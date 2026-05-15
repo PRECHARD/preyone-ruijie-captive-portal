@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Preyone Admin</title>
+  <link rel="icon" type="image/png" href="/images/preyonetabicon.webp" />
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Montserrat:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/portal.css" />
+  <style>
+    .admin-shell { max-width: 1200px; margin: 0 auto; padding: 2rem; }
+    .admin-panel { background: rgba(255,255,255,.95); border-radius: 20px; box-shadow: 0 24px 80px rgba(0,0,0,.1); padding: 2rem; }
+    .admin-grid { display: grid; gap: 1.5rem; }
+    .admin-row { display: flex; gap: 1rem; flex-wrap: wrap; align-items: flex-end; }
+    .admin-row label { display: block; font-size: .95rem; color: #444; margin-bottom: .4rem; }
+    .admin-row input, .admin-row select { width: 100%; padding: .9rem 1rem; border: 1px solid #ddd; border-radius: 12px; }
+    .admin-btn { display: inline-flex; align-items: center; justify-content: center; padding: .95rem 1.2rem; border: none; border-radius: 999px; font-weight: 700; cursor: pointer; background: #1f2c7a; color: white; }
+    .section-title { margin-bottom: .75rem; font-size: 1.15rem; font-weight: 700; }
+    .admin-table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+    .admin-table th, .admin-table td { padding: .85rem 1rem; border: 1px solid #e5e7eb; text-align: left; }
+    .admin-table th { background: #f8fafc; font-weight: 700; }
+    .hidden { display: none; }
+    .field-error { color: #c62828; font-size: .9rem; margin-top: .3rem; display: block; }
+    .status-banner { background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 16px; padding: 1rem 1.25rem; margin-bottom: 1.5rem; }
+  </style>
+</head>
+<body class="portal-body">
+  <main class="admin-shell">
+    <div class="brand-eyebrow brand-eyebrow--main" style="margin-bottom: 1rem; text-align: center;">
+      <span class="brand-signature">Preyone Admin Console</span>
+    </div>
+
+    <div class="admin-panel">
+      <div class="status-banner">
+        <p><strong>Admin key required.</strong> Enter the `x-admin-key` value to access vouchers, users, and logs.</p>
+      </div>
+
+      <section class="admin-grid">
+        <div>
+          <div class="section-title">Admin access</div>
+          <div class="admin-row">
+            <label for="admin-key">Admin API key</label>
+            <input id="admin-key" type="password" placeholder="Enter x-admin-key" />
+          </div>
+          <div class="admin-row">
+            <button class="admin-btn" id="save-key">Save key</button>
+            <button class="admin-btn" id="clear-key" type="button">Clear key</button>
+          </div>
+          <div id="admin-status" class="field-error hidden"></div>
+        </div>
+
+        <div>
+          <div class="section-title">Quick actions</div>
+          <div class="admin-row">
+            <button class="admin-btn" id="load-users">Reload users</button>
+            <button class="admin-btn" id="load-logs">Reload access logs</button>
+            <button class="admin-btn" id="load-vouchers">Reload vouchers</button>
+          </div>
+        </div>
+      </section>
+
+      <section style="margin-top: 2rem;">
+        <div class="section-title">Create voucher</div>
+        <form id="voucher-form" class="admin-grid">
+          <div class="admin-row">
+            <label for="voucher-code">Voucher code</label>
+            <input id="voucher-code" name="code" required placeholder="FREE60" />
+          </div>
+          <div class="admin-row">
+            <label for="voucher-duration">Duration (minutes)</label>
+            <input id="voucher-duration" name="durationMin" type="number" min="1" value="60" required />
+          </div>
+          <div class="admin-row">
+            <label for="voucher-uses">Max uses</label>
+            <input id="voucher-uses" name="maxUses" type="number" min="1" value="1" required />
+          </div>
+          <div class="admin-row">
+            <label for="voucher-expires">Expires at (UTC)</label>
+            <input id="voucher-expires" name="expiresAt" type="datetime-local" />
+          </div>
+          <div class="admin-row">
+            <button class="admin-btn" type="submit">Create voucher</button>
+          </div>
+          <div id="voucher-status" class="field-error hidden"></div>
+        </form>
+      </section>
+
+      <section id="tables-section" class="hidden" style="margin-top: 2rem;">
+        <div class="section-title">Voucher list</div>
+        <div id="voucher-list"></div>
+
+        <div class="section-title" style="margin-top: 2rem;">Active users</div>
+        <div id="user-list"></div>
+
+        <div class="section-title" style="margin-top: 2rem;">Access log</div>
+        <div id="access-log"></div>
+      </section>
+    </div>
+  </main>
+
+  <script src="/js/admin.js"></script>
+</body>
+</html>
