@@ -1,0 +1,320 @@
+.preyone-voucher {
+  position: relative;
+  width: min(580px, 100%);
+  min-height: 320px;
+  display: flex;
+  overflow: hidden;
+  background-color: var(--surface, #0a0a0a);
+  border: 1px solid var(--border, #2a2a3e);
+  border-radius: 8px;
+  box-shadow: 0 12px 35px rgba(11, 15, 25, 0.12);
+}
+
+.brand-ribbon {
+  position: relative;
+  width: 45px;
+  flex: 0 0 45px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%);
+  border-right: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.ribbon-text {
+  color: #38bdf8;
+  font-size: 0.85rem;
+  font-weight: 900;
+  letter-spacing: 5px;
+  opacity: 0.85;
+  white-space: nowrap;
+  transform: rotate(-90deg);
+}
+
+.barcode-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.simulated-barcode {
+  display: flex;
+  gap: 2px;
+  height: 24px;
+  align-items: stretch;
+}
+
+.simulated-barcode span {
+  display: block;
+  width: 2px;
+  background: #1e293b;
+  border-radius: 1px;
+}
+
+.simulated-barcode span:nth-child(2n) {
+  width: 4px;
+}
+
+.simulated-barcode span:nth-child(3n) {
+  width: 1px;
+  background: #475569;
+}
+
+.simulated-barcode span:nth-child(5n) {
+  width: 6px;
+}
+
+.simulated-barcode span:nth-child(7n) {
+  width: 3px;
+}
+
+.serial-no {
+  font-size: 0.45rem;
+  font-weight: 600;
+  color: #94a3b8;
+  letter-spacing: 1px;
+}
+
+.voucher-content {
+  flex: 1;
+  padding: 25px 30px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.voucher-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.logo-group h1 {
+  color: #0f172a;
+  font-size: 1.85rem;
+  font-weight: 900;
+  letter-spacing: 0;
+  line-height: 1;
+}
+
+.logo-group .subtitle {
+  margin-top: 4px;
+  color: #64748b;
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 2.5px;
+  text-transform: uppercase;
+}
+
+.access-badge {
+  padding: 5px 12px;
+  color: #334155;
+  background-color: #f1f5f9;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 1px;
+  white-space: nowrap;
+}
+
+.specs-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 15px;
+}
+
+.spec-block {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 10px;
+  background: #f8fafc;
+  border-radius: 6px;
+  border: 1px solid #eef2f6;
+}
+
+.spec-block.text-right {
+  text-align: right;
+}
+
+.spec-block.span-two {
+  grid-column: 1 / -1;
+}
+
+.spec-block.bg-light-tint {
+  background: #f0f9ff;
+  border-color: #c8e6ff;
+}
+
+.spec-label {
+  font-size: 0.52rem;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  color: #94a3b8;
+  text-transform: uppercase;
+}
+
+.spec-value {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #1e293b;
+}
+
+.highlight-blue {
+  color: #0284c7;
+}
+
+.token-container {
+  margin-top: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.token-title {
+  font-size: 0.52rem;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  color: #94a3b8;
+  text-transform: uppercase;
+}
+
+.token-box {
+  display: inline-flex;
+  align-self: flex-start;
+  padding: 10px 20px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+}
+
+.token-string {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #0f172a;
+  letter-spacing: 2px;
+}
+
+.voucher-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 12px;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid #eef2f6;
+}
+
+.meta-terms {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.infrastructure {
+  font-size: 0.58rem;
+  font-weight: 600;
+  color: #64748b;
+}
+
+.support {
+  font-size: 0.58rem;
+  font-weight: 600;
+  color: #0284c7;
+}
+
+
+
+/* ===== In-admin card wrapper ===== */
+.voucher-card-wrap {
+  position: relative;
+  width: 100%;
+  max-width: 580px;
+}
+
+.voucher-card-wrap .preyone-voucher {
+  width: 100%;
+  box-shadow: 0 12px 35px rgba(11, 15, 25, 0.12);
+}
+
+.voucher-card-actions-bar {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 1rem;
+  flex-wrap: wrap;
+}
+
+.btn-action--wa {
+  background: rgba(37, 211, 102, 0.15);
+  color: #25d366;
+  border: 1px solid rgba(37, 211, 102, 0.3);
+  border-radius: 8px;
+  padding: 0.45rem 0.75rem;
+  font-family: "Montserrat", sans-serif;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.btn-action--wa:hover {
+  background: rgba(37, 211, 102, 0.25);
+  border-color: #25d366;
+}
+
+.btn-action--copy {
+  background: rgba(0, 212, 255, 0.1);
+  color: #0284c7;
+  border: 1px solid rgba(0, 212, 255, 0.2);
+  border-radius: 8px;
+  padding: 0.45rem 0.75rem;
+  font-family: "Montserrat", sans-serif;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.btn-action--copy:hover {
+  background: rgba(0, 212, 255, 0.2);
+  border-color: #0284c7;
+}
+
+.btn-action--download {
+  background: rgba(99, 102, 241, 0.1);
+  color: #6366f1;
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  border-radius: 8px;
+  padding: 0.45rem 0.75rem;
+  font-family: "Montserrat", sans-serif;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.btn-action--download:hover {
+  background: rgba(99, 102, 241, 0.2);
+  border-color: #6366f1;
+}
+
+/* ===== Print ===== */
+@media print {
+  body { background: none; padding: 0; }
+  .preyone-voucher { box-shadow: none; border: 1px solid #ccc; break-inside: avoid; }
+  .voucher-card-actions-bar { display: none; }
+}

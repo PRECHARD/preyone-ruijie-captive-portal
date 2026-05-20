@@ -1,0 +1,46 @@
+.portal-header {
+  text-align: center;
+  margin-bottom: 4rem;
+}
+
+.brand-banner {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+  overflow: hidden;
+}
+
+.brand-logo-img {
+  width: 100%;
+  max-width: 800px;
+  height: auto;
+  display: block;
+  filter: drop-shadow(0 0 10px rgba(255,255,255,0.1));
+  transition: transform 0.3s ease, filter 0.3s ease;
+}
+
+.brand-logo-img:hover {
+  transform: scale(1.02);
+  filter: drop-shadow(0 0 20px rgba(255,255,255,0.4)) brightness(1.1);
+}
+
+.brand-eyebrow {
+  display: inline-block;
+  padding: 0.5rem 1.5rem;
+  border: 1px solid var(--pink);
+  border-radius: 50px;
+  background: rgba(0, 0, 0, 0.5);
+  box-shadow: 0 0 15px rgba(255, 0, 255, 0.2);
+}
+
+.brand-eyebrow span {
+  font-family: var(--display);
+  font-size: 1.2rem;
+  color: var(--cyan);
+  letter-spacing: 1px;
+}
+
+.brand-eyebrow .brand-signature {
+  font-family: 'Satisfy', cursive;
+}

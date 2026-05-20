@@ -1,0 +1,75 @@
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  --bg: #000000;
+  --surface: #0a0a0a;
+  --surface2: #111;
+  --border: rgba(255, 255, 255, 0.06);
+  --border-hover: rgba(255, 255, 255, 0.15);
+  --text: #ffffff;
+  --text-muted: #94a3b8;
+  --text-dim: rgba(255, 255, 255, 0.25);
+  --pink: #ff00ff;
+  --cyan: #00d4ff;
+  --orange: #f5a623;
+  --blue: #2d5bff;
+  --purple: #6a0dad;
+  --green: #22c55e;
+  --red: #ef4444;
+  --radius: 12px;
+  --font: 'Montserrat', sans-serif;
+  --display: 'Bebas Neue', sans-serif;
+  --gold: #ffd700;
+  --gold-dim: rgba(255, 215, 0, 0.3);
+  --gold-bg: rgba(255, 215, 0, 0.06);
+}
+
+html { scroll-behavior: smooth; }
+
+body {
+  font-family: var(--font);
+  color: var(--text);
+  background: var(--bg);
+  background-image:
+    radial-gradient(circle at 85% 5%, rgba(255, 0, 255, 0.06), transparent 40%),
+    radial-gradient(circle at 15% 95%, rgba(0, 212, 255, 0.04), transparent 40%);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100dvh;
+}
+
+/* ── Neon Purple Scrollbar ── */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: #050505; border-left: 1px solid rgba(255, 255, 255, 0.03); }
+::-webkit-scrollbar-thumb { background: linear-gradient(180deg, #6a0dad, #ff00ff); border-radius: 100px; border: 1px solid rgba(255, 0, 255, 0.15); box-shadow: 0 0 8px rgba(255, 0, 255, 0.25); }
+::-webkit-scrollbar-thumb:hover { background: linear-gradient(180deg, #8b2fc9, #ff33ff); box-shadow: 0 0 12px rgba(255, 0, 255, 0.4); }
+::-webkit-scrollbar-corner { background: #050505; }
+/* Firefox */
+* { scrollbar-width: thin; scrollbar-color: #ff00ff #050505; }
+
+.admin-layout {
+  display: flex;
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 92px 1.5rem 2rem;
+  gap: 1.5rem;
+  min-height: 100dvh;
+}
+
+.admin-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.admin-section {
+  animation: fadeSlideIn 0.35s ease;
+}
+
+@keyframes fadeSlideIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.hidden { display: none !important; }
+
+.admin-root.hidden { display: none; }

@@ -1,0 +1,223 @@
+.admin-root {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: var(--bg);
+}
+
+.admin-nav {
+  height: var(--nav-height);
+  background: rgba(10, 10, 10, 0.92);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  padding: 0 24px;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+
+.admin-nav-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.admin-nav-brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.admin-logo {
+  height: 42px;
+  width: auto;
+  filter: drop-shadow(0 0 8px rgba(113, 255, 47, 0.25));
+  transition: filter 0.3s;
+}
+.admin-logo:hover {
+  filter: drop-shadow(0 0 16px rgba(113, 255, 47, 0.5));
+}
+
+.admin-nav-title {
+  font-family: var(--font-display);
+  font-size: 22px;
+  letter-spacing: 2px;
+  color: var(--text);
+  text-transform: uppercase;
+  background: linear-gradient(135deg, #e2e8f0, #94a3b8);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ── Top-right user bar ── */
+.nav-user {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.nav-user-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 8px rgba(0, 230, 118, 0.6);
+  animation: dotPulse 2s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+@keyframes dotPulse {
+  0%,
+  100% {
+    box-shadow: 0 0 6px rgba(0, 230, 118, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 14px rgba(0, 230, 118, 0.8);
+  }
+}
+
+.nav-user-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.nav-signout-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-muted);
+  font-family: var(--font-body);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.nav-signout-btn:hover {
+  border-color: var(--red);
+  color: var(--red);
+  background: rgba(255, 23, 68, 0.06);
+}
+.nav-signout-btn svg {
+  font-size: 16px;
+}
+
+/* ── Main Layout ── */
+.admin-layout {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+.admin-main {
+  flex: 1;
+  overflow-y: auto;
+  padding: 28px;
+}
+
+/* ── Sidebar (no user info, just links) ── */
+.sidebar {
+  width: var(--sidebar-width);
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+.sidebar-links {
+  flex: 1;
+  padding: 10px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sidebar-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 14px;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  color: var(--text-muted);
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.18s;
+}
+.sidebar-link svg {
+  font-size: 17px;
+  flex-shrink: 0;
+  opacity: 0.7;
+  transition: opacity 0.2s;
+}
+
+.sidebar-link:hover {
+  background: var(--surface2);
+  color: var(--text);
+}
+.sidebar-link:hover svg {
+  opacity: 1;
+}
+
+.sidebar-link.active {
+  background: rgba(106, 13, 173, 0.2);
+  color: var(--purple-glow);
+  font-weight: 600;
+}
+.sidebar-link.active svg {
+  opacity: 1;
+  filter: drop-shadow(0 0 6px rgba(255, 0, 255, 0.4));
+}
+
+/* CEO active link gold override */
+.role-ceo .sidebar-link.active {
+  background: rgba(255, 215, 0, 0.12);
+  color: var(--gold);
+}
+.role-ceo .sidebar-link.active svg {
+  filter: drop-shadow(0 0 8px rgba(255, 215, 0, 0.5));
+}
+
+/* ── Sidebar footer ── */
+.sidebar-footer {
+  padding: 10px 12px;
+  border-top: 1px solid var(--border);
+  display: none;
+}
+
+/* ── Role badge in nav ── */
+.nav-role-badge {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border-radius: 4px;
+  letter-spacing: 0.5px;
+}
+.nav-role-badge.staff {
+  background: rgba(0, 229, 255, 0.15);
+  color: var(--cyan);
+}
+.nav-role-badge.manager {
+  background: rgba(255, 0, 127, 0.15);
+  color: var(--pink);
+}
+.nav-role-badge.ceo {
+  background: rgba(255, 215, 0, 0.15);
+  color: var(--gold);
+  box-shadow: 0 0 12px rgba(255, 215, 0, 0.15);
+}

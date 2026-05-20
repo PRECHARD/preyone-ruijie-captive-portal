@@ -1,0 +1,51 @@
+.features-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 2rem;
+  margin: 4rem 0;
+  padding: 2rem;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.feature-item {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  margin-bottom: 1rem;
+}
+
+.feature-icon {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background-size: 130%;
+  background-position: center;
+  background-repeat: no-repeat;
+  overflow: hidden;
+  flex-shrink: 0;
+  box-shadow: 0 0 15px rgba(0, 212, 255, 0.3);
+  border: 1px solid rgba(0, 212, 255, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.icon-fast { background-image: url('/images/icon-fast.png'); }
+.icon-reliable { background-image: url('/images/icon-reliable.png'); }
+.icon-multi { background-image: url('/images/icon-multi.png'); }
+.icon-support { background-image: url('/images/icon-support.png'); }
+
+.feature-label strong {
+  display: block;
+  font-family: var(--display);
+  font-size: 1.1rem;
+  color: var(--cyan);
+  letter-spacing: 1px;
+}
+
+.feature-label span {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}

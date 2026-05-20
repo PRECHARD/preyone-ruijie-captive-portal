@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Manage Account — Preyone UltraNet Wi‑Fi</title>
+  <link rel="icon" type="image/png" href="/images/preyonetabicon.webp" />
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Montserrat:wght@400;500;600;700;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/portal.css" />
+  <link rel="stylesheet" href="/css/manage-account.css" />
+</head>
+<body class="portal-body">
+
+  <header class="portal-header">
+    <div class="brand-banner">
+      <img src="/images/preyonenoneglow-logo-zoom.png" alt="Preyone" class="brand-logo-img" width="400" />
+    </div>
+    <div class="brand-eyebrow">
+      <span class="brand-signature">Fadaya nePreyone UltraNet Wifi</span>
+    </div>
+  </header>
+
+  <main class="portal-shell">
+    <div class="ma-card">
+      <div class="ma-header">
+        <h1>Account Dashboard</h1>
+        <p>Manage your WiFi session and usage</p>
+      </div>
+
+      <div id="maStatusBar" class="ma-status ma-status--active" role="status" aria-live="polite">
+        <span aria-hidden="true">●</span>
+        <span id="maStatusText">Checking session...</span>
+      </div>
+
+      <div class="ma-grid" id="maStatsGrid">
+        <div class="ma-stat">
+          <span class="label">Session Time Left</span>
+          <span class="value cyan" id="maTimeLeft">—</span>
+        </div>
+        <div class="ma-stat">
+          <span class="label">Data Used</span>
+          <span class="value orange" id="maDataUsed">—</span>
+        </div>
+        <div class="ma-stat full">
+          <span class="label">Speed Profile</span>
+          <span class="value green" id="maSpeed">—</span>
+        </div>
+        <div class="ma-stat">
+          <span class="label">Data Allowance</span>
+          <span class="value purple" id="maDataLimit">—</span>
+        </div>
+        <div class="ma-stat">
+          <span class="label">Expires</span>
+          <span class="value" id="maExpires">—</span>
+        </div>
+      </div>
+
+      <div class="ma-progress" id="maDataProgressSection">
+        <div class="label-row">
+          <span>Data Consumption</span>
+          <span id="maUsagePct">0%</span>
+        </div>
+        <div class="bar">
+          <div class="bar-fill low" id="maUsageBar" style="width:0%" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div>
+        </div>
+      </div>
+
+      <div class="ma-section-title">Session Details</div>
+      <div id="maSessionDetails">
+        <div class="ma-detail-row">
+          <span class="lbl">Voucher Code</span>
+          <span class="val" id="maVoucher">—</span>
+        </div>
+        <div class="ma-detail-row">
+          <span class="lbl">MAC Address</span>
+          <span class="val" id="maMac">—</span>
+        </div>
+        <div class="ma-detail-row">
+          <span class="lbl">IP Address</span>
+          <span class="val" id="maIp">—</span>
+        </div>
+        <div class="ma-detail-row">
+          <span class="lbl">Package</span>
+          <span class="val" id="maPackage">—</span>
+        </div>
+        <div class="ma-detail-row">
+          <span class="lbl">Bandwidth</span>
+          <span class="val" id="maBandwidth">—</span>
+        </div>
+        <div class="ma-detail-row">
+          <span class="lbl">Session Started</span>
+          <span class="val" id="maStarted">—</span>
+        </div>
+      </div>
+
+      <div class="ma-actions">
+        <a href="/" class="ma-btn ma-btn--primary" id="maTopUpBtn">
+          <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10" cy="10" r="7"/><line x1="10" y1="6" x2="10" y2="14"/><line x1="6" y1="10" x2="14" y2="10"/></svg>
+          Top Up / Extend Session
+        </a>
+        <a href="https://wa.me/263771327202" target="_blank" class="ma-btn ma-btn--secondary">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+          Need Help? Contact Support
+        </a>
+      </div>
+    </div>
+  </main>
+      
+  <script src="/js/manage-account.js"></script>
+</body>
+</html>

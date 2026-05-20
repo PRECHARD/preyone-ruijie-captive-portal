@@ -1,0 +1,66 @@
+.hero-section {
+  display: grid;
+  grid-template-columns: 1fr 400px;
+  gap: 3rem;
+  margin-bottom: 5rem;
+  align-items: center;
+}
+
+.hero-eyebrow {
+  color: var(--pink);
+  font-weight: 800;
+  font-size: 0.9rem;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+}
+
+.hero-title {
+  font-family: var(--display);
+  font-size: clamp(3rem, 6vw, 5rem);
+  line-height: 1;
+  margin: 0.5rem 0 1.5rem;
+}
+
+.hero-title span {
+  color: var(--cyan);
+  display: block;
+}
+
+.hero-text {
+  color: var(--text-muted);
+  font-size: 1.1rem;
+  margin-bottom: 2rem;
+  max-width: 600px;
+}
+
+.hero-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 1rem;
+}
+
+.stat-card {
+  background: rgba(255, 255, 255, 0.05);
+  padding: 1rem;
+  border-radius: 8px;
+  border-bottom: 3px solid var(--text-muted);
+}
+
+.stat-card span {
+  display: block;
+  font-size: 0.7rem;
+  font-weight: 800;
+  color: var(--text-muted);
+  margin-bottom: 0.3rem;
+}
+
+.stat-card strong {
+  font-size: 0.9rem;
+  color: #fff;
+  line-height: 1.2;
+  display: block;
+}
+
+.stat-card--pink { border-color: var(--pink); }
+.stat-card--cyan { border-color: var(--cyan); }
+.stat-card--purple { border-color: var(--purple); }

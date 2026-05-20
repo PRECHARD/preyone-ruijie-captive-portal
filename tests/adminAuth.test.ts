@@ -1,57 +1,81 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { requireApiKey } from '../src/middleware/adminAuth';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import jwt from 'jsonwebtoken';
+import { requireAdminAuth } from '../src/middleware/adminAuth';
 
-const makeReq = (header?: string): any => ({
-  headers: { 'x-admin-key': header },
+vi.mock('../src/db/pool', () => ({
+  pool: { query: vi.fn() },
+}));
+
+import { pool } from '../src/db/pool';
+
+const SECRET = process.env.JWT_SECRET || 'preyone-jwt-secret-change-in-production';
+
+const makeReq = (token?: string): any => ({
+  headers: token ? { authorization: 'Bearer ' + token } : {},
 });
 
-const makeRes = () => ({
-  status: vi.fn().mockReturnThis(),
-  json: vi.fn().mockReturnThis(),
-});
+const makeRes = () => {
+  const obj: any = {};
+  obj.status = vi.fn().mockReturnValue(obj);
+  obj.json = vi.fn().mockReturnValue(obj);
+  return obj;
+};
 
-describe('requireApiKey middleware', () => {
-  const originalEnv = process.env.ADMIN_API_KEY;
-
+describe('requireAdminAuth middleware', () => {
   beforeEach(() => {
-    process.env.ADMIN_API_KEY = 'secret-key';
+    vi.clearAllMocks();
   });
 
-  afterEach(() => {
-    process.env.ADMIN_API_KEY = originalEnv;
-  });
-
-  it('rejects requests without the header', () => {
+  it('rejects requests without a Bearer token', async () => {
     const req = makeReq();
     const res = makeRes();
     const next = vi.fn();
 
-    requireApiKey(req, res as any, next);
+    await requireAdminAuth(req, res as any, next);
 
     expect(res.status).toHaveBeenCalledWith(401);
     expect(res.json).toHaveBeenCalledWith({ error: 'Unauthorized' });
     expect(next).not.toHaveBeenCalled();
   });
 
-  it('rejects requests with the wrong key', () => {
-    const req = makeReq('wrong-key');
+  it('rejects requests with an invalid token', async () => {
+    const req = makeReq('invalid-token');
     const res = makeRes();
     const next = vi.fn();
 
-    requireApiKey(req, res as any, next);
+    await requireAdminAuth(req, res as any, next);
 
     expect(res.status).toHaveBeenCalledWith(401);
-    expect(res.json).toHaveBeenCalledWith({ error: 'Unauthorized' });
+    expect(res.json).toHaveBeenCalledWith({ error: 'Invalid or expired token' });
     expect(next).not.toHaveBeenCalled();
   });
 
-  it('allows requests with the correct header', () => {
-    const req = makeReq('secret-key');
+  it('rejects deactivated users', async () => {
+    const token = jwt.sign({ id: 'user-1', email: 'a@b', role: 'Staff', fullName: 'Test' }, SECRET, { expiresIn: '1h' });
+    (pool.query as any).mockResolvedValue({ rows: [{ id: 'user-1', approved: false }] });
+
+    const req = makeReq(token);
     const res = makeRes();
     const next = vi.fn();
 
-    requireApiKey(req, res as any, next);
+    await requireAdminAuth(req, res as any, next);
+
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(res.json).toHaveBeenCalledWith({ error: 'Account deactivated or removed' });
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('allows requests with a valid token', async () => {
+    const token = jwt.sign({ id: 'user-1', email: 'a@b', role: 'CEO', fullName: 'Test' }, SECRET, { expiresIn: '1h' });
+    (pool.query as any).mockResolvedValue({ rows: [{ id: 'user-1', approved: true }] });
+
+    const req = makeReq(token);
+    const res = makeRes();
+    const next = vi.fn();
+
+    await requireAdminAuth(req, res as any, next);
 
     expect(next).toHaveBeenCalled();
+    expect(req.adminUser).toMatchObject({ id: 'user-1', email: 'a@b', role: 'CEO', fullName: 'Test' });
   });
 });

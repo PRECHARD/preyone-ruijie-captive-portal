@@ -1,0 +1,118 @@
+:root {
+  --bg: #050505;
+  --surface: #0a0a0a;
+  --surface2: #111;
+  --surface3: #1a1a1a;
+  --border: #2a2a3e;
+  --text: #e2e8f0;
+  --text-muted: #94a3b8;
+  --text-dim: #64748b;
+  --pink: #ff007f;
+  --cyan: #00e5ff;
+  --purple: #6a0dad;
+  --purple-glow: #ff00ff;
+  --green: #00e676;
+  --orange: #ff9100;
+  --gold: #ffd700;
+  --gold-glow: #ffd700;
+  --red: #ff1744;
+  --font-display: 'Bebas Neue', sans-serif;
+  --font-body: 'Montserrat', sans-serif;
+  --sidebar-width: 240px;
+  --nav-height: 72px;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg);
+}
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #6a0dad, #ff00ff);
+  border-radius: 4px;
+}
+* {
+  scrollbar-color: #ff00ff #050505;
+  scrollbar-width: thin;
+}
+
+input,
+select,
+textarea,
+button {
+  outline: none;
+}
+input:focus,
+select:focus,
+textarea:focus {
+  box-shadow: 0 0 0 2px rgba(255, 0, 255, 0.12), 0 0 20px rgba(255, 0, 255, 0.08);
+  border-color: var(--purple-glow);
+}
+
+a {
+  color: var(--cyan);
+  text-decoration: none;
+}
+a:hover {
+  color: var(--pink);
+}
+
+.hidden {
+  display: none !important;
+}
+
+/* ── Layout glow for CEO ── */
+body.role-ceo .admin-nav {
+  border-bottom-color: rgba(255, 215, 0, 0.25);
+  box-shadow: 0 1px 20px rgba(255, 215, 0, 0.06);
+}
+
+/* ── Animated background pulse ── */
+@keyframes bgPulse {
+  0%,
+  100% {
+    opacity: 0.3;
+  }
+  50% {
+    opacity: 0.6;
+  }
+}
+
+/* ── Glassmorphism utility ── */
+.glass {
+  background: rgba(10, 10, 10, 0.7);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+/* ── Glow ring ── */
+@keyframes glowPulse {
+  0%,
+  100% {
+    box-shadow: 0 0 8px rgba(255, 0, 255, 0.15);
+  }
+  50% {
+    box-shadow: 0 0 20px rgba(255, 0, 255, 0.35);
+  }
+}

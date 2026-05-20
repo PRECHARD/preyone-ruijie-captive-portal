@@ -1,0 +1,54 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html { scroll-behavior: smooth; }
+
+/* ── Neon Purple Scrollbar ── */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: #050505; border-left: 1px solid rgba(255, 255, 255, 0.03); }
+::-webkit-scrollbar-thumb { background: linear-gradient(180deg, #6a0dad, #ff00ff); border-radius: 100px; border: 1px solid rgba(255, 0, 255, 0.15); box-shadow: 0 0 8px rgba(255, 0, 255, 0.25); }
+::-webkit-scrollbar-thumb:hover { background: linear-gradient(180deg, #8b2fc9, #ff33ff); box-shadow: 0 0 12px rgba(255, 0, 255, 0.4); }
+::-webkit-scrollbar-corner { background: #050505; }
+/* Firefox */
+* { scrollbar-width: thin; scrollbar-color: #ff00ff #050505; }
+
+:root {
+  --bg-dark: #000000;
+  --text: #ffffff;
+  --text-muted: #94a3b8;
+  --orange: #f5a623;
+  --cyan: #00d4ff;
+  --pink: #ff00ff;
+  --blue: #2d5bff;
+  --purple: #6a0dad;
+  --radius: 12px;
+  --font: 'Montserrat', sans-serif;
+  --display: 'Bebas Neue', sans-serif;
+}
+
+body.portal-body {
+  min-height: 100dvh;
+  font-family: var(--font);
+  color: var(--text);
+  background: var(--bg-dark);
+  background-image:
+    radial-gradient(circle at 80% 10%, rgba(255, 0, 255, 0.12), transparent 40%),
+    radial-gradient(circle at 20% 90%, rgba(0, 212, 255, 0.08), transparent 40%);
+  padding: 2rem 1.25rem;
+  line-height: 1.5;
+}
+
+.portal-shell {
+  width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.hidden {
+  display: none !important;
+}

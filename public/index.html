@@ -4,11 +4,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta http-equiv="Content-Security-Policy" content="
-    default-src 'self';
-    style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
-    font-src 'self' https://fonts.gstatic.com;
-  ">
+  
   <title>Preyone UltraNet Wi‑Fi</title>
   <link rel="icon" type="image/png" href="/images/preyonetabicon.webp" />
   <link
@@ -112,7 +108,7 @@
             <div class="pkg-data">2GB DATA</div>
             <div class="pkg-speed">2 Mbps</div>
             <div class="pkg-tier">PreLITE</div>
-            <button type="button" class="pkg-action">Buy now</button>
+            <button type="button" class="pkg-action" data-tier="PreLITE" data-display-name="Basic" data-amount="0.99" data-currency="USD" data-period="daily" data-data-limit="2" data-bandwidth-up="2" data-bandwidth-down="2" data-is-uncapped="false">Buy now</button>
             <div class="pkg-footer"><span>Pay with</span><span class="ecocash-badge">Eco<span
                   class="ecocash-red">Cash</span></span></div>
           </div>
@@ -124,7 +120,7 @@
             <div class="pkg-data">5GB DATA</div>
             <div class="pkg-speed">3 Mbps</div>
             <div class="pkg-tier">PreLITE PLUS</div>
-            <button type="button" class="pkg-action">Buy now</button>
+            <button type="button" class="pkg-action" data-tier="PreLITE PLUS" data-display-name="Power" data-amount="1.99" data-currency="USD" data-period="daily" data-data-limit="5" data-bandwidth-up="3" data-bandwidth-down="3" data-is-uncapped="false">Buy now</button>
             <div class="pkg-footer"><span>Pay with</span><span class="ecocash-badge">Eco<span
                   class="ecocash-red">Cash</span></span>
             </div>
@@ -137,7 +133,7 @@
             <div class="pkg-data">10GB DATA</div>
             <div class="pkg-speed">3 Mbps</div>
             <div class="pkg-tier">PreLINK</div>
-            <button type="button" class="pkg-action">Buy now</button>
+            <button type="button" class="pkg-action" data-tier="PreLINK" data-display-name="Entry" data-amount="4.99" data-currency="USD" data-period="weekly" data-data-limit="10" data-bandwidth-up="3" data-bandwidth-down="3" data-is-uncapped="false">Buy now</button>
             <div class="pkg-footer"><span>Pay with</span><span class="ecocash-badge">Eco<span
                   class="ecocash-red">Cash</span></span>
             </div>
@@ -150,7 +146,7 @@
             <div class="pkg-data">20GB DATA</div>
             <div class="pkg-speed">5 Mbps</div>
             <div class="pkg-tier">PreLINK PLUS</div>
-            <button type="button" class="pkg-action">Buy now</button>
+            <button type="button" class="pkg-action" data-tier="PreLINK PLUS" data-display-name="Power Pack" data-amount="9.99" data-currency="USD" data-period="weekly" data-data-limit="20" data-bandwidth-up="5" data-bandwidth-down="5" data-is-uncapped="false">Buy now</button>
             <div class="pkg-footer"><span>Pay with</span><span class="ecocash-badge">Eco<span
                   class="ecocash-red">Cash</span></span>
             </div>
@@ -163,7 +159,7 @@
             <div class="pkg-data">45GB DATA</div>
             <div class="pkg-speed">5 Mbps</div>
             <div class="pkg-tier">PreBIZ</div>
-            <button type="button" class="pkg-action">Buy now</button>
+            <button type="button" class="pkg-action" data-tier="PreBIZ" data-display-name="Standard" data-amount="19.99" data-currency="USD" data-period="monthly" data-data-limit="45" data-bandwidth-up="5" data-bandwidth-down="5" data-is-uncapped="false">Buy now</button>
             <div class="pkg-footer"><span>Pay with</span><span class="ecocash-badge">Eco<span
                   class="ecocash-red">Cash</span></span>
             </div>
@@ -176,7 +172,7 @@
             <div class="pkg-data">100GB DATA</div>
             <div class="pkg-speed">10 Mbps</div>
             <div class="pkg-tier">PreMAX</div>
-            <button type="button" class="pkg-action">Buy now</button>
+            <button type="button" class="pkg-action" data-tier="PreMAX" data-display-name="Pro" data-amount="34.99" data-currency="USD" data-period="monthly" data-data-limit="100" data-bandwidth-up="10" data-bandwidth-down="10" data-is-uncapped="false">Buy now</button>
             <div class="pkg-footer"><span>Pay with</span><span class="ecocash-badge">Eco<span
                   class="ecocash-red">Cash</span></span>
             </div>
@@ -189,7 +185,7 @@
             <div class="pkg-data">Uncapped data</div>
             <div class="pkg-speed">15 Mbps</div>
             <div class="pkg-tier">PreULTRA</div>
-            <button type="button" class="pkg-action">Buy now</button>
+            <button type="button" class="pkg-action" data-tier="PreULTRA" data-display-name="True Unlimited" data-amount="44.99" data-currency="USD" data-period="monthly" data-data-limit="null" data-bandwidth-up="15" data-bandwidth-down="15" data-is-uncapped="true">Buy now</button>
             <div class="pkg-footer"><span>Pay with</span><span class="ecocash-badge">Eco<span
                   class="ecocash-red">Cash</span></span>
             </div>
@@ -202,7 +198,7 @@
             <div class="pkg-data">Uncapped data</div>
             <div class="pkg-speed">30 Mbps</div>
             <div class="pkg-tier">PreEXECUTIVE</div>
-            <button type="button" class="pkg-action">Buy now</button>
+            <button type="button" class="pkg-action" data-tier="PreEXECUTIVE" data-display-name="VIP Unlimited" data-amount="59.99" data-currency="USD" data-period="monthly" data-data-limit="null" data-bandwidth-up="30" data-bandwidth-down="30" data-is-uncapped="true">Buy now</button>
             <div class="pkg-footer"><span>Pay with</span><span class="ecocash-badge">Eco<span
                   class="ecocash-red">Cash</span></span> </div>
         </article>
@@ -297,9 +293,10 @@
         <div class="footer-col">
           <h3>QUICK LINKS</h3>
           <ul class="footer-links">
-            <li><a href="https://www.preyone.com" target="_blank">Main Website</a></li>
+            <li><a href="/site/">Main Website</a></li>
             <li><a href="/terms.html">Terms of Service</a></li>
             <li><a href="#">View Packages</a></li>
+            <li><a href="/admin/" class="admin-login-link">Admin Console</a></li>
           </ul>
         </div>
       </div>

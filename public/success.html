@@ -35,7 +35,7 @@
           </svg>
         </div>
         <h1 class="bebas-font">ACCESS GRANTED</h1>
-        <p class="subtitle cursive-font">Welcome to the Preyone UltraNet Experience.</p>
+        <p class="subtitle cursive-font">Welcome to the Preyone UltraNet Wi-FiExperience.</p>
       </div>
 
       <div class="status-grid">
@@ -44,12 +44,27 @@
           <span class="value value--active">● ACTIVE</span>
         </div>
         <div class="status-item">
-          <span class="label">EXPIRATION</span>
-          <span class="value" id="session-info">Standard Session</span>
+          <span class="label">SESSION REMAINING</span>
+          <span class="value value--timer" id="timer-display">--:--:--</span>
         </div>
         <div class="status-item">
           <span class="label">NETWORK</span>
           <span class="value">Preyone UltraNet Wi-Fi</span>
+        </div>
+      </div>
+
+      <div class="session-details" id="session-details">
+        <div class="detail-row">
+          <span class="detail-label">Speed</span>
+          <span class="detail-value" id="detail-speed">—</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">Data</span>
+          <span class="detail-value" id="detail-data">—</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">Expires</span>
+          <span class="detail-value" id="detail-expires">—</span>
         </div>
       </div>
 
@@ -60,7 +75,7 @@
 
       <div class="action-group">
         <a href="https://www.google.com" target="_blank" rel="noopener" class="btn-primary">START BROWSING</a>
-        <a href="https://www.preyone.com" target="_blank" rel="noopener" class="btn-secondary">MANAGE ACCOUNT</a>
+        <a id="manageAccountLink" href="#" class="btn-secondary">MANAGE ACCOUNT</a>
       </div>
       
     </div>

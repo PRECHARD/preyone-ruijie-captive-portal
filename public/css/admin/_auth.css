@@ -1,0 +1,164 @@
+.auth-screen {
+  min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem 1.25rem;
+  background: var(--bg);
+  background-image:
+    radial-gradient(circle at 80% 10%, rgba(255, 0, 255, 0.10), transparent 40%),
+    radial-gradient(circle at 20% 90%, rgba(0, 212, 255, 0.06), transparent 40%);
+}
+
+.auth-card {
+  width: 100%;
+  max-width: 420px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  overflow: hidden;
+}
+
+.auth-nav {
+  background: rgba(0, 0, 0, 0.92);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border);
+  padding: 0 1.5rem;
+}
+
+.auth-nav-inner {
+  display: flex;
+  align-items: center;
+  height: 72px;
+}
+
+.auth-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.auth-logo { height: 72px; width: auto; }
+
+.auth-brand-title {
+  font-family: var(--display);
+  font-size: 1.4rem;
+  letter-spacing: 0.04em;
+  color: var(--text);
+  padding-left: 0.65rem;
+  border-left: 1px solid var(--border);
+  line-height: 1;
+  margin-top: 0.75rem;
+}
+
+.auth-body {
+  padding: 2rem 2rem 2.5rem;
+}
+
+.auth-tabs {
+  display: flex;
+  margin-bottom: 1.5rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.auth-tab {
+  flex: 1;
+  padding: 0.65rem;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: var(--font);
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.auth-tab.active { background: rgba(255, 0, 255, 0.08); color: var(--pink); }
+
+.auth-form { display: flex; flex-direction: column; gap: 1rem; }
+
+.auth-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.auth-field label {
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+.auth-field input,
+.auth-field select {
+  font-family: var(--font);
+  font-size: 0.85rem;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.65rem 0.85rem;
+  transition: border-color 0.2s, background 0.2s;
+  width: 100%;
+}
+
+.auth-field select {
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 12 12' fill='rgba(255,255,255,0.5)'%3E%3Cpath d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.85rem center;
+  padding-right: 2.5rem;
+}
+
+.auth-field select:hover { border-color: rgba(106, 13, 173, 0.4); }
+.auth-field select:focus { background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 12 12' fill='%23ff00ff'%3E%3Cpath d='M6 8L1 3h10z'/%3E%3C/svg%3E"); }
+
+.auth-field select option { background: #1a1a2e; color: #fff; padding: 0.5rem; }
+
+.auth-field input:focus,
+.auth-field select:focus { outline: none; border-color: var(--pink); background: rgba(255, 0, 255, 0.04); box-shadow: 0 0 0 2px rgba(255, 0, 255, 0.12), 0 0 20px rgba(255, 0, 255, 0.08); }
+
+.auth-hint { font-size: 0.6rem; color: var(--text-dim); margin-top: 0.2rem; }
+
+.auth-error {
+  font-size: 0.78rem;
+  color: var(--red);
+  text-align: center;
+  padding: 0.5rem;
+  background: rgba(239, 68, 68, 0.08);
+  border-radius: 8px;
+  border: 1px solid rgba(239, 68, 68, 0.12);
+}
+
+.auth-error.hidden { display: none; }
+
+.auth-btn {
+  width: 100%;
+  padding: 0.75rem;
+  border: 1px solid var(--pink);
+  border-radius: 10px;
+  background: rgba(255, 0, 255, 0.08);
+  color: var(--pink);
+  font-family: var(--font);
+  font-size: 0.82rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.auth-btn:hover { background: rgba(255, 0, 255, 0.15); box-shadow: 0 0 20px rgba(255, 0, 255, 0.1); }
+.auth-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.auth-success { text-align: center; padding: 1.5rem; color: var(--green); }
+.auth-success p { margin-top: 0.75rem; font-size: 0.9rem; }

@@ -20,17 +20,17 @@ describe('buildRuijieSuccessUrl', () => {
 
   it('uses RUIJIE_SUCCESS_URL when configured and appends token', () => {
     process.env.RUIJIE_SUCCESS_URL = 'https://example.com/success';
-    const url = buildRuijieSuccessUrl(makeReq(), 'abc-123');
+    const url = buildRuijieSuccessUrl(makeReq(), { sessionToken: 'abc-123' });
     expect(url).toBe('https://example.com/success?token=abc-123');
   });
 
   it('falls back to success.html for unsafe redirect URLs', () => {
-    const url = buildRuijieSuccessUrl(makeReq({ url: 'https://attacker.com' }), 'abc-123');
-    expect(url).toBe('/success.html');
+    const url = buildRuijieSuccessUrl(makeReq({ url: 'https://attacker.com' }), { sessionToken: 'abc-123' });
+    expect(url).toBe('http://localhost/success.html?token=abc-123');
   });
 
   it('allows same-origin redirect URLs', () => {
-    const url = buildRuijieSuccessUrl(makeReq({ url: '/success.html' }), 'abc-123');
-    expect(url).toBe('http://localhost/success.html');
+    const url = buildRuijieSuccessUrl(makeReq({ url: '/success.html' }), { sessionToken: 'abc-123' });
+    expect(url).toBe('http://localhost/success.html?token=abc-123');
   });
 });

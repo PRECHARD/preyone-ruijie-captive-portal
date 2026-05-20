@@ -1,0 +1,72 @@
+.card--wide {
+  max-width: 850px;
+  margin: 2rem auto;
+  background: rgba(10, 10, 10, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 24px;
+  padding: 3rem;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5), 0 0 15px rgba(0, 212, 255, 0.1);
+  backdrop-filter: blur(15px);
+}
+
+.card--wide h1 {
+  font-family: var(--display);
+  font-size: 3rem;
+  color: var(--text);
+  margin: 1rem 0;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+}
+
+.card--wide h2 {
+  font-family: var(--display);
+  font-size: 1.8rem;
+  color: var(--cyan);
+  margin-top: 2.5rem;
+  margin-bottom: 1rem;
+  border-left: 4px solid var(--pink);
+  padding-left: 15px;
+  letter-spacing: 1px;
+}
+
+.card--wide p,
+.card--wide li {
+  color: var(--text-muted);
+  line-height: 1.8;
+  font-size: 1rem;
+  margin-bottom: 1rem;
+}
+
+.card--wide strong {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.card--wide ul {
+  list-style: none;
+  padding-left: 0;
+}
+
+.card--wide ul li {
+  position: relative;
+  padding-left: 25px;
+}
+
+.card--wide ul li::before {
+  content: '\2192';
+  position: absolute;
+  left: 0;
+  color: var(--pink);
+  font-weight: bold;
+}
+
+.card--wide ul ul {
+  margin-top: 0.5rem;
+  padding-left: 20px;
+  border-left: 1px solid #333;
+}
+
+.card-brand-logo--terms {
+  filter: drop-shadow(0 0 8px rgba(255, 255, 255, 0.2));
+  margin-bottom: 1.5rem;
+}

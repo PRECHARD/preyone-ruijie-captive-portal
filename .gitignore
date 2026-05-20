@@ -1,4 +1,93 @@
+# Dependencies
 node_modules/
+yarn.lock
+pnpm-lock.yaml
+
+# Build output
 dist/
+build/
+*.tsbuildinfo
+
+# Environment variables - CRITICAL: Never commit these
 .env
+.env.local
+.env.*.local
+.env.production.local
+.env.development.local
+.env.test.local
+
+# Logs
 *.log
+*.logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+.pnpm-debug.log*
+
+# IDE & Editor files
+.vscode/
+.vscode-insiders/
+.idea/
+.DS_Store
+*.swp
+*.swo
+*~
+.project
+.classpath
+.c9/
+*.launch
+.settings/
+*.sublime-workspace
+.env.local.js
+
+# OS files
+Thumbs.db
+.DS_Store
+.AppleDouble
+.LSOverride
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+
+# Sensitive files - CRITICAL: Block all credentials, keys, certificates
+*.pem
+*.key
+*.crt
+*.cer
+*.der
+*.p12
+*.pfx
+*.jks
+*.keystore
+secrets/
+.ssh/
+credentials/
+*.gpg
+*.encrypted
+*.vault
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+*.realm
+*.rdb
+dump.sql
+*.sql.bak
+
+# Runtime files
+.env.json
+config.json
+.pm2/
+coverage/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.cache
+
+# Never commit actual environment configs with real secrets
+config/production.js
+config/staging.js

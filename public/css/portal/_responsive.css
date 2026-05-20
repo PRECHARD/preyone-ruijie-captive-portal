@@ -1,0 +1,60 @@
+@media (max-width: 992px) {
+  .hero-section {
+    grid-template-columns: 1fr;
+  }
+
+  .hero-copy {
+    text-align: center;
+  }
+
+  .hero-stats {
+    justify-content: center;
+  }
+}
+
+@media (max-width: 768px) {
+  .footer-grid {
+    grid-template-columns: 1fr;
+    text-align: center;
+  }
+
+  .footer-col h3 {
+    margin-top: 1rem;
+  }
+
+  .footer-tagline {
+    margin: 0 auto;
+  }
+
+  .legal-row {
+    justify-content: center;
+    text-align: center;
+  }
+
+  .card--wide {
+    padding: 1.5rem;
+    margin: 1rem;
+  }
+}
+
+@media (max-width: 600px) {
+  .status-grid {
+    grid-template-columns: 1fr;
+    gap: 0.75rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .payment-modal {
+    padding: 1.5rem;
+    border-radius: 16px;
+  }
+
+  .payment-modal h2 {
+    font-size: 1.1rem;
+  }
+
+  .modal-details {
+    padding: 1rem;
+  }
+}
