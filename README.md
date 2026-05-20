@@ -210,9 +210,13 @@ The client script in `public/js/portal.js`:
 
 ## Testing
 
-There is currently no automated test suite (`npm test` is not defined yet).
+```bash
+npm test
+```
 
-Recommended validation steps:
+Tests use [Vitest](https://vitest.dev/) and cover session cleanup, access log cleanup, admin auth middleware, and redirect URL building.
+
+For manual validation:
 
 1. Build check:
    - `npm run build`
