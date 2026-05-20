@@ -44,11 +44,6 @@ const SQL = `
 (async () => {
   const client = await pool.connect();
   try {
-    // Drop tables if they exist to ensure clean state
-    await client.query('DROP TABLE IF EXISTS access_log CASCADE');
-    await client.query('DROP TABLE IF EXISTS vouchers CASCADE');
-    await client.query('DROP TABLE IF EXISTS users CASCADE');
-    
     await client.query(SQL);
     console.log('Migration complete.');
   } finally {
