@@ -3,7 +3,8 @@ import { pool } from '../db/pool';
 export async function cleanupOldAccessLogs(retentionDays: number): Promise<number> {
   const result = await pool.query(
     `DELETE FROM access_log
-     WHERE created_at < NOW() - INTERVAL '${retentionDays} days'`
+     WHERE created_at < NOW() - make_interval(days => $1)`,
+    [retentionDays]
   );
 
   return result.rowCount ?? 0;

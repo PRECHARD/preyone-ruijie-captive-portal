@@ -56,7 +56,7 @@ body.portal-body {
   filter: drop-shadow(0 0 0px rgba(255,255,255,0.5));
 }
 
-brand-logo-img:hover {
+.brand-logo-img:hover {
   transform: scale(1.03);
   filter: drop-shadow(0 0 15px rgba(255, 255, 255, 0.6)) brightness(1.2);
 }

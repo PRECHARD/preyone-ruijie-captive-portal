@@ -20,6 +20,7 @@ describe('cleanupOldAccessLogs', () => {
     expect(result).toBe(5);
     expect(pool.query).toHaveBeenCalledWith(
       expect.stringContaining("DELETE FROM access_log"),
+      [30],
     );
   });
 

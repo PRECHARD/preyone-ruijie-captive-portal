@@ -8,14 +8,14 @@ adminRouter.use(requireApiKey);
 
 adminRouter.get('/users', async (_req: Request, res: Response) => {
   const { rows } = await pool.query(
-    'SELECT id, full_name, email, phone, voucher_code, accepted_tos, mac_address, ip_address, created_at, session_expires_at FROM users ORDER BY created_at DESC LIMIT 500'
+    'SELECT id, full_name, phone, voucher_code, accepted_tos, mac_address, ip_address, created_at, session_expires_at FROM users ORDER BY created_at DESC LIMIT 500'
   );
   res.json(rows);
 });
 
 adminRouter.get('/access-log', async (_req: Request, res: Response) => {
   const { rows } = await pool.query(
-    `SELECT al.id, al.event, al.mac_address, al.ip_address, al.detail, al.created_at, u.full_name, u.email
+    `SELECT al.id, al.event, al.mac_address, al.ip_address, al.detail, al.created_at, u.full_name
      FROM access_log al LEFT JOIN users u ON u.id = al.user_id ORDER BY al.created_at DESC LIMIT 1000`
   );
   res.json(rows);
