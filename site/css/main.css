@@ -425,6 +425,67 @@ section {
   margin-right: auto;
 }
 
+/* ===== HARDWARE CATALOG ===== */
+.hardware {
+  background: #000;
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.hardware-cat-heading {
+  font-family: var(--display);
+  font-size: 1.4rem;
+  letter-spacing: 0.06em;
+  color: var(--cat-color, var(--cyan));
+  margin: 2.5rem 0 1.25rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 2px solid var(--cat-color, var(--cyan));
+  opacity: 0.8;
+  text-transform: uppercase;
+}
+
+.hardware-cat-heading:first-child {
+  margin-top: 0;
+}
+
+.hardware-specs {
+  margin-top: 0.75rem;
+}
+
+.hardware-specs li {
+  font-size: 0.72rem;
+  color: rgba(255, 255, 255, 0.45);
+  padding: 0.2rem 0;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.hardware-specs li::before {
+  content: '';
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--cat-color, var(--cyan));
+  flex-shrink: 0;
+  box-shadow: 0 0 4px var(--cat-color, var(--cyan));
+}
+
+/* ===== IT SERVICES ===== */
+.it-services {
+  background: #000;
+}
+
+.it-service-card .service-icon svg {
+  filter: drop-shadow(0 0 8px currentColor);
+}
+
+/* ===== SOFTWARE DEVELOPMENT ===== */
+.software {
+  background: #000;
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+}
+
 /* ===== SCROLL REVEAL ===== */
 .reveal {
   opacity: 0;
@@ -1142,4 +1203,5 @@ section {
   .hero-actions { flex-direction: column; }
   .contact-cards-wrapper { grid-template-columns: 1fr; }
   .footer-links-row { flex-direction: column; gap: 0.75rem; }
+  .hardware-cat-heading { font-size: 1.1rem; margin: 1.5rem 0 0.75rem; }
 }

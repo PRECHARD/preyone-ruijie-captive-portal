@@ -3,6 +3,10 @@ import crypto from 'crypto';
 import { pool } from '../db/pool';
 import { requireAdminAuth, requireRole } from '../middleware/adminAuth';
 import { recordAuditLog } from './adminAuth';
+import { sendAdminApprovedNotification } from '../services/notificationService';
+import ExcelJS from 'exceljs';
+import path from 'path';
+import fs from 'fs';
 
 export const adminRouter = Router();
 
@@ -138,15 +142,186 @@ adminRouter.get('/my-sales', async (req: Request, res: Response) => {
   res.json({ sales: rows, totalAmount, totalSales });
 });
 
+// ── Shared Sales Excel Builder (neon purple theme) ──
+
+const DPB = 'FF2D1B69';   // dark purple-blue (header bg)
+const NP = 'FFA855F7';     // neon purple (accent)
+const LP = 'FFF3E8FF';     // light purple (alt rows)
+const RD = 'FFB91C1C';     // red (total row bg)
+const NV = 'FF000080';     // navy blue (title)
+const WH = 'FFFFFFFF';     // white
+
+async function sendStyledSalesExcel(
+  res: Response,
+  rows: any[],
+  opts: {
+    sheetName: string;
+    columns: { header: string; width: number }[];
+    subtitle: string | null;
+    mapRow: (r: any) => (string | number)[];
+    fileName: string;
+  }
+): Promise<void> {
+  const { sheetName, columns, subtitle, mapRow, fileName } = opts;
+  const colCount = columns.length;
+  const lastCol = String.fromCharCode(64 + colCount);
+
+  const wb = new ExcelJS.Workbook();
+  wb.creator = 'Preyone Network';
+  const ws = wb.addWorksheet(sheetName);
+  ws.columns = columns;
+
+  // Clear row 1 auto-headers from column defs (we set headers at row ~11-12)
+  for (let i = 1; i <= colCount; i++) ws.getRow(1).getCell(i).value = '';
+
+  // White fill on rows 1-11, cols A-E to hide grid lines in the header area
+  for (let r = 1; r <= 11; r++) {
+    for (let c = 1; c <= 5; c++) {
+      ws.getRow(r).getCell(c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFFFF' } };
+    }
+  }
+
+  // Logo — left edge, 16:9 ratio preserved
+  const logoPath = path.join(__dirname, '..', '..', 'public', 'images', 'staff-excel-preyonelogo.png');
+  if (fs.existsSync(logoPath)) {
+    const logoImg = wb.addImage({ filename: logoPath, extension: 'png' });
+    ws.addImage(logoImg, { tl: { col: 0, row: 0 }, ext: { width: 320, height: 180 } });
+  }
+
+  // Freeze rows 1-12 (logo through header) so they stay visible when scrolling
+  ws.views = [{ state: 'frozen', ySplit: 12 }];
+
+  // 3 blank rows between logo and heading
+  for (let i = 5; i <= 7; i++) ws.getRow(i).height = 15;
+
+  // Title — Copperplate Gothic, navy blue
+  ws.mergeCells(`A8:${lastCol}8`);
+  ws.getCell('A8').value = 'Preyone Ultranet Wi-Fi Sales Report';
+  ws.getCell('A8').font = { name: 'Copperplate Gothic', size: 18, bold: true, color: { argb: NV } };
+
+  // Subtitle
+  let r = 9;
+  if (subtitle) {
+    ws.mergeCells(`A${r}:${lastCol}${r}`);
+    ws.getCell(`A${r}`).value = subtitle;
+    ws.getCell(`A${r}`).font = { name: 'Calibri', size: 12, color: { argb: DPB } };
+    r++;
+  }
+
+  // Date
+  ws.mergeCells(`A${r}:${lastCol}${r}`);
+  ws.getCell(`A${r}`).value = `Generated: ${new Date().toLocaleString()}`;
+  ws.getCell(`A${r}`).font = { name: 'Calibri', size: 10, italic: true, color: { argb: DPB } };
+
+  // Header row — big titles
+  const hrRow = r + 2;
+  const hr = ws.getRow(hrRow);
+  hr.values = columns.map(c => c.header);
+  hr.height = 38;
+  for (let i = 1; i <= colCount; i++) {
+    const c = hr.getCell(i);
+    c.font = { name: 'Calibri', size: 13, bold: true, color: { argb: WH } };
+    c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: DPB } };
+    c.border = { top: { style: 'thin', color: { argb: DPB } }, bottom: { style: 'medium', color: { argb: NP } }, left: { style: 'thin', color: { argb: DPB } }, right: { style: 'thin', color: { argb: DPB } } };
+    c.alignment = { horizontal: 'center', vertical: 'middle' };
+  }
+
+  // Data rows
+  const priceIdx = columns.findIndex(c => c.header === 'Price (USD)') + 1;
+  let rowNum = hrRow + 1;
+  for (const r of rows) {
+    const dRow = ws.getRow(rowNum);
+    const isAlt = rowNum % 2 === 0;
+    dRow.values = mapRow(r);
+    dRow.height = 22;
+    for (let i = 1; i <= colCount; i++) {
+      const c = dRow.getCell(i);
+      c.font = { name: 'Calibri', size: 10, color: { argb: isAlt ? DPB : DPB } };
+      if (isAlt) {
+        c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: LP } };
+      }
+      c.border = { top: { style: 'thin', color: { argb: 'FFE9D5FF' } }, bottom: { style: 'thin', color: { argb: 'FFE9D5FF' } }, left: { style: 'thin', color: { argb: 'FFE9D5FF' } }, right: { style: 'thin', color: { argb: 'FFE9D5FF' } } };
+      c.alignment = { horizontal: 'center', vertical: 'middle' };
+    }
+    dRow.getCell(1).font = { name: 'Consolas', size: 10, color: { argb: NP }, bold: true };
+    if (priceIdx > 0) {
+      dRow.getCell(priceIdx).font = { name: 'Calibri', size: 10, bold: true, color: { argb: DPB } };
+    }
+    rowNum++;
+  }
+
+  // Total row — red bg, white bold, larger
+  const totalAmount = rows.reduce((s: number, r: any) => s + (parseFloat(r.price_amount) || 0), 0);
+  const totalRow = ws.getRow(rowNum);
+  totalRow.height = 36;
+  totalRow.getCell(1).value = '';
+  totalRow.getCell(2).value = 'TOTAL';
+  if (priceIdx > 0) totalRow.getCell(priceIdx).value = totalAmount.toFixed(2);
+  const usesIdx = columns.findIndex(c => c.header === 'Uses') + 1;
+  if (usesIdx > 0) totalRow.getCell(usesIdx).value = `${rows.length} sale(s)`;
+  for (let i = 1; i <= colCount; i++) {
+    if (totalRow.getCell(i).value == null) totalRow.getCell(i).value = '';
+    const c = totalRow.getCell(i);
+    c.font = { name: 'Calibri', size: 12, bold: true, color: { argb: WH } };
+    c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: RD } };
+    c.border = { top: { style: 'medium', color: { argb: 'FF7F1D1D' } }, bottom: { style: 'medium', color: { argb: 'FF7F1D1D' } }, left: { style: 'thin', color: { argb: RD } }, right: { style: 'thin', color: { argb: RD } } };
+    c.alignment = { horizontal: 'center', vertical: 'middle' };
+  }
+  totalRow.getCell(2).font = { name: 'Calibri', size: 12, bold: true, color: { argb: WH } };
+  if (priceIdx > 0) totalRow.getCell(priceIdx).font = { name: 'Calibri', size: 14, bold: true, color: { argb: WH } };
+
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+  await wb.xlsx.write(res);
+  res.end();
+}
+
+// ── My Sales Export (Excel) ──
+
+adminRouter.get('/my-sales/export', async (req: Request, res: Response) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT v.*, a.full_name AS sold_by_name
+       FROM vouchers v
+       LEFT JOIN admin_users a ON a.id = v.sold_by
+       WHERE v.sold_by = $1
+       ORDER BY v.created_at DESC`,
+      [req.adminUser!.id]
+    );
+    await sendStyledSalesExcel(res, rows, {
+      sheetName: 'My Sales',
+      columns: [
+        { header: 'Code', width: 18 },
+        { header: 'Package', width: 22 },
+        { header: 'Price (USD)', width: 16 },
+        { header: 'Uses', width: 12 },
+        { header: 'Created', width: 22 },
+      ],
+      subtitle: `Staff: ${req.adminUser!.fullName}`,
+      mapRow: (r: any) => [
+        r.code || '',
+        r.package_tier || '',
+        r.price_amount ? parseFloat(r.price_amount).toFixed(2) : '0.00',
+        `${r.used_count || 0}/${r.max_uses || 1}`,
+        r.created_at ? new Date(r.created_at).toLocaleString() : '',
+      ],
+      fileName: `Preyone_Sales_${req.adminUser!.fullName.replace(/\s+/g, '_')}.xlsx`,
+    });
+  } catch (err: any) {
+    console.error('Export error:', err.message, err.stack);
+    res.status(500).json({ error: 'Export failed: ' + err.message });
+  }
+});
+
 // ── Staff Sales Aggregated (CEO/Manager only) ──
 
 adminRouter.get('/staff-sales', requireRole('CEO', 'Manager'), async (_req: Request, res: Response) => {
   const { rows: staffSummary } = await pool.query(`
-    SELECT a.id, a.full_name, COUNT(v.id)::int AS total_sales, COALESCE(SUM(v.price_amount), 0)::float AS total_amount
+    SELECT a.id, a.full_name, a.role, COUNT(v.id)::int AS total_sales, COALESCE(SUM(v.price_amount), 0)::float AS total_amount
     FROM admin_users a
     INNER JOIN vouchers v ON v.sold_by = a.id
-    WHERE a.role = 'Staff'
-    GROUP BY a.id, a.full_name
+    WHERE a.role IN ('Staff', 'Manager')
+    GROUP BY a.id, a.full_name, a.role
     ORDER BY total_amount DESC
   `);
   const { rows: allSales } = await pool.query(`
@@ -156,7 +331,99 @@ adminRouter.get('/staff-sales', requireRole('CEO', 'Manager'), async (_req: Requ
     WHERE v.sold_by IS NOT NULL
     ORDER BY v.created_at DESC
   `);
-  res.json({ staffSummary, allSales });
+  const { rows: dailyBreakdown } = await pool.query(`
+    SELECT DATE(v.created_at) AS sale_date, a.full_name, a.role, COUNT(v.id)::int AS sales_count, COALESCE(SUM(v.price_amount), 0)::float AS total_amount
+    FROM vouchers v
+    INNER JOIN admin_users a ON a.id = v.sold_by
+    WHERE a.role IN ('Staff', 'Manager')
+    GROUP BY DATE(v.created_at), a.full_name, a.role
+    ORDER BY sale_date DESC, a.full_name ASC
+  `);
+  res.json({ staffSummary, allSales, dailyBreakdown });
+});
+
+// ── All Staff Sales Export (Excel, CEO/Manager only) ──
+
+adminRouter.get('/staff-sales/export', requireRole('CEO', 'Manager'), async (req: Request, res: Response) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT v.*, a.full_name AS sold_by_name
+       FROM vouchers v
+       LEFT JOIN admin_users a ON a.id = v.sold_by
+       WHERE v.sold_by IS NOT NULL
+       ORDER BY v.created_at DESC`
+    );
+    await sendStyledSalesExcel(res, rows, {
+      sheetName: 'Staff Sales',
+      columns: [
+        { header: 'Code', width: 18 },
+        { header: 'Package', width: 22 },
+        { header: 'Price (USD)', width: 16 },
+        { header: 'Uses', width: 12 },
+        { header: 'Sold By', width: 20 },
+        { header: 'Created', width: 22 },
+      ],
+      subtitle: 'All Staff Sales',
+      mapRow: (r: any) => [
+        r.code || '',
+        r.package_tier || '',
+        r.price_amount ? parseFloat(r.price_amount).toFixed(2) : '0.00',
+        `${r.used_count || 0}/${r.max_uses || 1}`,
+        r.sold_by_name || '—',
+        r.created_at ? new Date(r.created_at).toLocaleString() : '',
+      ],
+      fileName: 'Preyone_All_Staff_Sales.xlsx',
+    });
+  } catch (err: any) {
+    console.error('Staff export error:', err.message, err.stack);
+    res.status(500).json({ error: 'Export failed: ' + err.message });
+  }
+});
+
+// ── Per-Staff Sales Export (Excel, CEO/Manager only) ──
+
+adminRouter.get('/staff-sales/export/:staffId', requireRole('CEO', 'Manager'), async (req: Request, res: Response) => {
+  try {
+    const { staffId } = req.params;
+    const { rows: staffRows } = await pool.query(
+      'SELECT full_name FROM admin_users WHERE id = $1', [staffId]
+    );
+    if (!staffRows.length) {
+      res.status(404).json({ error: 'Staff not found' });
+      return;
+    }
+    const staffName = staffRows[0].full_name;
+    const { rows } = await pool.query(
+      `SELECT v.*, a.full_name AS sold_by_name
+       FROM vouchers v
+       LEFT JOIN admin_users a ON a.id = v.sold_by
+       WHERE v.sold_by = $1
+       ORDER BY v.created_at DESC`,
+      [staffId]
+    );
+    await sendStyledSalesExcel(res, rows, {
+      sheetName: staffName,
+      columns: [
+        { header: 'Code', width: 18 },
+        { header: 'Package', width: 22 },
+        { header: 'Price (USD)', width: 16 },
+        { header: 'Uses', width: 12 },
+        { header: 'Created', width: 22 },
+      ],
+      subtitle: `Staff: ${staffName}`,
+      mapRow: (r: any) => [
+        r.code || '',
+        r.package_tier || '',
+        r.price_amount ? parseFloat(r.price_amount).toFixed(2) : '0.00',
+        `${r.used_count || 0}/${r.max_uses || 1}`,
+        r.created_at ? new Date(r.created_at).toLocaleString() : '',
+      ],
+      fileName: `Preyone_Sales_${staffName.replace(/\s+/g, '_')}.xlsx`,
+    });
+  } catch (err: any) {
+    console.error('Per-staff export error:', err.message, err.stack);
+    res.status(500).json({ error: 'Export failed: ' + err.message });
+  }
 });
 
 adminRouter.get('/admin-users', requireRole('CEO', 'Manager'), async (_req: Request, res: Response) => {
@@ -164,6 +431,72 @@ adminRouter.get('/admin-users', requireRole('CEO', 'Manager'), async (_req: Requ
     'SELECT id, full_name, email, phone, role, created_at FROM admin_users ORDER BY created_at DESC'
   );
   res.json(rows);
+});
+
+// ── Consolidated Dashboard (cached 30s) ──
+
+const dashboardCache: { data: any; expiresAt: number } = { data: null, expiresAt: 0 };
+
+adminRouter.get('/dashboard', requireRole('CEO', 'Manager'), async (_req: Request, res: Response) => {
+  if (Date.now() < dashboardCache.expiresAt && dashboardCache.data) {
+    res.json(dashboardCache.data);
+    return;
+  }
+  try {
+    const { rows: totalUsers } = await pool.query(`SELECT COUNT(*)::int AS count FROM users`);
+    const { rows: vouchersCreated } = await pool.query(`SELECT COUNT(*)::int AS count FROM vouchers`);
+    const { rows: vouchersUsed } = await pool.query(`SELECT COUNT(*)::int AS count FROM vouchers WHERE used_count > 0`);
+    const { rows: totalRevenueR } = await pool.query(`SELECT COALESCE(SUM(amount), 0)::float AS total FROM sales`);
+    const { rows: pendingPayments } = await pool.query(`SELECT COUNT(*)::int AS count, COALESCE(SUM(amount), 0)::float AS total FROM transactions WHERE status = 'pending'`);
+    const { rows: activeSessions } = await pool.query(`SELECT COUNT(*)::int AS count FROM users WHERE session_expires_at > NOW()`);
+    const { rows: dailyR } = await pool.query(`SELECT COALESCE(SUM(amount), 0)::float AS amount, COUNT(*)::int AS count FROM sales WHERE sold_at >= CURRENT_DATE`);
+    const { rows: weeklyR } = await pool.query(`SELECT COALESCE(SUM(amount), 0)::float AS amount, COUNT(*)::int AS count FROM sales WHERE sold_at >= DATE_TRUNC('week', CURRENT_DATE)`);
+    const { rows: monthlyR } = await pool.query(`SELECT COALESCE(SUM(amount), 0)::float AS amount, COUNT(*)::int AS count FROM sales WHERE sold_at >= DATE_TRUNC('month', CURRENT_DATE)`);
+    const { rows: dailySales } = await pool.query(`SELECT DATE(sold_at) AS day, COALESCE(SUM(amount),0)::float AS revenue, COUNT(*)::int AS count FROM sales WHERE sold_at >= NOW() - INTERVAL '14 days' GROUP BY DATE(sold_at) ORDER BY day`);
+    const { rows: dailySignups } = await pool.query(`SELECT DATE(created_at) AS day, COUNT(*)::int AS count FROM users WHERE created_at >= NOW() - INTERVAL '14 days' GROUP BY DATE(created_at) ORDER BY day`);
+    const { rows: byTier } = await pool.query(`SELECT v.package_tier, COUNT(*)::int AS count, COALESCE(SUM(v.price_amount),0)::float AS total FROM vouchers v WHERE v.package_tier IS NOT NULL AND v.price_amount > 0 GROUP BY v.package_tier ORDER BY total DESC`);
+    const { rows: recentSales } = await pool.query(`SELECT s.voucher_code, s.amount, s.currency, s.sold_by_name, s.sold_at FROM sales s ORDER BY s.sold_at DESC LIMIT 10`);
+    const { rows: [activeVouchers] } = await pool.query(`SELECT COUNT(*)::int AS count FROM vouchers WHERE expires_at > NOW() AND used_count > 0`);
+    const { rows: [dataToday] } = await pool.query(`SELECT COALESCE(SUM(data_used_bytes), 0)::bigint AS total_bytes FROM wispr_profiles WHERE session_start >= CURRENT_DATE`);
+    const { rows: [fupCount] } = await pool.query(`SELECT COUNT(*)::int AS count FROM wispr_profiles WHERE data_quota_bytes > 0 AND data_used_bytes >= data_quota_bytes AND session_end IS NULL`);
+    const { rows: sales24h } = await pool.query(`SELECT h.hour, COALESCE(s.count, 0)::int AS count, COALESCE(s.revenue, 0)::float AS revenue FROM (SELECT generate_series(DATE_TRUNC('hour', NOW() - INTERVAL '23 hours'), DATE_TRUNC('hour', NOW()), INTERVAL '1 hour') AS hour) h LEFT JOIN (SELECT DATE_TRUNC('hour', sold_at) AS hour, COUNT(*)::int AS count, COALESCE(SUM(amount),0)::float AS revenue FROM sales WHERE sold_at >= NOW() - INTERVAL '24 hours' GROUP BY DATE_TRUNC('hour', sold_at)) s ON h.hour = s.hour ORDER BY h.hour`);
+    const { rows: [apStatus] } = await pool.query(`SELECT COUNT(*)::int AS total, COUNT(*) FILTER (WHERE status = 'online')::int AS online FROM ap_devices`);
+
+    const daily = dailyR[0] || { amount: 0, count: 0 };
+    const weekly = weeklyR[0] || { amount: 0, count: 0 };
+    const monthly = monthlyR[0] || { amount: 0, count: 0 };
+
+    const result = {
+      metrics: {
+        totalUsers: totalUsers[0]?.count ?? 0,
+        vouchersCreated: vouchersCreated[0]?.count ?? 0,
+        vouchersUsed: vouchersUsed[0]?.count ?? 0,
+        totalRevenue: totalRevenueR[0]?.total ?? 0,
+        activeSessions: activeSessions[0]?.count ?? 0,
+        pendingPayments: { count: pendingPayments[0]?.count ?? 0, total: pendingPayments[0]?.total ?? 0 },
+        activeVouchers: activeVouchers?.count ?? 0,
+        dataConsumedToday: dataToday?.total_bytes ?? 0,
+        fupTriggered: fupCount?.count ?? 0,
+        apOnline: apStatus?.online ?? 0,
+        apTotal: apStatus?.total ?? 0,
+      },
+      sales: { daily, weekly, monthly },
+      charts: { dailySales, dailySignups },
+      sales24h,
+      byTier,
+      recentSales,
+    };
+    dashboardCache.data = result;
+    dashboardCache.expiresAt = Date.now() + 30000;
+    res.json(result);
+  } catch (err: any) {
+    console.error('Dashboard endpoint error:', err.message, err.query);
+    if (dashboardCache.data) {
+      res.json(dashboardCache.data);
+      return;
+    }
+    res.status(500).json({ error: 'Dashboard query failed' });
+  }
 });
 
 adminRouter.get('/revenue', requireRole('CEO', 'Manager'), async (_req: Request, res: Response) => {
@@ -188,8 +521,8 @@ adminRouter.get('/revenue', requireRole('CEO', 'Manager'), async (_req: Request,
     FROM cash_handovers WHERE status = 'approved'
   `);
   const { rows: byTier } = await pool.query(`
-    SELECT package_tier, COUNT(*)::int AS count, COALESCE(SUM(amount), 0)::float AS total
-    FROM transactions WHERE status = 'completed'
+    SELECT package_tier, COUNT(*)::int AS count, COALESCE(SUM(price_amount), 0)::float AS total
+    FROM vouchers WHERE package_tier IS NOT NULL AND price_amount > 0
     GROUP BY package_tier ORDER BY total DESC
   `);
   const { rows: recentTx } = await pool.query(`
@@ -271,6 +604,22 @@ adminRouter.post('/clock-out', async (req: Request, res: Response) => {
     res.status(409).json({ error: 'Not clocked in. Clock in first.' });
     return;
   }
+
+  // Enforce handover: check for unhanded sales
+  const { rows: unhanded } = await pool.query(
+    `SELECT COUNT(*)::int AS cnt FROM sales
+     WHERE sold_by = $1 AND (handover_status IS NULL OR handover_status = 'pending')`,
+    [req.adminUser!.id]
+  );
+  if (unhanded[0].cnt > 0) {
+    res.status(409).json({
+      error: `You have ${unhanded[0].cnt} unhanded sale(s). Please submit a cash handover before clocking out.`,
+      requiresHandover: true,
+      unhandedCount: unhanded[0].cnt,
+    });
+    return;
+  }
+
   const log = existing[0];
   const durationMin = Math.round((Date.now() - new Date(log.clock_in).getTime()) / 60000);
   const { rows } = await pool.query(
@@ -326,15 +675,15 @@ adminRouter.get('/time-logs', async (req: Request, res: Response) => {
 adminRouter.get('/staff', requireRole('CEO', 'Manager'), async (_req: Request, res: Response) => {
   const { rows } = await pool.query(
     `SELECT id, full_name, email, phone, role, approved, created_at
-     FROM admin_users WHERE role = 'Staff' ORDER BY created_at DESC`
+     FROM admin_users WHERE role IN ('Staff', 'Manager') ORDER BY created_at DESC`
   );
   res.json(rows);
 });
 
 adminRouter.get('/staff-pending', requireRole('CEO', 'Manager'), async (_req: Request, res: Response) => {
   const { rows } = await pool.query(
-    `SELECT id, full_name, email, phone, created_at
-     FROM admin_users WHERE role = 'Staff' AND approved = FALSE ORDER BY created_at DESC`
+    `SELECT id, full_name, email, phone, role, created_at
+     FROM admin_users WHERE role IN ('Staff', 'Manager') AND approved = FALSE ORDER BY created_at DESC`
   );
   res.json(rows);
 });
@@ -346,8 +695,10 @@ adminRouter.post('/staff-approve/:id', requireRole('CEO', 'Manager'), async (req
     [id]
   );
   if (rows.length === 0) { res.status(404).json({ error: 'Staff account not found' }); return; }
-  await recordAuditLog(req.adminUser!.id, req.adminUser!.fullName, 'staff_approve', 'admin_user', id, `Approved ${rows[0].full_name}`);
-  res.json({ message: 'Staff account approved', user: rows[0] });
+  const approvedUser = rows[0];
+  await recordAuditLog(req.adminUser!.id, req.adminUser!.fullName, 'staff_approve', 'admin_user', id, `Approved ${approvedUser.full_name}`);
+  sendAdminApprovedNotification(approvedUser.email, approvedUser.full_name);
+  res.json({ message: 'Staff account approved', user: approvedUser });
 });
 
 adminRouter.post('/staff-reject/:id', requireRole('CEO', 'Manager'), async (req: Request, res: Response) => {
@@ -508,12 +859,12 @@ adminRouter.get('/managers', requireRole('CEO'), async (_req: Request, res: Resp
 
 adminRouter.post('/manager-promote/:id', requireRole('CEO'), async (req: Request, res: Response) => {
   const { id } = req.params;
-  // Check manager slot isn't taken
+  // Check manager slot isn't taken (max 2)
   const { rows: existing } = await pool.query(
     `SELECT COUNT(*)::int AS cnt FROM admin_users WHERE role = 'Manager'`
   );
-  if (existing[0].cnt >= 1) {
-    res.status(409).json({ error: 'A Manager already exists. Remove or demote them first.' });
+  if (existing[0].cnt >= 2) {
+    res.status(409).json({ error: 'Maximum 2 Manager accounts allowed. Demote an existing Manager first.' });
     return;
   }
   const { rows } = await pool.query(
@@ -1151,15 +1502,15 @@ adminRouter.post('/vouchers/approvals/:id/approve', requireRole('CEO', 'Manager'
       const { rows: vrows } = await client.query(
         `INSERT INTO vouchers (code, duration_min, max_uses, expires_at, data_limit_gb, is_uncapped, bandwidth_mbps_up, bandwidth_mbps_down, sold_by, price_amount, package_tier)
          VALUES ($1, $2, $3, NULL, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
-        [voucherCode, pkg.duration_min, approval.max_uses || 1, pkg.data_limit_gb, pkg.is_uncapped, pkg.bandwidth_mbps_up, pkg.bandwidth_mbps_down,
-         req.adminUser!.id, approval.price_amount || null, approval.package_tier]
+         [voucherCode, pkg.duration_min, approval.max_uses || 1, pkg.data_limit_gb, pkg.is_uncapped, pkg.bandwidth_mbps_up, pkg.bandwidth_mbps_down,
+          approval.requested_by, approval.price_amount || null, approval.package_tier]
       );
 
       if (approval.price_amount && approval.price_amount > 0) {
         await client.query(
           `INSERT INTO sales (voucher_id, voucher_code, sold_by, sold_by_name, amount, currency)
            VALUES ($1, $2, $3, $4, $5, 'USD')`,
-          [vrows[0].id, vrows[0].code, req.adminUser!.id, req.adminUser!.fullName, approval.price_amount]
+          [vrows[0].id, vrows[0].code, approval.requested_by, approval.requested_by_name, approval.price_amount]
         );
       }
       created.push(vrows[0]);
@@ -1541,8 +1892,12 @@ adminRouter.get('/notifications/count', async (req: Request, res: Response) => {
     const { rows: pendingHandovers } = await pool.query(
       `SELECT COUNT(*)::int AS count FROM cash_handovers WHERE status = 'pending'`
     );
+    const { rows: pendingStaff } = await pool.query(
+      `SELECT COUNT(*)::int AS count FROM admin_users WHERE role IN ('Staff', 'Manager') AND approved = FALSE`
+    );
     result.pendingApprovals = pendingApprovals[0].count;
     result.pendingHandovers = pendingHandovers[0].count;
+    result.pendingStaff = pendingStaff[0].count;
   }
 
   if (role === 'Staff') {

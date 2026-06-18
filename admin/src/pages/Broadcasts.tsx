@@ -3,7 +3,6 @@ import { api } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import Spinner from '../components/Spinner';
 import EmptyState from '../components/EmptyState';
-import Badge from '../components/Badge';
 import Modal from '../components/Modal';
 
 export default function Broadcasts() {

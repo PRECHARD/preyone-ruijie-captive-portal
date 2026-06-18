@@ -96,7 +96,7 @@ export default function Packages() {
             columns={[
               { key: 'tier_name', label: 'Tier' },
               { key: 'display_name', label: 'Display Name' },
-              { key: 'price_amount', label: 'Price', width: '100px', render: (r: any) => `${Number(r.price_amount).toFixed(2)} ${r.price_currency || 'USD'}` },
+              { key: 'price_amount', label: 'Price', width: '120px', render: (r: any) => <span className="money money--sm">${Number(r.price_amount).toFixed(2)} {r.price_currency || 'USD'}</span> },
               { key: 'duration_min', label: 'Duration', width: '90px', render: (r: any) => r.duration_min ? `${r.duration_min}m` : '—' },
               { key: 'bandwidth', label: 'Speed', width: '120px', render: (r: any) => r.bandwidth_mbps_up || r.bandwidth_mbps_down ? `${r.bandwidth_mbps_up || '?'}/${r.bandwidth_mbps_down || '?'} Mbps` : '—' },
               { key: 'data_limit_gb', label: 'Data', width: '80px', render: (r: any) => r.is_uncapped ? '∞' : r.data_limit_gb ? `${r.data_limit_gb} GB` : '—' },

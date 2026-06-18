@@ -1,0 +1,263 @@
+/* ── Account Pages — only additions beyond portal base ── */
+
+/* Reusable gradient pill button (matches #quick-submit-btn / .pkg-action) */
+.account-btn {
+  width: 100%;
+  padding: 0.8rem;
+  font-family: var(--display);
+  font-size: 1.3rem;
+  background: linear-gradient(90deg, #ff00cc, #3333ff);
+  border: none;
+  border-radius: 50px;
+  color: #fff;
+  cursor: pointer;
+  transition: transform 0.2s ease, filter 0.2s ease, box-shadow 0.2s ease;
+}
+
+.account-btn:hover {
+  transform: scale(1.05);
+  filter: brightness(1.2);
+  box-shadow: 0 0 20px rgba(255, 0, 204, 0.4);
+}
+
+.account-btn:active {
+  transform: scale(0.95);
+}
+
+.account-btn--secondary {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  width: auto;
+  font-size: 0.9rem;
+  padding: 0.5rem 1.5rem;
+}
+
+.account-btn--secondary:hover {
+  background: rgba(255, 255, 255, 0.05);
+  filter: none;
+  box-shadow: none;
+}
+
+.account-btn--pill {
+  width: auto;
+  font-size: 0.8rem;
+  padding: 0.45rem 1.25rem;
+  font-family: var(--font);
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.account-btn--link {
+  background: none;
+  border: none;
+  color: var(--cyan);
+  font-family: var(--font);
+  font-size: 0.85rem;
+  font-weight: 600;
+  padding: 0;
+  display: inline;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.account-btn--link:hover {
+  color: var(--pink);
+}
+
+/* ── Dashboard Sections ── */
+.ma-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.ma-header .brand {
+  flex: 1;
+}
+
+.ma-header-actions {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.ma-section {
+  margin-top: 1.25rem;
+}
+
+.ma-section-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.ma-section-header h3 {
+  font-family: var(--display);
+  font-size: 1.2rem;
+  margin: 0;
+}
+
+/* ── Profile Grid ── */
+.ma-profile-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+
+@media (max-width: 500px) {
+  .ma-profile-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.ma-profile-field {
+  background: #111;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  padding: 0.75rem 1rem;
+}
+
+.ma-label {
+  display: block;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  margin-bottom: 0.25rem;
+}
+
+.ma-value {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #fff;
+}
+
+/* ── Data Usage Bar ── */
+.ma-data-card {
+  background: #111;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 12px;
+  padding: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.ma-data-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.ma-data-pkg {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #fff;
+}
+
+.ma-data-speed {
+  font-size: 0.75rem;
+  color: var(--cyan);
+}
+
+.ma-data-bar-track {
+  width: 100%;
+  height: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 0.4rem;
+}
+
+.ma-data-bar-fill {
+  height: 100%;
+  border-radius: 4px;
+  background: linear-gradient(90deg, #71ff2f, #13d8ff);
+  transition: width 0.4s ease;
+}
+
+.ma-data-stats {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+/* ── Password Row ── */
+.ma-pw-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.ma-input {
+  flex: 1;
+  min-width: 140px;
+  background: #111;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  padding: 0.5rem 0.75rem;
+  font-family: var(--font);
+  font-size: 0.85rem;
+  color: #fff;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.ma-input:focus {
+  border-color: var(--pink);
+  box-shadow: 0 0 0 2px rgba(255, 0, 255, 0.12);
+}
+
+.ma-input::placeholder {
+  color: #64748b;
+}
+
+/* ── Session Cards ── */
+.ma-session-card {
+  background: #111;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  padding: 1.2rem;
+  margin-bottom: 1rem;
+}
+
+.ma-session-status {
+  font-size: 0.75rem;
+  font-weight: 700;
+  margin-bottom: 0.8rem;
+}
+
+.ma-session-status.active {
+  color: #4ade80;
+}
+
+.ma-session-status.expired {
+  color: #f87171;
+}
+
+.ma-session-body {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.ma-session-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.85rem;
+}
+
+.ma-session-row .lbl {
+  color: var(--text-muted);
+}
+
+.ma-session-row .val {
+  color: #fff;
+  font-weight: 600;
+  text-align: right;
+}

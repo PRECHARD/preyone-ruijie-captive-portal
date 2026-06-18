@@ -188,14 +188,17 @@ describe('Payments routes', () => {
 
       const client = await (pool as any).connect();
       client.query
-        .mockResolvedValueOnce(undefined)
-        .mockResolvedValueOnce({ rows: [{ id: 'pay-1', user_id: 'user-1', phone_number: '123', amount: 10, package_id: 'pkg-1', status: 'pending', ruijie_auth_url: null }] })
-        .mockResolvedValueOnce(undefined)
-        .mockResolvedValueOnce({ rows: [{ mac_address: 'AA:BB:CC:DD:EE:FF' }] })
-        .mockResolvedValueOnce({ rows: [{ tier_name: 'PreLITE', data_limit_gb: 100, is_uncapped: false, bandwidth_mbps_up: 10, bandwidth_mbps_down: 10, duration_min: 1440 }] })
-        .mockResolvedValueOnce(undefined)
-        .mockResolvedValueOnce(undefined)
-        .mockResolvedValueOnce(undefined);
+        .mockResolvedValueOnce(undefined)                                                                         // 1: BEGIN
+        .mockResolvedValueOnce({ rows: [{ id: 'pay-1', user_id: 'user-1', phone_number: '123', amount: 10, package_id: 'pkg-1', status: 'pending', ruijie_auth_url: null }] })  // 2: SELECT payment
+        .mockResolvedValueOnce(undefined)                                                                         // 3: UPDATE payment status
+        .mockResolvedValueOnce({ rows: [{ mac_address: 'AA:BB:CC:DD:EE:FF' }] })                                  // 4: SELECT user
+        .mockResolvedValueOnce({ rows: [{ tier_name: 'PreLITE', data_limit_gb: 100, is_uncapped: false, bandwidth_mbps_up: 10, bandwidth_mbps_down: 10, duration_min: 1440 }] })  // 5: SELECT package
+        .mockResolvedValueOnce(undefined)                                                                         // 6: INSERT INTO transactions
+        .mockResolvedValueOnce({ rows: [] })                                                                      // 7: SELECT CEO
+        .mockResolvedValueOnce({ rows: [{ id: 'v-1' }] })                                                        // 8: INSERT INTO vouchers
+        .mockResolvedValueOnce(undefined)                                                                         // 9: UPDATE users (session_token + session_expires_at + voucher_code)
+        .mockResolvedValueOnce(undefined)                                                                         //10: INSERT INTO wispr_profiles
+        .mockResolvedValueOnce(undefined);                                                                        //11: COMMIT
 
       const res = await request(createApp())
         .post('/api/payments/webhook')

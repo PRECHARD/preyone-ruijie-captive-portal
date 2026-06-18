@@ -3,6 +3,12 @@
   margin-bottom: 4rem;
 }
 
+@media (min-width: 769px) {
+  .portal-header {
+    margin-bottom: 2rem;
+  }
+}
+
 .brand-banner {
   display: flex;
   justify-content: center;

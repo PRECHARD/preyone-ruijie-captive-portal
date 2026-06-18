@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { Router, Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { pool } from '../db/pool';
@@ -202,16 +203,59 @@ paymentsRouter.post('/webhook', async (req: Request, res: Response) => {
           );
         }
 
+        const { rows: ceoRows } = await client.query(
+          `SELECT id, full_name FROM admin_users WHERE role = 'CEO' ORDER BY created_at ASC LIMIT 1`
+        );
+        const ceoId = ceoRows.length > 0 ? ceoRows[0].id : null;
+        const ceoName = ceoRows.length > 0 ? ceoRows[0].full_name : null;
+
         if (userRows.length > 0 && pkgRows.length > 0) {
           const sessionExpires = new Date(Date.now() + pkgRows[0].duration_min * 60 * 1000);
-          await client.query('UPDATE users SET session_expires_at = $1 WHERE id = $2', [sessionExpires, payment.user_id]);
+          const slug = pkgRows[0].tier_name.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+          const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+          const bytes = crypto.randomBytes(4);
+          let rand = '';
+          for (let j = 0; j < 4; j++) rand += chars[bytes[j] % chars.length];
+          const vc = `${slug}-${rand}`;
+
+          const { rows: vRows } = await client.query(
+            `INSERT INTO vouchers (code, duration_min, max_uses, expires_at, data_limit_gb, is_uncapped, bandwidth_mbps_up, bandwidth_mbps_down, package_tier, sold_by, price_amount)
+             VALUES ($1, $2, 1, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
+            [vc, pkgRows[0].duration_min, sessionExpires, pkgRows[0].data_limit_gb, pkgRows[0].is_uncapped, pkgRows[0].bandwidth_mbps_up, pkgRows[0].bandwidth_mbps_down, pkgRows[0].tier_name, ceoId, payment.amount]
+          );
+
+          if (ceoId && vRows.length > 0) {
+            await client.query(
+              `INSERT INTO sales (voucher_id, voucher_code, sold_by, sold_by_name, amount, currency)
+               VALUES ($1, $2, $3, $4, $5, $6)`,
+              [vRows[0].id, vc, ceoId, ceoName, payment.amount, 'USD']
+            );
+          }
+
+          const webhookSessionToken = uuidv4();
+          await client.query('UPDATE users SET session_token = $1, session_expires_at = $2, voucher_code = $3 WHERE id = $4', [webhookSessionToken, sessionExpires, vc, payment.user_id]);
 
           if (userRows[0].mac_address) {
-            const wisprProfile = transformToWISPrProfile({
+            const wispr = transformToWISPrProfile({
               macAddress: userRows[0].mac_address,
               packageData: pkgRows[0],
             });
-            await bypassRuijieFirewall(userRows[0].mac_address, payment.ruijie_auth_url || '', wisprProfile.bandwidthDownKbps, wisprProfile.dataQuotaBytes);
+
+            await client.query(
+              `INSERT INTO wispr_profiles (user_id, mac_address, bandwidth_up_kbps, bandwidth_down_kbps, data_quota_bytes, is_uncapped, session_end)
+               VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+              [
+                payment.user_id,
+                wispr.macAddress,
+                wispr.bandwidthUpKbps,
+                wispr.bandwidthDownKbps,
+                wispr.dataQuotaBytes,
+                wispr.isUncapped,
+                sessionExpires,
+              ]
+            );
+
+            await bypassRuijieFirewall(userRows[0].mac_address, payment.ruijie_auth_url || '', wispr.bandwidthDownKbps, wispr.dataQuotaBytes);
           }
         }
 
@@ -268,6 +312,15 @@ paymentsRouter.get('/callback', async (req: Request, res: Response) => {
 
     if (payment.status === 'completed') {
       await client.query('COMMIT');
+      // If the payment was already completed, redirect with existing session_token
+      const { rows: existingUser } = await pool.query('SELECT session_token FROM users WHERE id = $1', [payment.user_id]);
+      const existingToken = existingUser.length > 0 ? existingUser[0].session_token : null;
+      if (existingToken) {
+        const ep = new URLSearchParams();
+        ep.set('token', existingToken);
+        res.redirect(`/success.html?${ep.toString()}`);
+        return;
+      }
       res.json({ success: true, message: 'Payment already processed.', paymentId: payment.id });
       return;
     }
@@ -309,9 +362,49 @@ paymentsRouter.get('/callback', async (req: Request, res: Response) => {
       );
     }
 
+    let voucherCode: string | null = null;
+    let soldById: string | null = null;
+    let soldByName: string | null = null;
+
+    const { rows: ceoRows } = await pool.query(
+      `SELECT id, full_name FROM admin_users WHERE role = 'CEO' ORDER BY created_at ASC LIMIT 1`
+    );
+    if (ceoRows.length > 0) {
+      soldById = ceoRows[0].id;
+      soldByName = ceoRows[0].full_name;
+    }
+
+    if (packageRows.length > 0) {
+      const slug = packageRows[0].tier_name.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+      const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+      const bytes = crypto.randomBytes(4);
+      let rand = '';
+      for (let j = 0; j < 4; j++) rand += chars[bytes[j] % chars.length];
+      voucherCode = `${slug}-${rand}`;
+    }
+    if (voucherCode) voucherCode = voucherCode.toUpperCase();
+
+    const sessionToken = uuidv4();
+    const sessionExpires = packageRows.length > 0
+      ? new Date(Date.now() + packageRows[0].duration_min * 60 * 1000)
+      : new Date();
+
     if (userRows.length > 0 && packageRows.length > 0) {
-      const sessionExpires = new Date(Date.now() + packageRows[0].duration_min * 60 * 1000);
-      await client.query('UPDATE users SET session_expires_at = $1 WHERE id = $2', [sessionExpires, payment.user_id]);
+      await client.query('UPDATE users SET session_token = $1, session_expires_at = $2, voucher_code = $3 WHERE id = $4', [sessionToken, sessionExpires, voucherCode, payment.user_id]);
+
+      const { rows: voucherRows } = await client.query(
+        `INSERT INTO vouchers (code, duration_min, max_uses, expires_at, data_limit_gb, is_uncapped, bandwidth_mbps_up, bandwidth_mbps_down, package_tier, sold_by, price_amount)
+         VALUES ($1, $2, 1, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
+        [voucherCode, packageRows[0].duration_min, sessionExpires, packageRows[0].data_limit_gb, packageRows[0].is_uncapped, packageRows[0].bandwidth_mbps_up, packageRows[0].bandwidth_mbps_down, packageRows[0].tier_name, soldById, payment.amount]
+      );
+
+      if (soldById && voucherRows.length > 0) {
+        await client.query(
+          `INSERT INTO sales (voucher_id, voucher_code, sold_by, sold_by_name, amount, currency)
+           VALUES ($1, $2, $3, $4, $5, $6)`,
+          [voucherRows[0].id, voucherCode, soldById, soldByName, payment.amount, 'USD']
+        );
+      }
 
       if (userRows[0].mac_address) {
         const wispr = transformToWISPrProfile({
@@ -339,11 +432,20 @@ paymentsRouter.get('/callback', async (req: Request, res: Response) => {
 
     await client.query('COMMIT');
 
-    res.json({
-      success: true,
-      message: 'Payment processed successfully',
-      paymentId: payment.id,
-    });
+    const redirectParams = new URLSearchParams();
+    redirectParams.set('token', sessionToken);
+    redirectParams.set('expires', sessionExpires.toISOString());
+    if (voucherCode) redirectParams.set('voucher', voucherCode);
+    if (packageRows.length > 0) {
+      redirectParams.set('bwUp', String(packageRows[0].bandwidth_mbps_up));
+      redirectParams.set('bwDown', String(packageRows[0].bandwidth_mbps_down));
+      if (packageRows[0].data_limit_gb != null) redirectParams.set('dataLimit', String(packageRows[0].data_limit_gb));
+      redirectParams.set('uncapped', String(packageRows[0].is_uncapped));
+      redirectParams.set('dur', String(packageRows[0].duration_min));
+      redirectParams.set('pkg', packageRows[0].tier_name);
+    }
+
+    res.redirect(`/success.html?${redirectParams.toString()}`);
   } catch (error) {
     await client.query('ROLLBACK');
     console.error('Payment callback error:', error);

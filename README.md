@@ -38,39 +38,60 @@ It serves a signup page, validates user input, optionally applies voucher-based 
 
 ## Environment Variables
 
-Create a `.env` file in the project root:
+Copy `.env.example` to `.env` and fill in your values:
 
 ```env
 PORT=3000
+NODE_ENV=production
+BASE_URL=https://wifi.preyone.com
 
 DB_HOST=localhost
 DB_PORT=5432
 DB_NAME=captive_portal
 DB_USER=postgres
-DB_PASSWORD=postgres
+DB_PASSWORD=your_password
 
 DEFAULT_SESSION_MIN=60
 SESSION_CLEANUP_INTERVAL_MIN=15
 ENABLE_SESSION_CLEANUP=true
-ADMIN_API_KEY=change-me
 
-# Optional: if set, signup success redirects to this URL with ?token=<sessionToken>
-RUIJIE_SUCCESS_URL=
+ACCESS_LOG_CLEANUP_INTERVAL_MIN=60
+ACCESS_LOG_RETENTION_DAYS=30
+ENABLE_ACCESS_LOG_CLEANUP=true
+
+RUIJIE_SUCCESS_URL=/success.html
+RUIJIE_PASSWORD=PreyoneNetAccess
+
+JWT_SECRET=generate-a-strong-random-secret
+
+PESEPAY_API_KEY=
+PESEPAY_API_ID=
+PESEPAY_MERCHANT_ID=
+PESEPAY_ENCRYPTION_KEY=
+PESEPAY_BASE_URL=https://api.pesepay.com
 ```
 
-- `SESSION_CLEANUP_INTERVAL_MIN`: how often the server clears expired sessions, in minutes.
-- `ENABLE_SESSION_CLEANUP`: set to `false` to disable automatic cleanup in the server.
+### Key Variables
 
-### Variable Notes
-
-- `DEFAULT_SESSION_MIN`: fallback session duration (minutes) when no voucher is provided.
-- `ADMIN_API_KEY`: required for all `/api/admin/*` requests via the `x-admin-key` header only.
-- `RUIJIE_SUCCESS_URL`: optional absolute URL. If omitted, backend uses a safe same-origin `url` query param fallback or `/success.html`.
+- `JWT_SECRET` — **required** in production. Used for admin JWT tokens. Generate with `openssl rand -hex 48`.
+- `NODE_ENV` — set to `production` for production deployment.
+- `BASE_URL` — the public-facing URL of the captive portal (used for Pesepay return URLs).
+- `RUIJIE_SUCCESS_URL` — where users are redirected after signup. Defaults to `/success.html`.
 
 ## Installation
 
+### Backend
+
 ```bash
 npm install
+```
+
+### Admin SPA
+
+```bash
+cd admin
+npm install
+cd ..
 ```
 
 ## Database Setup and Migration
@@ -81,12 +102,7 @@ Make sure the database in `DB_NAME` exists and credentials are correct, then run
 npm run migrate
 ```
 
-This creates:
-
-- `users`
-- `vouchers`
-- `access_log`
-- supporting indexes
+This creates all required tables (users, vouchers, payments, admin_users, etc.) and seeds default packages, AP devices, and alerts.
 
 ## Running the App
 
@@ -99,22 +115,31 @@ npm run dev
 ### Production Build
 
 ```bash
+# 1. Build the backend
 npm run build
+
+# 2. Build the admin SPA
+cd admin && npm run build && cd ..
+
+# 3. Start
 npm start
 ```
 
-Server starts on:
+Server listens on `http://0.0.0.0:3000` by default.
 
-- `http://0.0.0.0:3000` by default (or `PORT`)
+### Subdomain Routing
+
+| Domain | Serves |
+|--------|--------|
+| `preyone.com` / `www.preyone.com` | Marketing site (`site/`) |
+| `wifi.preyone.com` | Captive portal (`public/`) |
+| `admin.preyone.com` | Admin console SPA (`admin/dist/`) |
+
+A reverse proxy (nginx/Caddy) must route these domains to `127.0.0.1:3000` with SSL termination.
 
 ## Admin Console
 
-A simple browser-based admin console is available at `/admin.html`. It uses the `x-admin-key` header to authenticate with the backend and allows you to:
-
-- view vouchers
-- create vouchers
-- inspect recent user sessions
-- inspect the access log
+The React SPA admin console is served at `admin.preyone.com`. It provides a full dashboard, voucher management, staff sales, Excel exports, AP monitoring, and more.
 
 ## API Reference
 
@@ -161,7 +186,7 @@ Checks whether a session is still active.
 ### Admin Routes
 
 Base path: `/api/admin`  
-Auth: `x-admin-key: <ADMIN_API_KEY>`
+Auth: Bearer JWT token (obtained via `/api/admin/auth/login`)
 
 #### `GET /users`
 
@@ -214,22 +239,14 @@ The client script in `public/js/portal.js`:
 npm test
 ```
 
-Tests use [Vitest](https://vitest.dev/) and cover session cleanup, access log cleanup, admin auth middleware, and redirect URL building.
+Tests use [Vitest](https://vitest.dev/) — 14 test suites, 153 tests covering auth, payments, admin, redirect logic, session cleanup, and more.
 
 For manual validation:
 
-1. Build check:
-   - `npm run build`
-2. Database migration:
-   - `npm run migrate`
-3. Manual flow:
-   - Open `/`
-   - Submit signup form with valid/invalid payloads
-   - Verify redirect behavior and session expiry param
-4. API checks (using curl/Postman):
-   - `POST /api/auth/signup`
-   - `GET /api/auth/status`
-   - Admin routes with and without `x-admin-key`
+1. Build check: `npm run build`
+2. Database migration: `npm run migrate`
+3. Open `http://localhost:3000` and submit signup form
+4. Test admin API with Postman/curl using a JWT token
 
 ## Troubleshooting
 

@@ -73,7 +73,7 @@ export default function Bandwidth() {
               { key: 'full_name', label: 'User' },
               { key: 'voucher_code', label: 'Voucher', width: '120px', render: (r: any) => <span className="code-cell">{r.voucher_code}</span> },
               { key: 'mac_address', label: 'MAC', width: '150px', render: (r: any) => <code style={{ fontSize: 11 }}>{r.mac_address || '—'}</code> },
-              { key: 'bytes_used', label: 'Data Used', width: '100px', render: (r: any) => fmtBytes(r.bytes_used) },
+              { key: 'data_used_bytes', label: 'Data Used', width: '100px', render: (r: any) => fmtBytes(r.data_used_bytes) },
               { key: 'package_tier', label: 'Package', width: '100px' },
             ]}
             data={top}

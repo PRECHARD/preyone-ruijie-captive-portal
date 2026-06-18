@@ -14,7 +14,7 @@ interface TableProps<T> {
   compact?: boolean;
 }
 
-export default function Table<T extends Record<string, any>>({ columns, data, onRowClick, emptyMessage, compact }: TableProps<T>) {
+export default function Table<T extends Record<string, any>>({ columns, data, onRowClick, emptyMessage }: TableProps<T>) {
   if (!data.length) {
     return (
       <div className="table-empty">{emptyMessage || 'No data available'}</div>

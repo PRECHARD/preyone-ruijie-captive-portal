@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { api } from '../api/client';
 import Spinner from '../components/Spinner';
 import EmptyState from '../components/EmptyState';
+import Badge from '../components/Badge';
 import Table from '../components/Table';
 
 export default function AccessLog() {
@@ -32,7 +33,11 @@ export default function AccessLog() {
           <Table
             columns={[
               { key: 'created_at', label: 'Time', width: '170px', render: (r: any) => r.created_at ? new Date(r.created_at).toLocaleString() : '—' },
-              { key: 'event', label: 'Event', width: '120px', render: (r: any) => <code style={{ fontSize: 11 }}>{r.event}</code> },
+              { key: 'event', label: 'Event', width: '120px', render: (r: any) =>
+                r.event === 'login_failed'
+                  ? <Badge variant="rejected">{r.event}</Badge>
+                  : <code style={{ fontSize: 11 }}>{r.event}</code>
+              },
               { key: 'full_name', label: 'User' },
               { key: 'mac_address', label: 'MAC', width: '150px', render: (r: any) => <code style={{ fontSize: 11 }}>{r.mac_address || '—'}</code> },
               { key: 'ip_address', label: 'IP', width: '130px' },

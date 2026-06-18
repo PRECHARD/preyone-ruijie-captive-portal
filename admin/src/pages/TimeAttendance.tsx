@@ -83,7 +83,12 @@ export default function TimeAttendance() {
             columns={[
               ...(isMgmt ? [{ key: 'admin_name', label: 'Staff', render: (r: any) => r.admin_name || r.full_name || '—' }] : []),
               { key: 'clock_in', label: 'Clock In', width: '170px', render: (r: any) => r.clock_in ? new Date(r.clock_in).toLocaleString() : '—' },
-              { key: 'clock_out', label: 'Clock Out', width: '170px', render: (r: any) => r.clock_out ? new Date(r.clock_out).toLocaleString() : <Badge variant="active">Active</Badge> },
+              { key: 'clock_out', label: 'Clock Out', width: '170px', render: (r: any) => {
+                if (r.clock_out) return new Date(r.clock_out).toLocaleString();
+                if (!r.clock_in) return '—';
+                const hrs = (Date.now() - new Date(r.clock_in).getTime()) / 3600000;
+                return hrs > 12 ? <Badge variant="rejected">Active ({hrs.toFixed(1)}h)</Badge> : <Badge variant="active">Active</Badge>;
+              }},
               { key: 'duration', label: 'Duration', width: '100px', render: (r: any) => {
                 if (!r.clock_in) return '—';
                 const end = r.clock_out ? new Date(r.clock_out).getTime() : Date.now();

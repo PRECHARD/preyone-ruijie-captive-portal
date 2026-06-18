@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="bg_dark">#FF050505</color>
+    <color name="bg_surface">#FF0A0A0A</color>
+    <color name="bg_surface2">#FF111111</color>
+    <color name="cyan">#FF00E5FF</color>
+    <color name="pink">#FFFF007F</color>
+    <color name="purple">#FF6A0DAD</color>
+    <color name="text_primary">#FFE2E8F0</color>
+    <color name="text_muted">#FF94A3B8</color>
+    <color name="border_color">#FF3A3A5E</color>
+</resources>

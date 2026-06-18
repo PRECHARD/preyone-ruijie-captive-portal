@@ -5,7 +5,12 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Connected — Preyone UltraNet Wi‑Fi</title>
-  <link rel="icon" type="image/png" href="/images/preyonetabicon.webp" />
+  <link rel="icon" type="image/png" href="/favicon/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="/favicon/favicon.svg" />
+  <link rel="shortcut icon" href="/favicon/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/favicon/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-title" content="Preyone" />
+  <link rel="manifest" href="/favicon/site.webmanifest" />
   <link
     href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Montserrat:wght@500;700&family=Satisfy&display=swap"
     rel="stylesheet">
@@ -13,6 +18,23 @@
 </head>
 
 <body class="portal-body">
+  <div class="body-loading hidden" id="bodyLoading">
+    <div class="loading-spinner">
+      <div class="loading-spinner-inner">
+        <img src="/images/faviconloading.svg" alt="Preyone" />
+      </div>
+    </div>
+    <div class="loading-text">Connecting to Preyone...</div>
+  </div>
+  <svg aria-hidden="true" style="position:absolute;width:0;height:0">
+    <defs>
+      <linearGradient id="ring-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#71ff2f" />
+        <stop offset="50%" stop-color="#13d8ff" />
+        <stop offset="100%" stop-color="#367cff" />
+      </linearGradient>
+    </defs>
+  </svg>
 
   <!-- Sticky Header -->
   <header class="portal-header">
@@ -25,17 +47,57 @@
   </header>
 
   <main class="portal-shell">
+    
+    <!-- Success Header -->
     <div class="card card--success">
       <div class="success-glow"></div>
-
       <div class="brand">
         <div class="success-icon-wrapper">
           <svg class="wifi-icon--success" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
             <polyline points="20 6 9 17 4 12" />
           </svg>
         </div>
-        <h1 class="bebas-font">ACCESS GRANTED</h1>
-        <p class="subtitle cursive-font">Welcome to the Preyone UltraNet Wi-FiExperience.</p>
+        <h1 class="bebas-font">PAYMENT CONFIRMED</h1>
+        <p class="subtitle cursive-font">Your Preyone UltraNet WiFi session is now active.</p>
+      </div>
+    </div>
+
+    <!-- Voucher Card -->
+    <div class="voucher-section">
+      <div id="voucher-card-container" class="voucher-card-wrapper"></div>
+      <div class="voucher-actions">
+        <button id="downloadVoucherBtn" class="btn-primary" style="display:none">DOWNLOAD VOUCHER</button>
+      </div>
+    </div>
+
+    <!-- Session Details -->
+    <div class="card card--success">
+      <!-- Ring Timer -->
+      <div class="ring-timer-wrapper">
+        <svg class="ring-timer-svg" viewBox="0 0 160 160">
+          <circle class="ring-bg" cx="80" cy="80" r="68" />
+          <circle class="ring-fg" id="ring-fg" cx="80" cy="80" r="68"
+            stroke-dasharray="427.26" stroke-dashoffset="0" />
+        </svg>
+        <div class="ring-timer-center">
+          <span class="ring-label">TIME LEFT</span>
+          <span class="ring-value" id="timer-display">--:--:--</span>
+        </div>
+      </div>
+
+      <!-- Data Usage -->
+      <div class="data-usage-section" id="data-usage-section">
+        <div class="data-usage-header">
+          <span class="data-usage-label">DATA USAGE</span>
+          <span class="data-usage-numbers" id="data-usage-numbers">— / —</span>
+        </div>
+        <div class="data-bar-track">
+          <div class="data-bar-fill" id="data-bar-fill" style="width:0%"></div>
+        </div>
+        <div class="data-usage-footer">
+          <span id="data-usage-pct">0%</span>
+          <span id="data-usage-remaining">— remaining</span>
+        </div>
       </div>
 
       <div class="status-grid">
@@ -45,7 +107,7 @@
         </div>
         <div class="status-item">
           <span class="label">SESSION REMAINING</span>
-          <span class="value value--timer" id="timer-display">--:--:--</span>
+          <span class="value value--timer" id="timer-display-text">--:--:--</span>
         </div>
         <div class="status-item">
           <span class="label">NETWORK</span>
@@ -59,8 +121,12 @@
           <span class="detail-value" id="detail-speed">—</span>
         </div>
         <div class="detail-row">
-          <span class="detail-label">Data</span>
+          <span class="detail-label">Data Allowance</span>
           <span class="detail-value" id="detail-data">—</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">Session Started</span>
+          <span class="detail-value" id="detail-started">—</span>
         </div>
         <div class="detail-row">
           <span class="detail-label">Expires</span>
@@ -68,17 +134,94 @@
         </div>
       </div>
 
-      <div class="success-message">
-        <p>Your high-speed session is now active. You are connected to most reliable Starlink Satellite
-          Infrastructure.</p>
-      </div>
-
       <div class="action-group">
         <a href="https://www.google.com" target="_blank" rel="noopener" class="btn-primary">START BROWSING</a>
-        <a id="manageAccountLink" href="#" class="btn-secondary">MANAGE ACCOUNT</a>
+        <a id="manageAccountLink" href="/login" class="btn-secondary" target="_blank" rel="noopener">MANAGE ACCOUNT</a>
+        <button type="button" class="btn-secondary" id="successSignUpBtn">SIGN UP</button>
       </div>
-      
     </div>
+
+    <section class="signup-section hidden" id="signup-section">
+      <div class="section-heading">
+        <div>
+          <p class="section-eyebrow">Create your Preyone account</p>
+          <h2>Sign Up</h2>
+        </div>
+        <div class="section-note">Register to buy packages, manage your account, and track your sessions.</div>
+      </div>
+      <div class="signup-card">
+        <form id="signup-form" novalidate>
+          <div class="field">
+            <label for="fullName">Full Name</label>
+            <input id="fullName" name="fullName" type="text" autocomplete="name" placeholder="Your full name" required />
+            <span class="field-error" id="err-fullName"></span>
+          </div>
+          <div class="field">
+            <label for="phone">Phone Number</label>
+            <input id="phone" name="phone" type="tel" autocomplete="tel" placeholder="+263 771 327 202" required />
+            <span class="field-error" id="err-phone"></span>
+          </div>
+          <div class="field">
+            <label for="email">Email</label>
+            <input id="email" name="email" type="email" autocomplete="email" placeholder="you@example.com" required />
+            <span class="field-error" id="err-email"></span>
+          </div>
+          <div class="field">
+            <label for="suPassword">Set Password <span class="optional">(for future sign-ins)</span></label>
+            <input id="suPassword" name="password" type="password" autocomplete="new-password" placeholder="8+ chars, upper, lower, number &amp; special" minlength="8" />
+            <span class="field-error" id="err-suPassword"></span>
+          </div>
+          <div class="field">
+            <label for="suPasswordConfirm">Confirm Password</label>
+            <input id="suPasswordConfirm" name="passwordConfirm" type="password" autocomplete="new-password" placeholder="Re-enter password" />
+            <span class="field-error" id="err-suPasswordConfirm"></span>
+          </div>
+          <div class="field field--checkbox">
+            <label class="checkbox-label">
+              <input id="acceptedTos" name="acceptedTos" type="checkbox" required />
+              <span>I agree to the <a href="/terms.html" target="_blank" rel="noopener">Terms of Service</a>.</span>
+            </label>
+            <span class="field-error" id="err-acceptedTos"></span>
+          </div>
+          <div id="signup-form-error" class="field-error hidden"></div>
+          <button type="submit" id="signup-submit-btn">
+            <span id="signup-btn-text">Create Account</span>
+            <span id="signup-btn-spinner" class="spinner hidden" aria-hidden="true"></span>
+          </button>
+        </form>
+      </div>
+    </section>
+
+    <!-- Signup Success Message -->
+    <section class="signup-section hidden" id="register-success-section">
+      <div class="section-heading">
+        <div>
+          <p class="section-eyebrow">Account Created</p>
+          <h2>Welcome to Preyone!</h2>
+        </div>
+      </div>
+      <div class="signup-card">
+        <div style="text-align:center;padding:2rem 1rem">
+          <svg viewBox="0 0 24 24" width="64" height="64" fill="none" stroke="#16a34a" stroke-width="2" style="margin-bottom:1rem">
+            <circle cx="12" cy="12" r="11"/>
+            <polyline points="7,12 10,15 17,9"/>
+          </svg>
+          <h3 style="font-size:1.25rem;margin:0 0 0.75rem">Your sign up has been successful!</h3>
+          <p style="color:#aaa;margin:0 0 0.5rem">Thank you for signing up for Preyone UltraNet WiFi.</p>
+          <p style="color:#aaa;margin:0 0 1.5rem">A verification email has been sent to:</p>
+          <p style="font-size:1.1rem;font-weight:600;color:#71ff2f;margin:0 0 1.5rem;word-break:break-all" id="registered-email"></p>
+          <div style="background:rgba(22,163,74,0.1);border:1px solid rgba(22,163,74,0.3);border-radius:8px;padding:1rem;margin-bottom:1.5rem;text-align:left">
+            <p style="margin:0 0 0.5rem;color:#ccc;font-size:0.9rem"><strong>Next steps:</strong></p>
+            <ol style="margin:0;padding-left:1.25rem;color:#ccc;font-size:0.9rem">
+              <li style="margin-bottom:0.25rem">Check your email inbox (and spam folder)</li>
+              <li style="margin-bottom:0.25rem">Click the <strong style="color:#71ff2f">Verify Email</strong> button in the email</li>
+              <li style="margin-bottom:0.25rem">Return here and click Sign In to manage your account</li>
+            </ol>
+          </div>
+          <a href="/login" class="btn-primary" style="display:inline-block;text-decoration:none">Sign In to Your Account</a>
+        </div>
+      </div>
+    </section>
     
   </main>
 
@@ -129,9 +272,9 @@
     <div class="footer-col">
       <h3>GET IN TOUCH</h3>
       <ul class="footer-links">
-        <li><a href="tel:+263771327202"><span class="icon">📞</span> +263 771 327 202</a></li>
-        <li><a href="mailto:support@preyone.com"><span class="icon">✉️</span> support@preyone.com</a></li>
-        <li><span class="icon">📍</span> Harare, Zimbabwe</li>
+        <li><a href="tel:+263771327202"><svg class="icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg> +263 771 327 202</a></li>
+        <li><a href="mailto:support@preyone.com"><svg class="icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> support@preyone.com</a></li>
+        <li><svg class="icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg> Harare, Zimbabwe</li>
       </ul>
     </div>
 
@@ -158,6 +301,161 @@
 </footer>
 
   <script src="/js/portal.js"></script>
+  <script src="/js/voucher-card.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', function () {
+      var params = new URLSearchParams(location.search);
+      var code = params.get('voucher');
+      var sessionToken = params.get('token');
+      var dataLimitGb = params.get('dataLimit') ? parseFloat(params.get('dataLimit')) : null;
+      var isUncapped = params.get('uncapped') === 'true';
+
+      // ── Render Voucher Card ──
+      if (code) {
+        var data = {
+          code: code,
+          package_tier: params.get('pkg') || 'Prepaid',
+          price_amount: null,
+          duration_min: parseInt(params.get('dur')) || 60,
+          data_limit_gb: dataLimitGb,
+          is_uncapped: isUncapped,
+          bandwidth_mbps_up: parseInt(params.get('bwUp')) || 0,
+          bandwidth_mbps_down: parseInt(params.get('bwDown')) || 0,
+        };
+
+        renderVoucherToContainer('voucher-card-container', data);
+
+        var dlBtn = document.getElementById('downloadVoucherBtn');
+        dlBtn.style.display = 'inline-flex';
+        dlBtn.addEventListener('click', function () {
+          downloadVoucherPNG(data);
+        });
+      }
+
+      // ── Helpers ──
+      function formatBytes(bytes) {
+        if (bytes == null) return '—';
+        if (bytes < 1024) return bytes + ' B';
+        if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+        if (bytes < 1073741824) return (bytes / 1048576).toFixed(2) + ' MB';
+        return (bytes / 1073741824).toFixed(2) + ' GB';
+      }
+
+      function formatDuration(ms) {
+        if (ms <= 0) return '00:00:00';
+        var totalSec = Math.floor(ms / 1000);
+        var h = Math.floor(totalSec / 3600);
+        var m = Math.floor((totalSec % 3600) / 60);
+        var s = totalSec % 60;
+        return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+      }
+
+      // ── Ring Timer SVG circumference ──
+      var RING_CIRCUMFERENCE = 2 * Math.PI * 68; // r=68 → 427.26
+
+      function updateRing(pct) {
+        var ring = document.getElementById('ring-fg');
+        if (!ring) return;
+        var offset = RING_CIRCUMFERENCE * (1 - Math.min(pct, 1));
+        ring.style.strokeDashoffset = offset;
+      }
+
+      // ── Timer & Data Polling ──
+      var timerEl = document.getElementById('timer-display');
+      var timerTextEl = document.getElementById('timer-display-text');
+      var expiresAt = params.get('expires');
+      var endTime = expiresAt ? new Date(expiresAt).getTime() : null;
+      var totalDuration = parseInt(params.get('dur')) * 60 * 1000 || 1;
+
+      function updateTimer() {
+        if (!endTime) {
+          if (timerEl) timerEl.textContent = 'UNLIMITED';
+          if (timerTextEl) timerTextEl.textContent = 'UNLIMITED';
+          return;
+        }
+        var now = Date.now();
+        var diff = endTime - now;
+        var elapsed = totalDuration - diff;
+        var pct = Math.min(Math.max(elapsed / totalDuration, 0), 1);
+        var str = formatDuration(diff);
+
+        if (timerEl) timerEl.textContent = str;
+        if (timerTextEl) timerTextEl.textContent = str;
+        updateRing(1 - pct);
+
+        if (diff <= 0) {
+          if (timerEl) timerEl.textContent = '00:00:00';
+          if (timerTextEl) timerTextEl.textContent = '00:00:00';
+          updateRing(1);
+        }
+      }
+
+      updateTimer();
+      setInterval(updateTimer, 1000);
+
+      // ── Fill session details from URL (fallback) ──
+      var detailSpeed = document.getElementById('detail-speed');
+      var detailData = document.getElementById('detail-data');
+      var detailExpires = document.getElementById('detail-expires');
+
+      var bwUp = params.get('bwUp');
+      var bwDown = params.get('bwDown');
+      if (detailSpeed) detailSpeed.textContent = bwUp && bwDown ? bwUp + ' Mbps \u2191 / ' + bwDown + ' Mbps \u2193' : '\u2014';
+      if (detailData) detailData.textContent = isUncapped ? 'Unlimited' : (dataLimitGb ? dataLimitGb + ' GB' : '\u2014');
+      if (detailExpires && endTime) detailExpires.textContent = new Date(endTime).toLocaleString([], { hour12: false, dateStyle: 'medium', timeStyle: 'medium' });
+
+      // ── Live Status Polling ──
+      var dataUsageSection = document.getElementById('data-usage-section');
+      var dataUsageNumbers = document.getElementById('data-usage-numbers');
+      var dataBarFill = document.getElementById('data-bar-fill');
+      var dataUsagePct = document.getElementById('data-usage-pct');
+      var dataUsageRemaining = document.getElementById('data-usage-remaining');
+      var detailStarted = document.getElementById('detail-started');
+
+      function pollStatus() {
+        if (!sessionToken) return;
+        fetch('/api/auth/status?token=' + encodeURIComponent(sessionToken))
+          .then(function (r) { return r.json(); })
+          .then(function (json) {
+            if (!json.active) return;
+
+            // Update expires from server
+            if (json.expiresAt) {
+              endTime = new Date(json.expiresAt).getTime();
+              if (detailExpires) detailExpires.textContent = new Date(endTime).toLocaleString([], { hour12: false, dateStyle: 'medium', timeStyle: 'medium' });
+            }
+
+            // Data usage
+            var used = json.bytesUsed;
+            var total = json.bytesTotal;
+            var limitGb = json.dataLimitGb;
+
+            if (used != null && dataUsageNumbers) {
+              var usedStr = formatBytes(used);
+              var totalStr = json.isUncapped ? 'Unlimited' : (total != null ? formatBytes(total) : (limitGb ? limitGb + ' GB' : '—'));
+              dataUsageNumbers.textContent = usedStr + ' / ' + totalStr;
+
+              if (dataBarFill && total != null && total > 0) {
+                var pct = Math.min((used / total) * 100, 100);
+                dataBarFill.style.width = pct + '%';
+                if (dataUsagePct) dataUsagePct.textContent = pct.toFixed(1) + '%';
+                if (dataUsageRemaining) dataUsageRemaining.textContent = formatBytes(Math.max(total - used, 0)) + ' remaining';
+              }
+            }
+
+            // Session started (estimate from voucher info)
+            if (json.voucherCode && detailStarted) {
+              detailStarted.textContent = 'Just now';
+            }
+          })
+          .catch(function () { /* silent */ });
+      }
+
+      // Initial poll + every 10 seconds
+      pollStatus();
+      setInterval(pollStatus, 10000);
+    });
+  </script>
 </body>
 
 </html>

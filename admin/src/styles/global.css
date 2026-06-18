@@ -3,7 +3,7 @@
   --surface: #0a0a0a;
   --surface2: #111;
   --surface3: #1a1a1a;
-  --border: #2a2a3e;
+  --border: #3a3a5e;
   --text: #e2e8f0;
   --text-muted: #94a3b8;
   --text-dim: #64748b;
@@ -19,7 +19,7 @@
   --font-display: 'Bebas Neue', sans-serif;
   --font-body: 'Montserrat', sans-serif;
   --sidebar-width: 240px;
-  --nav-height: 72px;
+  --nav-height: 80px;
 }
 
 *,
@@ -37,7 +37,7 @@ body,
   background: var(--bg);
   color: var(--text);
   font-family: var(--font-body);
-  font-size: 15px;
+  font-size: 17px;
   line-height: 1.6;
 }
 
@@ -48,11 +48,15 @@ body,
   background: var(--bg);
 }
 ::-webkit-scrollbar-thumb {
-  background: linear-gradient(180deg, #6a0dad, #ff00ff);
+  background: #555;
   border-radius: 4px;
 }
+::-webkit-scrollbar-thumb:hover {
+  background: #777;
+  box-shadow: 0 0 10px rgba(150, 150, 150, 0.4);
+}
 * {
-  scrollbar-color: #ff00ff #050505;
+  scrollbar-color: #555 #050505;
   scrollbar-width: thin;
 }
 
@@ -86,6 +90,19 @@ body.role-ceo .admin-nav {
   border-bottom-color: rgba(255, 215, 0, 0.25);
   box-shadow: 0 1px 20px rgba(255, 215, 0, 0.06);
 }
+
+/* ── Money / number display (Bebas Neue, green, glow) ── */
+.money {
+  font-family: var(--font-display);
+  font-weight: 400;
+  color: var(--green);
+  text-shadow: 0 0 6px rgba(0, 230, 118, 0.5);
+  letter-spacing: 0.02em;
+}
+.money--lg { font-size: 1.6rem; }
+.money--sm { font-size: 0.95rem; text-shadow: none; }
+.role-ceo .money--sm { text-shadow: none; }
+.role-ceo .money { color: #ffd700; text-shadow: 0 0 6px rgba(255, 215, 0, 0.5); }
 
 /* ── Animated background pulse ── */
 @keyframes bgPulse {

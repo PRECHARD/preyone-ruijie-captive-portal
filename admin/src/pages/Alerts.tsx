@@ -1,15 +1,13 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../api/client';
-import { useAuth } from '../context/AuthContext';
 import Spinner from '../components/Spinner';
 import EmptyState from '../components/EmptyState';
 import Badge from '../components/Badge';
 
 export default function Alerts() {
-  const { user } = useAuth();
-  const isMgmt = user?.role === 'CEO' || user?.role === 'Manager';
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [ackMsg, setAckMsg] = useState('');
 
   const fetch = useCallback(async () => {
     try {
@@ -22,8 +20,11 @@ export default function Alerts() {
   useEffect(() => { fetch(); const t = setInterval(fetch, 30000); return () => clearInterval(t); }, [fetch]);
 
   const acknowledge = async (id: string) => {
+    setAckMsg('');
     await api.post(`/alerts/${id}/acknowledge`);
+    setAckMsg('✓ Acknowledged');
     fetch();
+    setTimeout(() => setAckMsg(''), 3000);
   };
 
   const seedMock = async () => {
@@ -43,7 +44,10 @@ export default function Alerts() {
           <h2 className="page-title">Alerts</h2>
           <p className="page-desc">{data.totalUnacknowledged || 0} unacknowledged</p>
         </div>
-        <button className="btn-secondary" onClick={seedMock}>Seed Mock Alerts</button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {ackMsg && <span style={{ color: 'var(--green)', fontSize: 13, alignSelf: 'center' }}>{ackMsg}</span>}
+          <button className="btn-secondary" onClick={seedMock}>Seed Mock Alerts</button>
+        </div>
       </div>
 
       {alerts.length === 0 ? (

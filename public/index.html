@@ -6,7 +6,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   
   <title>Preyone UltraNet Wi‑Fi</title>
-  <link rel="icon" type="image/png" href="/images/preyonetabicon.webp" />
+  <link rel="icon" type="image/png" href="/favicon/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="/favicon/favicon.svg" />
+  <link rel="shortcut icon" href="/favicon/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/favicon/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-title" content="MyWebSite" />
+  <link rel="manifest" href="/favicon/site.webmanifest" />
   <link
     href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Montserrat:wght@500;600;700;800&family=Satisfy&display=swap"
     rel="stylesheet">
@@ -14,6 +19,14 @@
 </head>
 
 <body class="portal-body">
+  <div class="body-loading" id="bodyLoading">
+    <div class="loading-spinner">
+      <div class="loading-spinner-inner">
+        <img src="/images/faviconloading.svg" alt="Preyone" />
+      </div>
+    </div>
+    <div class="loading-text">Connecting to Preyone...</div>
+  </div>
   <div class="portal-shell">
     <header class="portal-header">
       <div class="brand-banner">
@@ -53,42 +66,27 @@
       <aside class="hero-card">
         <div class="glass-card glass-card--hero">
           <div class="brand">
-            <h2>Activate Wi‑Fi access</h2>
-            <p class="subtitle">Use your Voucher Code to connect to Preyone UltraNet instantly.</p>
+            <h2>Connect Now</h2>
+            <p class="subtitle">Enter your access code to connect instantly.</p>
           </div>
-          <form id="signup-form" novalidate>
+          <form id="quick-form" novalidate>
             <div class="field">
-              <label for="fullName">Full Name</label>
-              <input id="fullName" name="fullName" type="text" autocomplete="name" placeholder="Your full name"
-                required />
-              <span class="field-error" id="err-fullName"></span>
-            </div>
-            <div class="field">
-              <label for="phone">Phone Number</label>
-              <input id="phone" name="phone" type="tel" autocomplete="tel" placeholder="+263 771 327 202" required />
-              <span class="field-error" id="err-phone"></span>
-            </div>
-            <div class="field">
-              <label for="voucherCode">Voucher code</label>
-              <input id="voucherCode" name="voucherCode" type="text" placeholder="e.g. PRELINK-XXXX"
+              <label for="accessCode">Access Code</label>
+              <input id="accessCode" name="voucherCode" type="text" placeholder="e.g. PRELINK-XXXX"
                 autocomplete="off" required />
-              <span class="field-error" id="err-voucherCode"></span>
-            </div>
-            <div class="field field--checkbox">
-              <label class="checkbox-label">
-                <input id="acceptedTos" name="acceptedTos" type="checkbox" required />
-                <span>I agree to the <a href="/terms.html" target="_blank" rel="noopener">Terms of Service</a>.</span>
-              </label>
-              <span class="field-error" id="err-acceptedTos"></span>
+              <span class="field-error" id="err-accessCode"></span>
             </div>
             <div id="form-error" class="field-error hidden"></div>
-            <button type="submit" id="submit-btn">
-              <span id="btn-text">Connect</span>
-              <span id="btn-spinner" class="spinner hidden" aria-hidden="true"></span>
+            <button type="submit" id="quick-submit-btn">
+              <span id="quick-btn-text">Connect</span>
+              <span id="quick-btn-spinner" class="spinner hidden" aria-hidden="true"></span>
             </button>
           </form>
         </div>
       </aside>
+      <div class="hero-btn-group">
+        <button type="button" class="hero-connect-btn" id="connectNowBtn">Connect Now</button>
+      </div>
     </section>
 
     <section class="packages-section" aria-labelledby="packages-heading">
@@ -97,7 +95,7 @@
           <p class="section-eyebrow">Choose Your Preyone Pre‑Suite package</p>
           <h2 id="packages-heading">Packages for every need</h2>
         </div>
-        <div class="section-note">Select the right plan and activate immediately with your voucher or phone number.
+        <div class="section-note">Select the right plan and activate immediately with your voucher.
         </div>
       </div>
       <div class="brand-eybrow--main">
@@ -283,9 +281,9 @@
         <div class="footer-col">
           <h3>GET IN TOUCH</h3>
           <ul class="footer-links">
-            <li><a href="tel:+263771327202"><span class="icon">📞</span> +263 771 327 202</a></li>
-            <li><a href="mailto:support@preyone.com"><span class="icon">✉️</span> support@preyone.com</a></li>
-            <li><span class="icon">📍</span> Harare, Zimbabwe</li>
+            <li><a href="tel:+263771327202"><svg class="icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg> +263 771 327 202</a></li>
+            <li><a href="mailto:support@preyone.com"><svg class="icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> support@preyone.com</a></li>
+            <li><svg class="icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg> Harare, Zimbabwe</li>
           </ul>
         </div>
     
@@ -295,8 +293,7 @@
           <ul class="footer-links">
             <li><a href="/site/">Main Website</a></li>
             <li><a href="/terms.html">Terms of Service</a></li>
-            <li><a href="#">View Packages</a></li>
-            <li><a href="/admin/" class="admin-login-link">Admin Console</a></li>
+            <li><a href="#packages-heading">View Packages</a></li>
           </ul>
         </div>
       </div>

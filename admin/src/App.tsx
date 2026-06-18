@@ -24,6 +24,30 @@ import AuditLog from './pages/AuditLog';
 import Backup from './pages/Backup';
 import Settings from './pages/Settings';
 
+const sectionRoles: Record<string, string[]> = {
+  overview: ['Staff', 'Manager', 'CEO'],
+  vouchers: ['Staff', 'Manager', 'CEO'],
+  users: ['Staff', 'Manager', 'CEO'],
+  sessions: ['Staff', 'Manager', 'CEO'],
+  'my-sales': ['Staff', 'Manager', 'CEO'],
+  time: ['Staff', 'Manager', 'CEO'],
+  'access-log': ['Staff', 'Manager', 'CEO'],
+  'mac-mgmt': ['Staff', 'Manager', 'CEO'],
+  alerts: ['Staff', 'Manager', 'CEO'],
+  'ap-health': ['Staff', 'Manager', 'CEO'],
+  bandwidth: ['Staff', 'Manager', 'CEO'],
+  broadcasts: ['Staff', 'Manager', 'CEO'],
+  'peak-hours': ['Manager', 'CEO'],
+  staff: ['Manager', 'CEO'],
+  reports: ['Manager', 'CEO'],
+  'admin-users': ['Manager', 'CEO'],
+  packages: ['CEO'],
+  'ap-devices': ['CEO'],
+  'audit-log': ['CEO'],
+  backup: ['CEO'],
+  settings: ['CEO'],
+};
+
 export default function App() {
   const { user, loading } = useAuth();
   const [section, setSection] = useState('overview');
@@ -31,29 +55,34 @@ export default function App() {
   if (loading) return null;
   if (!user) return <Login />;
 
+  // Route guard: redirect if user lacks role
+  const allowed = sectionRoles[section];
+  const safeSection = allowed?.includes(user.role) ? section : 'overview';
+  if (safeSection !== section) setSection('overview');
+
   return (
-    <Layout activeSection={section} onNavigate={setSection}>
-      {section === 'overview' && <Dashboard onNavigate={setSection} />}
-      {section === 'vouchers' && <Vouchers />}
-      {section === 'users' && <Users />}
-      {section === 'sessions' && <Sessions />}
-      {section === 'my-sales' && <MySales />}
-      {section === 'time' && <TimeAttendance />}
-      {section === 'access-log' && <AccessLog />}
-      {section === 'mac-mgmt' && <MacMgmt />}
-      {section === 'alerts' && <Alerts />}
-      {section === 'ap-health' && <ApHealth />}
-      {section === 'bandwidth' && <Bandwidth />}
-      {section === 'peak-hours' && <PeakHours />}
-      {section === 'staff' && <StaffManagement />}
-      {section === 'reports' && <Reports />}
-      {section === 'admin-users' && <AdminUsers />}
-      {section === 'packages' && <Packages />}
-      {section === 'ap-devices' && <ApDevices />}
-      {section === 'broadcasts' && <Broadcasts />}
-      {section === 'audit-log' && <AuditLog />}
-      {section === 'backup' && <Backup />}
-      {section === 'settings' && <Settings />}
+    <Layout activeSection={safeSection} onNavigate={(s) => { const a = sectionRoles[s]; setSection(a?.includes(user.role) ? s : 'overview'); }}>
+      {safeSection === 'overview' && <Dashboard onNavigate={setSection} />}
+      {safeSection === 'vouchers' && <Vouchers />}
+      {safeSection === 'users' && <Users />}
+      {safeSection === 'sessions' && <Sessions />}
+      {safeSection === 'my-sales' && <MySales />}
+      {safeSection === 'time' && <TimeAttendance />}
+      {safeSection === 'access-log' && <AccessLog />}
+      {safeSection === 'mac-mgmt' && <MacMgmt />}
+      {safeSection === 'alerts' && <Alerts />}
+      {safeSection === 'ap-health' && <ApHealth />}
+      {safeSection === 'bandwidth' && <Bandwidth />}
+      {safeSection === 'peak-hours' && <PeakHours />}
+      {safeSection === 'staff' && <StaffManagement />}
+      {safeSection === 'reports' && <Reports />}
+      {safeSection === 'admin-users' && <AdminUsers />}
+      {safeSection === 'packages' && <Packages />}
+      {safeSection === 'ap-devices' && <ApDevices />}
+      {safeSection === 'broadcasts' && <Broadcasts />}
+      {safeSection === 'audit-log' && <AuditLog />}
+      {safeSection === 'backup' && <Backup />}
+      {safeSection === 'settings' && <Settings />}
     </Layout>
   );
 }

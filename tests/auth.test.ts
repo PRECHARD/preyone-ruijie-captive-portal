@@ -48,6 +48,7 @@ describe('POST /api/auth/signup', () => {
       .send({
         fullName: 'John Doe',
         phone: '+263771327202',
+        email: 'john@example.com',
         voucherCode: 'INVALID',
         acceptedTos: true,
       });
@@ -68,6 +69,7 @@ describe('POST /api/auth/signup', () => {
       .send({
         fullName: 'John Doe',
         phone: '+263771327202',
+        email: 'john@example.com',
         voucherCode: 'EXPIRED',
         acceptedTos: true,
       });
@@ -88,6 +90,7 @@ describe('POST /api/auth/signup', () => {
       .send({
         fullName: 'John Doe',
         phone: '+263771327202',
+        email: 'john@example.com',
         voucherCode: 'USED',
         acceptedTos: true,
       });
@@ -105,6 +108,7 @@ describe('POST /api/auth/signup', () => {
       .mockResolvedValueOnce(undefined)
       .mockResolvedValueOnce({ rows: [{ id: 'user-1' }] })
       .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce(undefined)
       .mockResolvedValueOnce(undefined);
 
     const res = await request(createApp())
@@ -113,12 +117,80 @@ describe('POST /api/auth/signup', () => {
       .send({
         fullName: 'John Doe',
         phone: '+263771327202',
+        email: 'john@example.com',
         voucherCode: 'FREE120',
         acceptedTos: true,
       });
 
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
+  });
+});
+
+describe('POST /api/auth/register', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('returns 422 for missing required fields', async () => {
+    const res = await request(createApp())
+      .post('/api/auth/register')
+      .send({});
+
+    expect(res.status).toBe(422);
+    expect(res.body.errors).toBeDefined();
+  });
+
+  it('returns 422 for weak password', async () => {
+    const res = await request(createApp())
+      .post('/api/auth/register')
+      .send({
+        fullName: 'Jane Doe',
+        phone: '+263771327202',
+        email: 'jane@example.com',
+        password: 'weak',
+        acceptedTos: true,
+      });
+
+    expect(res.status).toBe(422);
+  });
+
+  it('returns 409 for duplicate email', async () => {
+    vi.mocked(pool.query)
+      .mockResolvedValueOnce({ rows: [{ id: 'existing-user' }] });
+
+    const res = await request(createApp())
+      .post('/api/auth/register')
+      .send({
+        fullName: 'Jane Doe',
+        phone: '+263771327202',
+        email: 'existing@example.com',
+        password: 'StrongP@ss1',
+        acceptedTos: true,
+      });
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toContain('already exists');
+  });
+
+  it('creates account for valid request', async () => {
+    vi.mocked(pool.query)
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce(undefined);
+
+    const res = await request(createApp())
+      .post('/api/auth/register')
+      .send({
+        fullName: 'Jane Doe',
+        phone: '+263771327202',
+        email: 'jane@example.com',
+        password: 'StrongP@ss1!',
+        acceptedTos: true,
+      });
+
+    expect(res.status).toBe(201);
+    expect(res.body.success).toBe(true);
+    expect(res.body.email).toBe('jane@example.com');
   });
 });
 

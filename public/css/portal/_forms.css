@@ -31,7 +31,9 @@
 }
 
 .field input[type="text"],
-.field input[type="tel"] {
+.field input[type="tel"],
+.field input[type="email"],
+.field input[type="password"] {
   width: 100%;
   background: #111;
   border: 1px solid #333;
@@ -41,9 +43,15 @@
   transition: border-color 0.2s, box-shadow 0.2s;
 }
 .field input[type="text"]:hover,
-.field input[type="tel"]:hover { border-color: rgba(106, 13, 173, 0.4); }
+.field input[type="tel"]:hover,
+.field input[type="email"]:hover,
+.field input[type="password"]:hover { border-color: rgba(106, 13, 173, 0.4); }
 .field input[type="text"]:focus,
-.field input[type="tel"]:focus { outline: none; border-color: var(--pink); background: rgba(255, 0, 255, 0.03); box-shadow: 0 0 0 2px rgba(255, 0, 255, 0.12), 0 0 20px rgba(255, 0, 255, 0.08); }
+.field input[type="tel"]:focus,
+.field input[type="email"]:focus,
+.field input[type="password"]:focus { outline: none; border-color: var(--pink); background: rgba(255, 0, 255, 0.03); box-shadow: 0 0 0 2px rgba(255, 0, 255, 0.12), 0 0 20px rgba(255, 0, 255, 0.08); }
+
+.optional { font-weight: 400; opacity: 0.6; font-size: 0.7rem; }
 
 .field input.invalid {
   border-color: #ff4444 !important;
@@ -62,7 +70,8 @@
   color: var(--cyan);
 }
 
-#form-error {
+#form-error,
+#signup-form-error {
   background: rgba(255, 0, 0, 0.1);
   border: 1px solid #ff4444;
   color: #ff4444;
@@ -72,4 +81,88 @@
   font-weight: bold;
   text-align: center;
   box-shadow: 0 0 15px rgba(255, 68, 68, 0.2);
+}
+
+/* ── Sign Up Section ── */
+.signup-section {
+  margin-bottom: 4rem;
+  margin-top: 2rem;
+}
+
+.signup-card {
+  max-width: 520px;
+  margin: 2rem auto 0;
+  background: #0a0a0a;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 2rem;
+  border-radius: 20px;
+}
+
+#quick-submit-btn {
+  width: 100%;
+  padding: 0.8rem;
+  font-family: var(--display);
+  font-size: 1.3rem;
+  background: linear-gradient(90deg, #ff00cc, #3333ff);
+  border: none;
+  border-radius: 50px;
+  color: #fff;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+#quick-submit-btn:hover {
+  transform: scale(1.05);
+  filter: brightness(1.2);
+  box-shadow: 0 0 20px rgba(255, 0, 204, 0.4);
+}
+
+#quick-submit-btn:active,
+#signup-submit-btn:active {
+  transform: scale(0.95);
+}
+
+#signup-submit-btn {
+  width: 100%;
+  padding: 0.8rem;
+  font-family: var(--display);
+  font-size: 1.3rem;
+  background: linear-gradient(90deg, #ff00cc, #3333ff);
+  border: none;
+  border-radius: 50px;
+  color: #fff;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+#signup-submit-btn:hover {
+  transform: scale(1.05);
+  filter: brightness(1.2);
+  box-shadow: 0 0 20px rgba(255, 0, 204, 0.4);
+}
+
+.spinner {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  border: 2px solid rgba(255,255,255,0.3);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: sp 0.6s linear infinite;
+  vertical-align: middle;
+  margin-left: 0.4rem;
+}
+
+@keyframes sp {
+  to { transform: rotate(360deg); }
+}
+
+/* ── Sign Up Reveal Animation ── */
+.signup-section--reveal {
+  animation: signupReveal 0.45s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes signupReveal {
+  0%   { opacity: 0; transform: translateY(-24px) scale(0.97); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
 }

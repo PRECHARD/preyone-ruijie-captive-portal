@@ -89,8 +89,57 @@
   color: var(--cyan);
 }
 
+.hero-btn-group {
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+  margin-top: 1.5rem;
+}
+
+@media (max-width: 768px) {
+  .hero-btn-group {
+    justify-content: center;
+  }
+}
+
+.hero-connect-btn {
+  flex: 1;
+  max-width: 260px;
+  padding: 0.9rem 1.5rem;
+  font-family: var(--display);
+  font-size: 1.4rem;
+  background: linear-gradient(90deg, #ff00cc, #3333ff);
+  border: none;
+  border-radius: 50px;
+  color: #fff;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.hero-connect-btn:hover {
+  transform: scale(1.05);
+  filter: brightness(1.2);
+  box-shadow: 0 0 20px rgba(255, 0, 204, 0.4);
+}
+
+.hero-connect-btn:active {
+  transform: scale(0.95);
+}
+
 .action-group {
   display: flex;
   flex-direction: column;
   gap: 1rem;
+}
+
+/* Voucher code highlight animation */
+@keyframes voucher-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(255, 0, 204, 0.6); }
+  50% { box-shadow: 0 0 0 8px rgba(255, 0, 204, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(255, 0, 204, 0); }
+}
+
+.voucher-highlight {
+  animation: voucher-pulse 0.8s ease 3;
+  border-color: #ff00cc !important;
 }

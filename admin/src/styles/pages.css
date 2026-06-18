@@ -1,5 +1,5 @@
 /* Shared page layout */
-.page { max-width: 1200px; }
+.page { width: 100%; }
 
 /* ── Glow for CEO role ── */
 .role-ceo .page-title {
@@ -39,6 +39,58 @@
   }
 }
 
+/* ── Stats Grid (shared across pages) ── */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 12px;
+}
+
+.stats-grid--compact {
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+}
+
+.stat-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  transition: all 0.2s;
+}
+
+.stat-card:hover {
+  border-color: rgba(255, 0, 255, 0.15);
+}
+
+.stat-card.clickable { cursor: pointer; }
+.stat-card.clickable:hover {
+  border-color: var(--purple-glow);
+  box-shadow: 0 0 12px rgba(255,0,255,0.1);
+}
+
+.stat-label {
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+}
+
+.stat-number {
+  font-size: 1.3rem;
+  font-weight: 800;
+  font-family: var(--font-display);
+  letter-spacing: 0.5px;
+}
+
+/* ── Selected table row ── */
+.row-selected {
+  background: rgba(106, 13, 173, 0.15) !important;
+}
+
 /* ── Card hover effect ── */
 .card {
   background: var(--surface);
@@ -62,16 +114,23 @@
 
 .page-title {
   font-family: var(--font-display);
-  font-size: 1.4rem;
+  font-size: 1.6rem;
   letter-spacing: 1px;
   text-transform: uppercase;
   color: var(--text);
 }
 
+.page-header-extra {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
 .page-desc {
   color: var(--text-muted);
   margin-top: 2px;
-  font-size: 0.75rem;
+  font-size: 0.85rem;
 }
 
 /* Alert row (generic list item) */
@@ -164,3 +223,46 @@
   color: var(--red) !important;
 }
 .btn-danger:hover { background: rgba(255,23,68,0.1) !important; }
+
+/* ── Utility classes (replace common inline style patterns) ── */
+.flex { display: flex; }
+.flex-col { display: flex; flex-direction: column; }
+.flex-center { display: flex; align-items: center; }
+.flex-between { display: flex; justify-content: space-between; align-items: center; }
+.flex-wrap { flex-wrap: wrap; }
+.flex-shrink-0 { flex-shrink: 0; }
+.gap-4 { gap: 4px; }
+.gap-6 { gap: 6px; }
+.gap-8 { gap: 8px; }
+.gap-10 { gap: 10px; }
+.gap-12 { gap: 12px; }
+.gap-16 { gap: 16px; }
+.mb-4 { margin-bottom: 4px; }
+.mb-8 { margin-bottom: 8px; }
+.mb-12 { margin-bottom: 12px; }
+.mb-16 { margin-bottom: 16px; }
+.mb-20 { margin-bottom: 20px; }
+.mt-8 { margin-top: 8px; }
+.mt-12 { margin-top: 12px; }
+.mt-16 { margin-top: 16px; }
+.p-8 { padding: 8px; }
+.p-12 { padding: 12px; }
+.p-16 { padding: 16px; }
+.px-16 { padding-left: 16px; padding-right: 16px; }
+.py-8 { padding-top: 8px; padding-bottom: 8px; }
+.py-12 { padding-top: 12px; padding-bottom: 12px; }
+.text-center { text-align: center; }
+.text-muted { color: var(--text-muted); }
+.text-sm { font-size: 0.75rem; }
+.fw-600 { font-weight: 600; }
+.fw-700 { font-weight: 700; }
+.fw-800 { font-weight: 800; }
+.w-full { width: 100%; }
+
+/* Section card header (used in card-table sections) */
+.section-header {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  font-weight: 600;
+  font-size: 13px;
+}

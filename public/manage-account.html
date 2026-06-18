@@ -3,109 +3,227 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Manage Account — Preyone UltraNet Wi‑Fi</title>
-  <link rel="icon" type="image/png" href="/images/preyonetabicon.webp" />
+  <title>My Account — Preyone UltraNet Wi‑Fi</title>
+  <link rel="icon" type="image/png" href="/favicon/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="/favicon/favicon.svg" />
+  <link rel="shortcut icon" href="/favicon/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/favicon/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-title" content="Preyone" />
+  <link rel="manifest" href="/favicon/site.webmanifest" />
   <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Montserrat:wght@400;500;600;700;900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/css/portal.css" />
-  <link rel="stylesheet" href="/css/manage-account.css" />
+  <link rel="stylesheet" href="/css/account.css" />
 </head>
 <body class="portal-body">
+  <div class="body-loading hidden" id="bodyLoading">
+    <div class="loading-spinner">
+      <div class="loading-spinner-inner">
+        <img src="/images/faviconloading.svg" alt="Preyone" />
+      </div>
+    </div>
+    <div class="loading-text">Loading account...</div>
+  </div>
 
   <header class="portal-header">
     <div class="brand-banner">
-      <img src="/images/preyonenoneglow-logo-zoom.png" alt="Preyone" class="brand-logo-img" width="400" />
+      <picture class="brand-logo-picture">
+        <source srcset="/images/preyonenoneglow-logo-zoom.png" media="(prefers-contrast: more)" />
+        <img src="/images/preyonenoneglow-logo-zoom.png" alt="Preyone" class="brand-logo-img" width="400" />
+      </picture>
     </div>
     <div class="brand-eyebrow">
       <span class="brand-signature">Fadaya nePreyone UltraNet Wifi</span>
     </div>
   </header>
 
-  <main class="portal-shell">
-    <div class="ma-card">
-      <div class="ma-header">
-        <h1>Account Dashboard</h1>
-        <p>Manage your WiFi session and usage</p>
-      </div>
+  <main class="portal-shell" id="app">
 
-      <div id="maStatusBar" class="ma-status ma-status--active" role="status" aria-live="polite">
-        <span aria-hidden="true">●</span>
-        <span id="maStatusText">Checking session...</span>
-      </div>
+    <!-- Loading state -->
+    <div id="ma-loading" class="glass-card glass-card--hero" style="text-align:center;padding:2rem">
+      <p>Loading your account...</p>
+    </div>
 
-      <div class="ma-grid" id="maStatsGrid">
-        <div class="ma-stat">
-          <span class="label">Session Time Left</span>
-          <span class="value cyan" id="maTimeLeft">—</span>
+    <!-- Error state -->
+    <div id="ma-error" class="glass-card glass-card--hero hidden" style="text-align:center;padding:2rem">
+      <p style="color:#ff4444;margin-bottom:1rem" id="ma-error-text">Could not load account.</p>
+      <a href="/login" class="account-btn" style="text-decoration:none;display:inline-block;width:auto;padding:0.5rem 2rem">Sign In Again</a>
+    </div>
+
+    <!-- Dashboard -->
+    <div id="ma-dashboard" class="hidden" style="max-width:640px;margin:0 auto">
+
+      <!-- Header -->
+      <div class="glass-card glass-card--hero ma-header">
+        <div class="brand">
+          <h2>My Account</h2>
+          <p id="ma-user-info" class="subtitle">Welcome back</p>
         </div>
-        <div class="ma-stat">
-          <span class="label">Data Used</span>
-          <span class="value orange" id="maDataUsed">—</span>
-        </div>
-        <div class="ma-stat full">
-          <span class="label">Speed Profile</span>
-          <span class="value green" id="maSpeed">—</span>
-        </div>
-        <div class="ma-stat">
-          <span class="label">Data Allowance</span>
-          <span class="value purple" id="maDataLimit">—</span>
-        </div>
-        <div class="ma-stat">
-          <span class="label">Expires</span>
-          <span class="value" id="maExpires">—</span>
+        <div class="ma-header-actions">
+          <button id="ma-topup-btn" class="account-btn account-btn--pill" style="margin-right:0.5rem">Buy Data</button>
+          <button id="ma-signout-btn" class="account-btn account-btn--secondary">Sign Out</button>
         </div>
       </div>
 
-      <div class="ma-progress" id="maDataProgressSection">
-        <div class="label-row">
-          <span>Data Consumption</span>
-          <span id="maUsagePct">0%</span>
+      <!-- Profile Card -->
+      <div class="glass-card glass-card--hero ma-section">
+        <div class="ma-section-header">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--cyan)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+          <h3>My Profile</h3>
         </div>
-        <div class="bar">
-          <div class="bar-fill low" id="maUsageBar" style="width:0%" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div>
-        </div>
-      </div>
-
-      <div class="ma-section-title">Session Details</div>
-      <div id="maSessionDetails">
-        <div class="ma-detail-row">
-          <span class="lbl">Voucher Code</span>
-          <span class="val" id="maVoucher">—</span>
-        </div>
-        <div class="ma-detail-row">
-          <span class="lbl">MAC Address</span>
-          <span class="val" id="maMac">—</span>
-        </div>
-        <div class="ma-detail-row">
-          <span class="lbl">IP Address</span>
-          <span class="val" id="maIp">—</span>
-        </div>
-        <div class="ma-detail-row">
-          <span class="lbl">Package</span>
-          <span class="val" id="maPackage">—</span>
-        </div>
-        <div class="ma-detail-row">
-          <span class="lbl">Bandwidth</span>
-          <span class="val" id="maBandwidth">—</span>
-        </div>
-        <div class="ma-detail-row">
-          <span class="lbl">Session Started</span>
-          <span class="val" id="maStarted">—</span>
+        <div class="ma-profile-grid" id="ma-profile">
+          <div class="ma-profile-field">
+            <span class="ma-label">Full Name</span>
+            <span class="ma-value" id="ma-profile-name">—</span>
+          </div>
+          <div class="ma-profile-field">
+            <span class="ma-label">Email</span>
+            <span class="ma-value" id="ma-profile-email">—</span>
+          </div>
+          <div class="ma-profile-field">
+            <span class="ma-label">Phone</span>
+            <span class="ma-value" id="ma-profile-phone">—</span>
+          </div>
+          <div class="ma-profile-field">
+            <span class="ma-label">Status</span>
+            <span class="ma-value" id="ma-profile-status">—</span>
+          </div>
+          <div class="ma-profile-field">
+            <span class="ma-label">Member Since</span>
+            <span class="ma-value" id="ma-profile-joined">—</span>
+          </div>
         </div>
       </div>
 
-      <div class="ma-actions">
-        <a href="/" class="ma-btn ma-btn--primary" id="maTopUpBtn">
-          <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10" cy="10" r="7"/><line x1="10" y1="6" x2="10" y2="14"/><line x1="6" y1="10" x2="14" y2="10"/></svg>
-          Top Up / Extend Session
-        </a>
-        <a href="https://wa.me/263771327202" target="_blank" class="ma-btn ma-btn--secondary">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
-          Need Help? Contact Support
-        </a>
+      <!-- Active Package / Data Usage -->
+      <div class="glass-card glass-card--hero ma-section">
+        <div class="ma-section-header">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--pink)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+          <h3>Data Usage</h3>
+        </div>
+        <div id="ma-data-summary">
+          <p style="color:var(--text-muted);font-size:0.85rem;padding:0.5rem 0">No active session.</p>
+        </div>
+        <div id="ma-data-bars"></div>
+      </div>
+
+      <!-- Active Sessions -->
+      <div class="glass-card glass-card--hero ma-section">
+        <div class="ma-section-header">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--purple)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+          <h3>Sessions</h3>
+        </div>
+        <div id="ma-no-sessions" class="hidden" style="text-align:center;padding:1rem;color:var(--text-muted)">
+          No active sessions. <a href="/">Connect now</a>.
+        </div>
+        <div id="ma-sessions-list"></div>
+      </div>
+
+      <!-- Account Actions -->
+      <div class="glass-card glass-card--hero ma-section">
+        <div class="ma-section-header">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--orange)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          <h3>Account Settings</h3>
+        </div>
+
+        <!-- Resend Verification -->
+        <div id="ma-verify-section" class="hidden" style="margin-bottom:1rem;padding:0.75rem;background:rgba(245,166,35,0.1);border-radius:8px;border:1px solid rgba(245,166,35,0.2)">
+          <p style="font-size:0.85rem;color:var(--orange);margin:0 0 0.5rem">
+            Your email is not yet verified. Please check your inbox or
+            <button id="ma-resend-verify-btn" class="account-btn account-btn--link">resend verification</button>.
+          </p>
+          <span id="ma-verify-msg" style="font-size:0.75rem;color:var(--text-muted)"></span>
+        </div>
+
+        <!-- Change Password -->
+        <p style="font-size:0.85rem;color:var(--text-muted);margin:0 0 0.75rem">Update your account password.</p>
+        <div class="ma-pw-row">
+          <input id="ma-current-pw" type="password" placeholder="Current password" autocomplete="current-password" class="ma-input" style="min-width:100px" />
+          <input id="ma-new-pw" type="password" placeholder="New password" autocomplete="new-password" class="ma-input" style="min-width:100px" />
+          <input id="ma-confirm-pw" type="password" placeholder="Confirm new" autocomplete="new-password" class="ma-input" style="min-width:100px" />
+          <button id="ma-change-pw-btn" class="account-btn account-btn--pill" style="width:auto;white-space:nowrap">Change Password</button>
+        </div>
+        <span id="ma-pw-msg" style="font-size:0.75rem;color:var(--text-muted);display:block;margin-top:0.4rem"></span>
+      </div>
+
+    </div>
+
+  </main>
+
+  <footer class="portal-footer main-footer">
+    <div class="footer-grid">
+      <!-- Brand Column -->
+      <div class="footer-col brand-col">
+        <img src="/images/preyone-logo-mainInverse.png" alt="Preyone" class="footer-brand-mark" />
+        <p class="footer-tagline">High-speed satellite connectivity across Zimbabwe. Powered by Starlink Business
+          Priority
+          infrastructure.</p>
+
+        <!-- Social Media Suite -->
+        <div class="social-links">
+          <a href="https://wa.me/263771327202" class="social-icon whatsapp" title="WhatsApp" target="_blank"
+            rel="noopener">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+              <path
+                d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L0 24l6.335-1.662c1.72.938 3.659 1.434 5.631 1.434h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z" />
+            </svg>
+          </a>
+          <a href="https://www.facebook.com/preyoneenterprise?mibextid=wwXIfr&rdid=h1ANqYJ9tbA3XB5O&share_url=https%3A%2F%2Fwww.facebook.com%2Fshare%2F1HsJc5tsSr%2F%3Fmibextid%3DwwXIfr#"
+            class="social-icon facebook" title="Facebook" target="_blank" rel="noopener"><svg viewBox="0 0 24 24"
+              width="20" height="20" fill="currentColor">
+              <path
+                d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
+            </svg></a>
+          <a href="https://www.instagram.com/preyoneenterprise?igsh=dW55cXVwdTV0YXY%3D&utm_source=qr"
+            class="social-icon instagram" title="Instagram" target="_blank" rel="noopener"><svg viewBox="0 0 24 24"
+              width="20" height="20" fill="currentColor">
+              <path
+                d="M12 0C8.74 0 8.333.015 7.053.072 5.775.132 4.905.333 4.14.63c-.789.306-1.459.717-2.126 1.384S.935 3.35.63 4.14C.333 4.905.131 5.775.072 7.053.012 8.333 0 8.74 0 12s.015 3.667.072 4.947c.06 1.277.261 2.148.558 2.913.306.788.717 1.459 1.384 2.126.667.666 1.336 1.079 2.126 1.384.766.296 1.636.499 2.913.558C8.333 23.988 8.74 24 12 24s3.667-.015 4.947-.072c1.277-.06 2.148-.262 2.913-.558.788-.306 1.459-.718 2.126-1.384.666-.667 1.079-1.335 1.384-2.126.296-.765.499-1.636.558-2.913.06-1.28.072-1.687.072-4.947s-.015-3.667-.072-4.947c-.06-1.277-.262-2.149-.558-2.913-.306-.789-.718-1.459-1.384-2.126C21.319 1.347 20.651.935 19.86.63c-.765-.297-1.636-.499-2.913-.558C15.667.012 15.26 0 12 0zm0 2.16c3.203 0 3.585.016 4.85.071 1.17.055 1.805.249 2.227.415.562.217.96.477 1.382.896.419.42.679.819.896 1.381.164.422.36 1.057.413 2.227.057 1.266.07 1.646.07 4.85s-.015 3.585-.074 4.85c-.061 1.17-.256 1.805-.421 2.227-.224.562-.479.96-.899 1.382-.419.419-.824.679-1.38.896-.42.164-1.065.36-2.235.413-1.274.057-1.649.07-4.859.07-3.211 0-3.586-.015-4.859-.074-1.171-.061-1.816-.256-2.237-.421-.569-.224-.96-.479-1.382-.899-.419-.419-.679-.824-.896-1.38-.164-.42-.359-1.065-.413-2.235-.057-1.274-.07-1.649-.07-4.859 0-3.211.015-3.586.074-4.859.061-1.171.256-1.816.421-2.237.224-.569.479-.96.899-1.382.419-.419.824-.679 1.38-.896.42-.164 1.065-.359 2.235-.413 1.274-.057 1.649-.07 4.859-.07zM12 5.838a6.162 6.162 0 100 12.324 6.162 6.162 0 000-12.324zM12 16a4 4 0 110-8 4 4 0 010 8zm6.406-11.845a1.44 1.44 0 100 2.881 1.44 1.44 0 000-2.881z" />
+            </svg></a>
+          <a href="https://x.com/preyonetech" class="social-icon x" title="X (Twitter)" target="_blank"
+            rel="noopener"><svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+              <path
+                d="M18.901 1.153h3.68l-8.04 9.19L24 22.846h-7.406l-5.8-7.584-6.638 7.584H.474l8.6-9.83L0 1.154h7.594l5.243 6.932 6.064-6.932zm-1.292 19.494h2.039L6.486 3.24H4.298l13.311 17.407z" />
+            </svg></a>
+          <a href="https://youtube.com/@preyonenterprises?si=i885xoltq6D4bW7m" class="social-icon youtube" title="YouTube"
+            target="_blank" rel="noopener"><svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+              <path
+                d="M23.498 6.186a3.016 3.016 0 00-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 00.502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 002.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 002.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" />
+            </svg></a>
+        </div>
+      </div>
+
+      <!-- Contact Column -->
+      <div class="footer-col">
+        <h3>GET IN TOUCH</h3>
+        <ul class="footer-links">
+          <li><a href="tel:+263771327202"><svg class="icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg> +263 771 327 202</a></li>
+          <li><a href="mailto:support@preyone.com"><svg class="icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> support@preyone.com</a></li>
+          <li><svg class="icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg> Harare, Zimbabwe</li>
+        </ul>
+      </div>
+
+      <!-- Quick Links Column -->
+      <div class="footer-col">
+        <h3>QUICK LINKS</h3>
+        <ul class="footer-links">
+          <li><a href="https://www.preyone.com" target="_blank">Main Website</a></li>
+          <li><a href="/terms.html">Terms of Service</a></li>
+          <li><a href="/">WiFi Portal</a></li>
+        </ul>
       </div>
     </div>
-  </main>
-      
-  <script src="/js/manage-account.js"></script>
+
+    <div class="footer-bottom">
+      <div class="legal-row">
+        <p>&copy; <span id="current-year"></span> Preyone Enterprises. All Rights Reserved.</p>
+        <div class="payment-badges">
+          <span>Payment Verified:</span>
+          <span class="ecocash-badge">Eco<span class="ecocash-red">Cash</span></span>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <script src="/js/portal.js"></script>
 </body>
 </html>

@@ -222,7 +222,9 @@ describe('Admin routes', () => {
     it('POST /api/admin/clock-out completes a log', async () => {
       (pool.query as any)
         .mockResolvedValueOnce({ rows: [{ id: 1, clock_in: new Date(Date.now() - 3600000).toISOString() }] })
-        .mockResolvedValueOnce({ rows: [{ id: 1, clock_out: new Date().toISOString(), duration_min: 60 }] });
+        .mockResolvedValueOnce({ rows: [{ cnt: 0 }] })
+        .mockResolvedValueOnce({ rows: [{ id: 1, clock_out: new Date().toISOString(), duration_min: 60 }] })
+        .mockResolvedValueOnce({ rows: [] });
 
       const res = await request(createApp()).post('/api/admin/clock-out');
 

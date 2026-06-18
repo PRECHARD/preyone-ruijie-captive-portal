@@ -35,6 +35,12 @@ const SQL = `
   );
 
   ALTER TABLE users ADD COLUMN IF NOT EXISTS package_id UUID REFERENCES packages(id) ON DELETE SET NULL;
+  ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT;
+  ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT;
+  ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT FALSE;
+  ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verification_token TEXT;
+  ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_password_token TEXT;
+  ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_password_expires_at TIMESTAMPTZ;
 
   CREATE INDEX IF NOT EXISTS idx_users_voucher_code  ON users (voucher_code);
   CREATE INDEX IF NOT EXISTS idx_users_session_token ON users (session_token);
@@ -131,6 +137,10 @@ const SQL = `
   );
 
   ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS approved BOOLEAN NOT NULL DEFAULT TRUE;
+  ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS reset_token TEXT;
+  ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS reset_token_expires_at TIMESTAMPTZ;
+  ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT FALSE;
+  ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS email_verification_token TEXT;
 
   CREATE UNIQUE INDEX IF NOT EXISTS idx_admin_users_email ON admin_users (email);
 

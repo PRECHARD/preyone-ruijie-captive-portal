@@ -1,8 +1,8 @@
 .hero-section {
   display: grid;
   grid-template-columns: 1fr 400px;
-  gap: 3rem;
-  margin-bottom: 5rem;
+  gap: 2rem;
+  margin-bottom: 1rem;
   align-items: center;
 }
 
@@ -29,7 +29,7 @@
 .hero-text {
   color: var(--text-muted);
   font-size: 1.1rem;
-  margin-bottom: 2rem;
+  margin-bottom: 1.5rem;
   max-width: 600px;
 }
 

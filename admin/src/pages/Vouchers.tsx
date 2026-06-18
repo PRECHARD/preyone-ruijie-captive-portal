@@ -1,6 +1,10 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef, Fragment } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../api/client';
+import { showToast } from '../utils/toast';
+import jsPDF from 'jspdf';
+import { playVoucherSound, playAlertSound } from '../utils/sound';
+import EmptyState from '../components/EmptyState';
 import './Vouchers.css';
 
 interface Package {
@@ -39,11 +43,13 @@ interface ApprovalRequest {
   voucher_code: string;
   max_uses: number;
   count: number;
+  voucher_count: number;
   status: string;
   requested_by_name: string;
   created_at: string;
   approved_at: string | null;
   approved_by_name: string | null;
+  voucher_data: { code?: string; codes?: string[] } | null;
 }
 
 interface ClockStatus {
@@ -91,7 +97,10 @@ export default function Vouchers() {
   const [pendingApprovals, setPendingApprovals] = useState<ApprovalRequest[]>([]);
   const [myApprovals, setMyApprovals] = useState<ApprovalRequest[]>([]);
 
+  const processedApprovalIds = useRef<Set<string>>(new Set());
+
   const [voucherCardData, setVoucherCardData] = useState<any>(null);
+  const [expandedApproval, setExpandedApproval] = useState<string | null>(null);
 
   const loadClockStatus = useCallback(() => {
     if (needsClockIn) {
@@ -111,8 +120,63 @@ export default function Vouchers() {
     if (isMgmt) {
       api.get<ApprovalRequest[]>('/vouchers/pending-approvals').then(setPendingApprovals).catch(() => {});
     }
-    api.get<ApprovalRequest[]>('/vouchers/my-approvals').then(setMyApprovals).catch(() => {});
+    // Initial myApprovals fetch — record already-approved IDs so they don't trigger
+    api.get<ApprovalRequest[]>('/vouchers/my-approvals').then(approvals => {
+      setMyApprovals(approvals);
+      for (const a of approvals) {
+        if (a.status === 'approved') processedApprovalIds.current.add(a.id);
+      }
+    }).catch(() => {});
   }, [isMgmt]);
+
+  // Poll myApprovals to detect newly-approved items and show card/bulk results
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      try {
+        const approvals = await api.get<ApprovalRequest[]>('/vouchers/my-approvals');
+        setMyApprovals(approvals);
+        for (const a of approvals) {
+          if (a.status === 'approved' && !processedApprovalIds.current.has(a.id)) {
+            processedApprovalIds.current.add(a.id);
+            const codes = a.voucher_data?.codes;
+            const code = a.voucher_data?.code;
+            if (a.request_type === 'single' && (code || codes?.[0])) {
+              const pkg = packages.find(p => p.tier_name === a.package_tier);
+              setVoucherCardData({
+                code: code || codes?.[0],
+                package_tier: a.package_tier,
+                price_amount: a.price_amount?.toString() || '',
+                max_uses: a.max_uses,
+                duration_min: pkg?.duration_min || 60,
+                bandwidth_mbps_up: pkg?.bandwidth_mbps_up || 2,
+                bandwidth_mbps_down: pkg?.bandwidth_mbps_down || 5,
+                data_limit_gb: pkg?.data_limit_gb ?? null,
+                is_uncapped: pkg?.is_uncapped ?? false,
+              });
+              showToast({ title: 'Voucher Approved', message: `"${code || codes?.[0]}" is ready to share`, type: 'success' });
+              playVoucherSound();
+            } else if (a.request_type === 'bulk' && codes?.length) {
+              const pkg = packages.find(p => p.tier_name === a.package_tier);
+              setBulkResults(codes.map((c: string) => ({
+                code: c,
+                package_tier: a.package_tier,
+                price_amount: a.price_amount?.toString() || '',
+                duration_min: pkg?.duration_min || 60,
+                bandwidth_mbps_up: pkg?.bandwidth_mbps_up || 2,
+                bandwidth_mbps_down: pkg?.bandwidth_mbps_down || 5,
+                data_limit_gb: pkg?.data_limit_gb ?? null,
+                is_uncapped: pkg?.is_uncapped ?? false,
+                max_uses: a.max_uses,
+              })));
+              showToast({ title: 'Bulk Vouchers Approved', message: `${codes.length} voucher(s) ready to share`, type: 'success' });
+              playVoucherSound();
+            }
+          }
+        }
+      } catch {}
+    }, 15000);
+    return () => clearInterval(interval);
+  }, [packages]);
 
   const generateCode = useCallback((tier: string) => {
     const prefix = tier.slice(0, 4).toUpperCase();
@@ -125,6 +189,7 @@ export default function Vouchers() {
     setSelectedPkg(pkg);
     if (pkg) {
       setVCode(generateCode(pkg.tier_name));
+      setVPrice(pkg.price_amount);
       if (!['PreBIZ', 'PreMAX', 'PreULTRA', 'PreEXECUTIVE'].includes(pkg.tier_name)) setVUses(1);
     }
   }, [packages, generateCode]);
@@ -161,7 +226,6 @@ export default function Vouchers() {
 
     setCreating(true);
     setVStatus(null);
-    setVoucherCardData(null);
     try {
       const data = await api.post<any>('/vouchers', {
         code: vCode,
@@ -176,6 +240,8 @@ export default function Vouchers() {
       setVPrice('');
       setVUses(1);
       api.get<Voucher[]>('/vouchers').then(setVouchers).catch(() => {});
+      showToast({ title: 'Voucher Created', message: `"${data.code}" created successfully`, type: 'success' });
+      playVoucherSound();
     } catch (err: any) {
       if (err.requiresApproval) {
         setVStatus({ type: 'approval', msg: err.message || 'Approval required' });
@@ -212,7 +278,6 @@ export default function Vouchers() {
 
     setBulkCreating(true);
     setBulkStatus(null);
-    setBulkResults(null);
     try {
       const data = await api.post<any>('/vouchers/bulk', {
         count: bulkCount,
@@ -222,6 +287,8 @@ export default function Vouchers() {
       setBulkStatus({ type: 'success', msg: data.message });
       setBulkResults(data.vouchers);
       api.get<Voucher[]>('/vouchers').then(setVouchers).catch(() => {});
+      showToast({ title: 'Bulk Vouchers', message: data.message, type: 'success' });
+      playVoucherSound();
     } catch (err: any) {
       if (err.requiresApproval) {
         setBulkStatus({ type: 'approval', msg: err.message || 'Approval required' });
@@ -254,6 +321,8 @@ export default function Vouchers() {
       setPendingApprovals(prev => prev.filter(a => a.id !== id));
       setVStatus({ type: 'success', msg: data.message || 'Approved' });
       api.get<Voucher[]>('/vouchers').then(setVouchers).catch(() => {});
+      showToast({ title: 'Approved', message: data.message || 'Voucher request approved', type: 'success' });
+      playAlertSound();
     } catch (err: any) {
       setVStatus({ type: 'error', msg: err.message || 'Failed to approve' });
     }
@@ -264,6 +333,8 @@ export default function Vouchers() {
       const data = await api.post<any>(`/vouchers/approvals/${id}/reject`);
       setPendingApprovals(prev => prev.filter(a => a.id !== id));
       setVStatus({ type: 'success', msg: data.message || 'Rejected' });
+      showToast({ title: 'Rejected', message: data.message || 'Voucher request rejected', type: 'warning' });
+      playAlertSound();
     } catch (err: any) {
       setVStatus({ type: 'error', msg: err.message || 'Failed to reject' });
     }
@@ -276,20 +347,20 @@ export default function Vouchers() {
 
   const downloadVoucherPNG = () => {
     if (!voucherCardData) return;
-    const data = voucherCardData;
+    renderVoucherPNG(voucherCardData, user?.fullName || 'Preyone UltraNet');
+  };
 
+  const drawVoucherCanvas = async (c: HTMLCanvasElement, data: any, issuedByName: string) => {
     const code = data.code || 'PREYONE-XXXX';
     const tierText = data.package_tier || 'Custom';
     const priceText = data.price_amount ? '$' + parseFloat(data.price_amount).toFixed(2) : '';
     const durShort = fmtDurShort(data.duration_min);
     const validUntil = calcValidUntil(data);
-    const issuedByName = user?.fullName || 'Preyone UltraNet';
     const dataVal = data.is_uncapped ? 'UNCAPPED DATA' : (data.data_limit_gb != null ? data.data_limit_gb + ' GB' : 'UNLIMITED');
     const bwVal = data.bandwidth_mbps_up ? data.bandwidth_mbps_up + ' Mbps' : '—';
     const serial = voucherSerial(code);
 
     const W = 800, H = 450;
-    const c = document.createElement('canvas');
     c.width = W;
     c.height = H;
     const ctx = c.getContext('2d')!;
@@ -298,6 +369,8 @@ export default function Vouchers() {
     var bgGrad = ctx.createLinearGradient(0, 0, W, H);
     bgGrad.addColorStop(0, '#050604'); bgGrad.addColorStop(0.46, '#020202'); bgGrad.addColorStop(1, '#050506');
     ctx.fillStyle = bgGrad; ctx.fillRect(0, 0, W, H);
+
+    // ── Cyberpunk radial glow spots ──
     [[50, 40, 300], [750, 50, 280], [30, 400, 260], [770, 380, 300]].forEach(function (g) {
       var rg = ctx.createRadialGradient(g[0], g[1], 5, g[0], g[1], g[2]);
       rg.addColorStop(0, 'rgba(113,255,47,0.15)'); rg.addColorStop(0.4, 'rgba(113,255,47,0.15)'); rg.addColorStop(1, 'transparent');
@@ -306,6 +379,13 @@ export default function Vouchers() {
       if (g[0] === 770) { rg = ctx.createRadialGradient(g[0], g[1], 5, g[0], g[1], g[2]); rg.addColorStop(0, 'rgba(139,77,255,0.12)'); rg.addColorStop(0.4, 'rgba(139,77,255,0.12)'); rg.addColorStop(1, 'transparent'); }
       ctx.fillStyle = rg; ctx.fillRect(0, 0, W, H);
     });
+
+    // ── Voucher logo image (under text, left-aligned) ──
+    const logoImg = new Image();
+    await new Promise(resolve => { logoImg.onload = resolve; logoImg.onerror = resolve; logoImg.src = '/images/preyone-techy-voucher.png'; });
+    var iw = logoImg.naturalWidth, ih = logoImg.naturalHeight, maxH = 90;
+    if (ih > maxH) { iw *= maxH / ih; ih = maxH; }
+    ctx.drawImage(logoImg, -5, 21, iw, ih);
 
     // ── LEFT: Logo ──
     var logoG = ctx.createLinearGradient(115, 0, 221, 0);
@@ -461,27 +541,57 @@ export default function Vouchers() {
       ctx.fillRect(0, by, ribW, bw * 3);
       by += bw * 3 + 3;
     }
-    // SN below barcode
     ctx.fillStyle = '#64748b';
     ctx.font = '600 10px Montserrat, sans-serif';
     ctx.textAlign = 'right';
     ctx.fillText('SN: ' + serial, W - 14, H - 10);
+  };
 
-    // ── Logo image overlay ──
-    var logoImg = new Image();
-    logoImg.onload = function () {
-      ctx.drawImage(logoImg, 28, 8, 78, 78);
-      doDownload();
-    };
-    logoImg.onerror = function () { doDownload(); };
-    logoImg.src = '/images/preyone-green-neonglow.png';
+  const renderVoucherPNG = async (data: any, issuedByName: string) => {
+    const c = document.createElement('canvas');
+    await drawVoucherCanvas(c, data, issuedByName);
+    var link = document.createElement('a');
+    link.download = 'preyone-voucher-' + data.code + '.png';
+    link.href = c.toDataURL('image/png');
+    link.click();
+  };
 
-    function doDownload() {
-      var link = document.createElement('a');
-      link.download = 'preyone-voucher-' + data.code + '.png';
-      link.href = c.toDataURL('image/png');
-      link.click();
+  const printVoucherPDF = async () => {
+    if (!voucherCardData) return;
+    const c = document.createElement('canvas');
+    c.width = 800; c.height = 450;
+    await drawVoucherCanvas(c, voucherCardData, user?.fullName || 'Preyone UltraNet');
+    const doc = new jsPDF('portrait', 'mm', 'a4');
+    const imgData = c.toDataURL('image/png');
+    const pw = 210, ph = 297, m = 10;
+    const iw = pw - m * 2, ih = iw * 450 / 800;
+    doc.addImage(imgData, 'PNG', (pw - iw) / 2, (ph - ih) / 2, iw, ih);
+    doc.save('preyone-voucher-' + voucherCardData.code + '.pdf');
+  };
+
+  const printBulkPDFs = async () => {
+    if (!bulkResults || bulkResults.length === 0) return;
+    const doc = new jsPDF('portrait', 'mm', 'a4');
+    const pw = 210, ph = 297, m = 8, cols = 3, rows = 2, perPage = cols * rows;
+    const cw = (pw - m * 2) / cols, ch = (ph - m * 2) / rows;
+    for (let i = 0; i < bulkResults.length; i++) {
+      if (i > 0 && i % perPage === 0) doc.addPage();
+      const c = document.createElement('canvas');
+      c.width = 800; c.height = 450;
+      await drawVoucherCanvas(c, bulkResults[i], user?.fullName || 'Preyone UltraNet');
+      const imgData = c.toDataURL('image/png');
+      const col = i % cols, row = Math.floor(i / cols) % rows;
+      const pad = 3;
+      let iw = cw - pad * 2, ih = iw * 450 / 800;
+      if (ih > ch - pad * 2) { ih = ch - pad * 2; iw = ih * 800 / 450; }
+      const x = m + col * cw + (cw - iw) / 2;
+      const y = m + row * ch + (ch - ih) / 2;
+      doc.setDrawColor(210, 210, 210);
+      doc.setLineWidth(0.2);
+      doc.rect(m + col * cw + 1, m + row * ch + 1, cw - 2, ch - 2, 'S');
+      doc.addImage(imgData, 'PNG', x, y, iw, ih);
     }
+    doc.save('preyone-bulk-vouchers.pdf');
   };
 
   const copyCode = (code: string) => {
@@ -490,49 +600,26 @@ export default function Vouchers() {
     setTimeout(() => setVStatus(null), 2000);
   };
 
-  const shareWhatsApp = () => {
+  const shareWhatsApp = async () => {
     if (!voucherCardData) return;
-    const d = voucherCardData;
-    const tierText = d.package_tier || 'Custom';
-    const priceText = d.price_amount ? '$' + parseFloat(d.price_amount).toFixed(2) : '';
-    const bwVal = d.bandwidth_mbps_up ? d.bandwidth_mbps_up + ' Mbps' : '—';
-    const dataVal = d.is_uncapped ? 'Unlimited Data' : (d.data_limit_gb != null ? d.data_limit_gb + ' GB' : 'Unlimited');
-    const durVal = fmtDur(d.duration_min);
-    const waMsg = '*Preyone WiFi Voucher*%0A%0A' +
-      'Code: `' + d.code + '`%0A' +
-      'Package: ' + tierText + '%0A' +
-      'Duration: ' + durVal + '%0A' +
-      'Bandwidth: ' + bwVal + '%0A' +
-      'Data: ' + dataVal +
-      (priceText ? '%0APrice: ' + priceText : '') +
-      '%0A%0A_Thank you for choosing Preyone_';
-    window.open('https://wa.me/?text=' + waMsg, '_blank');
+    const c = document.createElement('canvas');
+    c.width = 800; c.height = 450;
+    await drawVoucherCanvas(c, voucherCardData, user?.fullName || 'Preyone UltraNet');
+    const blob = await new Promise<Blob | null>(resolve => c.toBlob(resolve, 'image/png'));
+    if (!blob) return;
+    const file = new File([blob], 'preyone-voucher-' + voucherCardData.code + '.png', { type: 'image/png' });
+    if (navigator.canShare?.({ files: [file] })) {
+      try { await navigator.share({ files: [file], title: 'Preyone Voucher' }); return; } catch {}
+    }
+    const url = URL.createObjectURL(blob);
+    window.open(url, '_blank');
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
   };
 
   const copyAllVoucher = () => {
     if (!voucherCardData) return;
-    const d = voucherCardData;
-    const vSerial = voucherSerial(d.code);
-    const tierText = d.package_tier || 'Custom';
-    const priceText = d.price_amount ? '$' + parseFloat(d.price_amount).toFixed(2) : '';
-    const bwVal = d.bandwidth_mbps_up ? d.bandwidth_mbps_up + ' Mbps' : '—';
-    const dataVal = d.is_uncapped ? 'Unlimited Data' : (d.data_limit_gb != null ? d.data_limit_gb + ' GB' : 'Unlimited');
-    const durVal = fmtDur(d.duration_min);
-    const info = [
-      '=== PREYONE VOUCHER ===',
-      'Code: ' + d.code,
-      'SN: ' + vSerial,
-      'Package: ' + tierText,
-      'Duration: ' + durVal,
-      'Bandwidth: ' + bwVal,
-      'Data: ' + dataVal,
-      priceText ? 'Price: ' + priceText : '',
-      'Issued: ' + (user?.fullName || 'Preyone UltraNet'),
-      'Support: +263 771 327 202',
-      '======================',
-    ].filter(Boolean).join('\n');
-    navigator.clipboard.writeText(info);
-    setVStatus({ type: 'success', msg: 'All voucher info copied to clipboard' });
+    navigator.clipboard.writeText(voucherCardData.code);
+    setVStatus({ type: 'success', msg: 'Voucher PIN copied to clipboard' });
     setTimeout(() => setVStatus(null), 2000);
   };
 
@@ -561,7 +648,7 @@ export default function Vouchers() {
       </div>
 
       {/* Clock-in / Clock-out Banner */}
-      {needsClockIn && (
+      {needsClockIn && clockStatus !== null && (
         <div className={'clock-banner ' + (isClockedIn ? 'clocked-in' : 'clocked-out')}>
           <span className="clock-status-icon">{isClockedIn ? '✓' : '✕'}</span>
           <span>
@@ -594,7 +681,7 @@ export default function Vouchers() {
                 <div className="pkg-display">{pkg.display_name}</div>
                 <div className="pkg-tier">{pkg.tier_name}</div>
                 <div className="pkg-price-row">
-                  <span className="pkg-price">${parseFloat(pkg.price_amount).toFixed(2)}</span>
+                  <span className="pkg-price money">${parseFloat(pkg.price_amount).toFixed(2)}</span>
                   <span className="pkg-currency">{pkg.billing_period}</span>
                 </div>
                 <div className="pkg-badges">
@@ -625,7 +712,7 @@ export default function Vouchers() {
               <label>Sale Price</label>
               <div className="stepper">
                 <button type="button" className="stepper-btn" onClick={() => setVPrice(p => Math.max(0, parseFloat(p || '0') - 0.5).toFixed(2))} disabled={!selectedPkg || createDisabled}>&minus;</button>
-                <input type="text" className="stepper-input" value={vPrice || ''} placeholder="0.00" readOnly />
+                <input type="text" className="stepper-input" value={vPrice || ''} placeholder="0.00" onChange={e => { const v = e.target.value; if (v === '' || /^\d*\.?\d*$/.test(v)) setVPrice(v); }} />
                 <button type="button" className="stepper-btn" onClick={() => setVPrice(p => (parseFloat(p || '0') + 0.5).toFixed(2))} disabled={!selectedPkg || createDisabled}>+</button>
               </div>
             </div>
@@ -634,7 +721,8 @@ export default function Vouchers() {
               <div className="stepper">
                 <button type="button" className="stepper-btn" onClick={() => setVUses(u => Math.max(1, u - 1))}
                   disabled={!!(selectedPkg && !['PreBIZ', 'PreMAX', 'PreULTRA', 'PreEXECUTIVE'].includes(selectedPkg.tier_name))}>&minus;</button>
-                <input type="text" className="stepper-input" value={vUses} readOnly
+                <input type="number" className="stepper-input" value={vUses} min="1" max="100"
+                  onChange={e => { const n = parseInt(e.target.value); if (!isNaN(n)) setVUses(Math.max(1, Math.min(100, n))); }}
                   disabled={!!(selectedPkg && !['PreBIZ', 'PreMAX', 'PreULTRA', 'PreEXECUTIVE'].includes(selectedPkg.tier_name))} />
                 <button type="button" className="stepper-btn" onClick={() => setVUses(u => Math.min(100, u + 1))}
                   disabled={!!(selectedPkg && !['PreBIZ', 'PreMAX', 'PreULTRA', 'PreEXECUTIVE'].includes(selectedPkg.tier_name))} >+</button>
@@ -677,7 +765,7 @@ export default function Vouchers() {
               <div className="specs-grid">
                 <div className="spec-block" style={{ background: '#f1f5f9' }}><span className="spec-label" style={{ color: '#64748b' }}>DATA PROFILE</span><span className="spec-value" style={{ color: '#0f172a' }}>{voucherCardData.is_uncapped ? 'Unlimited' : (voucherCardData.data_limit_gb ?? 'Unlimited') + ' GB'}</span></div>
                 <div className="spec-block text-right" style={{ background: '#f1f5f9' }}><span className="spec-label" style={{ color: '#64748b' }}>BANDWIDTH PROFILE</span><span className="spec-value" style={{ color: '#0f172a' }}>{voucherCardData.bandwidth_mbps_up} Mbps</span></div>
-                <div className="spec-block" style={{ background: '#f1f5f9' }}><span className="spec-label" style={{ color: '#64748b' }}>SALE PRICE</span><span className="spec-value" style={{ color: '#0f172a' }}>{voucherCardData.price_amount ? '$' + parseFloat(voucherCardData.price_amount).toFixed(2) : ''}</span></div>
+                <div className="spec-block" style={{ background: '#f1f5f9' }}><span className="spec-label" style={{ color: '#64748b' }}>SALE PRICE</span><span className="spec-value" style={{ color: '#0f172a' }}><span className="money money--sm" style={{ color: '#059669' }}>{voucherCardData.price_amount ? '$' + parseFloat(voucherCardData.price_amount).toFixed(2) : ''}</span></span></div>
                 <div className="spec-block text-right" style={{ background: '#f1f5f9' }}><span className="spec-label" style={{ color: '#64748b' }}>VALIDITY TIMELINE</span><span className="spec-value highlight-blue" style={{ color: '#0284c7' }}>{fmtDur(voucherCardData.duration_min)}</span></div>
               </div>
               <div className="token-container">
@@ -698,9 +786,10 @@ export default function Vouchers() {
                   <span className="serial-no">{voucherSerialNum}</span>
                 </div>
               </div>
-            </div>
-          </div>
-          <div className="voucher-card-actions-bar">
+        </div>
+      </div>
+
+      <div className="voucher-card-actions-bar">
             <button className="btn-action btn-action--wa" onClick={shareWhatsApp}>
               <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
               WhatsApp
@@ -711,68 +800,12 @@ export default function Vouchers() {
             </button>
             <button className="btn-action btn-action--download" onClick={downloadVoucherPNG}>
               <svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10 3v12M5 10l5 5 5-5" /><path d="M3 16v1a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-1" /></svg>
-              Download PNG
+              Download Voucher
             </button>
-          </div>
-        </div>
-      )}
-
-      {/* Pending Approvals (Manager/CEO) */}
-      {isMgmt && pendingApprovals.length > 0 && (
-        <div style={{ marginTop: '2rem' }}>
-          <div className="section-head">
-            <h2 className="section-head-title">Pending Voucher Approvals</h2>
-            <p className="section-head-desc">Staff requests awaiting your authorization</p>
-          </div>
-          <div className="card card-table">
-            <table className="data-table">
-              <thead><tr><th>Staff</th><th>Type</th><th>Package</th><th>Amount</th><th>Count</th><th>Requested</th><th>Actions</th></tr></thead>
-              <tbody>
-                {pendingApprovals.map(a => (
-                  <tr key={a.id}>
-                    <td style={{ color: '#fff', fontWeight: 600 }}>{a.requested_by_name}</td>
-                    <td>{a.request_type}</td>
-                    <td>{a.package_tier}</td>
-                    <td>{a.price_amount ? '$' + a.price_amount.toFixed(2) : '—'}</td>
-                    <td>{a.count || 1}</td>
-                    <td>{fmtDate(a.created_at)}</td>
-                    <td>
-                      <div style={{ display: 'flex', gap: '0.4rem' }}>
-                        <button className="btn-sm btn-approve" onClick={() => handleApprove(a.id)}>Approve</button>
-                        <button className="btn-sm btn-reject" onClick={() => handleReject(a.id)}>Reject</button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* My Approval Requests */}
-      {myApprovals.length > 0 && (
-        <div style={{ marginTop: '2rem' }}>
-          <div className="section-head">
-            <h2 className="section-head-title">My Approval Requests</h2>
-            <p className="section-head-desc">Track your voucher approval requests</p>
-          </div>
-          <div className="card card-table">
-            <table className="data-table">
-              <thead><tr><th>Type</th><th>Package</th><th>Amount</th><th>Status</th><th>Requested</th><th>Approved By</th></tr></thead>
-              <tbody>
-                {myApprovals.map(a => (
-                  <tr key={a.id}>
-                    <td>{a.request_type}</td>
-                    <td>{a.package_tier}</td>
-                    <td>{a.price_amount ? '$' + a.price_amount.toFixed(2) : '—'}</td>
-                    <td><span className={'badge badge--' + (a.status === 'approved' ? 'yes' : a.status === 'rejected' ? 'no' : 'warn')}>{a.status}</span></td>
-                    <td>{fmtDate(a.created_at)}</td>
-                    <td>{a.approved_by_name || '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <button className="btn-action btn-action--download" onClick={printVoucherPDF}>
+              <svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 4h12v12H4z"/><path d="M7 10h6M10 7v6"/></svg>
+              Download PDF
+            </button>
           </div>
         </div>
       )}
@@ -787,22 +820,31 @@ export default function Vouchers() {
           <form onSubmit={handleBulk} className="bulk-form">
             <div className="form-field">
               <label>Package Tier</label>
-              <select value={bulkTier} onChange={e => setBulkTier(e.target.value)} className="form-select">
+              <select value={bulkTier} onChange={e => { const t = e.target.value; setBulkTier(t); const pkg = packages.find(p => p.tier_name === t); if (pkg) setBulkPrice(pkg.price_amount); }} className="form-select">
                 <option value="">Select package...</option>
                 {packages.map(p => (
                   <option key={p.tier_name} value={p.tier_name}>{p.display_name} ({p.tier_name}) - ${parseFloat(p.price_amount).toFixed(2)}</option>
                 ))}
               </select>
             </div>
-            <div className="form-field" style={{ maxWidth: 130 }}>
-              <label>Count</label>
-              <input type="number" min="1" max="100" value={bulkCount} onChange={e => setBulkCount(parseInt(e.target.value) || 10)} />
-            </div>
-            <div className="form-field" style={{ maxWidth: 130 }}>
+            <div className="form-field" style={{ maxWidth: 200 }}>
               <label>Sale Price</label>
-              <input type="number" min="0" step="0.01" placeholder="0.00" value={bulkPrice} onChange={e => setBulkPrice(e.target.value)} />
+              <div className="stepper stepper--wide">
+                <button type="button" className="stepper-btn" onClick={() => setBulkPrice(p => Math.max(0, parseFloat(p || '0') - 0.5).toFixed(2))} disabled={bulkCreating}>&minus;</button>
+                <input type="text" className="stepper-input" value={bulkPrice || ''} placeholder="0.00" onChange={e => { const v = e.target.value; if (v === '' || /^\d*\.?\d*$/.test(v)) setBulkPrice(v); }} />
+                <button type="button" className="stepper-btn" onClick={() => setBulkPrice(p => (parseFloat(p || '0') + 0.5).toFixed(2))} disabled={bulkCreating}>+</button>
+              </div>
             </div>
-            <button type="submit" className="btn-primary" disabled={bulkCreating || (needsClockIn && !isClockedIn && !bulkTier)} style={{ flexShrink: 0 }}>
+            <div className="form-field" style={{ maxWidth: 130 }}>
+              <label>Users</label>
+              <div className="stepper">
+                <button type="button" className="stepper-btn" onClick={() => setBulkCount(c => Math.max(1, c - 5))} disabled={bulkCreating}>&minus;</button>
+                <input type="number" className="stepper-input" value={bulkCount} min="1" max="100"
+                  onChange={e => { const n = parseInt(e.target.value); if (!isNaN(n)) setBulkCount(Math.max(1, Math.min(100, n))); }} />
+                <button type="button" className="stepper-btn" onClick={() => setBulkCount(c => Math.min(100, c + 5))} disabled={bulkCreating}>+</button>
+              </div>
+            </div>
+            <button type="submit" className="btn-primary" disabled={bulkCreating || (needsClockIn && !isClockedIn && !bulkTier)} style={{ flexShrink: 0, height: '2.3rem' }}>
               {bulkCreating ? 'Generating...' : 'Generate Bulk'}
             </button>
           </form>
@@ -827,17 +869,186 @@ export default function Vouchers() {
                   <span key={i} className="bulk-code-chip" onClick={() => copyCode(v.code)} title="Click to copy">{v.code}</span>
                 ))}
               </div>
-              <div style={{ marginTop: '0.75rem', display: 'flex', gap: '0.5rem' }}>
-                <button className="btn-sm" onClick={() => {
+              <div className="voucher-card-actions-bar" style={{ marginTop: '0.75rem' }}>
+                <button className="btn-action btn-action--wa" onClick={() => {
+                  const msg = bulkResults.map((v: any) => {
+                    const tier = v.package_tier || 'Custom';
+                    const price = v.price_amount ? ' $' + parseFloat(v.price_amount).toFixed(2) : '';
+                    return 'Code: ' + v.code + ' | ' + tier + price;
+                  }).join('%0A');
+                  window.open('https://wa.me/?text=' + '*Preyone Bulk Vouchers*%0A%0A' + msg + '%0A%0A_Thank you for choosing Preyone_', '_blank');
+                }}>
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+                  WhatsApp
+                </button>
+                <button className="btn-action btn-action--copy" onClick={() => {
                   const all = bulkResults.map((v: any) => v.code).join('\n');
                   navigator.clipboard.writeText(all);
                   setBulkStatus({ type: 'success', msg: 'All codes copied' });
-                }}>Copy All</button>
+                }}>
+                  <svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2"><rect x="5" y="2" width="13" height="15" rx="2"/><polyline points="2 5 2 18 15 18"/></svg>
+                  Copy All
+                </button>
+                <button className="btn-action btn-action--download" onClick={() => {
+                  bulkResults.forEach((v: any, i: number) => {
+                    setTimeout(() => renderVoucherPNG(v, user?.fullName || 'Preyone UltraNet'), i * 500);
+                  });
+                  setBulkStatus({ type: 'success', msg: 'Downloading ' + bulkResults.length + ' vouchers...' });
+                }}>
+                  <svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10 3v12M5 10l5 5 5-5" /><path d="M3 16v1a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-1" /></svg>
+                  Download Vouchers
+                </button>
+                <button className="btn-action btn-action--download" onClick={() => { printBulkPDFs(); setBulkStatus({ type: 'success', msg: 'Generating PDF with ' + bulkResults.length + ' vouchers...' }); }}>
+                  <svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 4h12v12H4z"/><path d="M7 10h6M10 7v6"/></svg>
+                  Download PDFs
+                </button>
               </div>
             </div>
           )}
         </div>
       </div>
+
+      {/* Pending Approvals (Manager/CEO) */}
+      {isMgmt && (
+        <div style={{ marginTop: '2rem' }}>
+          <div className="section-head">
+            <h2 className="section-head-title">Pending Voucher Approvals</h2>
+            <p className="section-head-desc">Staff requests awaiting your authorization</p>
+          </div>
+          {pendingApprovals.length > 0 ? (
+            <div className="card card-table">
+              <table className="data-table">
+                <thead><tr><th>Staff</th><th>Type</th><th>Package</th><th>Amount</th><th>Count</th><th>Requested</th><th>Actions</th></tr></thead>
+                <tbody>
+                  {pendingApprovals.map(a => (
+                    <tr key={a.id}>
+                      <td style={{ color: '#fff', fontWeight: 600 }}>{a.requested_by_name}</td>
+                      <td>{a.request_type}</td>
+                      <td>{a.package_tier}</td>
+                      <td><span className="money money--sm">{a.price_amount ? '$' + Number(a.price_amount).toFixed(2) : '—'}</span></td>
+                      <td>{a.voucher_count ?? 1}</td>
+                      <td style={{ fontSize: 11, color: 'var(--text-dim)' }}>{a.created_at ? new Date(a.created_at).toLocaleString() : ''}</td>
+                      <td>
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          <button className="btn-sm btn-approve" onClick={() => handleApprove(a.id)}>
+                            <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2"><path d="M13 4L6 12l-3-3"/></svg>
+                            Approve
+                          </button>
+                          <button className="btn-sm btn-reject" onClick={() => handleReject(a.id)}>
+                            <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 4l8 8M12 4l-8 8"/></svg>
+                            Reject
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <EmptyState icon="🕐" title="No Pending Approvals" message="No approval requests at the moment." />
+          )}
+        </div>
+      )}
+
+      {/* My Approval Requests */}
+      {!isMgmt && (
+      <div className="card" style={{ marginTop: '1.5rem' }}>
+        <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', fontWeight: 600, fontSize: 13 }}>My Approval Requests</div>
+        {myApprovals.length > 0 ? (
+          <div className="card-table">
+            <table className="data-table">
+              <thead><tr><th>Code</th><th>Package</th><th>Type</th><th>Amount</th><th>Status</th><th>Created</th><th>Approved By</th></tr></thead>
+              <tbody>
+                {myApprovals.map((a: ApprovalRequest) => {
+                  const isExpanded = expandedApproval === a.id;
+                  const codes = a.voucher_data?.codes || (a.voucher_data?.code ? [a.voucher_data.code] : []);
+                  const isApproved = a.status === 'approved' && codes.length > 0;
+                  const pkg = packages.find(p => p.tier_name === a.package_tier);
+                  return (
+                    <Fragment key={a.id}>
+                      <tr className={isExpanded ? 'row-selected' : ''}>
+                        <td>
+                          {isApproved ? (
+                            <span className="code-cell clickable" onClick={() => setExpandedApproval(isExpanded ? null : a.id)} style={{ cursor: 'pointer', borderBottom: '1px dashed var(--text-muted)' }}>
+                              {codes.length === 1 ? codes[0] : codes[0] + ' +' + (codes.length - 1) + ' more'}
+                            </span>
+                          ) : (
+                            <span className="code-cell">{a.voucher_data?.code || '—'}</span>
+                          )}
+                        </td>
+                        <td>{a.package_tier || '—'}</td>
+                        <td style={{ fontSize: 11, textTransform: 'uppercase', color: 'var(--text-dim)' }}>{a.request_type || '—'}</td>
+                        <td><span className="money money--sm">{a.price_amount ? '$' + Number(a.price_amount).toFixed(2) : '—'}</span></td>
+                        <td><span className={'badge badge--' + (a.status === 'approved' ? 'yes' : a.status === 'rejected' ? 'no' : 'warn')}>{a.status}</span></td>
+                        <td>{fmtDate(a.created_at)}</td>
+                        <td>{a.approved_by_name || '—'}</td>
+                      </tr>
+                      {isExpanded && (
+                        <tr className="expand-row">
+                          <td colSpan={7}>
+                            <div style={{ padding: '1rem 1.25rem' }}>
+                              {codes.length > 1 && (
+                                <div style={{ display: 'flex', gap: '0.3rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
+                                  {codes.map((c, i) => (
+                                    <span key={i} className="bulk-code-chip" onClick={() => copyCode(c)} title="Click to copy">{c}</span>
+                                  ))}
+                                </div>
+                              )}
+                              <div className="voucher-card-actions-bar" style={{ marginTop: 0 }}>
+                                <button className="btn-action btn-action--wa" onClick={() => {
+                                  const msg = codes.map((c: string) => {
+                                    const tier = a.package_tier || 'Custom';
+                                    const price = a.price_amount ? ' $' + Number(a.price_amount).toFixed(2) : '';
+                                    return 'Code: ' + c + ' | ' + tier + price;
+                                  }).join('%0A');
+                                  window.open('https://wa.me/?text=' + '*Preyone Vouchers*%0A%0A' + msg + '%0A%0A_Thank you for choosing Preyone_', '_blank');
+                                }}>
+                                  <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+                                  WhatsApp
+                                </button>
+                                <button className="btn-action btn-action--copy" onClick={() => {
+                                  navigator.clipboard.writeText(codes.join('\n'));
+                                  showToast({ title: 'Copied', message: 'All codes copied', type: 'success' });
+                                }}>
+                                  <svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2"><rect x="5" y="2" width="13" height="15" rx="2"/><polyline points="2 5 2 18 15 18"/></svg>
+                                  Copy All
+                                </button>
+                                <button className="btn-action btn-action--download" onClick={() => {
+                                  codes.forEach((c: string, i: number) => {
+                                    setTimeout(() => renderVoucherPNG({
+                                      code: c,
+                                      package_tier: a.package_tier,
+                                      price_amount: a.price_amount?.toString() || '',
+                                      max_uses: a.max_uses,
+                                      duration_min: pkg?.duration_min || 60,
+                                      bandwidth_mbps_up: pkg?.bandwidth_mbps_up || 2,
+                                      bandwidth_mbps_down: pkg?.bandwidth_mbps_down || 5,
+                                      data_limit_gb: pkg?.data_limit_gb ?? null,
+                                      is_uncapped: pkg?.is_uncapped ?? false,
+                                    }, user?.fullName || 'Preyone UltraNet'), i * 500);
+                                  });
+                                  showToast({ title: 'Downloading', message: 'Downloading ' + codes.length + ' voucher(s)...', type: 'success' });
+                                }}>
+                                  <svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10 3v12M5 10l5 5 5-5" /><path d="M3 16v1a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-1" /></svg>
+                                  {codes.length > 1 ? 'Download Vouchers' : 'Download Voucher'}
+                                </button>
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>No approval requests yet.</div>
+        )}
+      </div>
+      )}
 
       {/* Voucher List */}
       <div className="section-head" style={{ marginTop: '2rem' }}>
@@ -853,7 +1064,7 @@ export default function Vouchers() {
               {vouchers.map(v => (
                 <tr key={v.id}>
                   <td><span className="code-cell" onClick={() => copyCode(v.code)} title="Click to copy">{v.code}</span></td>
-                  <td>{v.price_amount ? '$' + parseFloat(v.price_amount).toFixed(2) : <span className="muted">—</span>}</td>
+                  <td><span className="money money--sm">{v.price_amount ? '$' + parseFloat(v.price_amount).toFixed(2) : '—'}</span></td>
                   <td>{fmtDur(v.duration_min)}</td>
                   <td>{v.bandwidth_mbps_up}/{v.bandwidth_mbps_down} Mbps</td>
                   <td>{v.is_uncapped ? 'Unlimited' : (v.data_limit_gb ?? 'Unlimited') + ' GB'}</td>

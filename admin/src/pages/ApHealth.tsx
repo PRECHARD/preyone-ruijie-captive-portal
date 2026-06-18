@@ -1,13 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../api/client';
-import { useAuth } from '../context/AuthContext';
 import Spinner from '../components/Spinner';
 import EmptyState from '../components/EmptyState';
 import Badge from '../components/Badge';
 
 export default function ApHealth() {
-  const { user } = useAuth();
-  const isCEO = user?.role === 'CEO';
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 

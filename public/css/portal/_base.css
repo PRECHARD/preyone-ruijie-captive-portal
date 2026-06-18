@@ -43,6 +43,12 @@ body.portal-body {
   line-height: 1.5;
 }
 
+@media (min-width: 769px) {
+  body.portal-body {
+    padding-top: 0.5rem;
+  }
+}
+
 .portal-shell {
   width: 100%;
   max-width: 1200px;
@@ -51,4 +57,68 @@ body.portal-body {
 
 .hidden {
   display: none !important;
+}
+
+/* ── Loading Overlay ── */
+.body-loading {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 32px;
+  background: #060c1f;
+  z-index: 9999;
+}
+
+.loading-spinner {
+  width: 140px;
+  height: 140px;
+  border-radius: 50%;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: conic-gradient(from 0deg, #3b8dff, #9b2cff, #ff5fa4, #3b8dff);
+  animation: spin 1.8s linear infinite;
+  box-shadow: 0 0 50px rgba(155, 44, 255, 0.5), 0 0 100px rgba(155, 44, 255, 0.25);
+}
+
+.loading-spinner-inner {
+  width: 112px;
+  height: 112px;
+  border-radius: 50%;
+  background: #060c1f;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: absolute;
+}
+
+.loading-spinner-inner img {
+  width: 64px;
+  height: 64px;
+  display: block;
+}
+
+.loading-text {
+  font-family: var(--font);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  background: linear-gradient(90deg, #3b8dff, #9b2cff, #ff5fa4);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: pulse-text 1.5s ease-in-out infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes pulse-text {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
 }

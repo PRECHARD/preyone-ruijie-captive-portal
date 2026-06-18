@@ -23,6 +23,7 @@ const PORT = process.env.PORT ?? 3000;
 
 app.use(
   helmet({
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
@@ -41,29 +42,72 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
-app.use(express.static(path.join(__dirname, '..', 'public')));
-app.use('/site', express.static(path.join(__dirname, '..', 'site')));
+// ── Subdomain-based routing ──
+app.use((req, res, next) => {
+  const host = req.hostname;
+
+  // API routes always work regardless of subdomain
+  if (req.path.startsWith('/api/')) return next();
+
+  // admin.preyone.com → serve admin SPA static + fallback
+  if (host === 'admin.preyone.com') {
+    const adminDist = path.join(__dirname, '..', 'admin', 'dist');
+    if (fs.existsSync(adminDist)) {
+      const adminStatic = express.static(adminDist);
+      return adminStatic(req, res, () => {
+        // SPA fallback: serve index.html for all non-file paths
+        res.sendFile(path.join(adminDist, 'index.html'));
+      });
+    }
+    return res.status(503).send('Admin build not found');
+  }
+
+  // wifi.preyone.com → captive portal
+  if (host === 'wifi.preyone.com') {
+    return express.static(path.join(__dirname, '..', 'public'))(req, res, () => {
+      res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
+    });
+  }
+
+  // preyone.com → main site
+  if (host === 'preyone.com' || host === 'www.preyone.com') {
+    return express.static(path.join(__dirname, '..', 'site'))(req, res, () => {
+      res.sendFile(path.join(__dirname, '..', 'site', 'index.html'));
+    });
+  }
+
+  // localhost / 127.0.0.1 → captive portal at root
+  if (host === 'localhost' || host === '127.0.0.1') {
+    return express.static(path.join(__dirname, '..', 'public'))(req, res, () => {
+      res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
+    });
+  }
+
+  // Fallback for unknown hosts
+  next();
+});
 
 // Maintenance mode check (blocks portal routes, skips admin & static)
 app.use(maintenanceCheck);
-
-// Serve admin SPA build if it exists
-const adminDist = path.join(__dirname, '..', 'admin', 'dist');
-if (fs.existsSync(adminDist)) {
-  app.use('/admin', express.static(adminDist));
-}
 
 app.use('/api/auth', authRouter);
 app.use('/api/admin/auth', adminAuthRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/payments', paymentsRouter);
 
-// Captive portal detection probes
+// Captive portal detection probes (respond on any host)
 app.get('/generate_204', (_req, res) => res.status(204).send());
 app.get('/hotspot-detect.html', (_req, res) => res.redirect('/'));
 app.get('/ncsi.txt', (_req, res) => res.send('Microsoft NCSI'));
 app.get('/connecttest.txt', (_req, res) => res.send('Microsoft Connect Test'));
 
+// Standard route aliases
+app.get('/login', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'account-login.html')));
+app.get('/account', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'manage-account.html')));
+app.get('/forgot-password', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'forgot-password.html')));
+app.get('/reset-password', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'reset-password.html')));
+
+// Fallback for unmatched routes
 app.get('*', (_req, res) => {
   res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
 });

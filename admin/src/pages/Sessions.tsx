@@ -44,9 +44,13 @@ export default function Sessions() {
               { key: 'voucher_code', label: 'Voucher', width: '120px', render: (r: any) => <span className="code-cell">{r.voucher_code}</span> },
               { key: 'mac_address', label: 'MAC', width: '150px', render: (r: any) => <code style={{ fontSize: 11 }}>{r.mac_address || '—'}</code> },
               { key: 'ip_address', label: 'IP', width: '130px' },
-              { key: 'bytes_used', label: 'Data Used', width: '100px', render: (r: any) => r.bytes_used ? `${(r.bytes_used / 1e6).toFixed(1)} MB` : '0 MB' },
+              { key: 'data_used_bytes', label: 'Data Used', width: '120px', render: (r: any) => r.data_used_bytes ? `${(r.data_used_bytes / 1048576).toFixed(1)} MB` : '0 MB' },
               { key: 'status', label: 'Status', width: '90px', render: (r: any) => <Badge variant={r.active !== false ? 'active' : 'inactive'}>{r.active !== false ? 'Active' : 'Expired'}</Badge> },
-              { key: 'session_expires_at', label: 'Expires', width: '160px', render: (r: any) => r.session_expires_at ? new Date(r.session_expires_at).toLocaleString() : '—' },
+              { key: 'session_expires_at', label: 'Expires', width: '160px', render: (r: any) => {
+                if (!r.session_expires_at) return '—';
+                const expiringSoon = new Date(r.session_expires_at).getTime() - Date.now() < 1800000 && r.active !== false;
+                return <span style={expiringSoon ? { color: 'var(--orange)' } : {}}>{new Date(r.session_expires_at).toLocaleString()}{expiringSoon ? ' ⚠' : ''}</span>;
+              }},
             ]}
             data={sessions}
           />

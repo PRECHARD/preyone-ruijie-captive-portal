@@ -22,7 +22,13 @@ async function request<T = any>(path: string, options: RequestInit = {}): Promis
 
   const res = await fetch(`${BASE}${path}`, { ...options, headers });
   const json = await res.json();
-  if (!res.ok) throw new Error(json.error || `Request failed (${res.status})`);
+  if (!res.ok) {
+    const err: any = new Error(json.error || `Request failed (${res.status})`);
+    if (json.requiresApproval) err.requiresApproval = true;
+    if (json.requiresHandover) err.requiresHandover = true;
+    if (json.unhandedCount) err.unhandedCount = json.unhandedCount;
+    throw err;
+  }
   return json;
 }
 
