@@ -138,21 +138,26 @@ function emailHeader(title: string): string {
 // ── Email footer helper with WhatsApp + links ─────────────────────
 function emailFooter(): string {
   const baseUrl = process.env.BASE_URL || 'http://localhost:3000';
-  return `<div style="background:linear-gradient(135deg,#f3e8ff,#ede9fe,#e0e7ff);padding:24px;text-align:center;font-family:'Montserrat',Arial,sans-serif">
-    <div style="margin-bottom:14px">
-      <a href="https://wa.me/263771327202" style="display:inline-block;background:#25D366;color:#ffffff;padding:10px 24px;border-radius:50px;text-decoration:none;font-size:13px;font-weight:600">Chat on WhatsApp</a>
+  return `<div style="background:#0a0a0a;padding:28px 24px 20px;text-align:center;font-family:'Montserrat',Arial,sans-serif;border-top:2px solid #1a1a2e">
+    <img src="${baseUrl}/images/preyone-logo-mainInverse.png" alt="Preyone" style="max-width:120px;height:auto;margin-bottom:16px;display:block;margin-left:auto;margin-right:auto" />
+    <div style="margin-bottom:16px">
+      <a href="https://wa.me/263771327202" style="display:inline-block;background:linear-gradient(135deg,#25D366,#128C7E);color:#ffffff;padding:10px 28px;border-radius:50px;text-decoration:none;font-size:13px;font-weight:700;box-shadow:0 4px 14px rgba(37,211,102,0.3)">Chat on WhatsApp</a>
     </div>
-    <p style="margin:0 0 10px;font-size:13px;color:#6b21a8">
-      <a href="mailto:support@preyone.com" style="color:#7c3aed;text-decoration:none;font-weight:600">support@preyone.com</a>
+    <p style="margin:0 0 12px;font-size:13px;color:#94a3b8">
+      <a href="mailto:support@preyone.com" style="color:#71ff2f;text-decoration:none;font-weight:600">support@preyone.com</a>
+      <span style="color:#334155;margin:0 8px">|</span>
+      <a href="tel:+263771327202" style="color:#13d8ff;text-decoration:none;font-weight:600">+263 771 327 202</a>
     </p>
-    <div style="margin-bottom:10px;font-size:12px;color:#6b21a8">
-      <a href="${baseUrl}/terms.html" style="color:#7c3aed;text-decoration:none;margin:0 8px">Terms of Service</a>
-      <span style="color:#c4b5fd">|</span>
-      <a href="https://www.preyone.com" style="color:#7c3aed;text-decoration:none;margin:0 8px">Main Website</a>
-      <span style="color:#c4b5fd">|</span>
-      <a href="${baseUrl}" style="color:#7c3aed;text-decoration:none;margin:0 8px">WiFi Portal</a>
+    <div style="margin-bottom:14px;font-size:12px;color:#475569">
+      <a href="${baseUrl}/terms.html" style="color:#13d8ff;text-decoration:none;margin:0 10px;font-weight:500">Terms of Service</a>
+      <span style="color:#334155">•</span>
+      <a href="https://www.preyone.com" style="color:#71ff2f;text-decoration:none;margin:0 10px;font-weight:500">Main Website</a>
+      <span style="color:#334155">•</span>
+      <a href="${baseUrl}" style="color:#8b4dff;text-decoration:none;margin:0 10px;font-weight:500">WiFi Portal</a>
     </div>
-    <p style="margin:0;font-size:11px;color:#8b5cf6">&copy; Preyone UltraNet WiFi</p>
+    <div style="height:2px;background:linear-gradient(90deg,#71ff2f,#13d8ff,#8b4dff);border-radius:2px;margin-bottom:14px;max-width:300px;margin-left:auto;margin-right:auto"></div>
+    <p style="margin:0;font-size:11px;color:#475569">&copy; ${new Date().getFullYear()} Preyone Enterprises. All rights reserved.</p>
+    <p style="margin:4px 0 0;font-size:10px;color:#334155">Powered by Starlink Business Infrastructure</p>
   </div>`;
 }
 
@@ -207,30 +212,32 @@ function buildAdminWelcomeHtml(fullName: string, email: string, role: string, st
   const isActivated = status === 'activated';
   const roleBadgeColor = role === 'CEO' ? '#ffd700' : role === 'Manager' ? '#367cff' : '#10b981';
   const roleBadgeBg = role === 'CEO' ? '#fff8e1' : role === 'Manager' ? '#e8f0ff' : '#e6f7ee';
+  const baseUrl = process.env.BASE_URL || 'http://localhost:3000';
 
-  return `
-<div style="font-family:'Segoe UI',Arial,sans-serif;max-width:560px;margin:32px auto;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.12)">
+  if (isActivated) {
+    return `
+<div style="font-family:'Segoe UI',Arial,sans-serif;max-width:560px;margin:32px auto;background:#0a0a0a;border-radius:16px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.12),0 0 40px rgba(113,255,47,0.08)">
   ${emailHeader('Admin Console')}
 
   <!-- Hero Section -->
   <div style="padding:32px 32px 0;text-align:center">
-    <div style="width:72px;height:72px;border-radius:50%;background:${isActivated ? '#e6f7ee' : '#fff8e1'};display:flex;align-items:center;justify-content:center;margin:0 auto 16px">
-      <span style="font-size:32px">${isActivated ? '✅' : '🕐'}</span>
+    <div style="width:72px;height:72px;border-radius:50%;background:linear-gradient(135deg,rgba(113,255,47,0.15),rgba(19,216,255,0.15));display:flex;align-items:center;justify-content:center;margin:0 auto 16px;box-shadow:0 0 20px rgba(113,255,47,0.2)">
+      <span style="font-size:32px">✅</span>
     </div>
-    <h1 style="margin:0 0 4px;font-size:22px;color:#1a1a2e;font-weight:700">${isActivated ? 'Account Activated' : 'Account Created'}</h1>
-    <p style="margin:0 0 20px;font-size:14px;color:#64748b">Preyone Admin Console</p>
+    <h1 style="margin:0 0 4px;font-size:22px;color:#ffffff;font-weight:700">Account Activated</h1>
+    <p style="margin:0 0 20px;font-size:14px;color:#13d8ff">Preyone Admin Console</p>
   </div>
 
   <!-- User Card -->
-  <div style="margin:0 32px;padding:20px;background:#f8fafc;border-radius:12px;border:1px solid #e2e8f0">
+  <div style="margin:0 32px;padding:20px;background:rgba(255,255,255,0.03);border-radius:12px;border:1px solid rgba(255,255,255,0.08)">
     <table style="width:100%;border-collapse:collapse">
       <tr>
         <td style="padding:6px 12px;font-size:13px;color:#64748b;width:80px">Name</td>
-        <td style="padding:6px 12px;font-size:14px;color:#1a1a2e;font-weight:600">${fullName}</td>
+        <td style="padding:6px 12px;font-size:14px;color:#ffffff;font-weight:600">${fullName}</td>
       </tr>
       <tr>
         <td style="padding:6px 12px;font-size:13px;color:#64748b">Email</td>
-        <td style="padding:6px 12px;font-size:14px;color:#1a1a2e">${email}</td>
+        <td style="padding:6px 12px;font-size:14px;color:#ffffff">${email}</td>
       </tr>
       <tr>
         <td style="padding:6px 12px;font-size:13px;color:#64748b">Role</td>
@@ -243,47 +250,108 @@ function buildAdminWelcomeHtml(fullName: string, email: string, role: string, st
 
   <!-- Body -->
   <div style="padding:24px 32px 0">
-    ${isActivated ? `
-    <p style="margin:0 0 12px;font-size:14px;color:#334155;line-height:1.6">Hi <strong style="color:#1a1a2e">${fullName}</strong>,</p>
-    <p style="margin:0 0 12px;font-size:14px;color:#334155;line-height:1.6">Your <strong>${role}</strong> account is ready. Please verify your email address to activate your account and gain full access to the <strong>Preyone Admin Console</strong>.</p>
-    ` : `
-    <p style="margin:0 0 12px;font-size:14px;color:#334155;line-height:1.6">Hi <strong style="color:#1a1a2e">${fullName}</strong>,</p>
-    <p style="margin:0 0 12px;font-size:14px;color:#334155;line-height:1.6">Your <strong>Staff</strong> account has been created successfully. A Manager or CEO will review and approve your account shortly.</p>
-    <p style="margin:0 0 12px;font-size:14px;color:#334155;line-height:1.6">In the meantime, please verify your email address using the button below.</p>
-    `}
+    <p style="margin:0 0 12px;font-size:14px;color:#cbd5e1;line-height:1.6">Hi <strong style="color:#ffffff">${fullName}</strong>,</p>
+    <p style="margin:0 0 12px;font-size:14px;color:#cbd5e1;line-height:1.6">Your <strong style="color:#71ff2f">${role}</strong> account is ready. Please verify your email address to activate your account and gain full access to the <strong style="color:#13d8ff">Preyone Admin Console</strong>.</p>
   </div>
 
   <!-- Verify Email Button -->
   ${verifyUrl ? `
   <div style="padding:16px 32px;text-align:center">
-    <a href="${verifyUrl}" style="display:inline-block;background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;padding:14px 36px;border-radius:8px;text-decoration:none;font-weight:600;font-size:14px;box-shadow:0 4px 14px rgba(102,126,234,0.4)">Verify Email Address</a>
-    <p style="margin:8px 0 0;font-size:12px;color:#94a3b8">Link expires in 24 hours</p>
+    <a href="${verifyUrl}" style="display:inline-block;background:linear-gradient(135deg,#71ff2f,#13d8ff);color:#0a0a0a;padding:14px 36px;border-radius:8px;text-decoration:none;font-weight:700;font-size:14px;box-shadow:0 4px 20px rgba(113,255,47,0.3)">Verify Email Address</a>
+    <p style="margin:8px 0 0;font-size:12px;color:#64748b">Link expires in 24 hours</p>
   </div>
   ` : ''}
 
   <!-- Divider -->
-  <div style="margin:16px 32px 0;border-top:1px solid #e2e8f0"></div>
+  <div style="margin:16px 32px 0;border-top:1px solid rgba(255,255,255,0.06)"></div>
 
   <!-- Quick Links -->
   <div style="padding:16px 32px 0">
-    <p style="margin:0 0 8px;font-size:13px;color:#64748b;font-weight:600">QUICK LINKS</p>
+    <p style="margin:0 0 8px;font-size:11px;color:#64748b;font-weight:600;letter-spacing:1px">QUICK LINKS</p>
     <table style="width:100%;border-collapse:collapse">
       <tr>
-        <td style="padding:4px 0"><a href="${signInUrl}" style="font-size:13px;color:#667eea;text-decoration:none">🔑 Sign In to Admin Console</a></td>
+        <td style="padding:4px 0"><a href="${baseUrl}" style="font-size:13px;color:#71ff2f;text-decoration:none">🔑 Sign In to Admin Console</a></td>
       </tr>
       <tr>
-        <td style="padding:4px 0"><a href="${adminUrl}/forgot-password" style="font-size:13px;color:#667eea;text-decoration:none">🔒 Reset Your Password</a></td>
+        <td style="padding:4px 0"><a href="${baseUrl}/forgot-password" style="font-size:13px;color:#13d8ff;text-decoration:none">🔒 Reset Your Password</a></td>
       </tr>
       <tr>
-        <td style="padding:4px 0"><a href="https://www.preyone.com" style="font-size:13px;color:#667eea;text-decoration:none">🌐 Preyone Website</a></td>
+        <td style="padding:4px 0"><a href="https://www.preyone.com" style="font-size:13px;color:#8b4dff;text-decoration:none">🌐 Preyone Website</a></td>
       </tr>
     </table>
   </div>
 
   <!-- Need Help -->
-  <div style="margin:16px 32px 24px;padding:16px;background:#f0f4ff;border-radius:8px;border:1px solid #dbeafe">
-    <p style="margin:0 0 4px;font-size:13px;color:#1e40af;font-weight:600">Need help?</p>
-    <p style="margin:0;font-size:12px;color:#3b82f6">Contact support at <a href="mailto:support@preyone.com" style="color:#2563eb;text-decoration:underline">support@preyone.com</a> or call <a href="tel:+263771327202" style="color:#2563eb;text-decoration:none">+263 771 327 202</a></p>
+  <div style="margin:16px 32px 24px;padding:16px;background:rgba(19,216,255,0.05);border-radius:8px;border:1px solid rgba(19,216,255,0.1)">
+    <p style="margin:0 0 4px;font-size:13px;color:#13d8ff;font-weight:600">Need help?</p>
+    <p style="margin:0;font-size:12px;color:#64748b">Contact support at <a href="mailto:support@preyone.com" style="color:#71ff2f;text-decoration:underline">support@preyone.com</a> or call <a href="tel:+263771327202" style="color:#13d8ff;text-decoration:none">+263 771 327 202</a></p>
+  </div>
+
+  ${emailFooter()}
+</div>`;
+  }
+
+  return `
+<div style="font-family:'Segoe UI',Arial,sans-serif;max-width:560px;margin:32px auto;background:#0a0a0a;border-radius:16px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.12),0 0 40px rgba(113,255,47,0.08)">
+  ${emailHeader('Staff Account Created')}
+
+  <!-- Hero -->
+  <div style="padding:28px 32px 0;text-align:center">
+    <div style="width:80px;height:80px;border-radius:50%;background:linear-gradient(135deg,rgba(19,216,255,0.12),rgba(139,77,255,0.12));display:flex;align-items:center;justify-content:center;margin:0 auto 16px;box-shadow:0 0 30px rgba(19,216,255,0.15)">
+      <span style="font-size:36px">🎉</span>
+    </div>
+    <h1 style="margin:0 0 6px;font-size:24px;color:#ffffff;font-weight:800;letter-spacing:-0.5px">Welcome to the Team!</h1>
+    <p style="margin:0 0 4px;font-size:15px;color:#13d8ff;font-weight:500">Preyone Admin Console</p>
+  </div>
+
+  <!-- Intro -->
+  <div style="padding:24px 32px 0">
+    <p style="margin:0 0 16px;font-size:15px;color:#cbd5e1;line-height:1.7">Hi <strong style="color:#ffffff">${fullName}</strong>,</p>
+    <p style="margin:0 0 16px;font-size:15px;color:#cbd5e1;line-height:1.7">Great news—your staff account has been successfully created! To keep our workspace secure, a Manager or member of our Executive Team just needs to give your account a quick final approval before you can officially sign in.</p>
+  </div>
+
+  <!-- Steps -->
+  <div style="margin:0 32px;padding:20px;background:linear-gradient(135deg,rgba(113,255,47,0.04),rgba(19,216,255,0.04));border-radius:12px;border:1px solid rgba(255,255,255,0.06)">
+    <p style="margin:0 0 14px;font-size:14px;color:#71ff2f;font-weight:700">🚀 What happens next?</p>
+    <table style="width:100%;border-collapse:collapse">
+      <tr>
+        <td style="padding:6px 0;vertical-align:top;width:28px;color:#13d8ff;font-weight:700;font-size:14px">1.</td>
+        <td style="padding:6px 0;font-size:14px;color:#94a3b8;line-height:1.5"><strong style="color:#ffffff">The Review.</strong> Our leadership team is already on it.</td>
+      </tr>
+      <tr>
+        <td style="padding:6px 0;vertical-align:top;width:28px;color:#13d8ff;font-weight:700;font-size:14px">2.</td>
+        <td style="padding:6px 0;font-size:14px;color:#94a3b8;line-height:1.5"><strong style="color:#ffffff">The Notification.</strong> As soon as you're approved, we'll drop a fresh link straight into your inbox.</td>
+      </tr>
+      <tr>
+        <td style="padding:6px 0;vertical-align:top;width:28px;color:#13d8ff;font-weight:700;font-size:14px">3.</td>
+        <td style="padding:6px 0;font-size:14px;color:#94a3b8;line-height:1.5"><strong style="color:#ffffff">The Launch.</strong> You'll set your password, log in, and dive right in.</td>
+      </tr>
+    </table>
+  </div>
+
+  <!-- Verify Email -->
+  ${verifyUrl ? `
+  <div style="padding:20px 32px 0;text-align:center">
+    <p style="margin:0 0 10px;font-size:13px;color:#64748b">While you wait, please verify your email address:</p>
+    <a href="${verifyUrl}" style="display:inline-block;background:linear-gradient(135deg,#71ff2f,#13d8ff);color:#0a0a0a;padding:14px 36px;border-radius:8px;text-decoration:none;font-weight:700;font-size:14px;box-shadow:0 4px 20px rgba(113,255,47,0.3)">Verify Email Address</a>
+    <p style="margin:8px 0 0;font-size:12px;color:#64748b">Link expires in 24 hours</p>
+  </div>
+  ` : ''}
+
+  <!-- Support -->
+  <div style="padding:20px 32px 0">
+    <div style="padding:16px;background:rgba(139,77,255,0.05);border-radius:8px;border:1px solid rgba(139,77,255,0.1)">
+      <p style="margin:0 0 8px;font-size:13px;color:#8b4dff;font-weight:600">Need a hand in the meantime?</p>
+      <p style="margin:0;font-size:13px;color:#94a3b8;line-height:1.5">If you have any immediate questions or feel there's been a delay, feel free to reach out to our support desk at <a href="mailto:support@preyone.com" style="color:#71ff2f;text-decoration:underline">support@preyone.com</a>.</p>
+    </div>
+  </div>
+
+  <!-- Sign-off -->
+  <div style="padding:24px 32px 0;text-align:center">
+    <p style="margin:0 0 4px;font-size:14px;color:#cbd5e1;line-height:1.6">We are incredibly excited to have you on board and can't wait to help you get started!</p>
+    <p style="margin:16px 0 0;font-size:14px;color:#ffffff;font-weight:600">Best regards,</p>
+    <p style="margin:4px 0 0;font-size:14px;color:#71ff2f;font-weight:700">The Preyone Team</p>
+    <p style="margin:4px 0 0"><a href="https://www.preyone.com" style="font-size:13px;color:#13d8ff;text-decoration:none">www.preyone.com</a></p>
   </div>
 
   ${emailFooter()}
