@@ -49,23 +49,23 @@ export async function sendEmailReceipt(notification: PaymentNotification): Promi
 <!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"></head>
-<body style="font-family:Arial,sans-serif;background:#f5f5f5;padding:24px">
-  <div style="max-width:480px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.1)">
+<body style="margin:0;padding:0;background:#050505;font-family:'Segoe UI',Arial,sans-serif">
+  <div style="max-width:560px;margin:32px auto;background:#0a0a0a;border-radius:16px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.12),0 0 40px rgba(113,255,47,0.08)">
     ${emailHeader('Payment Confirmed')}
-    <div style="padding:24px">
-      <p style="margin:0 0 16px;color:#333">Hi <strong>${notification.fullName}</strong>,</p>
-      <p style="margin:0 0 16px;color:#333">Your payment was successful. Here are your connection details:</p>
-      <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:16px;margin-bottom:16px;text-align:center">
-        <p style="margin:0 0 4px;font-size:12px;text-transform:uppercase;color:#666">Your Voucher Code</p>
-        <p style="margin:0;font-size:24px;font-weight:700;letter-spacing:2px;color:#16a34a">${notification.voucherCode}</p>
-        <p style="margin:8px 0 0;font-size:12px;color:#666">Use this code to reconnect on any device</p>
+    <div style="padding:24px 32px">
+      <p style="margin:0 0 16px;font-size:15px;color:#cbd5e1;line-height:1.6">Hi <strong style="color:#ffffff">${notification.fullName}</strong>,</p>
+      <p style="margin:0 0 16px;font-size:15px;color:#cbd5e1;line-height:1.6">Your payment was successful. Here are your connection details:</p>
+      <div style="background:linear-gradient(135deg,rgba(113,255,47,0.08),rgba(19,216,255,0.08));border:1px solid rgba(113,255,47,0.2);border-radius:12px;padding:20px;margin-bottom:20px;text-align:center">
+        <p style="margin:0 0 6px;font-size:11px;text-transform:uppercase;color:#64748b;letter-spacing:1.5px;font-weight:600">Your Voucher Code</p>
+        <p style="margin:0;font-size:28px;font-weight:800;letter-spacing:3px;color:#71ff2f;text-shadow:0 0 20px rgba(113,255,47,0.3);font-family:'Courier New',monospace">${notification.voucherCode}</p>
+        <p style="margin:10px 0 0;font-size:12px;color:#64748b">Use this code to reconnect on any device</p>
       </div>
       <table style="width:100%;border-collapse:collapse">
-        <tr><td style="padding:6px 0;color:#666;font-size:14px">Package</td><td style="padding:6px 0;font-size:14px;font-weight:600;text-align:right">${notification.packageTier}</td></tr>
-        <tr><td style="padding:6px 0;color:#666;font-size:14px">Speed</td><td style="padding:6px 0;font-size:14px;font-weight:600;text-align:right">${notification.bandwidthDown} Mbps</td></tr>
-        <tr><td style="padding:6px 0;color:#666;font-size:14px">Data</td><td style="padding:6px 0;font-size:14px;font-weight:600;text-align:right">${dataText}</td></tr>
-        <tr><td style="padding:6px 0;color:#666;font-size:14px">Expires</td><td style="padding:6px 0;font-size:14px;font-weight:600;text-align:right">${notification.sessionExpiresAt.toLocaleString()}</td></tr>
-        <tr><td style="padding:6px 0;color:#666;font-size:14px">Amount Paid</td><td style="padding:6px 0;font-size:14px;font-weight:600;text-align:right">${notification.currency} ${notification.amount}</td></tr>
+        <tr><td style="padding:8px 0;color:#64748b;font-size:14px;border-bottom:1px solid rgba(255,255,255,0.04)">Package</td><td style="padding:8px 0;font-size:14px;font-weight:600;text-align:right;color:#ffffff;border-bottom:1px solid rgba(255,255,255,0.04)">${notification.packageTier}</td></tr>
+        <tr><td style="padding:8px 0;color:#64748b;font-size:14px;border-bottom:1px solid rgba(255,255,255,0.04)">Speed</td><td style="padding:8px 0;font-size:14px;font-weight:600;text-align:right;color:#ffffff;border-bottom:1px solid rgba(255,255,255,0.04)">${notification.bandwidthDown} Mbps</td></tr>
+        <tr><td style="padding:8px 0;color:#64748b;font-size:14px;border-bottom:1px solid rgba(255,255,255,0.04)">Data</td><td style="padding:8px 0;font-size:14px;font-weight:600;text-align:right;color:#ffffff;border-bottom:1px solid rgba(255,255,255,0.04)">${dataText}</td></tr>
+        <tr><td style="padding:8px 0;color:#64748b;font-size:14px;border-bottom:1px solid rgba(255,255,255,0.04)">Expires</td><td style="padding:8px 0;font-size:14px;font-weight:600;text-align:right;color:#ffffff;border-bottom:1px solid rgba(255,255,255,0.04)">${notification.sessionExpiresAt.toLocaleString()}</td></tr>
+        <tr><td style="padding:8px 0;color:#64748b;font-size:14px">Amount Paid</td><td style="padding:8px 0;font-size:14px;font-weight:600;text-align:right;color:#71ff2f">${notification.currency} ${notification.amount}</td></tr>
       </table>
       ${emailFooter()}
     </div>
@@ -157,7 +157,7 @@ function emailFooter(): string {
     </div>
     <div style="height:2px;background:linear-gradient(90deg,#71ff2f,#13d8ff,#8b4dff);border-radius:2px;margin-bottom:14px;max-width:300px;margin-left:auto;margin-right:auto"></div>
     <p style="margin:0;font-size:11px;color:#475569">&copy; ${new Date().getFullYear()} Preyone Enterprises. All rights reserved.</p>
-    <p style="margin:4px 0 0;font-size:10px;color:#334155">Powered by Starlink Business Infrastructure</p>
+    <p style="margin:6px 0 0;font-size:10px;color:#334155;font-style:italic;letter-spacing:0.3px">Innovating with IT Excellence, Driven by Faith, Growing Beyond Boundaries.</p>
   </div>`;
 }
 
@@ -197,14 +197,14 @@ export async function sendAdminSignupConfirmation(
       email,
       `🎉 Welcome to Preyone — ${role} Account Activated`,
       buildAdminWelcomeHtml(fullName, email, role, 'activated', verifyUrl),
-      'Preyone', 'info@preyone.com'
+      'Preyone', 'admin@preyone.com'
     );
   }
   return sendMail(
     email,
     `⏳ Your Preyone Staff Account — Pending Approval`,
     buildAdminWelcomeHtml(fullName, email, role, 'pending', verifyUrl),
-    'Preyone', 'info@preyone.com'
+    'Preyone', 'admin@preyone.com'
   );
 }
 
@@ -424,7 +424,7 @@ export async function sendAdminApprovedNotification(email: string, fullName: str
 
   ${emailFooter()}
 </div>`,
-    'Preyone', 'info@preyone.com'
+    'Preyone', 'admin@preyone.com'
   );
 }
 
@@ -441,23 +441,29 @@ export async function sendAdminSignupNotification(
     return false;
   }
   const adminEmails: string[] = rows.map((r: any) => r.email);
-  const html = `<div style="font-family:Arial,sans-serif;max-width:480px;margin:24px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.1)">
+  const adminUrl = process.env.ADMIN_BASE_URL || process.env.BASE_URL || 'https://admin.preyone.com';
+  const html = `<div style="font-family:'Segoe UI',Arial,sans-serif;max-width:560px;margin:32px auto;background:#0a0a0a;border-radius:16px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.12),0 0 40px rgba(113,255,47,0.08)">
     ${emailHeader('New Staff Signup')}
-    <div style="padding:24px">
-      <p>A new staff member has signed up and needs your approval:</p>
-      <table style="width:100%;border-collapse:collapse">
-        <tr><td style="padding:6px 0;color:#666">Name</td><td style="padding:6px 0;font-weight:600;text-align:right">${staffName}</td></tr>
-        <tr><td style="padding:6px 0;color:#666">Email</td><td style="padding:6px 0;font-weight:600;text-align:right">${staffEmail}</td></tr>
-      </table>
-      <p style="margin-top:16px">Log in to the admin panel to approve or reject this account.</p>
-      <p style="text-align:center;margin-top:16px">
-        <a href="https://admin.preyone.com" style="display:inline-block;background:#367cff;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600">Go to Admin Panel</a>
+    <div style="padding:24px 32px">
+      <div style="width:64px;height:64px;border-radius:50%;background:linear-gradient(135deg,rgba(19,216,255,0.12),rgba(139,77,255,0.12));display:flex;align-items:center;justify-content:center;margin:0 auto 16px;box-shadow:0 0 20px rgba(19,216,255,0.12)">
+        <span style="font-size:28px">👤</span>
+      </div>
+      <p style="margin:0 0 16px;font-size:15px;color:#cbd5e1;line-height:1.6;text-align:center">A new staff member has signed up and needs your approval:</p>
+      <div style="background:linear-gradient(135deg,rgba(113,255,47,0.04),rgba(19,216,255,0.04));border-radius:12px;border:1px solid rgba(255,255,255,0.06);padding:16px;margin-bottom:16px">
+        <table style="width:100%;border-collapse:collapse">
+          <tr><td style="padding:8px 0;color:#64748b;font-size:14px;border-bottom:1px solid rgba(255,255,255,0.04)">Name</td><td style="padding:8px 0;font-size:14px;font-weight:600;text-align:right;color:#ffffff;border-bottom:1px solid rgba(255,255,255,0.04)">${staffName}</td></tr>
+          <tr><td style="padding:8px 0;color:#64748b;font-size:14px">Email</td><td style="padding:8px 0;font-size:14px;font-weight:600;text-align:right;color:#13d8ff">${staffEmail}</td></tr>
+        </table>
+      </div>
+      <p style="margin:0 0 16px;font-size:14px;color:#94a3b8;text-align:center">Log in to the admin panel to approve or reject this account.</p>
+      <p style="text-align:center;margin:0 0 8px">
+        <a href="${adminUrl}" style="display:inline-block;background:linear-gradient(135deg,#71ff2f,#13d8ff);color:#0a0a0a;padding:14px 36px;border-radius:8px;text-decoration:none;font-weight:700;font-size:14px;box-shadow:0 4px 20px rgba(113,255,47,0.3)">Go to Admin Panel</a>
       </p>
       ${emailFooter()}
     </div>
   </div>`;
   for (const email of adminEmails) {
-    await sendMail(email, 'New Staff Signup — Pending Approval', html, 'Preyone', 'info@preyone.com');
+    await sendMail(email, 'New Staff Signup — Pending Approval', html, 'Preyone', 'admin@preyone.com');
   }
   return true;
 }
@@ -519,7 +525,7 @@ export async function sendAdminRejectedNotification(email: string, fullName: str
 
   ${emailFooter()}
 </div>`,
-    'Preyone', 'info@preyone.com'
+    'Preyone', 'admin@preyone.com'
   );
 }
 
@@ -530,37 +536,40 @@ export async function sendPasswordResetEmail(email: string, resetToken: string, 
   return sendMail(
     email,
     'Reset Your Preyone Admin Password',
-    `<div style="font-family:Arial,sans-serif;max-width:480px;margin:24px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.1)">
+    `<div style="font-family:'Segoe UI',Arial,sans-serif;max-width:560px;margin:32px auto;background:#0a0a0a;border-radius:16px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.12),0 0 40px rgba(113,255,47,0.08)">
       ${emailHeader('Password Reset')}
-      <div style="padding:24px">
-        <p>Hi <strong>${fullName}</strong>,</p>
-        <p>We received a request to reset your admin password. Click the button below to set a new password. This link expires in 1 hour.</p>
-        <p style="text-align:center;margin:24px 0">
-          <a href="${resetUrl}" style="display:inline-block;background:#367cff;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600">Reset Password</a>
-        </p>
-        <p style="font-size:13px;color:#666">If you didn't request this, you can safely ignore this email.</p>
+      <div style="padding:24px 32px;text-align:center">
+        <div style="width:64px;height:64px;border-radius:50%;background:linear-gradient(135deg,rgba(113,255,47,0.12),rgba(19,216,255,0.12));display:flex;align-items:center;justify-content:center;margin:0 auto 16px;box-shadow:0 0 20px rgba(113,255,47,0.12)">
+          <span style="font-size:28px">🔒</span>
+        </div>
+        <p style="margin:0 0 12px;font-size:15px;color:#cbd5e1;line-height:1.6">Hi <strong style="color:#ffffff">${fullName}</strong>,</p>
+        <p style="margin:0 0 20px;font-size:15px;color:#cbd5e1;line-height:1.6">We received a request to reset your admin password. Click the button below to set a new one. This link expires in <strong style="color:#71ff2f">1 hour</strong>.</p>
+        <a href="${resetUrl}" style="display:inline-block;background:linear-gradient(135deg,#71ff2f,#13d8ff);color:#0a0a0a;padding:14px 36px;border-radius:8px;text-decoration:none;font-weight:700;font-size:14px;box-shadow:0 4px 20px rgba(113,255,47,0.3)">Reset Password</a>
+        <p style="margin:16px 0 0;font-size:13px;color:#64748b">If you didn't request this, you can safely ignore this email.</p>
         ${emailFooter()}
       </div>
     </div>`,
-    'Preyone', 'info@preyone.com'
+    'Preyone', 'admin@preyone.com'
   );
 }
 
 // ── Portal email verification ─────────────────────────────────────────
 export async function sendPortalEmailVerification(email: string, token: string, fullName: string): Promise<boolean> {
-  const verifyUrl = `${process.env.BASE_URL || 'http://localhost:3000'}/verify-email?token=${token}`;
+  const baseUrl = process.env.BASE_URL || 'http://localhost:3000';
+  const verifyUrl = `${baseUrl}/verify-email?token=${token}`;
   return sendMail(
     email,
     'Verify Your Email — Preyone WiFi',
-    `<div style="font-family:Arial,sans-serif;max-width:480px;margin:24px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.1)">
+    `<div style="font-family:'Segoe UI',Arial,sans-serif;max-width:560px;margin:32px auto;background:#0a0a0a;border-radius:16px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.12),0 0 40px rgba(113,255,47,0.08)">
       ${emailHeader('Verify Your Email')}
-      <div style="padding:24px">
-        <p style="color:#333;line-height:1.6">Hi <strong>${fullName}</strong>,</p>
-        <p style="color:#333;line-height:1.6">Please confirm your email address by clicking the button below. This link expires in <strong>24 hours</strong>.</p>
-        <p style="text-align:center;margin:24px 0">
-          <a href="${verifyUrl}" style="display:inline-block;background:linear-gradient(90deg,#7c3aed,#6d28d9);color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600">Verify Email</a>
-        </p>
-        <p style="font-size:13px;color:#888">If you didn't create an account, you can safely ignore this email.</p>
+      <div style="padding:24px 32px;text-align:center">
+        <div style="width:64px;height:64px;border-radius:50%;background:linear-gradient(135deg,rgba(19,216,255,0.12),rgba(139,77,255,0.12));display:flex;align-items:center;justify-content:center;margin:0 auto 16px;box-shadow:0 0 20px rgba(19,216,255,0.12)">
+          <span style="font-size:28px">📧</span>
+        </div>
+        <p style="margin:0 0 12px;font-size:15px;color:#cbd5e1;line-height:1.6">Hi <strong style="color:#ffffff">${fullName}</strong>,</p>
+        <p style="margin:0 0 20px;font-size:15px;color:#cbd5e1;line-height:1.6">Please confirm your email address by clicking the button below. This link expires in <strong style="color:#13d8ff">24 hours</strong>.</p>
+        <a href="${verifyUrl}" style="display:inline-block;background:linear-gradient(135deg,#71ff2f,#13d8ff);color:#0a0a0a;padding:14px 36px;border-radius:8px;text-decoration:none;font-weight:700;font-size:14px;box-shadow:0 4px 20px rgba(113,255,47,0.3)">Verify Email</a>
+        <p style="margin:16px 0 0;font-size:13px;color:#64748b">If you didn't create an account, you can safely ignore this email.</p>
         ${emailFooter()}
       </div>
     </div>`,
@@ -570,19 +579,21 @@ export async function sendPortalEmailVerification(email: string, token: string, 
 
 // ── Portal forgot password ───────────────────────────────────────────
 export async function sendPortalForgotPassword(email: string, token: string, fullName: string): Promise<boolean> {
-  const resetUrl = `${process.env.BASE_URL || 'http://localhost:3000'}/reset-password.html?token=${token}`;
+  const baseUrl = process.env.BASE_URL || 'http://localhost:3000';
+  const resetUrl = `${baseUrl}/reset-password.html?token=${token}`;
   return sendMail(
     email,
     'Reset Your Password — Preyone WiFi',
-    `<div style="font-family:Arial,sans-serif;max-width:480px;margin:24px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.1)">
+    `<div style="font-family:'Segoe UI',Arial,sans-serif;max-width:560px;margin:32px auto;background:#0a0a0a;border-radius:16px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.12),0 0 40px rgba(113,255,47,0.08)">
       ${emailHeader('Reset Your Password')}
-      <div style="padding:24px">
-        <p style="color:#333;line-height:1.6">Hi <strong>${fullName}</strong>,</p>
-        <p style="color:#333;line-height:1.6">We received a request to reset your Preyone WiFi account password. Click the button below to set a new one. This link expires in <strong>1 hour</strong>.</p>
-        <p style="text-align:center;margin:24px 0">
-          <a href="${resetUrl}" style="display:inline-block;background:linear-gradient(90deg,#7c3aed,#6d28d9);color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600">Reset Password</a>
-        </p>
-        <p style="font-size:13px;color:#888">If you didn't request this, you can safely ignore this email.</p>
+      <div style="padding:24px 32px;text-align:center">
+        <div style="width:64px;height:64px;border-radius:50%;background:linear-gradient(135deg,rgba(113,255,47,0.12),rgba(19,216,255,0.12));display:flex;align-items:center;justify-content:center;margin:0 auto 16px;box-shadow:0 0 20px rgba(113,255,47,0.12)">
+          <span style="font-size:28px">🔑</span>
+        </div>
+        <p style="margin:0 0 12px;font-size:15px;color:#cbd5e1;line-height:1.6">Hi <strong style="color:#ffffff">${fullName}</strong>,</p>
+        <p style="margin:0 0 20px;font-size:15px;color:#cbd5e1;line-height:1.6">We received a request to reset your Preyone WiFi account password. Click the button below to set a new one. This link expires in <strong style="color:#71ff2f">1 hour</strong>.</p>
+        <a href="${resetUrl}" style="display:inline-block;background:linear-gradient(135deg,#71ff2f,#13d8ff);color:#0a0a0a;padding:14px 36px;border-radius:8px;text-decoration:none;font-weight:700;font-size:14px;box-shadow:0 4px 20px rgba(113,255,47,0.3)">Reset Password</a>
+        <p style="margin:16px 0 0;font-size:13px;color:#64748b">If you didn't request this, you can safely ignore this email.</p>
         ${emailFooter()}
       </div>
     </div>`,
@@ -596,44 +607,47 @@ export async function sendPortalAccountCreated(
   fullName: string,
   verifyToken: string
 ): Promise<boolean> {
-  const verifyUrl = `${process.env.BASE_URL || 'http://localhost:3000'}/verify-email?token=${verifyToken}`;
-  const loginUrl = `${process.env.BASE_URL || 'http://localhost:3000'}/login`;
-  const portalUrl = process.env.BASE_URL || 'http://localhost:3000';
+  const baseUrl = process.env.BASE_URL || 'http://localhost:3000';
+  const verifyUrl = `${baseUrl}/verify-email?token=${verifyToken}`;
+  const loginUrl = `${baseUrl}/login`;
   return sendMail(
     email,
     'Your Preyone WiFi Account Has Been Created — Verify Your Email',
-    `<div style="font-family:Arial,sans-serif;max-width:480px;margin:24px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.1)">
+    `<div style="font-family:'Segoe UI',Arial,sans-serif;max-width:560px;margin:32px auto;background:#0a0a0a;border-radius:16px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.12),0 0 40px rgba(113,255,47,0.08)">
       ${emailHeader('Account Created')}
-      <div style="padding:24px">
-        <p>Hi <strong>${fullName}</strong>,</p>
-        <p style="color:#333;line-height:1.6">Welcome to <strong>Preyone UltraNet WiFi</strong>! Your account has been created successfully.</p>
-        <p style="font-size:13px;color:#555">Your account email: <strong>${email}</strong></p>
+      <div style="padding:24px 32px">
+        <div style="width:64px;height:64px;border-radius:50%;background:linear-gradient(135deg,rgba(113,255,47,0.12),rgba(19,216,255,0.12));display:flex;align-items:center;justify-content:center;margin:0 auto 16px;box-shadow:0 0 20px rgba(113,255,47,0.12)">
+          <span style="font-size:28px">🎉</span>
+        </div>
+        <p style="margin:0 0 12px;font-size:15px;color:#cbd5e1;line-height:1.6">Hi <strong style="color:#ffffff">${fullName}</strong>,</p>
+        <p style="margin:0 0 12px;font-size:15px;color:#cbd5e1;line-height:1.6">Welcome to <strong style="color:#71ff2f">Preyone UltraNet WiFi</strong>! Your account has been created successfully.</p>
+        <p style="margin:0 0 16px;font-size:14px;color:#64748b">Your account email: <strong style="color:#13d8ff">${email}</strong></p>
 
-        <div style="background:#f5f3ff;border-radius:8px;padding:16px;margin:16px 0">
-          <p style="margin:0 0 8px;font-size:13px;font-weight:600;color:#6b21a8">Next Steps:</p>
-          <ol style="margin:0;padding-left:20px;font-size:13px;color:#4c1d95;line-height:1.8">
+        <div style="background:linear-gradient(135deg,rgba(113,255,47,0.04),rgba(19,216,255,0.04));border-radius:12px;border:1px solid rgba(255,255,255,0.06);padding:16px;margin-bottom:16px">
+          <p style="margin:0 0 8px;font-size:13px;font-weight:600;color:#71ff2f">Next Steps:</p>
+          <ol style="margin:0;padding-left:20px;font-size:13px;color:#94a3b8;line-height:1.8">
             <li>Verify your email using the button below</li>
             <li>Sign in to manage your account, view data usage, and top up</li>
-            <li>Connect to the <strong>Preyone UltraNet</strong> WiFi network and enjoy high-speed internet</li>
+            <li>Connect to the <strong style="color:#ffffff">Preyone UltraNet</strong> WiFi network and enjoy high-speed internet</li>
           </ol>
         </div>
 
-        <p style="text-align:center;margin:20px 0">
-          <a href="${verifyUrl}" style="display:inline-block;background:linear-gradient(90deg,#7c3aed,#6d28d9);color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600">Verify Email Address</a>
+        <p style="text-align:center;margin:16px 0">
+          <a href="${verifyUrl}" style="display:inline-block;background:linear-gradient(135deg,#71ff2f,#13d8ff);color:#0a0a0a;padding:14px 36px;border-radius:8px;text-decoration:none;font-weight:700;font-size:14px;box-shadow:0 4px 20px rgba(113,255,47,0.3)">Verify Email Address</a>
         </p>
-        <p style="text-align:center;margin:20px 0">
-          <a href="${loginUrl}" style="display:inline-block;background:#059669;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600">Sign In to Manage Account</a>
+        <p style="text-align:center;margin:0 0 16px">
+          <a href="${loginUrl}" style="display:inline-block;background:rgba(19,216,255,0.1);color:#13d8ff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:600;font-size:13px;border:1px solid rgba(19,216,255,0.3)">Sign In to Manage Account</a>
         </p>
 
-        <div style="background:#f0fdf4;border-radius:8px;padding:16px;margin:16px 0">
-          <p style="margin:0 0 8px;font-size:13px;font-weight:600;color:#15803d">Quick Connect:</p>
-          <p style="margin:0;font-size:13px;color:#166534;line-height:1.6">
-            To connect immediately, open your WiFi settings, select <strong>Preyone UltraNet</strong>, and follow the on-screen instructions. No voucher needed for instant access.
+        <div style="background:linear-gradient(135deg,rgba(139,77,255,0.04),rgba(19,216,255,0.04));border-radius:12px;border:1px solid rgba(255,255,255,0.06);padding:16px;margin-bottom:16px">
+          <p style="margin:0 0 8px;font-size:13px;font-weight:600;color:#8b4dff">Quick Connect:</p>
+          <p style="margin:0;font-size:13px;color:#94a3b8;line-height:1.6">
+            To connect immediately, open your WiFi settings, select <strong style="color:#ffffff">Preyone UltraNet</strong>, and follow the on-screen instructions. No voucher needed for instant access.
           </p>
         </div>
 
-        <p style="font-size:12px;color:#888;text-align:center;margin:16px 0 0">
-          Need a voucher or top-up? Visit our <a href="${portalUrl}" style="color:#7c3aed">WiFi Portal</a> or any Preyone agent near you.
+        <p style="font-size:12px;color:#64748b;text-align:center;margin:0">
+          Need a voucher or top-up? Visit our <a href="${baseUrl}" style="color:#71ff2f">WiFi Portal</a> or any Preyone agent near you.
         </p>
         ${emailFooter()}
       </div>
@@ -648,31 +662,35 @@ export async function sendPortalSignupConfirmation(
   fullName: string,
   voucherCode: string
 ): Promise<boolean> {
-  const portalUrl = process.env.BASE_URL || 'http://localhost:3000';
+  const baseUrl = process.env.BASE_URL || 'http://localhost:3000';
   return sendMail(
     email,
     'Your Preyone WiFi Session is Ready',
-    `<div style="font-family:Arial,sans-serif;max-width:480px;margin:24px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.1)">
+    `<div style="font-family:'Segoe UI',Arial,sans-serif;max-width:560px;margin:32px auto;background:#0a0a0a;border-radius:16px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.12),0 0 40px rgba(113,255,47,0.08)">
       ${emailHeader('Welcome to Preyone WiFi!')}
-      <div style="padding:24px">
-        <p style="color:#333;line-height:1.6">Hi <strong>${fullName}</strong>,</p>
-        <p style="color:#333;line-height:1.6">Your WiFi session has been activated using voucher <strong style="color:#7c3aed">${voucherCode}</strong>.</p>
+      <div style="padding:24px 32px">
+        <div style="width:64px;height:64px;border-radius:50%;background:linear-gradient(135deg,rgba(113,255,47,0.12),rgba(19,216,255,0.12));display:flex;align-items:center;justify-content:center;margin:0 auto 16px;box-shadow:0 0 20px rgba(113,255,47,0.12)">
+          <span style="font-size:28px">✅</span>
+        </div>
+        <p style="margin:0 0 12px;font-size:15px;color:#cbd5e1;line-height:1.6">Hi <strong style="color:#ffffff">${fullName}</strong>,</p>
+        <p style="margin:0 0 16px;font-size:15px;color:#cbd5e1;line-height:1.6">Your WiFi session has been activated using voucher <strong style="color:#71ff2f">${voucherCode}</strong>.</p>
 
-        <div style="background:#f0fdf4;border-radius:8px;padding:16px;margin:16px 0">
-          <p style="margin:0 0 8px;font-size:13px;font-weight:600;color:#15803d">How to Connect:</p>
-          <ol style="margin:0;padding-left:20px;font-size:13px;color:#166534;line-height:1.8">
+        <div style="background:linear-gradient(135deg,rgba(113,255,47,0.04),rgba(19,216,255,0.04));border-radius:12px;border:1px solid rgba(255,255,255,0.06);padding:16px;margin-bottom:16px">
+          <p style="margin:0 0 8px;font-size:13px;font-weight:600;color:#71ff2f">How to Connect:</p>
+          <ol style="margin:0;padding-left:20px;font-size:13px;color:#94a3b8;line-height:1.8">
             <li>Open your device WiFi settings</li>
-            <li>Select the network <strong>Preyone UltraNet</strong></li>
+            <li>Select the network <strong style="color:#ffffff">Preyone UltraNet</strong></li>
             <li>You will be redirected to the portal &mdash; you're already online!</li>
           </ol>
         </div>
 
-        <p style="font-size:13px;color:#555;text-align:center;margin:16px 0">
-          Reconnect anytime using voucher code: <strong style="font-size:18px;color:#7c3aed">${voucherCode}</strong>
-        </p>
+        <div style="background:rgba(113,255,47,0.08);border:1px solid rgba(113,255,47,0.2);border-radius:12px;padding:16px;margin-bottom:16px;text-align:center">
+          <p style="margin:0 0 6px;font-size:11px;text-transform:uppercase;color:#64748b;letter-spacing:1px;font-weight:600">Your Voucher Code</p>
+          <p style="margin:0;font-size:22px;font-weight:800;letter-spacing:2px;color:#71ff2f;text-shadow:0 0 15px rgba(113,255,47,0.3);font-family:'Courier New',monospace">${voucherCode}</p>
+        </div>
 
-        <p style="font-size:12px;color:#888;text-align:center;margin:16px 0 0">
-          <a href="${portalUrl}" style="color:#7c3aed">Visit WiFi Portal</a> to manage your account, check data usage, or purchase a new voucher.
+        <p style="font-size:12px;color:#64748b;text-align:center;margin:0">
+          <a href="${baseUrl}" style="color:#71ff2f">Visit WiFi Portal</a> to manage your account, check data usage, or purchase a new voucher.
         </p>
         ${emailFooter()}
       </div>
