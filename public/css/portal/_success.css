@@ -136,6 +136,59 @@
   box-shadow: 0 0 40px rgba(113, 255, 47, 0.15);
 }
 
+.voucher-code-row {
+  margin: 1rem auto 0;
+  max-width: 800px;
+  text-align: center;
+}
+
+.voucher-code-label {
+  display: block;
+  font-size: 0.7rem;
+  letter-spacing: 1.5px;
+  color: var(--text-muted);
+  margin-bottom: 0.4rem;
+}
+
+.voucher-code-box {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.75rem;
+  background: rgba(15, 23, 42, 0.85);
+  border: 2px solid #71ff2f;
+  border-radius: 12px;
+  padding: 0.6rem 1.2rem;
+  box-shadow: 0 0 20px rgba(113, 255, 47, 0.25);
+}
+
+.voucher-code-text {
+  font-family: 'Courier New', monospace;
+  font-size: 1.6rem;
+  font-weight: 800;
+  color: #71ff2f;
+  letter-spacing: 3px;
+  user-select: all;
+}
+
+.voucher-copy-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  background: rgba(113, 255, 47, 0.15);
+  border: 1px solid rgba(113, 255, 47, 0.4);
+  border-radius: 8px;
+  color: #71ff2f;
+  padding: 0.4rem 0.8rem;
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 600;
+  transition: background 0.2s;
+}
+
+.voucher-copy-btn:hover {
+  background: rgba(113, 255, 47, 0.3);
+}
+
 .voucher-actions {
   margin-top: 1rem;
   display: flex;

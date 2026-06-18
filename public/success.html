@@ -65,6 +65,18 @@
     <!-- Voucher Card -->
     <div class="voucher-section">
       <div id="voucher-card-container" class="voucher-card-wrapper"></div>
+      <div id="voucher-code-display" class="voucher-code-row" style="display:none">
+        <span class="voucher-code-label">YOUR VOUCHER PIN</span>
+        <div class="voucher-code-box">
+          <span id="voucher-code-text" class="voucher-code-text"></span>
+          <button id="copyVoucherBtn" class="voucher-copy-btn" title="Copy to clipboard">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
+            </svg>
+            <span id="copyLabel">Copy</span>
+          </button>
+        </div>
+      </div>
       <div class="voucher-actions">
         <button id="downloadVoucherBtn" class="btn-primary" style="display:none">DOWNLOAD VOUCHER</button>
       </div>
@@ -324,6 +336,35 @@
         };
 
         renderVoucherToContainer('voucher-card-container', data);
+
+        // ── Voucher code text + copy ──
+        var voucherCodeDisplay = document.getElementById('voucher-code-display');
+        var voucherCodeText = document.getElementById('voucher-code-text');
+        var copyVoucherBtn = document.getElementById('copyVoucherBtn');
+        var copyLabel = document.getElementById('copyLabel');
+        voucherCodeText.textContent = code;
+        voucherCodeDisplay.style.display = '';
+
+        copyVoucherBtn.addEventListener('click', function () {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(code).then(function () {
+              copyLabel.textContent = 'Copied!';
+              setTimeout(function () { copyLabel.textContent = 'Copy'; }, 2000);
+            });
+          } else {
+            // Fallback
+            var ta = document.createElement('textarea');
+            ta.value = code;
+            ta.style.position = 'fixed';
+            ta.style.left = '-9999px';
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand('copy');
+            document.body.removeChild(ta);
+            copyLabel.textContent = 'Copied!';
+            setTimeout(function () { copyLabel.textContent = 'Copy'; }, 2000);
+          }
+        });
 
         var dlBtn = document.getElementById('downloadVoucherBtn');
         dlBtn.style.display = 'inline-flex';
