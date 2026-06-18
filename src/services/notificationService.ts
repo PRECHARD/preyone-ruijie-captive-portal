@@ -462,6 +462,67 @@ export async function sendAdminSignupNotification(
   return true;
 }
 
+// ── Admin rejection: notify staff their account was declined ──────────
+export async function sendAdminRejectedNotification(email: string, fullName: string): Promise<boolean> {
+  return sendMail(
+    email,
+    'Your Preyone Staff Account Application',
+    `
+<div style="font-family:'Segoe UI',Arial,sans-serif;max-width:560px;margin:32px auto;background:#0a0a0a;border-radius:16px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.12)">
+  ${emailHeader('Application Status')}
+
+  <!-- Hero -->
+  <div style="padding:28px 32px 0;text-align:center">
+    <div style="width:80px;height:80px;border-radius:50%;background:linear-gradient(135deg,rgba(255,107,107,0.12),rgba(139,77,255,0.12));display:flex;align-items:center;justify-content:center;margin:0 auto 16px;box-shadow:0 0 30px rgba(255,107,107,0.15)">
+      <span style="font-size:36px">💫</span>
+    </div>
+    <h1 style="margin:0 0 6px;font-size:24px;color:#ffffff;font-weight:800;letter-spacing:-0.5px">Application Update</h1>
+    <p style="margin:0 0 4px;font-size:15px;color:#13d8ff;font-weight:500">Preyone Admin Console</p>
+  </div>
+
+  <!-- Intro -->
+  <div style="padding:24px 32px 0">
+    <p style="margin:0 0 16px;font-size:15px;color:#cbd5e1;line-height:1.7">Hi <strong style="color:#ffffff">${fullName}</strong>,</p>
+    <p style="margin:0 0 16px;font-size:15px;color:#cbd5e1;line-height:1.7">Thank you for your interest in joining the Preyone team. After careful review, we are unable to approve your staff account application at this time.</p>
+  </div>
+
+  <!-- Next Steps -->
+  <div style="margin:0 32px;padding:20px;background:linear-gradient(135deg,rgba(255,107,107,0.04),rgba(139,77,255,0.04));border-radius:12px;border:1px solid rgba(255,255,255,0.06)">
+    <p style="margin:0 0 14px;font-size:14px;color:#ff6b6b;font-weight:700">💡 What you can do</p>
+    <table style="width:100%;border-collapse:collapse">
+      <tr>
+        <td style="padding:6px 0;vertical-align:top;width:28px;color:#13d8ff;font-weight:700;font-size:14px">1.</td>
+        <td style="padding:6px 0;font-size:14px;color:#94a3b8;line-height:1.5"><strong style="color:#ffffff">Contact Support.</strong> If you believe this was a mistake, reach out to our team for clarification.</td>
+      </tr>
+      <tr>
+        <td style="padding:6px 0;vertical-align:top;width:28px;color:#13d8ff;font-weight:700;font-size:14px">2.</td>
+        <td style="padding:6px 0;font-size:14px;color:#94a3b8;line-height:1.5"><strong style="color:#ffffff">Re-apply.</strong> You may submit a new application in the future.</td>
+      </tr>
+    </table>
+  </div>
+
+  <!-- Support -->
+  <div style="padding:20px 32px 0">
+    <div style="padding:16px;background:rgba(139,77,255,0.05);border-radius:8px;border:1px solid rgba(139,77,255,0.1)">
+      <p style="margin:0 0 8px;font-size:13px;color:#8b4dff;font-weight:600">Need more information?</p>
+      <p style="margin:0;font-size:13px;color:#94a3b8;line-height:1.5">Please contact our support desk at <a href="mailto:admin@preyone.com" style="color:#71ff2f;text-decoration:underline">admin@preyone.com</a> if you have any questions.</p>
+    </div>
+  </div>
+
+  <!-- Sign-off -->
+  <div style="padding:24px 32px 0;text-align:center">
+    <p style="margin:0 0 4px;font-size:14px;color:#cbd5e1;line-height:1.6">We appreciate your understanding and wish you all the best.</p>
+    <p style="margin:16px 0 0;font-size:14px;color:#ffffff;font-weight:600">Best regards,</p>
+    <p style="margin:4px 0 0;font-size:14px;color:#71ff2f;font-weight:700">The Preyone Team</p>
+    <p style="margin:4px 0 0"><a href="https://admin.preyone.com" style="font-size:13px;color:#13d8ff;text-decoration:none">admin.preyone.com</a></p>
+  </div>
+
+  ${emailFooter()}
+</div>`,
+    'Preyone', 'info@preyone.com'
+  );
+}
+
 // ── Password reset email ───────────────────────────────────────────────
 export async function sendPasswordResetEmail(email: string, resetToken: string, fullName: string): Promise<boolean> {
   const baseUrl = process.env.ADMIN_BASE_URL || process.env.BASE_URL || 'https://admin.preyone.com';

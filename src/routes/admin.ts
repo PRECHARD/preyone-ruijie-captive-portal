@@ -3,7 +3,7 @@ import crypto from 'crypto';
 import { pool } from '../db/pool';
 import { requireAdminAuth, requireRole } from '../middleware/adminAuth';
 import { recordAuditLog } from './adminAuth';
-import { sendAdminApprovedNotification } from '../services/notificationService';
+import { sendAdminApprovedNotification, sendAdminRejectedNotification } from '../services/notificationService';
 import ExcelJS from 'exceljs';
 import path from 'path';
 import fs from 'fs';
@@ -704,11 +704,12 @@ adminRouter.post('/staff-approve/:id', requireRole('CEO', 'Manager'), async (req
 adminRouter.post('/staff-reject/:id', requireRole('CEO', 'Manager'), async (req: Request, res: Response) => {
   const { id } = req.params;
   const { rows } = await pool.query(
-    `DELETE FROM admin_users WHERE id = $1 AND role = 'Staff' AND approved = FALSE RETURNING id, full_name`,
+    `DELETE FROM admin_users WHERE id = $1 AND role = 'Staff' AND approved = FALSE RETURNING id, full_name, email`,
     [id]
   );
   if (rows.length === 0) { res.status(404).json({ error: 'Pending staff account not found' }); return; }
   await recordAuditLog(req.adminUser!.id, req.adminUser!.fullName, 'staff_reject', 'admin_user', id, `Rejected ${rows[0].full_name}`);
+  sendAdminRejectedNotification(rows[0].email, rows[0].full_name);
   res.json({ message: 'Staff account rejected and removed' });
 });
 
