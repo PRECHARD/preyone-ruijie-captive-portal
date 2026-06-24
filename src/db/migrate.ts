@@ -343,23 +343,6 @@ const SQL = `
   ALTER TABLE sales ADD COLUMN IF NOT EXISTS handover_id UUID REFERENCES cash_handovers(id);
   ALTER TABLE sales ADD COLUMN IF NOT EXISTS handover_status TEXT NOT NULL DEFAULT 'pending' CHECK (handover_status IN ('pending', 'handed_over'));
 
-  -- Seed mock AP devices on first run (idempotent)
-  INSERT INTO ap_devices (name, model, mac_address, ip_address, location, status, firmware_version, uptime_seconds, clients_count, last_seen)
-  VALUES
-    ('RAP-6262G-Lobby', 'Reyee RAP6262G', 'AA:BB:CC:DD:EE:01', '192.168.1.10', 'Main Lobby', 'online', 'v2.1.3', 864000, 12, NOW()),
-    ('RAP-6262G-Hall', 'Reyee RAP6262G', 'AA:BB:CC:DD:EE:02', '192.168.1.11', 'Conference Hall', 'online', 'v2.1.3', 432000, 8, NOW()),
-    ('RAP-6262G-Cafe', 'Reyee RAP6262G', 'AA:BB:CC:DD:EE:03', '192.168.1.12', 'Cafeteria', 'warning', 'v2.0.9', 72000, 3, NOW()),
-    ('RAP-6262G-Outdoor', 'Reyee RAP6262G', 'AA:BB:CC:DD:EE:04', '192.168.1.13', 'Outdoor Patio', 'online', 'v2.1.3', 3600, 2, NOW())
-  ON CONFLICT (mac_address) DO NOTHING;
-
-  INSERT INTO alerts (type, severity, title, message, target_type, target_id)
-  SELECT 'ap_warning', 'warning', 'Firmware Update Available', 'RAP-6262G-Cafe is running v2.0.9. Latest is v2.1.3.', 'ap_device', (SELECT id FROM ap_devices WHERE mac_address = 'AA:BB:CC:DD:EE:03' LIMIT 1)
-  WHERE NOT EXISTS (SELECT 1 FROM alerts WHERE type = 'ap_warning' AND title LIKE '%Firmware%');
-
-  INSERT INTO alerts (type, severity, title, message, target_type, target_id)
-  SELECT 'traffic_spike', 'info', 'Traffic Spike Detected', 'Bandwidth usage on Lobby AP increased 340% in the last hour.', 'ap_device', (SELECT id FROM ap_devices WHERE mac_address = 'AA:BB:CC:DD:EE:01' LIMIT 1)
-  WHERE NOT EXISTS (SELECT 1 FROM alerts WHERE type = 'traffic_spike' AND title LIKE '%Traffic Spike%');
-
   -- ── CEO-only features: Retention Policies ──
   CREATE TABLE IF NOT EXISTS retention_policies (
     id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),

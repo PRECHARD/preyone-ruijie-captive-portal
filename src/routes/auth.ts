@@ -6,6 +6,7 @@ import jwt from 'jsonwebtoken';
 import { v4 as uuidv4 } from 'uuid';
 import { pool } from '../db/pool';
 import { buildRuijieSuccessUrl, WISPrSessionConfig } from '../utils/redirect';
+import { transformToWISPrProfile } from '../utils/wisprTransformer';
 import { sendPortalAccountCreated, sendPortalSignupConfirmation, sendPortalEmailVerification, sendPortalForgotPassword } from '../services/notificationService';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'preyone-jwt-secret-change-in-production';
@@ -97,6 +98,26 @@ authRouter.post('/signup', signupLimiter, signupValidators, async (req: Request,
       `INSERT INTO voucher_redemptions (voucher_id, voucher_code, user_id, full_name, mac_address, ip_address) VALUES ($1, $2, $3, $4, $5, $6::inet)`,
       [v.id, voucherCode.toUpperCase(), userRows[0].id, fullName, macAddress, ipAddress]
     );
+
+    // Create WISPr profile for data tracking
+    if (macAddress) {
+      const wisprProfile = transformToWISPrProfile({
+        macAddress,
+        packageData: {
+          data_limit_gb: v.data_limit_gb,
+          is_uncapped: v.is_uncapped,
+          bandwidth_mbps_up: v.bandwidth_mbps_up,
+          bandwidth_mbps_down: v.bandwidth_mbps_down,
+          duration_min: sessionDurationMin,
+        },
+      });
+      await client.query(
+        `INSERT INTO wispr_profiles (user_id, mac_address, bandwidth_up_kbps, bandwidth_down_kbps, data_quota_bytes, is_uncapped, session_end)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [userRows[0].id, wisprProfile.macAddress, wisprProfile.bandwidthUpKbps, wisprProfile.bandwidthDownKbps,
+         wisprProfile.dataQuotaBytes, wisprProfile.isUncapped, sessionExpires]
+      );
+    }
 
     await client.query(
       `INSERT INTO access_log (user_id, event, mac_address, ip_address, detail) VALUES ($1, 'login', $2, $3::inet, $4)`,
