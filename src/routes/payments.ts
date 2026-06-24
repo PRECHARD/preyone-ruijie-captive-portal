@@ -5,6 +5,7 @@ import { pool } from '../db/pool';
 import { initiateEcoCashPayment, decryptResponse, verifyPaymentStatus } from '../services/pesepayService';
 import { transformToWISPrProfile } from '../utils/wisprTransformer';
 import { bypassRuijieFirewall } from '../services/ruijieService';
+import { buildRuijieSuccessUrl } from '../utils/redirect';
 
 export const paymentsRouter = Router();
 
@@ -106,14 +107,20 @@ paymentsRouter.post('/initiate', async (req: Request, res: Response) => {
 
     await client.query('COMMIT');
 
-    // 4. Initiate Pesepay EcoCash payment
+    // 4. Build returnUrl preserved through callback
+    const callbackUrl = new URL('/api/payments/callback', process.env.BASE_URL || 'https://portal.preyone.com');
+    callbackUrl.searchParams.set('ref', merchantReference);
+    if (macAddress) callbackUrl.searchParams.set('mac', macAddress);
+
     const pesepayResponse = await initiateEcoCashPayment({
       amount,
       currency,
       phone,
+      fullName,
+      email: `${phone.replace(/\D/g, '')}@preyone.com`,
       reference: merchantReference,
       description: `${displayName} - ${billingPeriod} package`,
-      returnUrl: `${process.env.BASE_URL || 'https://portal.preyone.com'}/api/payments/callback?ref=${merchantReference}`,
+      returnUrl: callbackUrl.toString(),
     });
 
     if (!pesepayResponse.success) {
@@ -432,20 +439,19 @@ paymentsRouter.get('/callback', async (req: Request, res: Response) => {
 
     await client.query('COMMIT');
 
-    const redirectParams = new URLSearchParams();
-    redirectParams.set('token', sessionToken);
-    redirectParams.set('expires', sessionExpires.toISOString());
-    if (voucherCode) redirectParams.set('voucher', voucherCode);
-    if (packageRows.length > 0) {
-      redirectParams.set('bwUp', String(packageRows[0].bandwidth_mbps_up));
-      redirectParams.set('bwDown', String(packageRows[0].bandwidth_mbps_down));
-      if (packageRows[0].data_limit_gb != null) redirectParams.set('dataLimit', String(packageRows[0].data_limit_gb));
-      redirectParams.set('uncapped', String(packageRows[0].is_uncapped));
-      redirectParams.set('dur', String(packageRows[0].duration_min));
-      redirectParams.set('pkg', packageRows[0].tier_name);
-    }
+    const successUrl = buildRuijieSuccessUrl(req, {
+      sessionToken,
+      macAddress: userRows.length > 0 ? userRows[0].mac_address : undefined,
+      packageData: packageRows.length > 0 ? {
+        data_limit_gb: packageRows[0].data_limit_gb,
+        is_uncapped: packageRows[0].is_uncapped,
+        bandwidth_mbps_up: packageRows[0].bandwidth_mbps_up,
+        bandwidth_mbps_down: packageRows[0].bandwidth_mbps_down,
+        duration_min: packageRows[0].duration_min,
+      } : undefined,
+    });
 
-    res.redirect(`/success.html?${redirectParams.toString()}`);
+    res.redirect(successUrl);
   } catch (error) {
     await client.query('ROLLBACK');
     console.error('Payment callback error:', error);

@@ -1,4 +1,6 @@
-import 'dotenv/config';
+import dotenv from 'dotenv';
+import path from 'path';
+dotenv.config({ path: path.resolve(__dirname, '../.env') });
 import 'express-async-errors';
 import express from 'express';
 import helmet from 'helmet';
@@ -6,13 +8,13 @@ import cors from 'cors';
 import compression from 'compression';
 import cookieParser from 'cookie-parser';
 import morgan from 'morgan';
-import path from 'path';
 import fs from 'fs';
 
 import { authRouter } from './routes/auth';
 import { adminRouter } from './routes/admin';
 import { adminAuthRouter } from './routes/adminAuth';
 import { paymentsRouter } from './routes/payments';
+import { gatewayRouter } from './routes/gateway';
 import { errorHandler } from './middleware/errorHandler';
 import { maintenanceCheck } from './middleware/maintenanceMode';
 import { scheduleSessionCleanup } from './services/sessionCleanup';
@@ -20,6 +22,8 @@ import { scheduleAccessLogCleanup } from './services/accessLogCleanup';
 
 const app = express();
 const PORT = process.env.PORT ?? 3000;
+
+app.set('trust proxy', 1);
 
 app.use(
   helmet({
@@ -41,6 +45,9 @@ app.use(morgan('combined'));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
+
+// ── Gateway routes (work on any host, registered before subdomain routing) ──
+app.use(gatewayRouter);
 
 // ── Subdomain-based routing ──
 app.use((req, res, next) => {
@@ -76,15 +83,10 @@ app.use((req, res, next) => {
     });
   }
 
-  // localhost / 127.0.0.1 → captive portal at root
-  if (host === 'localhost' || host === '127.0.0.1') {
-    return express.static(path.join(__dirname, '..', 'public'))(req, res, () => {
-      res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
-    });
-  }
-
-  // Fallback for unknown hosts
-  next();
+  // Any IP or unknown host → captive portal (with proper static file serving)
+  return express.static(path.join(__dirname, '..', 'public'))(req, res, () => {
+    res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
+  });
 });
 
 // Maintenance mode check (blocks portal routes, skips admin & static)

@@ -45,6 +45,44 @@ export async function sendEmailReceipt(notification: PaymentNotification): Promi
     ? 'Unlimited'
     : notification.dataLimitGb ? `${notification.dataLimitGb} GB` : '—';
 
+  const durShort = notification.durationMin < 60
+    ? notification.durationMin + 'min'
+    : (notification.durationMin % 60 === 0
+      ? Math.floor(notification.durationMin / 60) + 'h'
+      : Math.floor(notification.durationMin / 60) + 'h ' + (notification.durationMin % 60) + 'min');
+
+  const validUntil = notification.sessionExpiresAt.toLocaleDateString('en-ZW', {
+    month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit'
+  });
+
+  // Generate voucher card PNG inline
+  let voucherAttachment: { filename: string; content: Buffer; cid: string } | null = null;
+  try {
+    const { drawVoucherPng } = await import('./voucherPngRenderer');
+    const pngBuffer = await drawVoucherPng({
+      code: notification.voucherCode,
+      packageTier: notification.packageTier,
+      priceAmount: notification.amount,
+      currency: notification.currency,
+      durationMin: notification.durationMin,
+      dataLimitGb: notification.dataLimitGb,
+      isUncapped: notification.isUncapped,
+      bandwidthDown: notification.bandwidthDown,
+      bandwidthUp: notification.bandwidthUp,
+      issuedBy: 'Preyone Enterprises',
+      validUntil,
+      durShort,
+      dataText,
+    });
+    voucherAttachment = {
+      filename: 'preyone-voucher-' + notification.voucherCode + '.png',
+      content: pngBuffer,
+      cid: 'voucher-card-' + notification.voucherCode.replace(/[^A-Z0-9]/g, '') + '@preyone.com',
+    };
+  } catch (err) {
+    console.log('[NOTIFICATION] Voucher PNG generation skipped:', (err as Error).message);
+  }
+
   const html = `
 <!DOCTYPE html>
 <html>
@@ -54,12 +92,13 @@ export async function sendEmailReceipt(notification: PaymentNotification): Promi
     ${emailHeader('Payment Confirmed')}
     <div style="padding:24px 32px">
       <p style="margin:0 0 16px;font-size:15px;color:#cbd5e1;line-height:1.6">Hi <strong style="color:#ffffff">${notification.fullName}</strong>,</p>
-      <p style="margin:0 0 16px;font-size:15px;color:#cbd5e1;line-height:1.6">Your payment was successful. Here are your connection details:</p>
+      <p style="margin:0 0 16px;font-size:15px;color:#cbd5e1;line-height:1.6">Your payment was successful. Here are is your Voucher and its details:</p>
+      ${voucherAttachment ? `<div style="text-align:center;margin-bottom:20px"><img src="cid:${voucherAttachment.cid}" alt="Preyone Voucher" style="max-width:100%;height:auto;border-radius:12px;display:block;margin:0 auto"></div>` : `
       <div style="background:linear-gradient(135deg,rgba(113,255,47,0.08),rgba(19,216,255,0.08));border:1px solid rgba(113,255,47,0.2);border-radius:12px;padding:20px;margin-bottom:20px;text-align:center">
         <p style="margin:0 0 6px;font-size:11px;text-transform:uppercase;color:#64748b;letter-spacing:1.5px;font-weight:600">Your Voucher Code</p>
         <p style="margin:0;font-size:28px;font-weight:800;letter-spacing:3px;color:#71ff2f;text-shadow:0 0 20px rgba(113,255,47,0.3);font-family:'Courier New',monospace">${notification.voucherCode}</p>
         <p style="margin:10px 0 0;font-size:12px;color:#64748b">Use this code to reconnect on any device</p>
-      </div>
+      </div>`}
       <table style="width:100%;border-collapse:collapse">
         <tr><td style="padding:8px 0;color:#64748b;font-size:14px;border-bottom:1px solid rgba(255,255,255,0.04)">Package</td><td style="padding:8px 0;font-size:14px;font-weight:600;text-align:right;color:#ffffff;border-bottom:1px solid rgba(255,255,255,0.04)">${notification.packageTier}</td></tr>
         <tr><td style="padding:8px 0;color:#64748b;font-size:14px;border-bottom:1px solid rgba(255,255,255,0.04)">Speed</td><td style="padding:8px 0;font-size:14px;font-weight:600;text-align:right;color:#ffffff;border-bottom:1px solid rgba(255,255,255,0.04)">${notification.bandwidthDown} Mbps</td></tr>
@@ -73,7 +112,8 @@ export async function sendEmailReceipt(notification: PaymentNotification): Promi
 </body>
 </html>`;
 
-  return sendMail(notification.email, `Preyone UltraNet WiFi — Voucher ${notification.voucherCode}`, html, 'Preyone UltraNet WiFi');
+  const attachments = voucherAttachment ? [voucherAttachment] : undefined;
+  return sendMail(notification.email, `Preyone UltraNet WiFi — Voucher ${notification.voucherCode}`, html, 'Preyone UltraNet WiFi', undefined, attachments);
 }
 
 export async function sendSmsReceipt(notification: PaymentNotification): Promise<boolean> {
@@ -162,7 +202,7 @@ function emailFooter(): string {
 }
 
 // ── Generic email helper ──────────────────────────────────────────────
-async function sendMail(to: string, subject: string, html: string, fromName?: string, fromEmail?: string): Promise<boolean> {
+async function sendMail(to: string, subject: string, html: string, fromName?: string, fromEmail?: string, attachments?: Array<{ filename: string; content: Buffer; cid: string }>): Promise<boolean> {
   const t = getTransporter();
   if (!t) {
     console.log('[NOTIFICATION] Email not sent (SMTP not configured). To:', to);
@@ -171,7 +211,7 @@ async function sendMail(to: string, subject: string, html: string, fromName?: st
   const email = fromEmail || process.env.SMTP_FROM || 'info@preyone.com';
   const from = fromName ? `"${fromName}" <${email}>` : email;
   try {
-    await t.sendMail({ from, to, subject, html });
+    await t.sendMail({ from, to, subject, html, attachments });
     console.log('[NOTIFICATION] Email sent to', to, '-', subject);
     return true;
   } catch (err) {

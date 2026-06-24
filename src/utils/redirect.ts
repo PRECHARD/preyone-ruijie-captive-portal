@@ -2,12 +2,12 @@ import { Request } from 'express';
 import {
   transformToWISPrProfile,
   generateWISPrAccessAccept,
-  buildRuijieWISPrCallbackUrl,
 } from './wisprTransformer';
 
 export interface WISPrSessionConfig {
   sessionToken: string;
   macAddress?: string;
+  originalUrl?: string;
   packageData?: {
     data_limit_gb: number | null;
     is_uncapped: boolean;
@@ -27,13 +27,13 @@ export function isSafeSameOriginUrl(rawUrl: string, origin: string): boolean {
 }
 
 /**
- * Build Ruijie success URL with optional WISPr bandwidth configuration
+ * Build success URL with optional WISPr bandwidth configuration
  * If package data is provided, includes WISPr parameters for automatic bandwidth and quota setup
  */
 export function buildRuijieSuccessUrl(req: Request, config: WISPrSessionConfig): string {
   const base = process.env.RUIJIE_SUCCESS_URL;
-  
-  // Get the base success URL
+  const originalUrl = config.originalUrl || (req.query.url as string);
+
   let url: URL;
   if (base) {
     try {
@@ -43,7 +43,6 @@ export function buildRuijieSuccessUrl(req: Request, config: WISPrSessionConfig):
       url = new URL('/success.html', `${req.protocol}://${req.get('host')}`);
     }
   } else {
-    const originalUrl = req.query.url as string | undefined;
     const origin = `${req.protocol}://${req.get('host')}`;
     if (originalUrl && isSafeSameOriginUrl(originalUrl, origin)) {
       url = new URL(originalUrl, origin);
@@ -52,10 +51,8 @@ export function buildRuijieSuccessUrl(req: Request, config: WISPrSessionConfig):
     }
   }
 
-  // Add session token
   url.searchParams.set('token', config.sessionToken);
 
-  // If package data is provided, add WISPr parameters
   if (config.packageData && config.macAddress) {
     const wisprProfile = transformToWISPrProfile({
       macAddress: config.macAddress,
@@ -64,7 +61,6 @@ export function buildRuijieSuccessUrl(req: Request, config: WISPrSessionConfig):
 
     const wisprParams = generateWISPrAccessAccept(wisprProfile, config.sessionToken);
 
-    // Add WISPr parameters to URL
     url.searchParams.append('WISPr-Bandwidth-Max-Up', wisprParams.maxBandwidthUp.toString());
     url.searchParams.append('WISPr-Bandwidth-Max-Down', wisprParams.maxBandwidthDown.toString());
 
@@ -75,7 +71,6 @@ export function buildRuijieSuccessUrl(req: Request, config: WISPrSessionConfig):
     url.searchParams.append('WISPr-Session-Timeout', wisprParams.sessionTimeout.toString());
     url.searchParams.append('Billing-Type', wisprParams.billingType);
 
-    // Add device MAC for tracking
     if (config.macAddress) {
       url.searchParams.append('Device-MAC', config.macAddress);
     }

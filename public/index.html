@@ -6,6 +6,16 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   
   <title>Preyone UltraNet Wi‑Fi</title>
+  <style>
+    .body-loading{position:fixed;inset:0;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#000;color:#fff;transition:opacity .4s ease,visibility .4s ease}
+    .body-loading.is-hidden{opacity:0;visibility:hidden;pointer-events:none}
+    .loading-spinner{width:80px;height:80px;display:flex;align-items:center;justify-content:center;border-radius:50%;border:3px solid rgba(255,255,255,.1);border-top-color:#00d4ff;animation:spin .8s linear infinite;margin-bottom:1.5rem}
+    .loading-spinner-inner{width:60px;height:60px;display:flex;align-items:center;justify-content:center}
+    .loading-spinner-inner img{width:40px;height:40px;animation:pulse 1.5s ease-in-out infinite}
+    .loading-text{font-family:'Montserrat',sans-serif;font-size:1.125rem;color:#94a3b8;letter-spacing:.05em;animation:pulse 1.5s ease-in-out infinite}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    @keyframes pulse{0%,100%{opacity:.6}50%{opacity:1}}
+  </style>
   <link rel="icon" type="image/png" href="/favicon/favicon-96x96.png" sizes="96x96" />
   <link rel="icon" type="image/svg+xml" href="/favicon/favicon.svg" />
   <link rel="shortcut icon" href="/favicon/favicon.ico" />
@@ -63,6 +73,10 @@
         </div>
       </div>
 
+      <div class="hero-btn-group">
+        <button type="button" class="hero-connect-btn" id="connectNowBtn">Connect Now</button>
+      </div>
+
       <aside class="hero-card">
         <div class="glass-card glass-card--hero">
           <div class="brand">
@@ -84,9 +98,6 @@
           </form>
         </div>
       </aside>
-      <div class="hero-btn-group">
-        <button type="button" class="hero-connect-btn" id="connectNowBtn">Connect Now</button>
-      </div>
     </section>
 
     <section class="packages-section" aria-labelledby="packages-heading">
@@ -310,6 +321,7 @@
     </footer>
     
   </div>
+  <script>(function(){var e=document.getElementById('bodyLoading');if(!e)return;var h=function(){e.classList.add('is-hidden')};if(document.readyState==='complete')h();else window.addEventListener('load',h);setTimeout(h,8e3)})();</script>
   <script src="/js/portal.js"></script>
 </body>
 

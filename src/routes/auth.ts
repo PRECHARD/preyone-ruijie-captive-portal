@@ -116,6 +116,7 @@ authRouter.post('/signup', signupLimiter, signupValidators, async (req: Request,
     const redirectConfig: WISPrSessionConfig = {
       sessionToken,
       macAddress: macAddress || undefined,
+      originalUrl: (req.query.url as string) || undefined,
       packageData: {
         data_limit_gb: v.data_limit_gb,
         is_uncapped: v.is_uncapped,

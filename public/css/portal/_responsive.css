@@ -3,6 +3,21 @@
     grid-template-columns: 1fr;
   }
 
+  .hero-section > .hero-copy {
+    grid-column: 1;
+    grid-row: auto;
+  }
+
+  .hero-section > .hero-btn-group {
+    grid-column: 1;
+    grid-row: auto;
+  }
+
+  .hero-section > .hero-card {
+    grid-column: 1;
+    grid-row: auto;
+  }
+
   .hero-copy {
     text-align: center;
   }

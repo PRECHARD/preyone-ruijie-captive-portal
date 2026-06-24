@@ -285,6 +285,19 @@ const SQL = `
   CREATE INDEX IF NOT EXISTS idx_ap_bw_snapshots_ap_id ON ap_bandwidth_snapshots (ap_id);
   CREATE INDEX IF NOT EXISTS idx_ap_bw_snapshots_recorded_at ON ap_bandwidth_snapshots (recorded_at);
 
+  -- ── Gateway Heartbeats (EG105G-P health check tracking) ──
+  CREATE TABLE IF NOT EXISTS gateway_heartbeats (
+    id              BIGSERIAL PRIMARY KEY,
+    gw_sn           TEXT UNIQUE NOT NULL,
+    gw_id           TEXT,
+    dev_model       TEXT,
+    dev_softversion TEXT,
+    sys_uptime      TEXT,
+    ip_address      INET,
+    last_seen       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    first_seen      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+
   -- Ensure package_tier column on vouchers
   ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS package_tier TEXT;
 
@@ -336,13 +349,8 @@ const SQL = `
     ('RAP-6262G-Lobby', 'Reyee RAP6262G', 'AA:BB:CC:DD:EE:01', '192.168.1.10', 'Main Lobby', 'online', 'v2.1.3', 864000, 12, NOW()),
     ('RAP-6262G-Hall', 'Reyee RAP6262G', 'AA:BB:CC:DD:EE:02', '192.168.1.11', 'Conference Hall', 'online', 'v2.1.3', 432000, 8, NOW()),
     ('RAP-6262G-Cafe', 'Reyee RAP6262G', 'AA:BB:CC:DD:EE:03', '192.168.1.12', 'Cafeteria', 'warning', 'v2.0.9', 72000, 3, NOW()),
-    ('RAP-6262G-Outdoor', 'Reyee RAP6262G', 'AA:BB:CC:DD:EE:04', '192.168.1.13', 'Outdoor Patio', 'offline', 'v2.1.0', 0, 0, NOW() - INTERVAL '2 hours')
+    ('RAP-6262G-Outdoor', 'Reyee RAP6262G', 'AA:BB:CC:DD:EE:04', '192.168.1.13', 'Outdoor Patio', 'online', 'v2.1.3', 3600, 2, NOW())
   ON CONFLICT (mac_address) DO NOTHING;
-
-  -- Seed mock alerts (idempotent)
-  INSERT INTO alerts (type, severity, title, message, target_type, target_id)
-  SELECT 'ap_down', 'critical', 'AP Offline: Outdoor Patio', 'RAP-6262G-Outdoor has been offline for 2+ hours. No clients connected.', 'ap_device', (SELECT id FROM ap_devices WHERE mac_address = 'AA:BB:CC:DD:EE:04' LIMIT 1)
-  WHERE NOT EXISTS (SELECT 1 FROM alerts WHERE type = 'ap_down' AND title LIKE '%Outdoor%');
 
   INSERT INTO alerts (type, severity, title, message, target_type, target_id)
   SELECT 'ap_warning', 'warning', 'Firmware Update Available', 'RAP-6262G-Cafe is running v2.0.9. Latest is v2.1.3.', 'ap_device', (SELECT id FROM ap_devices WHERE mac_address = 'AA:BB:CC:DD:EE:03' LIMIT 1)
