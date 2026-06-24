@@ -27,11 +27,6 @@ export default function Alerts() {
     setTimeout(() => setAckMsg(''), 3000);
   };
 
-  const seedMock = async () => {
-    await api.post('/alerts/seed-mock');
-    fetch();
-  };
-
   if (loading) return <Spinner />;
   if (!data || !data.all?.length) return <EmptyState icon="🔔" title="No Alerts" message="All clear — no alerts to display." />;
 
@@ -46,7 +41,6 @@ export default function Alerts() {
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           {ackMsg && <span style={{ color: 'var(--green)', fontSize: 13, alignSelf: 'center' }}>{ackMsg}</span>}
-          <button className="btn-secondary" onClick={seedMock}>Seed Mock Alerts</button>
         </div>
       </div>
 

@@ -92,3 +92,6 @@ temp/
 # Never commit actual environment configs with real secrets
 config/production.js
 config/staging.js
+
+# ZIP backup
+*.zip

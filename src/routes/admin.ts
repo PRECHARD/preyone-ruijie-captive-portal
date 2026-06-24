@@ -1216,31 +1216,6 @@ adminRouter.post('/alerts/:id/acknowledge', async (req: Request, res: Response) 
   res.json(rows[0]);
 });
 
-adminRouter.post('/alerts/seed-mock', async (req: Request, res: Response) => {
-  const types = ['ap_down', 'traffic_spike', 'abuse_detected', 'voucher_abuse', 'ap_warning', 'system'];
-  const severities = ['info', 'warning', 'critical'];
-  const titles = [
-    'AP Offline Detected',
-    'Traffic Anomaly',
-    'Multiple Failed Logins',
-    'Voucher Code Brute Force',
-    'High Memory Usage',
-    'Bandwidth Cap Approaching',
-  ];
-  const inserted: any[] = [];
-  for (let i = 0; i < 3; i++) {
-    const type = types[Math.floor(Math.random() * types.length)];
-    const severity = severities[Math.floor(Math.random() * severities.length)];
-    const title = titles[Math.floor(Math.random() * titles.length)];
-    const { rows } = await pool.query(
-      `INSERT INTO alerts (type, severity, title, message) VALUES ($1, $2, $3, $4) RETURNING *`,
-      [type, severity, title, `Mock alert generated at ${new Date().toISOString()}`]
-    );
-    inserted.push(rows[0]);
-  }
-  res.status(201).json({ message: `${inserted.length} mock alert(s) created`, alerts: inserted });
-});
-
 // ═══════════════════════════════════════════════════════
 // NEW: MAC Blacklist / Whitelist Management
 // ═══════════════════════════════════════════════════════
@@ -1989,42 +1964,6 @@ adminRouter.delete('/packages/:id', requireRole('CEO'), async (req: Request, res
   if (rows.length === 0) { res.status(404).json({ error: 'Package not found' }); return; }
   await recordAuditLog(req.adminUser!.id, req.adminUser!.fullName, 'package_delete', 'package', id, `Deleted package ${rows[0].tier_name}`);
   res.json({ message: `Package ${rows[0].tier_name} deleted` });
-});
-
-// ═══════════════════════════════════════════════════════
-// CEO: AP Device Management (CRUD)
-// ═══════════════════════════════════════════════════════
-
-adminRouter.post('/ap-devices', requireRole('CEO'), async (req: Request, res: Response) => {
-  const { name, model, macAddress, ipAddress, location } = req.body as any;
-  if (!name || !macAddress) { res.status(422).json({ error: 'name and macAddress required' }); return; }
-  const { rows } = await pool.query(
-    `INSERT INTO ap_devices (name, model, mac_address, ip_address, location, status)
-     VALUES ($1,$2,$3,$4,$5,'offline') RETURNING *`,
-    [name, model || null, macAddress.toUpperCase(), ipAddress || null, location || null]
-  );
-  await recordAuditLog(req.adminUser!.id, req.adminUser!.fullName, 'ap_device_create', 'ap_device', rows[0].id, `Added AP ${name}`);
-  res.status(201).json(rows[0]);
-});
-
-adminRouter.put('/ap-devices/:id', requireRole('CEO'), async (req: Request, res: Response) => {
-  const { id } = req.params;
-  const { name, model, macAddress, ipAddress, location, status } = req.body as any;
-  const { rows } = await pool.query(
-    `UPDATE ap_devices SET name = COALESCE($1, name), model = COALESCE($2, model), mac_address = COALESCE($3, mac_address), ip_address = COALESCE($4, ip_address), location = COALESCE($5, location), status = COALESCE($6, status) WHERE id = $7 RETURNING *`,
-    [name || null, model || null, macAddress?.toUpperCase() || null, ipAddress || null, location || null, status || null, id]
-  );
-  if (rows.length === 0) { res.status(404).json({ error: 'AP device not found' }); return; }
-  await recordAuditLog(req.adminUser!.id, req.adminUser!.fullName, 'ap_device_update', 'ap_device', id, `Updated AP ${rows[0].name}`);
-  res.json(rows[0]);
-});
-
-adminRouter.delete('/ap-devices/:id', requireRole('CEO'), async (req: Request, res: Response) => {
-  const { id } = req.params;
-  const { rows } = await pool.query('DELETE FROM ap_devices WHERE id = $1 RETURNING name', [id]);
-  if (rows.length === 0) { res.status(404).json({ error: 'AP device not found' }); return; }
-  await recordAuditLog(req.adminUser!.id, req.adminUser!.fullName, 'ap_device_delete', 'ap_device', id, `Deleted AP ${rows[0].name}`);
-  res.json({ message: `AP ${rows[0].name} deleted` });
 });
 
 // ═══════════════════════════════════════════════════════

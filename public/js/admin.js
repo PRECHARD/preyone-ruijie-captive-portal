@@ -3107,18 +3107,6 @@
     });
   }
 
-  var seedBtn = $('seedAlertsBtn');
-  if (seedBtn) {
-    seedBtn.addEventListener('click', function () {
-      api('/api/admin/alerts/seed-mock', { method: 'POST' }).then(function (d) {
-        toast(d.message || 'Mock alerts generated', 'success');
-        loadAlerts();
-      }).catch(function (err) {
-        toast(err.error || 'Failed to generate alerts', 'error');
-      });
-    });
-  }
-
   /* ── AP Device Management (CEO) ── */
   window.editApDevice = function (id, name, model, mac, ip, location) {
     $('apName').value = name;
