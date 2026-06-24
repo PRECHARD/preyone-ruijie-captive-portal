@@ -31,8 +31,8 @@ const STRONG_PASSWORD_RE = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=
 
 const signupValidators = [
   body('fullName').trim().notEmpty().withMessage('Full name is required'),
-  body('phone').trim().matches(ZW_PHONE_RE).withMessage('Valid Zimbabwean phone number required (+263 7XX XXX XXX)'),
-  body('email').trim().isEmail().withMessage('Valid email address is required'),
+  body('phone').trim().optional({ values: 'falsy' }).matches(ZW_PHONE_RE).withMessage('Valid Zimbabwean phone number required (+263 7XX XXX XXX)'),
+  body('email').trim().optional({ values: 'falsy' }).isEmail().withMessage('Valid email address is required'),
   body('voucherCode').trim().notEmpty().withMessage('Voucher code is required'),
   body('acceptedTos').custom((value) => value === true).withMessage('You must accept the terms'),
   body('password').optional({ values: 'falsy' }).matches(STRONG_PASSWORD_RE).withMessage('Password must be at least 8 characters with uppercase, lowercase, number, and special character'),

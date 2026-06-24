@@ -182,7 +182,18 @@
         var loadingEl = document.getElementById('bodyLoading');
         if (loadingEl) loadingEl.classList.add('hidden');
         if (json.errors && Array.isArray(json.errors)) {
-          json.errors.forEach(function (err) { setFieldError(err.path || err.param, err.msg); });
+          var hasField = false;
+          json.errors.forEach(function (err) {
+            var fieldName = err.path || err.param;
+            setFieldError(fieldName, err.msg);
+            if (document.getElementById('err-' + fieldName)) {
+              hasField = true;
+            }
+          });
+          if (!hasField && errorEl) {
+            errorEl.textContent = json.errors[0].msg || 'Validation failed.';
+            errorEl.classList.remove('hidden');
+          }
         } else {
           if (errorEl) { errorEl.textContent = json.error || 'Something went wrong.'; errorEl.classList.remove('hidden'); }
         }
