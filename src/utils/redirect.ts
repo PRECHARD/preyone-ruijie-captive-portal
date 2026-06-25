@@ -8,6 +8,7 @@ export interface WISPrSessionConfig {
   sessionToken: string;
   macAddress?: string;
   originalUrl?: string;
+  nasip?: string;
   packageData?: {
     data_limit_gb: number | null;
     is_uncapped: boolean;

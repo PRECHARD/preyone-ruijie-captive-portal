@@ -31,8 +31,8 @@ const STRONG_PASSWORD_RE = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=
 
 const signupValidators = [
   body('fullName').trim().notEmpty().withMessage('Full name is required'),
-  body('phone').trim().optional({ values: 'falsy' }).matches(ZW_PHONE_RE).withMessage('Valid Zimbabwean phone number required (+263 7XX XXX XXX)'),
-  body('email').trim().optional({ values: 'falsy' }).isEmail().withMessage('Valid email address is required'),
+  body('phone').trim().optional({ values: 'falsy' }),
+  body('email').trim().optional({ values: 'falsy' }),
   body('voucherCode').trim().notEmpty().withMessage('Voucher code is required'),
   body('acceptedTos').custom((value) => value === true).withMessage('You must accept the terms'),
   body('password').optional({ values: 'falsy' }).matches(STRONG_PASSWORD_RE).withMessage('Password must be at least 8 characters with uppercase, lowercase, number, and special character'),
@@ -46,12 +46,15 @@ authRouter.post('/signup', signupLimiter, signupValidators, async (req: Request,
   }
 
   const { fullName, phone, email, voucherCode, acceptedTos, password } = req.body as {
-    fullName: string; phone: string; email: string; voucherCode: string; acceptedTos: boolean; password?: string;
+    fullName: string; phone?: string; email?: string; voucherCode: string; acceptedTos: boolean; password?: string;
   };
+  const signupPhone = phone || 'N/A';
+  const signupEmail = email || '';
   const passwordHash = password ? await bcrypt.hash(password, 12) : null;
 
   const macAddress = (req.query.mac as string) ?? (req.query.clientMac as string) ?? (req.headers['x-client-mac'] as string) ?? null;
   const ipAddress  = (req.query.ip  as string) ?? req.ip ?? null;
+  const nasip      = (req.query.nasip as string) ?? (req.query.wlanacname as string) ?? null;
 
   const client = await pool.connect();
   try {
@@ -91,7 +94,7 @@ authRouter.post('/signup', signupLimiter, signupValidators, async (req: Request,
       `INSERT INTO users (full_name, phone, email, voucher_code, accepted_tos, mac_address, ip_address, session_token, session_expires_at, password_hash, email_verification_token)
        VALUES ($1, $2, $3, $4, $5, $6, $7::inet, $8, $9, $10, $11)
        RETURNING id`,
-      [fullName, phone, email, voucherCode, acceptedTos, macAddress, ipAddress, sessionToken, sessionExpires, passwordHash, emailVerificationToken]
+      [fullName, signupPhone, signupEmail, voucherCode, acceptedTos, macAddress, ipAddress, sessionToken, sessionExpires, passwordHash, emailVerificationToken]
     );
 
     await client.query(
@@ -127,17 +130,20 @@ authRouter.post('/signup', signupLimiter, signupValidators, async (req: Request,
     await client.query('COMMIT');
 
     // Send confirmation email (non-blocking)
-    sendPortalSignupConfirmation(email, fullName, voucherCode.toUpperCase());
+    if (signupEmail) {
+      sendPortalSignupConfirmation(signupEmail, fullName, voucherCode.toUpperCase());
+    }
 
     // Send email verification if password was set (non-blocking)
-    if (emailVerificationToken) {
-      sendPortalEmailVerification(email, emailVerificationToken, fullName);
+    if (signupEmail && emailVerificationToken) {
+      sendPortalEmailVerification(signupEmail, emailVerificationToken, fullName);
     }
 
     const redirectConfig: WISPrSessionConfig = {
       sessionToken,
       macAddress: macAddress || undefined,
       originalUrl: (req.query.url as string) || undefined,
+      nasip: nasip || undefined,
       packageData: {
         data_limit_gb: v.data_limit_gb,
         is_uncapped: v.is_uncapped,

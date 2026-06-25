@@ -150,7 +150,7 @@
       </div>
 
       <div class="action-group">
-        <a href="https://www.google.com" target="_blank" rel="noopener" class="btn-primary">START BROWSING</a>
+        <a href="http://google.com" target="_blank" rel="noopener" class="btn-primary" id="startBrowsingBtn">START BROWSING</a>
         <a id="manageAccountLink" href="/login" class="btn-secondary" target="_blank" rel="noopener">MANAGE ACCOUNT</a>
         <button type="button" class="btn-secondary" id="successSignUpBtn">SIGN UP</button>
       </div>
@@ -498,6 +498,31 @@
       // Initial poll + every 10 seconds
       pollStatus();
       setInterval(pollStatus, 10000);
+
+      // ── Gateway Authorization Trigger ──
+      // After showing success, redirect browser to an HTTP URL so the
+      // Ruijie gateway intercepts and authorizes the user's MAC address.
+      var gwNasip = params.get('nasip');
+      var origUrl = params.get('origUrl');
+      // Force HTTP so the gateway can intercept the request
+      if (origUrl) {
+        if (/^https:\/\//i.test(origUrl)) {
+          origUrl = origUrl.replace(/^https:\/\//i, 'http://');
+        } else if (!/^https?:\/\//i.test(origUrl)) {
+          origUrl = 'http://' + origUrl;
+        }
+      }
+      origUrl = origUrl || 'http://google.com';
+      var gwRedirectTimer = null;
+      if (gwNasip) {
+        gwRedirectTimer = setTimeout(function () {
+          location.href = origUrl;
+        }, 4000);
+      }
+      var startBtn = document.getElementById('startBrowsingBtn');
+      if (startBtn && gwRedirectTimer) {
+        startBtn.addEventListener('click', function () { clearTimeout(gwRedirectTimer); });
+      }
     });
   </script>
 </body>

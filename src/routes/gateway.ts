@@ -30,28 +30,40 @@ gatewayRouter.get('/ping', async (req: Request, res: Response) => {
 });
 
 // ── Session verification (called by gateway via WISPr / redirect) ──
-// GET /auth?token=<session_token>
+// GET /auth?token=<session_token>   — verify by session token
+// GET /auth?mac=<client_mac>        — verify by MAC address
+// GET /auth?token=<t>&mac=<m>       — verify both match
 // Returns Auth: 1 if session is valid, Auth: 0 otherwise
 gatewayRouter.get('/auth', async (req: Request, res: Response) => {
-  const token = req.query.token as string;
-  if (!token) {
-    res.set('Content-Type', 'text/plain');
-    res.send('Auth: 0');
-    return;
-  }
+  const token = req.query.token as string | undefined;
+  const mac = (req.query.mac as string | undefined)?.toUpperCase();
 
   try {
-    const { rows } = await pool.query(
-      'SELECT session_expires_at FROM users WHERE session_token = $1',
-      [token]
-    );
-    if (rows.length > 0 && new Date(rows[0].session_expires_at) > new Date()) {
-      res.set('Content-Type', 'text/plain');
-      res.send('Auth: 1');
-    } else {
-      res.set('Content-Type', 'text/plain');
-      res.send('Auth: 0');
+    if (token) {
+      const { rows } = await pool.query(
+        'SELECT session_expires_at FROM users WHERE session_token = $1',
+        [token]
+      );
+      if (rows.length > 0 && new Date(rows[0].session_expires_at) > new Date()) {
+        res.set('Content-Type', 'text/plain');
+        res.send('Auth: 1');
+        return;
+      }
+    } else if (mac) {
+      const { rows } = await pool.query(
+        `SELECT session_expires_at FROM users
+         WHERE mac_address = $1 AND session_expires_at > NOW()
+         ORDER BY created_at DESC LIMIT 1`,
+        [mac]
+      );
+      if (rows.length > 0) {
+        res.set('Content-Type', 'text/plain');
+        res.send('Auth: 1');
+        return;
+      }
     }
+    res.set('Content-Type', 'text/plain');
+    res.send('Auth: 0');
   } catch {
     res.set('Content-Type', 'text/plain');
     res.send('Auth: 0');

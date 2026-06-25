@@ -165,6 +165,10 @@
     if (json.ipAddress) dest.searchParams.set('ip', json.ipAddress);
     if (json.voucherCode) dest.searchParams.set('voucher', json.voucherCode);
     if (json.packageTier) dest.searchParams.set('pkg', json.packageTier);
+    // Forward gateway params so success page can trigger authorization
+    var cp = new URLSearchParams(location.search);
+    if (cp.get('nasip')) dest.searchParams.set('nasip', cp.get('nasip'));
+    if (cp.get('url')) dest.searchParams.set('origUrl', cp.get('url'));
     location.href = dest.toString();
   }
 
