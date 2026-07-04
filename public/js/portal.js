@@ -165,10 +165,14 @@
     if (json.ipAddress) dest.searchParams.set('ip', json.ipAddress);
     if (json.voucherCode) dest.searchParams.set('voucher', json.voucherCode);
     if (json.packageTier) dest.searchParams.set('pkg', json.packageTier);
+    if (json.loginUrl) dest.searchParams.set('loginUrl', json.loginUrl);
     // Forward gateway params so success page can trigger authorization
     var cp = new URLSearchParams(location.search);
     if (cp.get('nasip')) dest.searchParams.set('nasip', cp.get('nasip'));
+    if (cp.get('nas_ip')) dest.searchParams.set('nas_ip', cp.get('nas_ip'));
     if (cp.get('url')) dest.searchParams.set('origUrl', cp.get('url'));
+    if (cp.get('nas_mac')) dest.searchParams.set('nas_mac', cp.get('nas_mac'));
+    if (cp.get('ssid')) dest.searchParams.set('ssid', cp.get('ssid'));
     location.href = dest.toString();
   }
 

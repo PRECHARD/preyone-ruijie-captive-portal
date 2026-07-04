@@ -3,7 +3,12 @@
 
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Preyone WiFi" />
+  <meta name="format-detection" content="telephone=yes" />
+  <meta name="description" content="Preyone UltraNet Wi-Fi — High-speed satellite internet for Zimbabwe. Enter your voucher code to connect instantly." />
   
   <title>Preyone UltraNet Wi‑Fi</title>
   <style>
@@ -20,8 +25,11 @@
   <link rel="icon" type="image/svg+xml" href="/favicon/favicon.svg" />
   <link rel="shortcut icon" href="/favicon/favicon.ico" />
   <link rel="apple-touch-icon" sizes="180x180" href="/favicon/apple-touch-icon.png" />
-  <meta name="apple-mobile-web-app-title" content="MyWebSite" />
   <link rel="manifest" href="/favicon/site.webmanifest" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="preconnect" href="http://192.168.1.216:2060" />
+  <link rel="dns-prefetch" href="http://192.168.1.216:2060" />
   <link
     href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Montserrat:wght@500;600;700;800&family=Satisfy&display=swap"
     rel="stylesheet">
@@ -322,6 +330,26 @@
     
   </div>
   <script>(function(){var e=document.getElementById('bodyLoading');if(!e)return;var h=function(){e.classList.add('is-hidden')};if(document.readyState==='complete')h();else window.addEventListener('load',h);setTimeout(h,8e3)})();</script>
+  <script>
+  (function() {
+    // Detect gateway redirect — if params like wlanuserip or nasip exist, user
+    // was redirected here by the EG105G-P. Auto-focus access code input.
+    var params = new URLSearchParams(location.search);
+    var fromGateway = params.has('wlanuserip') || params.has('nasip') || params.has('nas_ip') || params.has('client_mac');
+    if (fromGateway) {
+      document.addEventListener('DOMContentLoaded', function() {
+        var input = document.getElementById('accessCode');
+        if (input) {
+          setTimeout(function() { input.focus(); }, 600);
+          input.classList.add('voucher-highlight');
+          setTimeout(function() { input.classList.remove('voucher-highlight'); }, 2600);
+        }
+        var card = document.querySelector('.hero-card');
+        if (card) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      });
+    }
+  })();
+  </script>
   <script src="/js/portal.js"></script>
 </body>
 

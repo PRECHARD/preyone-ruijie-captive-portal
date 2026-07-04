@@ -60,7 +60,7 @@ body.portal-body {
   display: none !important;
 }
 
-/* ── Loading Overlay ── */
+/* ── Loading Overlay (responsive: mobile → desktop) ── */
 .body-loading {
   position: fixed;
   inset: 0;
@@ -68,27 +68,35 @@ body.portal-body {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 32px;
+  gap: clamp(20px, 5vh, 40px);
   background: #060c1f;
   z-index: 9999;
+  transition: opacity 0.4s ease, visibility 0.4s ease;
+}
+.body-loading.is-hidden {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
 }
 
 .loading-spinner {
-  width: 140px;
-  height: 140px;
+  width: clamp(80px, 20vw, 160px);
+  height: clamp(80px, 20vw, 160px);
   border-radius: 50%;
   position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: conic-gradient(from 0deg, #3b8dff, #9b2cff, #ff5fa4, #3b8dff);
-  animation: spin 1.8s linear infinite;
-  box-shadow: 0 0 50px rgba(155, 44, 255, 0.5), 0 0 100px rgba(155, 44, 255, 0.25);
+  background: conic-gradient(from 0deg, #71ff2f, #13d8ff, #8b4dff, #ff00ff, #71ff2f);
+  animation: spin 1.4s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
+  box-shadow:
+    0 0 clamp(20px, 5vw, 60px) rgba(113, 255, 47, 0.3),
+    0 0 clamp(40px, 8vw, 100px) rgba(139, 77, 255, 0.2);
 }
 
 .loading-spinner-inner {
-  width: 112px;
-  height: 112px;
+  width: clamp(60px, 15vw, 128px);
+  height: clamp(60px, 15vw, 128px);
   border-radius: 50%;
   background: #060c1f;
   display: flex;
@@ -98,18 +106,19 @@ body.portal-body {
 }
 
 .loading-spinner-inner img {
-  width: 64px;
-  height: 64px;
+  width: clamp(32px, 8vw, 72px);
+  height: clamp(32px, 8vw, 72px);
   display: block;
+  animation: pulse 1.5s ease-in-out infinite;
 }
 
 .loading-text {
   font-family: var(--font);
-  font-size: 14px;
+  font-size: clamp(11px, 2.5vw, 16px);
   font-weight: 600;
-  letter-spacing: 3px;
+  letter-spacing: 0.2em;
   text-transform: uppercase;
-  background: linear-gradient(90deg, #3b8dff, #9b2cff, #ff5fa4);
+  background: linear-gradient(90deg, #71ff2f, #13d8ff, #8b4dff);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   animation: pulse-text 1.5s ease-in-out infinite;

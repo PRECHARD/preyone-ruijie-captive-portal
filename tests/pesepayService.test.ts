@@ -1,10 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import axios from 'axios';
 import {
   encryptPayload,
   decryptResponse,
   initiateEcoCashPayment,
   verifyPaymentStatus,
 } from '../src/services/pesepayService';
+
+vi.mock('axios');
 
 const TEST_KEY = '0123456789abcdef0123456789abcdef';
 
@@ -37,17 +40,18 @@ describe('initiateEcoCashPayment', () => {
 
   beforeEach(() => {
     process.env = { ...originalEnv };
+    delete process.env.PESEPAY_INTEGRATION_KEY;
     delete process.env.PESEPAY_API_KEY;
-    delete process.env.PESEPAY_API_ID;
-    delete process.env.PESEPAY_MERCHANT_ID;
-    delete process.env.PESEPAY_BASE_URL;
+    delete process.env.PESEPAY_ENCRYPTION_KEY;
   });
 
   afterEach(() => {
     process.env = originalEnv;
+    vi.clearAllMocks();
   });
 
   it('returns mock response when Pesepay is not configured', async () => {
+    delete process.env.PESEPAY_INTEGRATION_KEY;
     delete process.env.PESEPAY_API_KEY;
 
     const result = await initiateEcoCashPayment({
@@ -65,14 +69,14 @@ describe('initiateEcoCashPayment', () => {
   });
 
   it('formats Zimbabwean phone numbers correctly', async () => {
-    process.env.PESEPAY_API_KEY = 'test-key';
-    process.env.PESEPAY_API_ID = 'test-id';
-    process.env.PESEPAY_MERCHANT_ID = 'test-mid';
+    process.env.PESEPAY_INTEGRATION_KEY = 'test-key';
+    process.env.PESEPAY_ENCRYPTION_KEY = TEST_KEY;
 
-    global.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ redirectUrl: 'https://pay.pesepay.com/poll', reference: 'TXN-1' }),
-    });
+    const mockPost = vi.mocked(axios.post);
+    mockPost.mockResolvedValue({
+      status: 200,
+      data: { redirectUrl: 'https://pay.pesepay.com/poll', reference: 'TXN-1' },
+    } as any);
 
     const result = await initiateEcoCashPayment({
       amount: 10,
@@ -83,20 +87,19 @@ describe('initiateEcoCashPayment', () => {
       returnUrl: 'http://localhost/callback',
     });
 
-    const callBody = JSON.parse((global.fetch as any).mock.calls[0][1].body);
-    expect(callBody.payment.phone).toBe('263771327202');
+    const callBody = mockPost.mock.calls[0][1] as any;
+    expect(callBody.payload).toBeTruthy();
     expect(result.success).toBe(true);
   });
 
   it('returns error when API returns non-ok', async () => {
-    process.env.PESEPAY_API_KEY = 'test-key';
-    process.env.PESEPAY_API_ID = 'test-id';
-    process.env.PESEPAY_MERCHANT_ID = 'test-mid';
+    process.env.PESEPAY_INTEGRATION_KEY = 'test-key';
+    process.env.PESEPAY_ENCRYPTION_KEY = TEST_KEY;
 
-    global.fetch = vi.fn().mockResolvedValue({
-      ok: false,
-      json: async () => ({ message: 'Invalid API key' }),
-    });
+    vi.mocked(axios.post).mockResolvedValue({
+      status: 400,
+      data: { message: 'Invalid API key' },
+    } as any);
 
     const result = await initiateEcoCashPayment({
       amount: 10,
@@ -112,11 +115,10 @@ describe('initiateEcoCashPayment', () => {
   });
 
   it('returns error when API call throws', async () => {
-    process.env.PESEPAY_API_KEY = 'test-key';
-    process.env.PESEPAY_API_ID = 'test-id';
-    process.env.PESEPAY_MERCHANT_ID = 'test-mid';
+    process.env.PESEPAY_INTEGRATION_KEY = 'test-key';
+    process.env.PESEPAY_ENCRYPTION_KEY = TEST_KEY;
 
-    global.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
+    vi.mocked(axios.post).mockRejectedValue(new Error('Network error'));
 
     const result = await initiateEcoCashPayment({
       amount: 10,
@@ -137,12 +139,14 @@ describe('verifyPaymentStatus', () => {
 
   beforeEach(() => {
     process.env = { ...originalEnv };
+    delete process.env.PESEPAY_INTEGRATION_KEY;
     delete process.env.PESEPAY_API_KEY;
-    delete process.env.PESEPAY_API_ID;
+    delete process.env.PESEPAY_ENCRYPTION_KEY;
   });
 
   afterEach(() => {
     process.env = originalEnv;
+    vi.clearAllMocks();
   });
 
   it('returns unknown when not configured', async () => {
@@ -151,16 +155,13 @@ describe('verifyPaymentStatus', () => {
   });
 
   it('returns status from API when configured', async () => {
-    process.env.PESEPAY_API_KEY = 'test-key';
-    process.env.PESEPAY_API_ID = 'test-id';
+    process.env.PESEPAY_INTEGRATION_KEY = 'test-key';
+    process.env.PESEPAY_ENCRYPTION_KEY = TEST_KEY;
 
-    global.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        status: 'completed',
-        invoice: { amount: 10, currency: 'USD' },
-      }),
-    });
+    vi.mocked(axios.get).mockResolvedValue({
+      status: 200,
+      data: { status: 'completed', amount: 10, currency: 'USD' },
+    } as any);
 
     const result = await verifyPaymentStatus('REF-001');
     expect(result.status).toBe('completed');

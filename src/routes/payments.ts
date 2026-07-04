@@ -49,6 +49,13 @@ paymentsRouter.post('/initiate', async (req: Request, res: Response) => {
     return;
   }
 
+  // Force USD — reject any other currency
+  const paymentCurrency = 'USD';
+  if (currency !== paymentCurrency) {
+    res.status(400).json({ error: 'Only USD is supported' });
+    return;
+  }
+
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -102,19 +109,22 @@ paymentsRouter.post('/initiate', async (req: Request, res: Response) => {
       `INSERT INTO payments (id, user_id, package_id, phone_number, amount, currency, payment_method, pesepay_reference, merchant_reference, ruijie_auth_url, client_mac, status)
        VALUES ($1, $2, $3, $4, $5, $6, 'EcoCash', $7, $8, $9, $10, 'pending')
        RETURNING id`,
-      [paymentId, userId, packageId, phone, amount, currency, merchantReference, merchantReference, ruijieAuthUrl || null, macAddress || null]
+      [paymentId, userId, packageId, phone, amount, paymentCurrency, merchantReference, merchantReference, ruijieAuthUrl || null, macAddress || null]
     );
 
     await client.query('COMMIT');
 
     // 4. Build returnUrl preserved through callback
-    const callbackUrl = new URL('/api/payments/callback', process.env.BASE_URL || 'https://portal.preyone.com');
+    const baseCallbackUrl = process.env.BASE_URL || 'https://portal.preyone.com';
+    const callbackUrl = baseCallbackUrl.startsWith('http')
+      ? new URL('/api/payments/callback', baseCallbackUrl)
+      : new URL(`https://portal.preyone.com/api/payments/callback`);
     callbackUrl.searchParams.set('ref', merchantReference);
     if (macAddress) callbackUrl.searchParams.set('mac', macAddress);
 
     const pesepayResponse = await initiateEcoCashPayment({
       amount,
-      currency,
+      currency: paymentCurrency,
       phone,
       fullName,
       email: `${phone.replace(/\D/g, '')}@preyone.com`,

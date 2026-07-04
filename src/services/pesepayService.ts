@@ -1,9 +1,5 @@
 import * as CryptoJS from 'crypto-js';
-import { execFile } from 'child_process';
-import { promisify } from 'util';
-import { writeFile, unlink, readFile } from 'fs/promises';
-
-const execFileAsync = promisify(execFile);
+import axios from 'axios';
 
 interface PesepayConfig {
   integrationKey: string;
@@ -39,7 +35,7 @@ function getPesepayConfig(): PesepayConfig {
   };
 }
 
-function encryptPayload(payloadObject: any, encryptionKey: string): string {
+export function encryptPayload(payloadObject: any, encryptionKey: string): string {
   const plainTextJson = JSON.stringify(payloadObject);
   const key = CryptoJS.enc.Utf8.parse(encryptionKey);
   const iv = CryptoJS.enc.Utf8.parse(encryptionKey.substring(0, 16));
@@ -95,39 +91,6 @@ function getRequestBody(paymentRequest: InitiatePaymentRequest) {
   };
 }
 
-async function curlPost(url: string, body: string, integrationKey: string): Promise<{ status: number; data: any }> {
-  const reqFile = `/tmp/pesepay-req-${Date.now()}.json`;
-  const resFile = `/tmp/pesepay-res-${Date.now()}.json`;
-  await writeFile(reqFile, body, 'utf8');
-  try {
-    const { stdout } = await execFileAsync('curl', [
-      '-s', '-w', '%{http_code}',
-      '-X', 'POST',
-      url,
-      '-H', `authorization: ${integrationKey}`,
-      '-H', 'Content-Type: application/json',
-      '-d', `@${reqFile}`,
-      '-o', resFile,
-    ], { timeout: 30000 });
-    const status = parseInt(stdout.trim(), 10);
-    const raw = await readFile(resFile, 'utf8');
-    let data: any;
-    try { data = JSON.parse(raw); } catch { data = { raw }; }
-    return { status, data };
-  } finally {
-    try { await unlink(reqFile); } catch {}
-    try { await unlink(resFile); } catch {}
-  }
-}
-
-async function curlGet(url: string, integrationKey: string): Promise<any> {
-  const { stdout } = await execFileAsync('curl', [
-    '-s', url,
-    '-H', `authorization: ${integrationKey}`,
-  ], { timeout: 15000 });
-  try { return JSON.parse(stdout); } catch { return { raw: stdout }; }
-}
-
 export async function initiateEcoCashPayment(
   paymentRequest: InitiatePaymentRequest
 ): Promise<PesepayPaymentResponse> {
@@ -143,8 +106,15 @@ export async function initiateEcoCashPayment(
 
     const requestBody = getRequestBody(paymentRequest);
     const encryptedPayload = encryptPayload(requestBody, config.encryptionKey);
-    const jsonBody = JSON.stringify({ payload: encryptedPayload });
-    const { status, data } = await curlPost(config.baseUrl, jsonBody, config.integrationKey);
+
+    const response = await axios.post(config.baseUrl, { payload: encryptedPayload }, {
+      headers: { authorization: config.integrationKey },
+      timeout: 30000,
+      validateStatus: () => true,
+    });
+
+    const status = response.status;
+    const data = response.data;
 
     if (status >= 400) {
       console.error('Pesepay API error:', data);
@@ -174,6 +144,13 @@ export async function initiateEcoCashPayment(
     return { success: false, error: 'No poll URL received from payment provider' };
   } catch (error: unknown) {
     console.error('Pesepay integration error:', error);
+    if (error instanceof Error && 'isAxiosError' in error && (error as any).isAxiosError) {
+      const axiosErr = error as any;
+      if (axiosErr.response) {
+        const msg = axiosErr.response.data?.message || axiosErr.response.data?.error || `HTTP ${axiosErr.response.status}`;
+        return { success: false, error: 'Payment service error: ' + msg };
+      }
+    }
     const msg = error instanceof Error ? error.message : 'Unknown error';
     return { success: false, error: 'Payment service error: ' + msg };
   }
@@ -195,7 +172,14 @@ export async function verifyPaymentStatus(reference: string): Promise<{
 
     const baseCheckUrl = 'https://api.pesepay.com/api/payments-engine/v1/payments/check-payment';
     const checkUrl = `${baseCheckUrl}?referenceNumber=${reference}`;
-    const data = await curlGet(checkUrl, config.integrationKey);
+
+    const response = await axios.get(checkUrl, {
+      headers: { authorization: config.integrationKey },
+      timeout: 15000,
+      validateStatus: () => true,
+    });
+
+    const data = response.data;
 
     if (data.payload) {
       const decrypted = decryptResponse(data.payload, config.encryptionKey);

@@ -150,7 +150,7 @@
       </div>
 
       <div class="action-group">
-        <a href="http://google.com" target="_blank" rel="noopener" class="btn-primary" id="startBrowsingBtn">START BROWSING</a>
+        <a href="http://www.preyone.com" class="btn-primary" id="startBrowsingBtn">START BROWSING</a>
         <a id="manageAccountLink" href="/login" class="btn-secondary" target="_blank" rel="noopener">MANAGE ACCOUNT</a>
         <button type="button" class="btn-secondary" id="successSignUpBtn">SIGN UP</button>
       </div>
@@ -500,28 +500,82 @@
       setInterval(pollStatus, 10000);
 
       // ── Gateway Authorization Trigger ──
-      // After showing success, redirect browser to an HTTP URL so the
-      // Ruijie gateway intercepts and authorizes the user's MAC address.
-      var gwNasip = params.get('nasip');
+      // POST to the gateway's ext_login to authorize the user's MAC.
+      // Uses hidden <form> + <iframe> instead of fetch() to bypass CSP entirely.
+      var loginUrl = params.get('loginUrl');
       var origUrl = params.get('origUrl');
-      // Force HTTP so the gateway can intercept the request
-      if (origUrl) {
-        if (/^https:\/\//i.test(origUrl)) {
-          origUrl = origUrl.replace(/^https:\/\//i, 'http://');
-        } else if (!/^https?:\/\//i.test(origUrl)) {
-          origUrl = 'http://' + origUrl;
+      var cliMacRaw = params.get('mac') || params.get('client_mac');
+      var cliMacClean = cliMacRaw ? cliMacRaw.replace(/[:-]/g, '').toUpperCase() : null;
+      var nasMacRaw = params.get('nas_mac');
+      var nasIp = params.get('nasip') || params.get('nas_ip');
+      var ssid = params.get('ssid');
+      var voucherCode = params.get('voucher');
+      var gwAuthAttempts = 0;
+      var GW_MAX_RETRIES = 3;
+      var gwIframe = null;
+      var gwForm = null;
+      function buildAuthFields() {
+        var raw = cliMacRaw || '';
+        var clean = cliMacClean || '';
+        var code = voucherCode || raw;
+        return [
+          { name: 'client_mac', value: raw },
+          { name: 'mac', value: clean },
+          { name: 'url', value: origUrl || '' },
+          { name: 'redirect', value: origUrl || '' },
+          { name: 'nas_ip', value: nasIp || '' },
+          { name: 'nas_mac', value: nasMacRaw || '' },
+          { name: 'ssid', value: ssid || '' },
+          { name: 'username', value: code },
+          { name: 'password', value: code }
+        ];
+      }
+      function postToGateway(url) {
+        if (!url) return;
+        // Remove previous iframe+form if any
+        if (gwIframe) { gwIframe.remove(); gwIframe = null; }
+        if (gwForm) { gwForm.remove(); gwForm = null; }
+        gwIframe = document.createElement('iframe');
+        gwIframe.name = 'gw_auth_' + Date.now();
+        gwIframe.style.display = 'none';
+        document.body.appendChild(gwIframe);
+        gwForm = document.createElement('form');
+        gwForm.method = 'POST';
+        gwForm.action = url;
+        gwForm.target = gwIframe.name;
+        gwForm.style.display = 'none';
+        var fields = buildAuthFields();
+        for (var i = 0; i < fields.length; i++) {
+          var inp = document.createElement('input');
+          inp.type = 'hidden';
+          inp.name = fields[i].name;
+          inp.value = fields[i].value;
+          gwForm.appendChild(inp);
+        }
+        document.body.appendChild(gwForm);
+        gwForm.submit();
+      }
+      function authGateway() {
+        if (!loginUrl || gwAuthAttempts >= GW_MAX_RETRIES) return;
+        gwAuthAttempts++;
+        postToGateway(loginUrl);
+        if (gwAuthAttempts < GW_MAX_RETRIES) {
+          setTimeout(authGateway, gwAuthAttempts * 3000);
         }
       }
-      origUrl = origUrl || 'http://google.com';
-      var gwRedirectTimer = null;
-      if (gwNasip) {
-        gwRedirectTimer = setTimeout(function () {
-          location.href = origUrl;
-        }, 4000);
+      if (loginUrl) {
+        var gwRedirectTimer = setTimeout(authGateway, 2000);
       }
       var startBtn = document.getElementById('startBrowsingBtn');
-      if (startBtn && gwRedirectTimer) {
-        startBtn.addEventListener('click', function () { clearTimeout(gwRedirectTimer); });
+      if (startBtn) {
+        startBtn.addEventListener('click', function () {
+          clearTimeout(gwRedirectTimer);
+          gwAuthAttempts = GW_MAX_RETRIES;
+          postToGateway(loginUrl);
+          var browseUrl = origUrl || 'http://preyone.com';
+          if (!/^https?:\/\//i.test(browseUrl)) browseUrl = 'http://' + browseUrl;
+          setTimeout(function () { location.href = browseUrl; }, 600);
+        });
       }
     });
   </script>

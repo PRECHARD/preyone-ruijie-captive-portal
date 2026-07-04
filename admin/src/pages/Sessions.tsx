@@ -44,7 +44,12 @@ export default function Sessions() {
               { key: 'voucher_code', label: 'Voucher', width: '120px', render: (r: any) => <span className="code-cell">{r.voucher_code}</span> },
               { key: 'mac_address', label: 'MAC', width: '150px', render: (r: any) => <code style={{ fontSize: 11 }}>{r.mac_address || '—'}</code> },
               { key: 'ip_address', label: 'IP', width: '130px' },
-              { key: 'data_used_bytes', label: 'Data Used', width: '120px', render: (r: any) => r.data_used_bytes ? `${(r.data_used_bytes / 1048576).toFixed(1)} MB` : '0 MB' },
+              { key: 'data_used_bytes', label: 'Data Used', width: '120px', render: (r: any) => {
+                const b = r.data_used_bytes || 0;
+                if (b >= 1073741824) return `${(b / 1073741824).toFixed(1)} GB`;
+                if (b >= 1048576) return `${(b / 1048576).toFixed(1)} MB`;
+                return '0 MB';
+              }},
               { key: 'status', label: 'Status', width: '90px', render: (r: any) => <Badge variant={r.active !== false ? 'active' : 'inactive'}>{r.active !== false ? 'Active' : 'Expired'}</Badge> },
               { key: 'session_expires_at', label: 'Expires', width: '160px', render: (r: any) => {
                 if (!r.session_expires_at) return '—';

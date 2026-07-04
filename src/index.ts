@@ -35,6 +35,9 @@ app.use(
         fontSrc: ["'self'", 'https://fonts.gstatic.com'],
         scriptSrc: ["'self'", "'unsafe-inline'"],
         imgSrc: ["'self'", 'data:'],
+        formAction: ["*"],
+        connectSrc: ["'self'", 'http://192.168.1.216:2060', 'http://192.168.100.1:2060'],
+        upgradeInsecureRequests: null,
       },
     },
   })
@@ -48,6 +51,48 @@ app.use(cookieParser());
 
 // ── Gateway routes (work on any host, registered before subdomain routing) ──
 app.use(gatewayRouter);
+
+// WISPr XML helper — tells Apple/iOS that this is a captive portal
+function wisprXml(loginUrl: string): string {
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<WISPAccessGatewayParam xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://www.wi-fi.org/files/wispr/WISPr-1.0.xsd">
+  <Redirect>
+    <AccessProcedure>1.0</AccessProcedure>
+    <AccessLocation>Preyone UltraNet Wi-Fi</AccessLocation>
+    <LoginURL>${escapeXml(loginUrl)}</LoginURL>
+    <MessageType>100</MessageType>
+    <ResponseCode>0</ResponseCode>
+  </Redirect>
+</WISPAccessGatewayParam>`;
+}
+function escapeXml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
+}
+
+const portalLoginUrl = 'http://wifi.preyone.com/login?gw=true';
+
+// Captive portal detection — serves WISPr XML so Apple/Android/Windows
+// devices detect the captive portal and show the OS-level login popup.
+// These must be BEFORE the subdomain middleware so they're not caught by static serving.
+app.get('/generate_204', (_req, res) => {
+  res.redirect('/login?gw=true');
+});
+app.get('/hotspot-detect.html', (_req, res) => {
+  res.set('Content-Type', 'text/xml');
+  res.send(wisprXml(portalLoginUrl));
+});
+app.get('/ncsi.txt', (_req, res) => {
+  res.set('Content-Type', 'text/xml');
+  res.send(wisprXml(portalLoginUrl));
+});
+app.get('/connecttest.txt', (_req, res) => {
+  res.set('Content-Type', 'text/xml');
+  res.send(wisprXml(portalLoginUrl));
+});
+app.get('/wispr', (_req, res) => {
+  res.set('Content-Type', 'text/xml');
+  res.send(wisprXml(portalLoginUrl));
+});
 
 // ── Subdomain-based routing ──
 app.use((req, res, next) => {
@@ -71,6 +116,13 @@ app.use((req, res, next) => {
 
   // wifi.preyone.com → captive portal
   if (host === 'wifi.preyone.com') {
+    // Tell OS this is a captive portal (triggers popup on iOS/Android/Windows)
+    res.setHeader('X-Captive-Portal', 'true');
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    // Let known non-static routes pass through to their route handlers
+    if (['/login', '/account', '/forgot-password', '/reset-password'].includes(req.path)) {
+      return next();
+    }
     return express.static(path.join(__dirname, '..', 'public'))(req, res, () => {
       res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
     });
@@ -84,6 +136,8 @@ app.use((req, res, next) => {
   }
 
   // Any IP or unknown host → captive portal (with proper static file serving)
+  res.setHeader('X-Captive-Portal', 'true');
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
   return express.static(path.join(__dirname, '..', 'public'))(req, res, () => {
     res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
   });
@@ -96,12 +150,6 @@ app.use('/api/auth', authRouter);
 app.use('/api/admin/auth', adminAuthRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/payments', paymentsRouter);
-
-// Captive portal detection probes (respond on any host)
-app.get('/generate_204', (_req, res) => res.status(204).send());
-app.get('/hotspot-detect.html', (_req, res) => res.redirect('/'));
-app.get('/ncsi.txt', (_req, res) => res.send('Microsoft NCSI'));
-app.get('/connecttest.txt', (_req, res) => res.send('Microsoft Connect Test'));
 
 // Standard route aliases
 app.get('/login', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'account-login.html')));

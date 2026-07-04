@@ -4,6 +4,7 @@ import rateLimit from 'express-rate-limit';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { v4 as uuidv4 } from 'uuid';
+import { PoolClient } from 'pg';
 import { pool } from '../db/pool';
 import { buildRuijieSuccessUrl, WISPrSessionConfig } from '../utils/redirect';
 import { transformToWISPrProfile } from '../utils/wisprTransformer';
@@ -50,14 +51,17 @@ authRouter.post('/signup', signupLimiter, signupValidators, async (req: Request,
   };
   const signupPhone = phone || 'N/A';
   const signupEmail = email || '';
-  const passwordHash = password ? await bcrypt.hash(password, 12) : null;
-
-  const macAddress = (req.query.mac as string) ?? (req.query.clientMac as string) ?? (req.headers['x-client-mac'] as string) ?? null;
+  const macAddress = (req.query.client_mac as string) ?? (req.query.mac as string) ?? (req.query.clientMac as string) ?? (req.headers['x-client-mac'] as string) ?? null;
   const ipAddress  = (req.query.ip  as string) ?? req.ip ?? null;
-  const nasip      = (req.query.nasip as string) ?? (req.query.wlanacname as string) ?? null;
+  const nasip      = (req.query.nas_ip as string) ?? (req.query.nasip as string) ?? (req.query.wlanacname as string) ?? null;
+  const loginUrl   = (req.query.login_url as string) ?? null;
+  const nasMac     = (req.query.nas_mac as string) ?? null;
+  const ssid       = (req.query.ssid as string) ?? null;
 
-  const client = await pool.connect();
+  let client: PoolClient | undefined;
   try {
+    client = await pool.connect();
+    const passwordHash = password ? await bcrypt.hash(password, 12) : null;
     await client.query('BEGIN');
 
     const { rows } = await client.query<{
@@ -144,6 +148,10 @@ authRouter.post('/signup', signupLimiter, signupValidators, async (req: Request,
       macAddress: macAddress || undefined,
       originalUrl: (req.query.url as string) || undefined,
       nasip: nasip || undefined,
+      loginUrl: loginUrl || undefined,
+      nasMac: nasMac || undefined,
+      ssid: ssid || undefined,
+      voucherCode: voucherCode.toUpperCase(),
       packageData: {
         data_limit_gb: v.data_limit_gb,
         is_uncapped: v.is_uncapped,
@@ -168,15 +176,99 @@ authRouter.post('/signup', signupLimiter, signupValidators, async (req: Request,
       ipAddress: ipAddress,
       voucherCode: voucherCode.toUpperCase(),
       packageTier: v.package_tier,
+      loginUrl: loginUrl,
     });
   } catch (err) {
-    await client.query('ROLLBACK');
+    if (client) {
+      await client.query('ROLLBACK');
+    }
     console.error('Signup error:', err);
     res.status(500).json({ error: 'Authentication failed.' });
   } finally {
-    client.release();
+    if (client) {
+      client.release();
+    }
   }
 });
+
+// ── Gateway Auth (POST redirect to AP's ext_login) ────────────────────
+// Serves an auto-submitting form so MAC authorization happens as top-level POST
+// (iOS CNA blocks JS background requests but handles top-level navigation)
+authRouter.get('/extauth', (req: Request, res: Response) => {
+  const loginUrl   = req.query.loginUrl as string;
+  const clientMac  = req.query.client_mac as string;
+  const nasIp      = req.query.nas_ip as string;
+  const nasMac     = req.query.nas_mac as string;
+  const ssid       = req.query.ssid as string;
+  const username   = req.query.username as string;
+  const password   = req.query.password as string;
+  const successUrl = req.query.success as string;
+  const origUrl    = req.query.origUrl as string;
+
+  if (!loginUrl) {
+    return res.redirect(successUrl || '/success.html');
+  }
+
+  // The AP's ext_login expects url/redirect to be the ORIGINAL url the user
+  // was trying to visit (short, plain). NOT our long success.html URL.
+  const gwRedirect = origUrl || 'http://preyone.com';
+
+  const fields: { name: string; value: string }[] = [
+    { name: 'client_mac', value: clientMac || '' },
+    { name: 'mac', value: (clientMac || '').replace(/[:-]/g, '').toUpperCase() },
+    { name: 'nas_ip', value: nasIp || '' },
+    { name: 'nas_mac', value: nasMac || '' },
+    { name: 'ssid', value: ssid || '' },
+    { name: 'username', value: username || '' },
+    { name: 'password', value: password || '' },
+    { name: 'url', value: gwRedirect },
+    { name: 'redirect', value: gwRedirect },
+  ];
+
+  const fieldsHtml = fields.map(f =>
+    `<input type="hidden" name="${escHtml(f.name)}" value="${escHtml(f.value)}" />`
+  ).join('\n      ');
+
+  const formAction = escHtml(loginUrl);
+  const successHref = escHtml(successUrl || '/');
+
+  res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta http-equiv="refresh" content="0; url=${formAction}" />
+<title>Authorizing...</title>
+<style>
+body{margin:0;background:#0b0e14;color:#e0e0e0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh}
+.card{background:#121620;border:1px solid #2a2f3a;border-radius:12px;padding:2rem;max-width:400px;width:90%;text-align:center}
+.spinner{width:40px;height:40px;margin:0 auto 1rem;border:3px solid #2a2f3a;border-top-color:#71ff2f;border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+h2{margin:0 0 .5rem;font-size:1.25rem;color:#fff}
+p{margin:0 0 1.5rem;color:#999;font-size:.9rem}
+.btn{display:inline-block;padding:.6rem 1.5rem;background:#71ff2f;color:#000;border-radius:6px;text-decoration:none;font-weight:600;font-size:.9rem}
+</style>
+</head>
+<body onload="document.forms[0].submit()">
+<div class="card">
+  <div class="spinner"></div>
+  <h2>Authorizing your device...</h2>
+  <p>Please wait while we connect you to Preyone UltraNet.</p>
+  <form method="POST" action="${formAction}">
+      ${fieldsHtml}
+    <noscript>
+      <button type="submit" class="btn">Continue</button>
+    </noscript>
+  </form>
+  <p style="margin-top:1rem;font-size:.8rem;color:#666">Redirecting to gateway...</p>
+</div>
+</body>
+</html>`);
+});
+
+function escHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
 
 // ── Register (pure account creation, no voucher) ──────────────────────
 const registerValidators = [
