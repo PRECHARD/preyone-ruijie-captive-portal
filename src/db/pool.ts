@@ -13,10 +13,16 @@ function getPool(): Pool {
       max: 20,
       idleTimeoutMillis: 30_000,
       connectionTimeoutMillis: 2_000,
+      // Server-side guard: any single statement (including a runaway sync batch
+      // or a missed index) is killed after 15s instead of pinning a client.
+      // Kept modest so slow-but-legit admin reports don't trip it.
+      options: '-c statement_timeout=15000',
     });
+    // A dropped backend must NEVER take the whole service down: log it and let
+    // the pool replace the client on next use. (process.exit here would flip
+    // PM2 into restart loops under transient db/network hiccups.)
     _pool.on('error', (err) => {
       console.error('Unexpected error on idle pg client', err);
-      process.exit(-1);
     });
   }
   return _pool;

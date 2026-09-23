@@ -1,5 +1,0 @@
--keepattributes Signature
--keepattributes *Annotation*
--keep class com.preyone.android.data.api.** { *; }
--dontwarn okhttp3.**
--dontwarn retrofit2.**

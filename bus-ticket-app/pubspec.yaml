@@ -1,0 +1,36 @@
+name: bus_ticket_app
+description: Preyone Transit - Transport Management & Ticketing Platform.
+publish_to: 'none'
+version: 1.0.0+18
+
+environment:
+  sdk: '>=3.1.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  bluetooth_print_plus: ^2.4.6
+  sqflite: ^2.3.0
+  path: ^1.9.0
+  permission_handler: ^11.0.0
+  http: ^1.1.0
+  printing: ^5.11.0
+  pdf: ^3.10.8
+  flutter_secure_storage: ^9.2.2
+  cryptography: ^2.7.0
+  connectivity_plus: ^6.0.5
+  firebase_core: ^4.15.0
+  firebase_crashlytics: ^5.4.0
+  firebase_messaging: ^16.7.0
+  barcode_widget: ^2.0.4
+
+dev_dependencies:
+  flutter_lints: ^4.0.0
+  flutter_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/
+    - assets/logo.png
