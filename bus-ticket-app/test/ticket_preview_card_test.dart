@@ -51,7 +51,8 @@ TicketData _data({
 Future<void> _pump(WidgetTester tester, TicketData data) async {
   await tester.pumpWidget(
     MaterialApp(
-      home: Scaffold(body: SingleChildScrollView(child: TicketPreviewCard(data: data))),
+      home: Scaffold(
+          body: SingleChildScrollView(child: TicketPreviewCard(data: data))),
     ),
   );
   await tester.pump();

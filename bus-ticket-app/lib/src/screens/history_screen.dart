@@ -62,8 +62,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
     ]);
     _offset = 0;
     _hasMore = true;
-    final sales = await _hydrateGapSales(await AppDb.getSales(
-        limit: _pageSize, offset: _offset));
+    final sales = await _hydrateGapSales(
+        await AppDb.getSales(limit: _pageSize, offset: _offset));
     // Mirror the sell screen: prefer the cached server company profile (kept
     // fresh by every sync via refreshCatalog) over the local settings so the
     // Tickets screen is branded identically to live tickets — online or off.
@@ -84,10 +84,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
       _website = profile?.website.isNotEmpty == true
           ? profile!.website
           : settings['website'] ?? '';
-      _customerCare =
-          zimPhoneOrEmpty(profile?.customerCare.isNotEmpty == true
-              ? profile!.customerCare
-              : settings['customer_care'] ?? '');
+      _customerCare = zimPhoneOrEmpty(profile?.customerCare.isNotEmpty == true
+          ? profile!.customerCare
+          : settings['customer_care'] ?? '');
       _companyAddress = profile?.companyAddress.isNotEmpty == true
           ? profile!.companyAddress
           : settings['company_address'] ?? '';
@@ -103,8 +102,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
     if (_loadingMore || !_hasMore || _loading) return;
     setState(() => _loadingMore = true);
     final nextOffset = _offset + _pageSize;
-    final more = await _hydrateGapSales(await AppDb.getSales(
-        limit: _pageSize, offset: nextOffset));
+    final more = await _hydrateGapSales(
+        await AppDb.getSales(limit: _pageSize, offset: nextOffset));
     if (!mounted) return;
     setState(() {
       _sales = [..._sales, ...more];
@@ -115,8 +114,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
   }
 
   void _snack(String msg) {
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(msg)));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
   /// Best-effort batch: backfills missing bus/driver/conductor/customer on
@@ -180,12 +178,10 @@ class _HistoryScreenState extends State<HistoryScreen> {
             child: RefreshIndicator(
               onRefresh: _reload,
               child: _loading
-                  ? const Center(
-                      child: CircularProgressIndicator())
+                  ? const Center(child: CircularProgressIndicator())
                   : _sales.isEmpty
                       ? ListView(
-                          physics:
-                              const AlwaysScrollableScrollPhysics(),
+                          physics: const AlwaysScrollableScrollPhysics(),
                           children: const [
                             SizedBox(height: 160),
                             Icon(Icons.receipt_long,
@@ -193,23 +189,20 @@ class _HistoryScreenState extends State<HistoryScreen> {
                             SizedBox(height: 12),
                             Center(
                                 child: Text('No sales yet',
-                                    style: TextStyle(
-                                        color: Colors.grey))),
+                                    style: TextStyle(color: Colors.grey))),
                           ],
                         )
                       : ListView.separated(
-                    physics:
-                        const AlwaysScrollableScrollPhysics(),
-                    itemCount: _sales.length + (_hasMore ? 1 : 0),
-                    separatorBuilder: (_, __) =>
-                        const Divider(height: 1),
-                    itemBuilder: (_, i) {
-                      if (i >= _sales.length) {
-                        return _loadMoreFooter();
-                      }
-                      return _saleTile(_sales[i]);
-                    },
-                  ),
+                          physics: const AlwaysScrollableScrollPhysics(),
+                          itemCount: _sales.length + (_hasMore ? 1 : 0),
+                          separatorBuilder: (_, __) => const Divider(height: 1),
+                          itemBuilder: (_, i) {
+                            if (i >= _sales.length) {
+                              return _loadMoreFooter();
+                            }
+                            return _saleTile(_sales[i]);
+                          },
+                        ),
             ),
           ),
         ],
@@ -253,10 +246,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
     ].join('  ·  ');
     return ListTile(
       onTap: () => _showSale(sale),
-      leading:
-          const Icon(Icons.confirmation_number, size: 32),
-      title: Text(
-          '${sale.receiptNo}  •  ${fmtMoney(sale.total, _currency)}'),
+      leading: const Icon(Icons.confirmation_number, size: 32),
+      title: Text('${sale.receiptNo}  •  ${fmtMoney(sale.total, _currency)}'),
       subtitle: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -297,33 +288,24 @@ class _HistoryScreenState extends State<HistoryScreen> {
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(
-              synced
-                  ? Icons.cloud_done
-                  : Icons.cloud_upload,
-              size: 18,
-              color: synced ? Colors.green : Colors.orange),
+          Icon(synced ? Icons.cloud_done : Icons.cloud_upload,
+              size: 18, color: synced ? Colors.green : Colors.orange),
           const SizedBox(width: 6),
           Icon(Icons.print,
-              size: 18,
-              color: printed
-                  ? Colors.black54
-                  : Colors.grey.shade300),
+              size: 18, color: printed ? Colors.black54 : Colors.grey.shade300),
         ],
       ),
     );
   }
 
-  String _summary(Sale sale) => sale.items
-      .map((i) => '${i.name} x${i.qty}')
-      .join(', ');
+  String _summary(Sale sale) =>
+      sale.items.map((i) => '${i.name} x${i.qty}').join(', ');
 
   /// Backfills missing fields (customer, crew, bus reg) on an older offline
   /// sale using the server-side ticket copy. Silent on failure so history
   /// stays usable offline. Returns the re-read (hydrated) sale.
   Future<Sale> _maybeHydrate(Sale sale) async {
-    final hasGaps =
-        sale.customerName.trim().isEmpty ||
+    final hasGaps = sale.customerName.trim().isEmpty ||
         sale.customerMobile.trim().isEmpty ||
         sale.busReg.trim().isEmpty ||
         sale.driver.trim().isEmpty ||
@@ -335,22 +317,25 @@ class _HistoryScreenState extends State<HistoryScreen> {
       if (t.isEmpty) return sale;
       await AppDb.hydrateSale(
         sale.id,
-        customerName: (t['customerName'] ?? t['customer_name'] ?? '').toString(),
+        customerName:
+            (t['customerName'] ?? t['customer_name'] ?? '').toString(),
         customerMobile: (t['customerMobile'] ??
-                    t['customerPhone'] ??
-                    t['customer_mobile'] ??
-                    t['phone'] ??
-                    '')
-                .toString(),
+                t['customerPhone'] ??
+                t['customer_mobile'] ??
+                t['phone'] ??
+                '')
+            .toString(),
         busReg: (t['busReg'] ?? t['bus_reg'] ?? '').toString(),
         driver: (t['driverName'] ?? t['driver'] ?? '').toString(),
         driverPhone: (t['driverPhone'] ?? t['driver_phone'] ?? '').toString(),
         conductor1: (t['conductor1'] ?? t['conductor_name'] ?? '').toString(),
         conductor2: (t['conductor2'] ?? '').toString(),
-        conductorPhone: (t['conductorPhone'] ?? t['conductor_phone'] ?? '').toString(),
+        conductorPhone:
+            (t['conductorPhone'] ?? t['conductor_phone'] ?? '').toString(),
         departureTime: formatDepartureTime(
             (t['departureTime'] ?? t['departure_time'] ?? '').toString()),
-        paymentMethod: (t['paymentMethod'] ?? t['payment_method'] ?? '').toString(),
+        paymentMethod:
+            (t['paymentMethod'] ?? t['payment_method'] ?? '').toString(),
       );
       return await AppDb.getSaleById(sale.id) ?? sale;
     } on TransitApiException catch (e) {
@@ -371,8 +356,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
     // Reflect hydrated crew/customer/vehicle fields in the list behind the
     // preview modal. _reload keeps the spinner hidden once loaded.
     await _reload();
-    final address =
-        await AppDb.getSetting('printer_address', null);
+    final address = await AppDb.getSetting('printer_address', null);
     if (!mounted) return;
     final data = await _buildLuggageTicketData(hydrated);
     if (!mounted) return;
@@ -389,15 +373,13 @@ class _HistoryScreenState extends State<HistoryScreen> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Padding(
-                  padding:
-                      const EdgeInsets.only(bottom: 12, left: 4, right: 4),
+                  padding: const EdgeInsets.only(bottom: 12, left: 4, right: 4),
                   child: Row(
                     children: [
                       Expanded(
                         child: Text(
                           hydrated.receiptNo,
-                          style:
-                              Theme.of(ctx).textTheme.titleMedium,
+                          style: Theme.of(ctx).textTheme.titleMedium,
                         ),
                       ),
                       IconButton(
@@ -450,38 +432,37 @@ class _HistoryScreenState extends State<HistoryScreen> {
     );
   }
 
-TicketData _buildTicketData(Sale sale) => TicketData(
-      companyName: _company,
-      slogan: _slogan,
-      ticketType: sale.ticketType == 'luggage'
-          ? 'LUGGAGE TICKET'
-          : 'BUS TICKET',
-      receiptNo: sale.receiptNo,
-      time: sale.createdAt ?? DateTime.now(),
-      busReg: sale.busReg.isNotEmpty ? sale.busReg : _busReg,
-      tripNo: sale.tripNo,
-      website: _website,
-      customerCare: _customerCare,
-      companyAddress: _companyAddress,
-      companyEmail: _companyEmail,
-      routeCode: sale.routeCode,
-      routeName: sale.routeName,
-      items: sale.items,
-      total: sale.total,
-      currency: _currency,
-      driver: sale.driver,
-      driverPhone: sale.driverPhone,
-      conductor1: sale.conductor1,
-      conductor2: sale.conductor2,
-      conductorPhone: sale.conductorPhone,
-      seatNumber: sale.seatNumber,
-      departureTime: sale.departureTime,
-      customerName: sale.customerName,
-      customerMobile: sale.customerMobile,
-      paymentMethod: sale.paymentMethod,
-      tendered: sale.cash,
-      note: sale.ticketType == 'luggage' ? kLuggageNote : kTicketValidityNote,
-    );
+  TicketData _buildTicketData(Sale sale) => TicketData(
+        companyName: _company,
+        slogan: _slogan,
+        ticketType:
+            sale.ticketType == 'luggage' ? 'LUGGAGE TICKET' : 'BUS TICKET',
+        receiptNo: sale.receiptNo,
+        time: sale.createdAt ?? DateTime.now(),
+        busReg: sale.busReg.isNotEmpty ? sale.busReg : _busReg,
+        tripNo: sale.tripNo,
+        website: _website,
+        customerCare: _customerCare,
+        companyAddress: _companyAddress,
+        companyEmail: _companyEmail,
+        routeCode: sale.routeCode,
+        routeName: sale.routeName,
+        items: sale.items,
+        total: sale.total,
+        currency: _currency,
+        driver: sale.driver,
+        driverPhone: sale.driverPhone,
+        conductor1: sale.conductor1,
+        conductor2: sale.conductor2,
+        conductorPhone: sale.conductorPhone,
+        seatNumber: sale.seatNumber,
+        departureTime: sale.departureTime,
+        customerName: sale.customerName,
+        customerMobile: sale.customerMobile,
+        paymentMethod: sale.paymentMethod,
+        tendered: sale.cash,
+        note: sale.ticketType == 'luggage' ? kLuggageNote : kTicketValidityNote,
+      );
 
   /// Backfills a luggage ticket's blank vehicle/crew/passenger from the linked
   /// bus-fare ticket (via `luggageLinkedTicketId` = the source's tx_id) so a
@@ -530,7 +511,8 @@ TicketData _buildTicketData(Sale sale) => TicketData(
       departureTime: data.departureTime.isNotEmpty
           ? data.departureTime
           : linked.departureTime,
-      customerName: data.customerName.isEmpty ? linked.customerName : data.customerName,
+      customerName:
+          data.customerName.isEmpty ? linked.customerName : data.customerName,
       customerMobile: data.customerMobile.isEmpty
           ? linked.customerMobile
           : data.customerMobile,
@@ -542,14 +524,15 @@ TicketData _buildTicketData(Sale sale) => TicketData(
   }
 
   Future<void> _printSale(Sale sale) async {
-    final address =
-        await AppDb.getSetting('printer_address', null);
+    final address = await AppDb.getSetting('printer_address', null);
     if (address == null || address.isEmpty) {
       _snack('No printer configured');
       return;
     }
-    final ok = await PrinterService.instance
-        .printTicket(address: address, data: await _buildLuggageTicketData(sale), fromSale: sale);
+    final ok = await PrinterService.instance.printTicket(
+        address: address,
+        data: await _buildLuggageTicketData(sale),
+        fromSale: sale);
     _snack(ok ? 'Ticket printed' : 'Print failed');
   }
 
@@ -558,16 +541,14 @@ TicketData _buildTicketData(Sale sale) => TicketData(
   }
 
   Future<void> _printTodayReport() async {
-    final address =
-        await AppDb.getSetting('printer_address', null);
+    final address = await AppDb.getSetting('printer_address', null);
     if (address == null || address.isEmpty) {
       _snack('No printer configured');
       return;
     }
     final now = DateTime.now();
     final start = DateTime(now.year, now.month, now.day);
-    final end =
-        DateTime(now.year, now.month, now.day, 23, 59, 59);
+    final end = DateTime(now.year, now.month, now.day, 23, 59, 59);
     final sales = await AppDb.getSalesBetween(start, end);
     final shift = await AppDb.getShiftForDay(now);
     final ok = await PrinterService.instance.printReport(
@@ -590,8 +571,7 @@ TicketData _buildTicketData(Sale sale) => TicketData(
   Future<void> _shareTodayReport() async {
     final now = DateTime.now();
     final start = DateTime(now.year, now.month, now.day);
-    final end =
-        DateTime(now.year, now.month, now.day, 23, 59, 59);
+    final end = DateTime(now.year, now.month, now.day, 23, 59, 59);
     final sales = await AppDb.getSalesBetween(start, end);
     final shift = await AppDb.getShiftForDay(now);
     await PdfService.instance.shareReport(

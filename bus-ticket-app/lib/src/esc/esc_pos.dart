@@ -11,14 +11,12 @@ class EscPos {
   static Uint8List bold(bool on) =>
       Uint8List.fromList([0x1B, 0x45, on ? 0x01 : 0x00]);
 
-  static Uint8List alignLeft() =>
-      Uint8List.fromList(const [0x1B, 0x61, 0x00]);
+  static Uint8List alignLeft() => Uint8List.fromList(const [0x1B, 0x61, 0x00]);
 
   static Uint8List alignCenter() =>
       Uint8List.fromList(const [0x1B, 0x61, 0x01]);
 
-  static Uint8List alignRight() =>
-      Uint8List.fromList(const [0x1B, 0x61, 0x02]);
+  static Uint8List alignRight() => Uint8List.fromList(const [0x1B, 0x61, 0x02]);
 
   static Uint8List doubleSize(bool width, bool height) => Uint8List.fromList(
       [0x1D, 0x21, (width ? 0x10 : 0x00) | (height ? 0x01 : 0x00)]);

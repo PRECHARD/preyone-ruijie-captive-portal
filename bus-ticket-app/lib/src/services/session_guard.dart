@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../db/app_db.dart';
 import '../screens/login_screen.dart';
 import '../security/secure_keystore.dart';
+import '../widgets/emerald_ui.dart';
 import 'transit_api.dart';
 
 /// Central sign-out interceptor for server-side auth rejections. When the
@@ -79,7 +80,7 @@ class SessionGuard {
         if (!context.mounted) return;
       }
       Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const LoginScreen()),
+        emeraldPageRoute<void>(const LoginScreen()),
         (route) => false,
       );
     } finally {

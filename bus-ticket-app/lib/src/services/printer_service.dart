@@ -96,8 +96,8 @@ class PrinterService {
   /// reappears in a fresh scan and looks "not found" — this restores it.
   Future<List<BluetoothDevice>> bondedDevices() async {
     try {
-      final raw = await _identityChannel
-          .invokeMethod<List<dynamic>>('bondedDevices');
+      final raw =
+          await _identityChannel.invokeMethod<List<dynamic>>('bondedDevices');
       if (raw == null) return [];
       final out = <BluetoothDevice>[];
       for (final item in raw) {
@@ -187,12 +187,10 @@ class PrinterService {
           ? ConnectState.connected
           : ConnectState.disconnected
     ];
-    final sub = BluetoothPrintPlus.connectState
-        .listen((s) => lastState[0] = s);
+    final sub = BluetoothPrintPlus.connectState.listen((s) => lastState[0] = s);
     try {
       await BluetoothPrintPlus.connect(device).timeout(kPrinterOpTimeout);
-      final deadline =
-          DateTime.now().add(const Duration(seconds: 15));
+      final deadline = DateTime.now().add(const Duration(seconds: 15));
       while (DateTime.now().isBefore(deadline)) {
         if (lastState[0] == ConnectState.connected) {
           // Cache the winning printer so a restart can silently reconnect
@@ -223,7 +221,8 @@ class PrinterService {
         if (d.address == address) return await connect(d);
       }
     } on Object catch (e, st) {
-      debugPrint('PrinterService: connectByAddress bonded lookup failed -> $e\n$st');
+      debugPrint(
+          'PrinterService: connectByAddress bonded lookup failed -> $e\n$st');
     }
     try {
       final devices = await scan();
@@ -282,8 +281,7 @@ class PrinterService {
   Future<bool> write(List<int> bytes) async {
     if (!BluetoothPrintPlus.isConnected) return false;
     try {
-      await BluetoothPrintPlus
-          .write(Uint8List.fromList(bytes))
+      await BluetoothPrintPlus.write(Uint8List.fromList(bytes))
           .timeout(kPrinterOpTimeout);
       return true;
     } on TimeoutException {
@@ -310,8 +308,7 @@ class PrinterService {
     // luggageLinkedTicketId (tx_id). Inherit the source's vehicle/crew/customer
     // so the printed luggage slip is complete even when issued offline.
     final linked = await _linkedBusSale(fromSale, data);
-    return write(buildTicket(_backfillTicket(data, linked),
-        feedLines: await _feedLines()));
+    return write(buildTicket(_backfillTicket(data, linked)));
   }
 
   /// Resolves the bus-fare ticket a luggage ticket links to (when the print
@@ -319,8 +316,7 @@ class PrinterService {
   /// inherit them. Returns [s] unchanged when there is nothing to resolve.
   Future<Sale?> _linkedBusSale(Sale? s, TicketData d) async {
     if (s == null || s.ticketType != 'luggage') return s;
-    final missing =
-        d.busReg.trim().isEmpty ||
+    final missing = d.busReg.trim().isEmpty ||
         d.driver.trim().isEmpty ||
         d.conductor1.trim().isEmpty ||
         d.customerName.trim().isEmpty;
@@ -330,20 +326,8 @@ class PrinterService {
     return linked ?? s;
   }
 
-  /// Per-company trailing paper feed so the full print rolls out visible.
-  /// Device-level setting `ticket_paper_feed` (default ~8 lines) applied to
-  /// tickets, manifests and end-of-day reports. Defensive floor of 3 lines so
-  /// a corrupted/blank setting can never produce a cut that shears the last
-  /// printed line.
-  Future<int> _feedLines() async {
-    final v = await AppDb.getSetting('ticket_paper_feed', '8');
-    final parsed = int.tryParse(v ?? '8') ?? 8;
-    return parsed < 3 ? 3 : parsed;
-  }
-
-  /// Fills blank ticket fields with the matching field from [sale]. Used to
-  /// keep printed receipts complete even when the live TicketData was built
-  /// from a partially-hydrated local row.
+  /// Per-company trailing paper feed was removed in favor of a strict
+  /// feed(1) + cut (see [kTrailingFeedLines]).
   TicketData _backfillTicket(TicketData d, Sale? s) {
     if (s == null) return d;
     String pickT(String live, String alt) =>
@@ -377,10 +361,12 @@ class PrinterService {
       customerMobile: pickT(d.customerMobile, s.customerMobile),
       departureTime: pickT(d.departureTime, s.departureTime),
       paymentMethod: pickT(d.paymentMethod, s.paymentMethod),
-      customFare:
-          d.customFare > 0 ? d.customFare : (s.customFare > 0 ? s.customFare : 0),
+      customFare: d.customFare > 0
+          ? d.customFare
+          : (s.customFare > 0 ? s.customFare : 0),
       note: d.note,
-      tendered: d.tendered > 0 ? d.tendered : (s.cash > 0 ? s.cash : d.tendered),
+      tendered:
+          d.tendered > 0 ? d.tendered : (s.cash > 0 ? s.cash : d.tendered),
     );
   }
 
@@ -408,7 +394,6 @@ class PrinterService {
       companyAddress: companyAddress,
       customerCare: customerCare,
       shift: shift,
-      feedLines: await _feedLines(),
     ));
   }
 
@@ -437,7 +422,6 @@ class PrinterService {
       companyAddress: companyAddress,
       customerCare: customerCare,
       shift: shift,
-      feedLines: await _feedLines(),
     ));
   }
 }

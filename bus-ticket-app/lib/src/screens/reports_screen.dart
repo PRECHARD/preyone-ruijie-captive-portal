@@ -40,10 +40,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
   }
 
   Future<void> _load() async {
-    final currency =
-        await AppDb.getSetting('currency', 'USD') ?? 'USD';
-    final company =
-        await AppDb.getSetting('company_name', '') ?? '';
+    final currency = await AppDb.getSetting('currency', 'USD') ?? 'USD';
+    final company = await AppDb.getSetting('company_name', '') ?? '';
     final profile = await AppDb.getCompanyProfile();
     final sales = await AppDb.getSalesBetween(
       DateTime(_day.year, _day.month, _day.day),
@@ -57,9 +55,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
       _sales = sales;
       _trips = trips;
       _currency = currency;
-      _company = (profile?.name.isNotEmpty ?? false)
-          ? profile!.name
-          : company;
+      _company = (profile?.name.isNotEmpty ?? false) ? profile!.name : company;
       _tagline = profile?.slogan ?? '';
       _companyAddress = profile?.companyAddress ?? '';
       _customerCare = zimPhoneOrEmpty(profile?.customerCare ?? '');
@@ -85,19 +81,17 @@ class _ReportsScreenState extends State<ReportsScreen> {
   }
 
   int get _total => _sales.fold(0, (s, x) => s + x.total);
-  int get _passengers => _sales.fold(
-      0, (s, x) => s + x.items.fold(0, (a, i) => a + i.qty));
+  int get _passengers =>
+      _sales.fold(0, (s, x) => s + x.items.fold(0, (a, i) => a + i.qty));
   int get _luggageCount =>
       _sales.where((s) => s.ticketType == 'luggage').length;
 
   void _snack(String msg) {
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(msg)));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
   Future<void> _printReport() async {
-    final address =
-        await AppDb.getSetting('printer_address', null);
+    final address = await AppDb.getSetting('printer_address', null);
     if (address == null || address.isEmpty) {
       _snack('No printer configured');
       return;
@@ -118,8 +112,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
   }
 
   Future<void> _printManifest(Trip trip) async {
-    final address =
-        await AppDb.getSetting('printer_address', null);
+    final address = await AppDb.getSetting('printer_address', null);
     if (address == null || address.isEmpty) {
       _snack('No printer configured');
       return;
@@ -132,8 +125,10 @@ class _ReportsScreenState extends State<ReportsScreen> {
     if (shift != null && shift.id.isNotEmpty) {
       final shiftTickets = await AppDb.getSalesByShift(shift.id);
       final tripIds = tripTickets.map((s) => s.id).toSet();
-      tickets = [...tripTickets,
-        ...shiftTickets.where((s) => !tripIds.contains(s.id))];
+      tickets = [
+        ...tripTickets,
+        ...shiftTickets.where((s) => !tripIds.contains(s.id))
+      ];
     }
     final ok = await PrinterService.instance.printTripManifest(
       address: address,
@@ -209,126 +204,125 @@ class _ReportsScreenState extends State<ReportsScreen> {
               child: ListView(
                 padding: const EdgeInsets.all(16),
                 children: [
-            Card(
-              elevation: 0,
-              color: Colors.white,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(14),
-                side: const BorderSide(color: Color(0xFFE2E8F0)),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Row(
-                  children: [
-                    const Icon(Icons.calendar_today_outlined,
-                        color: Color(0xFF1B5E20)),
-                    const SizedBox(width: 10),
-                    Text(
-                      fmtDate(_day),
-                      style: const TextStyle(
-                        fontSize: 16, fontWeight: FontWeight.w700),
+                  Card(
+                    elevation: 0,
+                    color: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      side: const BorderSide(color: Color(0xFFE2E8F0)),
                     ),
-                    const Spacer(),
-                    FilledButton.tonal(
-                      onPressed: _pickDay,
-                      child: const Text('Change'),
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.calendar_today_outlined,
+                              color: Color(0xFF1B5E20)),
+                          const SizedBox(width: 10),
+                          Text(
+                            fmtDate(_day),
+                            style: const TextStyle(
+                                fontSize: 16, fontWeight: FontWeight.w700),
+                          ),
+                          const Spacer(),
+                          FilledButton.tonal(
+                            onPressed: _pickDay,
+                            child: const Text('Change'),
+                          ),
+                        ],
+                      ),
                     ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                Expanded(
-                  child: _statCard('Tickets', '${_sales.length}',
-                      const Color(0xFF1B5E20)),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _statCard('Revenue',
-                      fmtMoney(_total, _currency),
-                      const Color(0xFFB45309)),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: _statCard('Passengers', '$_passengers',
-                      const Color(0xFF7C3AED)),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _statCard('Luggage', '$_luggageCount',
-                      const Color(0xFF0369A1)),
-                ),
-              ],
-            ),
-            const SizedBox(height: 20),
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    'Trips',
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _statCard('Tickets', '${_sales.length}',
+                            const Color(0xFF1B5E20)),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _statCard('Revenue', fmtMoney(_total, _currency),
+                            const Color(0xFFB45309)),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _statCard('Passengers', '$_passengers',
+                            const Color(0xFF7C3AED)),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _statCard('Luggage', '$_luggageCount',
+                            const Color(0xFF0369A1)),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 20),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'Trips',
+                          style: Theme.of(context)
+                              .textTheme
+                              .titleMedium
+                              ?.copyWith(fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                      FilledButton.tonal(
+                        onPressed: _printActiveTripManifest,
+                        style: FilledButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
+                        ),
+                        child: const Text('Print Trip Manifest'),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  if (_trips.isEmpty)
+                    const Card(
+                      child: Padding(
+                        padding: EdgeInsets.all(24),
+                        child: Center(
+                            child: Text('No trips fetched yet. Create one in '
+                                'Ticketing to print a full trip manifest.')),
+                      ),
+                    )
+                  else
+                    for (final t in _trips) _tripCard(t),
+                  const SizedBox(height: 20),
+                  Text(
+                    'Sales for ${fmtDate(_day)}',
                     style: Theme.of(context)
                         .textTheme
                         .titleMedium
                         ?.copyWith(fontWeight: FontWeight.w700),
                   ),
-                ),
-                FilledButton.tonal(
-                  onPressed: _printActiveTripManifest,
-                  style: FilledButton.styleFrom(
-                    visualDensity: VisualDensity.compact,
-                  ),
-                  child: const Text('Print Trip Manifest'),
-                ),
-              ],
+                  const SizedBox(height: 8),
+                  if (_loading)
+                    const Padding(
+                      padding: EdgeInsets.all(24),
+                      child: Center(child: CircularProgressIndicator()),
+                    )
+                  else if (_sales.isEmpty)
+                    const Card(
+                      child: Padding(
+                        padding: EdgeInsets.all(24),
+                        child: Center(child: Text('No sales for this day')),
+                      ),
+                    )
+                  else
+                    for (final s in _sales) _saleLine(s),
+                ],
+              ),
             ),
-            const SizedBox(height: 8),
-            if (_trips.isEmpty)
-              const Card(
-                child: Padding(
-                  padding: EdgeInsets.all(24),
-                  child:
-                      Center(child: Text('No trips fetched yet. Create one in '
-                          'Ticketing to print a full trip manifest.')),
-                ),
-              )
-            else
-              for (final t in _trips) _tripCard(t),
-            const SizedBox(height: 20),
-            Text(
-              'Sales for ${fmtDate(_day)}',
-              style: Theme.of(context)
-                  .textTheme
-                  .titleMedium
-                  ?.copyWith(fontWeight: FontWeight.w700),
-            ),
-            const SizedBox(height: 8),
-            if (_loading)
-              const Padding(
-                padding: EdgeInsets.all(24),
-                child: Center(child: CircularProgressIndicator()),
-              )
-            else if (_sales.isEmpty)
-              const Card(
-                child: Padding(
-                  padding: EdgeInsets.all(24),
-                  child: Center(child: Text('No sales for this day')),
-                ),
-              )
-            else
-              for (final s in _sales) _saleLine(s),
-          ],
-        ),
+          ),
+        ],
       ),
-      ),
-    ],
-  ),
-);
+    );
   }
 
   Widget _statCard(String label, String value, Color color) {
@@ -346,15 +340,13 @@ class _ReportsScreenState extends State<ReportsScreen> {
             fit: BoxFit.scaleDown,
             child: Text(
               value,
-              style:
-                  const TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
+              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
             ),
           ),
           const SizedBox(height: 2),
           Text(
             label,
-            style:
-                const TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+            style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)),
           ),
         ],
       ),

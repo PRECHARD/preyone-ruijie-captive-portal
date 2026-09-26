@@ -57,8 +57,7 @@ class _ConductorsScreenState extends State<ConductorsScreen> {
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDialog) => AlertDialog(
-          title:
-              Text(existing == null ? 'New Conductor' : 'Edit Conductor'),
+          title: Text(existing == null ? 'New Conductor' : 'Edit Conductor'),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -97,8 +96,8 @@ class _ConductorsScreenState extends State<ConductorsScreen> {
               onPressed: () {
                 final name = nameCtrl.text.trim();
                 if (name.isEmpty) return;
-                Navigator.of(ctx).pop(
-                    _ConductorResult(name, zimPhoneOrEmpty(phoneCtrl.text), active));
+                Navigator.of(ctx).pop(_ConductorResult(
+                    name, zimPhoneOrEmpty(phoneCtrl.text), active));
               },
               child: const Text('Save'),
             ),
@@ -214,14 +213,14 @@ class _ConductorsScreenState extends State<ConductorsScreen> {
                               color: Colors.white,
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(12),
-                                side: const BorderSide(
-                                    color: Color(0xFFE2E8F0)),
+                                side:
+                                    const BorderSide(color: Color(0xFFE2E8F0)),
                               ),
                               child: ListTile(
-                                leading: CircleAvatar(
+                                leading: const CircleAvatar(
                                   radius: 20,
-                                  backgroundColor: const Color(0xFFEDE9FE),
-                                  child: const Icon(Icons.person,
+                                  backgroundColor: Color(0xFFEDE9FE),
+                                  child: Icon(Icons.person,
                                       color: Color(0xFF7C3AED)),
                                 ),
                                 title: Text(

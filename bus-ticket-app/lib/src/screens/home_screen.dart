@@ -14,8 +14,10 @@ import '../services/pdf_service.dart';
 import '../services/printer_service.dart';
 import '../services/sync_service.dart';
 import '../services/transit_api.dart';
+import '../widgets/emerald_ui.dart';
 import '../widgets/ticket_preview_card.dart';
 import 'luggage_ticket_screen.dart';
+import 'on_the_go_trip_screen.dart';
 import 'start_shift_screen.dart';
 
 enum TicketType { busFare, luggage }
@@ -200,20 +202,19 @@ class _HomeScreenState extends State<HomeScreen> {
     final profile = await AppDb.getCompanyProfile();
     final activeShift = await AppDb.getActiveShift();
     final role = (await SecureKeystore.instance.readRole()) ?? '';
-    final operatorName = (await SecureKeystore.instance.readFullName())?.trim() ?? '';
+    final operatorName =
+        (await SecureKeystore.instance.readFullName())?.trim() ?? '';
     // The signed-in operator is the conductor on this device. Resolve their
     // profile once (staff-roster record → own name) and freeze it — trips and
     // the admin conductor list never override who is actually logging in here.
-    final operatorConductor =
-        await AppDb.findConductorByFullName(operatorName);
+    final operatorConductor = await AppDb.findConductorByFullName(operatorName);
     final conductorName = (operatorConductor?.name.isNotEmpty == true
             ? up(operatorConductor!.name)
             : operatorName.isNotEmpty
                 ? up(operatorName)
                 : _conductor1)
         .trim();
-    final conductorPhone =
-        (operatorConductor?.phone ?? _conductorPhone).trim();
+    final conductorPhone = (operatorConductor?.phone ?? _conductorPhone).trim();
     if (!mounted) return;
     setState(() {
       _canEditFares = Roles.canEditFares(role);
@@ -224,8 +225,12 @@ class _HomeScreenState extends State<HomeScreen> {
         if (profile.customerCare.isNotEmpty) {
           _customerCare = zimPhoneOrEmpty(profile.customerCare);
         }
-        if (profile.companyAddress.isNotEmpty) _companyAddress = profile.companyAddress;
-        if (profile.companyEmail.isNotEmpty) _companyEmail = profile.companyEmail;
+        if (profile.companyAddress.isNotEmpty) {
+          _companyAddress = profile.companyAddress;
+        }
+        if (profile.companyEmail.isNotEmpty) {
+          _companyEmail = profile.companyEmail;
+        }
         if (profile.currency.isNotEmpty) _currency = profile.currency;
         _receiptHeader = profile.receiptHeader;
         _receiptFooter = profile.receiptFooter;
@@ -290,8 +295,8 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   /// When the operator edits the route, auto-fill the route code from
-/// FROM/TO (e.g. "Harare"/"Bulawayo" -> "HRE-BYO") unless they already
-/// entered a custom code.
+  /// FROM/TO (e.g. "Harare"/"Bulawayo" -> "HRE-BYO") unless they already
+  /// entered a custom code.
   void _onRouteFieldChanged() {
     setState(() {});
     if (_routeCode.isEmpty &&
@@ -360,8 +365,8 @@ class _HomeScreenState extends State<HomeScreen> {
         final q = _cart[f.id] ?? 0;
         if (q > 0) {
           final price = _priceOverrides[f.id] ?? f.price;
-          out.add(SaleItem(
-              name: f.name, price: price, qty: q, total: price * q));
+          out.add(
+              SaleItem(name: f.name, price: price, qty: q, total: price * q));
         }
       }
     } else {
@@ -370,8 +375,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return out;
   }
 
-  int get _totalCents =>
-      _currentItems().fold(0, (sum, i) => sum + i.total);
+  int get _totalCents => _currentItems().fold(0, (sum, i) => sum + i.total);
 
   /// Total cents charged on fare lines whose price was manually overridden.
   /// 0 means standard pricing was used for the whole cart.
@@ -392,14 +396,14 @@ class _HomeScreenState extends State<HomeScreen> {
   /// or the operator clears a field.
   String get _effectiveDriver =>
       _driver.isEmpty ? up(_activeShift?.driverName ?? '') : _driver;
-  String get _effectiveDriverPhone =>
-      _driverPhone.isNotEmpty ? _driverPhone : (_activeShift?.driverPhone ?? '');
+  String get _effectiveDriverPhone => _driverPhone.isNotEmpty
+      ? _driverPhone
+      : (_activeShift?.driverPhone ?? '');
   String get _effectiveConductor1 =>
       _conductor1.isEmpty ? up(_activeShift?.conductorName ?? '') : _conductor1;
-  String get _effectiveConductorPhone =>
-      _conductorPhone.isNotEmpty
-          ? _conductorPhone
-          : (_activeShift?.conductorPhone ?? '');
+  String get _effectiveConductorPhone => _conductorPhone.isNotEmpty
+      ? _conductorPhone
+      : (_activeShift?.conductorPhone ?? '');
 
   /// Actual vehicle printed on the ticket: the bus the operator opened the
   /// CURRENT shift on always wins, falling back to the trip/settings value
@@ -422,8 +426,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return TicketData(
       companyName: _companyName,
       slogan: _slogan,
-      ticketType:
-          _type == TicketType.luggage ? 'LUGGAGE TICKET' : 'BUS TICKET',
+      ticketType: _type == TicketType.luggage ? 'LUGGAGE TICKET' : 'BUS TICKET',
       receiptNo: receiptNo.isEmpty ? '${_ticketPrefix}0000' : receiptNo,
       time: time ?? DateTime.now(),
       busReg: _effectiveBusReg,
@@ -489,8 +492,7 @@ class _HomeScreenState extends State<HomeScreen> {
         content: TextField(
           controller: ctrl,
           autofocus: true,
-          keyboardType: const TextInputType.numberWithOptions(
-              decimal: true),
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
           decoration: const InputDecoration(labelText: 'Price'),
         ),
         actions: [
@@ -521,8 +523,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final price = parseMoneyToCents(_lugPriceCtrl.text);
     if (desc.isEmpty || price == null) return;
     setState(() {
-      _luggage
-          .add(SaleItem(name: desc, price: price, qty: 1, total: price));
+      _luggage.add(SaleItem(name: desc, price: price, qty: 1, total: price));
     });
     _lugDescCtrl.clear();
     _lugPriceCtrl.clear();
@@ -621,17 +622,17 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _tripDetailsCard() {
     return Card(
       elevation: 2,
-      shape:
-          RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Trip details',
-                style: Theme.of(context).textTheme.titleSmall),
+            Text('Trip details', style: Theme.of(context).textTheme.titleSmall),
             const SizedBox(height: 10),
             _tripSelectorBar(),
+            const SizedBox(height: 8),
+            _onTheGoButton(),
             const SizedBox(height: 10),
             _tripRunBar(),
             const SizedBox(height: 10),
@@ -646,8 +647,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 onTap: _pickDepartureTime,
                 borderRadius: BorderRadius.circular(8),
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 12, vertical: 10),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                   child: Row(
                     children: [
                       const Icon(Icons.schedule,
@@ -677,62 +678,61 @@ class _HomeScreenState extends State<HomeScreen> {
             const SizedBox(height: 10),
             Row(
               children: [
-Expanded(
-                    flex: 2,
-                    child: TextField(
-                      controller: _routeCodeCtrl,
-                      textCapitalization: TextCapitalization.characters,
-                      onChanged: (v) =>
-                          setState(() => _routeCode = up(v)),
-                      decoration: const InputDecoration(
-                        labelText: 'Route code',
-                        isDense: true,
-                        border: OutlineInputBorder(),
+                Expanded(
+                  flex: 2,
+                  child: TextField(
+                    controller: _routeCodeCtrl,
+                    textCapitalization: TextCapitalization.characters,
+                    onChanged: (v) => setState(() => _routeCode = up(v)),
+                    decoration: const InputDecoration(
+                      labelText: 'Route code',
+                      isDense: true,
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  flex: 5,
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _routeFromCtrl,
+                          textCapitalization: TextCapitalization.characters,
+                          onChanged: (v) {
+                            _routeFrom = up(v);
+                            _onRouteFieldChanged();
+                          },
+                          decoration: const InputDecoration(
+                            labelText: 'From',
+                            isDense: true,
+                            border: OutlineInputBorder(),
+                          ),
+                        ),
                       ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    flex: 5,
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: TextField(
-                            controller: _routeFromCtrl,
-                            textCapitalization: TextCapitalization.characters,
-                            onChanged: (v) {
-                              _routeFrom = up(v);
-                              _onRouteFieldChanged();
-                            },
-                            decoration: const InputDecoration(
-                              labelText: 'From',
-                              isDense: true,
-                              border: OutlineInputBorder(),
-                            ),
+                      const Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 4),
+                        child: Icon(Icons.arrow_forward, size: 18),
+                      ),
+                      Expanded(
+                        child: TextField(
+                          controller: _routeToCtrl,
+                          textCapitalization: TextCapitalization.characters,
+                          onChanged: (v) {
+                            _routeTo = up(v);
+                            _onRouteFieldChanged();
+                          },
+                          decoration: const InputDecoration(
+                            labelText: 'To',
+                            isDense: true,
+                            border: OutlineInputBorder(),
                           ),
                         ),
-                        const Padding(
-                          padding: EdgeInsets.symmetric(horizontal: 4),
-                          child: Icon(Icons.arrow_forward, size: 18),
-                        ),
-                        Expanded(
-                          child: TextField(
-                            controller: _routeToCtrl,
-                            textCapitalization: TextCapitalization.characters,
-                            onChanged: (v) {
-                              _routeTo = up(v);
-                              _onRouteFieldChanged();
-                            },
-                            decoration: const InputDecoration(
-                              labelText: 'To',
-                              isDense: true,
-                              border: OutlineInputBorder(),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
+                ),
               ],
             ),
             const SizedBox(height: 10),
@@ -753,8 +753,7 @@ Expanded(
                 Expanded(
                   child: TextField(
                     controller: _seatCtrl,
-                    onChanged: (v) =>
-                        setState(() => _seat = v.trim()),
+                    onChanged: (v) => setState(() => _seat = v.trim()),
                     decoration: const InputDecoration(
                       labelText: 'Seat number',
                       hintText: 'e.g. 45 or A12',
@@ -866,8 +865,7 @@ Expanded(
                       color: accent,
                     )),
                 const Icon(Icons.chevron_right,
-                    size: 18,
-                    color: Color(0xFF94A3B8)),
+                    size: 18, color: Color(0xFF94A3B8)),
               ],
             ),
           ),
@@ -885,6 +883,37 @@ Expanded(
           ),
       ],
     );
+  }
+
+  /// "On-the-go trip" launcher: opens an unscheduled run from a master route
+  /// template when the bus is rolling and no admin schedule exists. The created
+  /// trip lands in the same trip selector as a scheduled departure, so everything
+  /// downstream (manifest, seat lock, reports) treats it identically.
+  Widget _onTheGoButton() {
+    if (_type != TicketType.busFare) return const SizedBox.shrink();
+    return EmeraldGlassButton(
+      icon: Icons.alt_route,
+      label: 'On-the-go trip (open an unscheduled run)',
+      onPressed: _openOnTheGoTrip,
+    );
+  }
+
+  Future<void> _openOnTheGoTrip() async {
+    final running = _runningInstance;
+    if (running != null) {
+      _showToast('Trip ${running.tripNo} is running. '
+          'End it before opening another run.');
+      return;
+    }
+    final created = await Navigator.of(context).push<Trip>(
+      emeraldPageRoute<Trip>(const OnTheGoTripScreen()),
+    );
+    if (created == null || !mounted) return;
+    setState(() {
+      _activeTrip = created;
+      _applyTripToFields(created);
+    });
+    _showToast('Run ${created.tripNo} opened for departure.');
   }
 
   Future<void> _pickTrip() async {
@@ -943,15 +972,17 @@ Expanded(
           color: warning ? const Color(0xFFFEF3C7) : const Color(0xFFE8F5E9),
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
-              color: warning ? const Color(0xFFB45309) : const Color(0xFF1B5E20),
+              color:
+                  warning ? const Color(0xFFB45309) : const Color(0xFF1B5E20),
               width: 1),
         ),
         child: Row(
           children: [
             Icon(warning ? Icons.warning_amber_rounded : Icons.play_circle_fill,
                 size: 18,
-                color:
-                    warning ? const Color(0xFFB45309) : const Color(0xFF1B5E20)),
+                color: warning
+                    ? const Color(0xFFB45309)
+                    : const Color(0xFF1B5E20)),
             const SizedBox(width: 8),
             Expanded(
               child: Text(
@@ -1075,64 +1106,48 @@ Expanded(
   Widget _shiftBar() {
     final s = _activeShift;
     if (s == null) {
-      return OutlinedButton.icon(
+      return EmeraldGlassButton(
         onPressed: _openStartShift,
-        icon: const Icon(Icons.play_arrow, size: 18),
-        label: const Text('Start shift (driver + vehicle)'),
-        style: OutlinedButton.styleFrom(
-          minimumSize: const Size.fromHeight(40),
-        ),
+        icon: Icons.play_arrow,
+        label: 'Start shift (driver + vehicle)',
       );
     }
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: const Color(0xFFE8F5E9),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: const Color(0xFF1B5E20), width: 1),
+    return EmeraldBanner(
+      leading: Icons.radio_button_checked,
+      onTap: _openStartShift,
+      trailing: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.22),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.6)),
+        ),
+        child: const Text(
+          'END / VIEW',
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w800,
+            color: Colors.white,
+          ),
+        ),
       ),
-      child: Row(
-        children: [
-          const Icon(Icons.radio_button_checked,
-              size: 18, color: Color(0xFF1B5E20)),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              'SHIFT: ${s.driverName.isNotEmpty ? s.driverName : 'Open'}'
-              '${s.vehicleReg.isNotEmpty ? ' · ${s.vehicleReg}' : ''}',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w700,
-                color: Color(0xFF1B5E20),
-              ),
-            ),
-          ),
-          InkWell(
-            onTap: _openStartShift,
-            borderRadius: BorderRadius.circular(6),
-            child: const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-              child: Text(
-                'END / VIEW',
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w800,
-                  color: Color(0xFF1B5E20),
-                ),
-              ),
-            ),
-          ),
-        ],
+      child: Text(
+        'SHIFT: ${s.driverName.isNotEmpty ? s.driverName : 'Open'}'
+        '${s.vehicleReg.isNotEmpty ? ' · ${s.vehicleReg}' : ''}',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(
+          fontSize: 13,
+          fontWeight: FontWeight.w800,
+          color: Colors.white,
+        ),
       ),
     );
   }
 
   Future<void> _openStartShift() async {
     await Navigator.of(context).push<bool>(
-      MaterialPageRoute(builder: (_) => const StartShiftScreen()),
+      emeraldPageRoute<bool>(const StartShiftScreen()),
     );
     if (!mounted) return;
     _activeShift = await AppDb.getActiveShift();
@@ -1144,8 +1159,7 @@ Expanded(
       return TextField(
         controller: _driverCtrl,
         textCapitalization: TextCapitalization.characters,
-        onChanged: (v) =>
-            setState(() => _driver = up(v)),
+        onChanged: (v) => setState(() => _driver = up(v)),
         decoration: const InputDecoration(
           labelText: 'Driver',
           isDense: true,
@@ -1195,8 +1209,7 @@ Expanded(
         children: [
           const Row(
             children: [
-              Icon(Icons.lock_outline,
-                  size: 14, color: Color(0xFF94A3B8)),
+              Icon(Icons.lock_outline, size: 14, color: Color(0xFF94A3B8)),
               SizedBox(width: 6),
               Expanded(
                 child: Text(
@@ -1239,13 +1252,10 @@ Expanded(
   Widget _itemsSection() {
     return Card(
       elevation: 2,
-      shape:
-          RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 6),
-        child: _type == TicketType.busFare
-            ? _fareList()
-            : _luggageInput(),
+        child: _type == TicketType.busFare ? _fareList() : _luggageInput(),
       ),
     );
   }
@@ -1254,9 +1264,8 @@ Expanded(
     if (_fares.isEmpty) {
       return const Padding(
         padding: EdgeInsets.all(16),
-        child: Center(
-            child:
-                Text('No fares configured. Add them in Settings.')),
+        child:
+            Center(child: Text('No fares configured. Add them in Settings.')),
       );
     }
     return Column(
@@ -1264,8 +1273,7 @@ Expanded(
         for (final f in _fares)
           ListTile(
             dense: true,
-            leading:
-                const Icon(Icons.confirmation_number_outlined),
+            leading: const Icon(Icons.confirmation_number_outlined),
             title: Text(f.name),
             subtitle: TextButton(
               style: TextButton.styleFrom(
@@ -1279,8 +1287,7 @@ Expanded(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    fmtMoney(
-                        _priceOverrides[f.id] ?? f.price, _currency),
+                    fmtMoney(_priceOverrides[f.id] ?? f.price, _currency),
                     style: TextStyle(
                       color: _priceOverrides[f.id] != null
                           ? Theme.of(context).colorScheme.primary
@@ -1311,21 +1318,17 @@ Expanded(
                 children: [
                   IconButton(
                     visualDensity: VisualDensity.compact,
-                    icon:
-                        const Icon(Icons.remove_circle_outline),
+                    icon: const Icon(Icons.remove_circle_outline),
                     onPressed: (_cart[f.id] ?? 0) == 0
                         ? null
-                        : () => _setQty(
-                            f.id!, (_cart[f.id]!) - 1),
+                        : () => _setQty(f.id!, (_cart[f.id]!) - 1),
                   ),
                   Text('${_cart[f.id] ?? 0}',
-                      style: const TextStyle(
-                          fontWeight: FontWeight.bold)),
+                      style: const TextStyle(fontWeight: FontWeight.bold)),
                   IconButton(
                     visualDensity: VisualDensity.compact,
                     icon: const Icon(Icons.add_circle_outline),
-                    onPressed: () => _setQty(
-                        f.id!, (_cart[f.id] ?? 0) + 1),
+                    onPressed: () => _setQty(f.id!, (_cart[f.id] ?? 0) + 1),
                   ),
                 ],
               ),
@@ -1359,8 +1362,8 @@ Expanded(
                 width: 110,
                 child: TextField(
                   controller: _lugPriceCtrl,
-                  keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true),
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
                   decoration: const InputDecoration(
                     labelText: 'Price',
                     isDense: true,
@@ -1384,8 +1387,7 @@ Expanded(
                   child: Align(
                     alignment: Alignment.centerRight,
                     child: TextButton(
-                      onPressed: () =>
-                          setState(() => _luggage.clear()),
+                      onPressed: () => setState(() => _luggage.clear()),
                       child: const Text('Clear all'),
                     ),
                   ),
@@ -1404,8 +1406,7 @@ Expanded(
                   IconButton(
                     visualDensity: VisualDensity.compact,
                     icon: const Icon(Icons.close, size: 18),
-                    onPressed: () =>
-                        setState(() => _luggage.remove(i)),
+                    onPressed: () => setState(() => _luggage.remove(i)),
                   ),
                 ],
               ),
@@ -1443,12 +1444,14 @@ Expanded(
                   ],
                 ),
               ),
-              FilledButton.icon(
+              EmeraldButton(
+                expand: true,
+                height: 48,
                 onPressed: _totalCents == 0 ? null : _startSale,
-                icon: const Icon(Icons.print),
-                label: Text(_type == TicketType.luggage
+                icon: Icons.print,
+                label: _type == TicketType.luggage
                     ? 'Sell Luggage'
-                    : 'Sell & Print'),
+                    : 'Sell & Print',
               ),
             ],
           ),
@@ -1471,9 +1474,8 @@ Expanded(
     }
 
     if (_type == TicketType.busFare && _activeShift == null) {
-      await Navigator.of(context).push<bool>(
-        MaterialPageRoute(builder: (_) => const StartShiftScreen()),
-      );
+      await Navigator.of(context)
+          .push(emeraldPageRoute<bool>(const StartShiftScreen()));
       if (!mounted) return;
       _activeShift = await AppDb.getActiveShift();
       if (_activeShift == null) {
@@ -1485,6 +1487,7 @@ Expanded(
 
     final promoCtrl = TextEditingController();
 
+    if (!mounted) return;
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -1535,16 +1538,14 @@ Expanded(
             final cashMethod = sheetPayment == 'cash';
             // A bus-fare ticket needs a passenger name unless "No name" is
             // deliberately ticked — cash handed must also clear the total.
-            final nameGiven =
-                _customerNameController.text.trim().isNotEmpty;
+            final nameGiven = _customerNameController.text.trim().isNotEmpty;
             final valid = cashMethod
-                ? cash >= due &&
-                    (nameGiven || isBusFare == false || noName)
+                ? cash >= due && (nameGiven || isBusFare == false || noName)
                 : (nameGiven || isBusFare == false || noName);
             final change = cashMethod ? cash - due : 0;
             return Padding(
-              padding: EdgeInsets.only(
-                  bottom: MediaQuery.of(ctx).viewInsets.bottom),
+              padding:
+                  EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
               child: SafeArea(
                 child: SingleChildScrollView(
                   padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
@@ -1553,21 +1554,17 @@ Expanded(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text('Passenger details',
-                          style:
-                              Theme.of(ctx).textTheme.titleMedium),
+                          style: Theme.of(ctx).textTheme.titleMedium),
                       const SizedBox(height: 10),
                       TextField(
                         controller: _customerNameController,
-                        textCapitalization:
-                            TextCapitalization.characters,
+                        textCapitalization: TextCapitalization.characters,
                         decoration: InputDecoration(
                           labelText: 'Customer name & surname',
                           hintText: 'Walk-in passenger',
                           isDense: true,
                           border: const OutlineInputBorder(),
-                          errorText: isBusFare &&
-                                  !noName &&
-                                  !nameGiven
+                          errorText: isBusFare && !noName && !nameGiven
                               ? 'Passenger name required'
                               : null,
                         ),
@@ -1632,8 +1629,7 @@ Expanded(
                           Expanded(
                             child: TextField(
                               controller: promoCtrl,
-                              textCapitalization:
-                                  TextCapitalization.characters,
+                              textCapitalization: TextCapitalization.characters,
                               decoration: InputDecoration(
                                 labelText: 'Code e.g. SAVE10',
                                 isDense: true,
@@ -1684,13 +1680,11 @@ Expanded(
                       ],
                       const Divider(height: 20),
                       Text('Confirm sale',
-                          style:
-                              Theme.of(ctx).textTheme.titleLarge),
+                          style: Theme.of(ctx).textTheme.titleLarge),
                       const SizedBox(height: 10),
                       for (final i in items)
                         Padding(
-                          padding: const EdgeInsets.symmetric(
-                              vertical: 3),
+                          padding: const EdgeInsets.symmetric(vertical: 3),
                           child: Row(
                             children: [
                               Expanded(
@@ -1698,8 +1692,7 @@ Expanded(
                                     ? '${i.name} (x${i.qty})'
                                     : i.name),
                               ),
-                              Text(fmtMoney(
-                                  i.total, _currency)),
+                              Text(fmtMoney(i.total, _currency)),
                             ],
                           ),
                         ),
@@ -1710,8 +1703,7 @@ Expanded(
                             const Expanded(
                                 child: Text('DISCOUNT',
                                     style: TextStyle(
-                                        fontWeight:
-                                            FontWeight.w600))),
+                                        fontWeight: FontWeight.w600))),
                             Text('−${fmtMoney(discount, _currency)}',
                                 style: const TextStyle(
                                     fontWeight: FontWeight.w600)),
@@ -1723,20 +1715,19 @@ Expanded(
                         children: [
                           const Expanded(
                               child: Text('TOTAL',
-                                  style: TextStyle(
-                                      fontWeight:
-                                          FontWeight.bold))),
+                                  style:
+                                      TextStyle(fontWeight: FontWeight.bold))),
                           Text(fmtMoney(due, _currency),
-                              style: const TextStyle(
-                                  fontWeight: FontWeight.bold)),
+                              style:
+                                  const TextStyle(fontWeight: FontWeight.bold)),
                         ],
                       ),
                       const SizedBox(height: 12),
                       if (cashMethod) ...[
                         TextField(
                           controller: _cashCtrl,
-                          keyboardType: const TextInputType
-                              .numberWithOptions(decimal: true),
+                          keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true),
                           decoration: const InputDecoration(
                             labelText: 'Cash tendered',
                             isDense: true,
@@ -1747,30 +1738,24 @@ Expanded(
                         const SizedBox(height: 8),
                         Row(
                           children: [
-                            const Expanded(
-                                child: Text('Cash tendered')),
+                            const Expanded(child: Text('Cash tendered')),
                             Text(
                               fmtMoney(cash, _currency),
-                              style: const TextStyle(
-                                  fontWeight: FontWeight.bold),
+                              style:
+                                  const TextStyle(fontWeight: FontWeight.bold),
                             ),
                           ],
                         ),
                         Row(
                           children: [
-                            const Expanded(
-                                child: Text('Change')),
+                            const Expanded(child: Text('Change')),
                             Text(
                               fmtMoney(change, _currency),
                               style: TextStyle(
                                 fontWeight: FontWeight.bold,
                                 color: valid
-                                    ? Theme.of(ctx)
-                                        .colorScheme
-                                        .primary
-                                    : Theme.of(ctx)
-                                        .colorScheme
-                                        .error,
+                                    ? Theme.of(ctx).colorScheme.primary
+                                    : Theme.of(ctx).colorScheme.error,
                               ),
                             ),
                           ],
@@ -1781,15 +1766,13 @@ Expanded(
                           child: Text(
                             'Collect $due via ${paymentMethodLabel(sheetPayment)} and confirm.',
                             style: const TextStyle(
-                                fontSize: 13,
-                                color: Color(0xFF64748B)),
+                                fontSize: 13, color: Color(0xFF64748B)),
                           ),
                         ),
                       const SizedBox(height: 14),
                       if (cashMethod) ...[
                         Text('Live preview',
-                            style:
-                                Theme.of(ctx).textTheme.titleSmall),
+                            style: Theme.of(ctx).textTheme.titleSmall),
                         const SizedBox(height: 8),
                         TicketPreviewCard(
                             data: _ticketData(
@@ -1797,8 +1780,7 @@ Expanded(
                           paymentMethod: sheetPayment,
                           total: due,
                           customerName: _customerNameController.text.trim(),
-                          customerMobile:
-                              _customerPhoneController.text.trim(),
+                          customerMobile: _customerPhoneController.text.trim(),
                         )),
                         const SizedBox(height: 14),
                       ],
@@ -1806,22 +1788,19 @@ Expanded(
                         mainAxisAlignment: MainAxisAlignment.end,
                         children: [
                           TextButton(
-                            onPressed: () =>
-                                Navigator.of(ctx).pop(),
+                            onPressed: () => Navigator.of(ctx).pop(),
                             child: const Text('Cancel'),
                           ),
                           const SizedBox(width: 8),
                           FilledButton(
                             onPressed: valid
-                                ? () => _confirmSale(
-                                    cashMethod ? cash : due,
+                                ? () => _confirmSale(cashMethod ? cash : due,
                                     paymentMethod: sheetPayment,
                                     promoCode: appliedCode,
                                     discount: discount,
                                     noName: noName)
                                 : null,
-                            child:
-                                const Text('Confirm & Print'),
+                            child: const Text('Confirm & Print'),
                           ),
                         ],
                       ),
@@ -1849,11 +1828,10 @@ Expanded(
     // placeholder) so manifests keep clean, real data.
     final name = _customerNameController.text.trim();
     final phone = _customerPhoneController.text.trim();
-    print(
-        'CONFIRMING SALE -> Customer: ${name.isEmpty ? 'NO NAME' : name}, Driver: ${_activeShift?.driverName}, Conductor: ${_activeShift?.conductorName}');
-    final custName = (name.isEmpty || noName)
-        ? ''
-        : name.toUpperCase();
+    debugPrint('Confirming sale for '
+        '${name.isEmpty ? 'NO NAME' : name} on shift '
+        '${_activeShift?.id ?? '—'}');
+    final custName = (name.isEmpty || noName) ? '' : name.toUpperCase();
     final custMobile = zimPhoneOrEmpty(phone);
     final allowed = await SecureKeystore.instance.canSellOffline();
     if (!allowed) {
@@ -1986,9 +1964,8 @@ Expanded(
       if (wantsLuggage == true) {
         final saved = await AppDb.getSaleById(saleId);
         if (saved != null && mounted) {
-          await Navigator.of(context).push(MaterialPageRoute(
-            builder: (_) => LuggageTicketScreen(sourceSale: saved),
-          ));
+          await Navigator.of(context).push(
+              emeraldPageRoute<void>(LuggageTicketScreen(sourceSale: saved)));
         }
       }
     }
@@ -1999,8 +1976,7 @@ Expanded(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Luggage?'),
-        content: const Text(
-            'Does this passenger have luggage to check in?'),
+        content: const Text('Does this passenger have luggage to check in?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
@@ -2024,8 +2000,7 @@ Expanded(
   }
 
   Future<String> _printReceipt(Sale sale) async {
-    final address =
-        await AppDb.getSetting('printer_address', null);
+    final address = await AppDb.getSetting('printer_address', null);
     if (address == null || address.isEmpty) {
       return 'No printer configured';
     }
@@ -2039,8 +2014,7 @@ Expanded(
     return TicketData(
       companyName: _companyName,
       slogan: _slogan,
-      ticketType:
-          isLuggage ? 'LUGGAGE TICKET' : 'BUS TICKET',
+      ticketType: isLuggage ? 'LUGGAGE TICKET' : 'BUS TICKET',
       receiptNo: sale.receiptNo,
       time: sale.createdAt ?? DateTime.now(),
       busReg: sale.busReg.isNotEmpty ? sale.busReg : _effectiveBusReg,
@@ -2051,33 +2025,24 @@ Expanded(
       companyEmail: _companyEmail,
       receiptHeader: _receiptHeader,
       receiptFooter: _receiptFooter,
-      routeCode: sale.routeCode.isNotEmpty
-          ? sale.routeCode
-          : _routeCode,
-      routeName: sale.routeName.isNotEmpty
-          ? sale.routeName
-          : _routeName,
+      routeCode: sale.routeCode.isNotEmpty ? sale.routeCode : _routeCode,
+      routeName: sale.routeName.isNotEmpty ? sale.routeName : _routeName,
       items: sale.items,
       total: sale.total,
       currency: _currency,
-      driver:
-          sale.driver.isNotEmpty ? sale.driver : _effectiveDriver,
-      driverPhone:
-          sale.driverPhone.isNotEmpty ? sale.driverPhone : _effectiveDriverPhone,
-      conductor1: sale.conductor1.isNotEmpty
-          ? sale.conductor1
-          : _effectiveConductor1,
-      conductor2: sale.conductor2.isNotEmpty
-          ? sale.conductor2
-          : _conductor2,
+      driver: sale.driver.isNotEmpty ? sale.driver : _effectiveDriver,
+      driverPhone: sale.driverPhone.isNotEmpty
+          ? sale.driverPhone
+          : _effectiveDriverPhone,
+      conductor1:
+          sale.conductor1.isNotEmpty ? sale.conductor1 : _effectiveConductor1,
+      conductor2: sale.conductor2.isNotEmpty ? sale.conductor2 : _conductor2,
       conductorPhone: sale.conductorPhone.isNotEmpty
           ? sale.conductorPhone
           : _effectiveConductorPhone,
-      seatNumber:
-          sale.seatNumber.isNotEmpty ? sale.seatNumber : _seat,
-      departureTime: sale.departureTime.isNotEmpty
-          ? sale.departureTime
-          : _departureTime,
+      seatNumber: sale.seatNumber.isNotEmpty ? sale.seatNumber : _seat,
+      departureTime:
+          sale.departureTime.isNotEmpty ? sale.departureTime : _departureTime,
       customFare: sale.customFare,
       customerName: sale.customerName,
       customerMobile: sale.customerMobile,
@@ -2097,8 +2062,7 @@ Expanded(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text('Total   ${fmtMoney(sale.total, _currency)}'),
-            Text(
-                'Change  ${fmtMoney(sale.change, _currency)}'),
+            Text('Change  ${fmtMoney(sale.change, _currency)}'),
             const SizedBox(height: 10),
             Text(
               printMsg,
@@ -2138,8 +2102,7 @@ Expanded(
   Future<void> _reprint(Sale sale) async {
     final msg = await _printReceipt(sale);
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(msg)));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
   Future<void> _sharePdf(Sale sale) async {
@@ -2174,8 +2137,8 @@ class _TripPickerSheetState extends State<_TripPickerSheet> {
   }
 
   Future<void> _loadLocal() async {
-    final trips = await AppDb.getTrips(
-        statuses: const ['SCHEDULED', 'ACTIVE', 'OPEN']);
+    final trips =
+        await AppDb.getTrips(statuses: const ['SCHEDULED', 'ACTIVE', 'OPEN']);
     if (!mounted) return;
     setState(() {
       _trips = trips;
@@ -2220,24 +2183,24 @@ class _TripPickerSheetState extends State<_TripPickerSheet> {
             children: [
               TextField(
                   controller: noCtrl,
-                  decoration:
-                      const InputDecoration(labelText: 'Trip no.', isDense: true)),
+                  decoration: const InputDecoration(
+                      labelText: 'Trip no.', isDense: true)),
               const SizedBox(height: 8),
               Row(
                 children: [
                   Expanded(
                       child: TextField(
                           controller: fromCtrl,
-                          onChanged: (_) => autofillCode(
-                              fromCtrl, toCtrl, codeCtrl),
+                          onChanged: (_) =>
+                              autofillCode(fromCtrl, toCtrl, codeCtrl),
                           decoration: const InputDecoration(
                               labelText: 'From', isDense: true))),
                   const SizedBox(width: 8),
                   Expanded(
                       child: TextField(
                           controller: toCtrl,
-                          onChanged: (_) => autofillCode(
-                              fromCtrl, toCtrl, codeCtrl),
+                          onChanged: (_) =>
+                              autofillCode(fromCtrl, toCtrl, codeCtrl),
                           decoration: const InputDecoration(
                               labelText: 'To', isDense: true))),
                 ],
@@ -2304,8 +2267,8 @@ class _TripPickerSheetState extends State<_TripPickerSheet> {
       }
     } on TransitApiException catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(e.code == 'FORBIDDEN'
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(e.code == 'FORBIDDEN'
               ? 'Admin access required to create trips.'
               : e.message)));
     } catch (_) {
@@ -2328,11 +2291,11 @@ class _TripPickerSheetState extends State<_TripPickerSheet> {
                 style: Theme.of(context).textTheme.titleMedium),
           ),
           const SizedBox(height: 4),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 20),
             child: Text(
               'Every ticket sold attaches to this trip.',
-              style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+              style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
             ),
           ),
           const SizedBox(height: 8),
@@ -2372,17 +2335,14 @@ class _TripPickerSheetState extends State<_TripPickerSheet> {
                       )
                     : ListView.separated(
                         itemCount: _trips.length,
-                        separatorBuilder: (_, __) =>
-                            const Divider(height: 1),
+                        separatorBuilder: (_, __) => const Divider(height: 1),
                         itemBuilder: (ctx, i) {
                           final t = _trips[i];
                           final active =
                               t.status == 'ACTIVE' || t.status == 'OPEN';
                           return ListTile(
                             leading: Icon(
-                              active
-                                  ? Icons.play_circle_fill
-                                  : Icons.schedule,
+                              active ? Icons.play_circle_fill : Icons.schedule,
                               color: active
                                   ? const Color(0xFF1B5E20)
                                   : const Color(0xFFCA9A2D),

@@ -50,8 +50,9 @@ class _PromotionsScreenState extends State<PromotionsScreen> {
     final discount = p.type == 'FLAT'
         ? '${fmtMoney(p.value, _currency)} off'
         : '${p.value}% off';
-    final minPart =
-        p.minimumCents > 0 ? ' · min ${fmtMoney(p.minimumCents, _currency)}' : '';
+    final minPart = p.minimumCents > 0
+        ? ' · min ${fmtMoney(p.minimumCents, _currency)}'
+        : '';
     final capPart = p.maxValueCents > 0
         ? ' · cap ${fmtMoney(p.maxValueCents, _currency)}'
         : '';
@@ -74,7 +75,8 @@ class _PromotionsScreenState extends State<PromotionsScreen> {
     if (saved == null) return;
     await AppDb.upsertPromo(saved);
     if (saved.id.isNotEmpty) {
-      await _tryPush(() => TransitApi.updatePromotion(saved.id, _payload(saved)));
+      await _tryPush(
+          () => TransitApi.updatePromotion(saved.id, _payload(saved)));
     }
     await _load();
   }
@@ -93,7 +95,8 @@ class _PromotionsScreenState extends State<PromotionsScreen> {
     );
     await AppDb.upsertPromo(updated);
     if (promo.id.isNotEmpty) {
-      await _tryPush(() => TransitApi.updatePromotion(promo.id, _payload(updated)));
+      await _tryPush(
+          () => TransitApi.updatePromotion(promo.id, _payload(updated)));
     }
     await _load();
   }
@@ -133,7 +136,8 @@ class _PromotionsScreenState extends State<PromotionsScreen> {
         active: false,
         usageCount: promo.usageCount,
       );
-      await _tryPush(() => TransitApi.updatePromotion(promo.id, _payload(deactivated)));
+      await _tryPush(
+          () => TransitApi.updatePromotion(promo.id, _payload(deactivated)));
     }
     await _load();
   }
@@ -200,13 +204,11 @@ class _PromotionsScreenState extends State<PromotionsScreen> {
                 const SizedBox(height: 10),
                 SegmentedButton<String>(
                   segments: const [
-                    ButtonSegment(
-                        value: 'PERCENT', label: Text('Percent')),
+                    ButtonSegment(value: 'PERCENT', label: Text('Percent')),
                     ButtonSegment(value: 'FLAT', label: Text('Fixed')),
                   ],
                   selected: {type},
-                  onSelectionChanged: (s) =>
-                      setDialog(() => type = s.first),
+                  onSelectionChanged: (s) => setDialog(() => type = s.first),
                 ),
                 const SizedBox(height: 10),
                 TextField(
@@ -309,15 +311,13 @@ class _PromotionsScreenState extends State<PromotionsScreen> {
                 children: [
                   const Text(
                     'Promo codes',
-                    style:
-                        TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
                   ),
                   const SizedBox(height: 4),
-                  Text(
+                  const Text(
                     'Give passengers a discount at checkout. Codes are '
                     'verified on-device even while offline.',
-                    style: const TextStyle(
-                        fontSize: 12.5, color: Color(0xFF64748B)),
+                    style: TextStyle(fontSize: 12.5, color: Color(0xFF64748B)),
                   ),
                   const SizedBox(height: 12),
                   FilledButton.tonalIcon(

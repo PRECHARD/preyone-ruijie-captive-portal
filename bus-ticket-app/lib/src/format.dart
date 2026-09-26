@@ -4,8 +4,18 @@ const kPlatformProvider = 'Preyone Technologies';
 const kPlatformUrl = 'www.preyone.com';
 
 const _months = [
-  'JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN',
-  'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC',
+  'JAN',
+  'FEB',
+  'MAR',
+  'APR',
+  'MAY',
+  'JUN',
+  'JUL',
+  'AUG',
+  'SEP',
+  'OCT',
+  'NOV',
+  'DEC',
 ];
 
 String two(int n) => n.toString().padLeft(2, '0');
@@ -89,8 +99,7 @@ String formatRow(String left, String right, {int totalWidth = 32}) {
 
 /// Truncates [s] to at most [max] characters so a label row never wraps on a
 /// 32-column ticket.
-String clipText(String s, int max) =>
-    s.length <= max ? s : s.substring(0, max);
+String clipText(String s, int max) => s.length <= max ? s : s.substring(0, max);
 
 /// Normalizes a Zimbabwe mobile number for print output. Maps every form of
 /// the inner-network prefix back to the real country code "+263" — "+363",

@@ -4,6 +4,7 @@ import '../db/app_db.dart';
 import '../format.dart';
 import '../security/secure_keystore.dart';
 import '../services/transit_api.dart';
+import '../widgets/emerald_ui.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -68,7 +69,8 @@ class _LoginScreenState extends State<LoginScreen> {
       builder: (ctx) => AlertDialog(
         icon: const Icon(Icons.warning_amber_rounded, color: Color(0xFFB45309)),
         title: Text(title),
-        content: Text(message, style: const TextStyle(fontSize: 14, height: 1.4)),
+        content:
+            Text(message, style: const TextStyle(fontSize: 14, height: 1.4)),
         actions: [
           FilledButton(
             onPressed: () => Navigator.of(ctx).pop(),
@@ -93,11 +95,15 @@ class _LoginScreenState extends State<LoginScreen> {
 
     try {
       final account = await TransitApi.login(user, pass);
+      // The screen can be popped while the request is in flight; every dialog
+      // below touches this context, so bail out if we are gone.
+      if (!mounted) return;
 
       if (account.deviceDisabled) {
         setState(() {
           _loading = false;
-          _error = 'This device has been disabled. Please contact your administrator.';
+          _error =
+              'This device has been disabled. Please contact your administrator.';
         });
         return;
       }
@@ -105,7 +111,7 @@ class _LoginScreenState extends State<LoginScreen> {
         await _showDeviceDialog(
           'Device linked to another account',
           'This terminal is linked to another staff account. Please request an '
-          'admin to unbind the device in the portal.',
+              'admin to unbind the device in the portal.',
         );
         return;
       }
@@ -145,7 +151,8 @@ class _LoginScreenState extends State<LoginScreen> {
       if (account.deviceToken.isEmpty) {
         setState(() {
           _loading = false;
-          _error = 'This account is not registered on this device. Please contact your administrator.';
+          _error =
+              'This account is not registered on this device. Please contact your administrator.';
         });
         return;
       }
@@ -164,7 +171,7 @@ class _LoginScreenState extends State<LoginScreen> {
         await _showDeviceDialog(
           'Device linked to another account',
           'This terminal is linked to another staff account. Please request an '
-          'admin to unbind the device in the portal.',
+              'admin to unbind the device in the portal.',
         );
         return;
       }
@@ -189,7 +196,8 @@ class _LoginScreenState extends State<LoginScreen> {
       if (!mounted) return;
       setState(() {
         _loading = false;
-        _error = 'Cannot reach the server and no offline authorization is available on this device.';
+        _error =
+            'Cannot reach the server and no offline authorization is available on this device.';
       });
     }
   }
@@ -276,180 +284,176 @@ class _LoginScreenState extends State<LoginScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFF5F7FA),
-      body: Center(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 32),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 420),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                // Logo
-                Center(
-                  child: Container(
-                    width: 96,
-                    height: 96,
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      shape: BoxShape.circle,
-                      border: Border.all(color: const Color(0xFFE2E8F0), width: 1),
-                      boxShadow: const [
-                        BoxShadow(
-                          color: Color(0x14000000),
-                          blurRadius: 14,
-                          offset: Offset(0, 6),
-                        ),
-                      ],
-                    ),
-                    child: ClipOval(
-                      child: Image.asset(
-                        'assets/logo.png',
-                        fit: BoxFit.cover,
-                        width: 96,
-                        height: 96,
-                        errorBuilder: (_, __, ___) => const Icon(
-                          Icons.directions_bus_filled,
-                          size: 52,
-                          color: Color(0xFF1B5E20),
+      body: EmeraldAurora(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 32),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 420),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // Logo
+                  Center(
+                    child: Container(
+                      width: 96,
+                      height: 96,
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                            color: const Color(0xFFE2E8F0), width: 1),
+                        boxShadow: const [
+                          BoxShadow(
+                            color: Color(0x14000000),
+                            blurRadius: 14,
+                            offset: Offset(0, 6),
+                          ),
+                        ],
+                      ),
+                      child: ClipOval(
+                        child: Image.asset(
+                          'assets/logo.png',
+                          fit: BoxFit.cover,
+                          width: 96,
+                          height: 96,
+                          errorBuilder: (_, __, ___) => const Icon(
+                            Icons.directions_bus_filled,
+                            size: 52,
+                            color: Color(0xFF1B5E20),
+                          ),
                         ),
                       ),
                     ),
                   ),
-                ),
-                const SizedBox(height: 20),
-                const Text(
-                  kPlatformName,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 30,
-                    fontWeight: FontWeight.w800,
-                    color: Color(0xFF0F1E33),
-                    letterSpacing: 0.5,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                const Text(
-                  kPlatformDesc,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w500,
-                    color: Color(0xFF64748B),
-                    height: 1.4,
-                  ),
-                ),
-                const SizedBox(height: 36),
-                Card(
-                  elevation: 0,
-                  color: Colors.white,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16),
-                    side: const BorderSide(color: Color(0xFFE2E8F0)),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.all(22),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        TextField(
-                          controller: _usernameCtrl,
-                          textCapitalization: TextCapitalization.none,
-                          decoration: const InputDecoration(
-                            labelText: 'Username',
-                            prefixIcon: Icon(Icons.person_outline),
-                            border: OutlineInputBorder(),
-                          ),
-                        ),
-                        const SizedBox(height: 14),
-                        TextField(
-                          controller: _passwordCtrl,
-                          obscureText: _obscure,
-                          onSubmitted: (_) => _login(),
-                          decoration: InputDecoration(
-                            labelText: 'Password',
-                            prefixIcon: const Icon(Icons.lock_outline),
-                            border: const OutlineInputBorder(),
-                            suffixIcon: IconButton(
-                              icon: Icon(_obscure
-                                  ? Icons.visibility_off_outlined
-                                  : Icons.visibility_outlined),
-                              onPressed: () =>
-                                  setState(() => _obscure = !_obscure),
-                            ),
-                          ),
-                        ),
-                        if (_error != null) ...[
-                          const SizedBox(height: 10),
-                          Text(
-                            _error!,
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              color: Colors.red.shade700,
-                              fontSize: 13,
-                            ),
-                          ),
-                        ],
-                        if (_offlineAvailable) ...[
-                          const SizedBox(height: 10),
-                          const Text(
-                            'Offline sign-in available for this device',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              color: Color(0xFF1B5E20),
-                              fontSize: 12.5,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
-                        const SizedBox(height: 20),
-                        SizedBox(
-                          height: 48,
-                          child: FilledButton.icon(
-                            onPressed: _loading ? null : _login,
-                            icon: _loading
-                                ? const SizedBox(
-                                    width: 18,
-                                    height: 18,
-                                    child: CircularProgressIndicator(
-                                        strokeWidth: 2, color: Colors.white),
-                                  )
-                                : const Icon(Icons.login),
-                            label: Text(_loading ? 'Signing in...' : 'Login'),
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        TextButton(
-                          onPressed: _loading ? null : _forgotPassword,
-                          child: const Text('Forgot Password / PIN?'),
-                        ),
-                      ],
+                  const SizedBox(height: 20),
+                  const Text(
+                    kPlatformName,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 30,
+                      fontWeight: FontWeight.w800,
+                      color: Color(0xFF0F1E33),
+                      letterSpacing: 0.5,
                     ),
                   ),
-                ),
-                const SizedBox(height: 32),
-                const Text(
-                  'Powered by $kPlatformProvider',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Color(0xFF94A3B8),
-                    fontWeight: FontWeight.w600,
+                  const SizedBox(height: 8),
+                  const Text(
+                    kPlatformDesc,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                      color: Color(0xFF64748B),
+                      height: 1.4,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 4),
-                const Text(
-                  kPlatformUrl,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 12, color: Color(0xFF94A3B8)),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  'v${kAppVersion.split('+').first}',
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(fontSize: 12, color: Color(0xFF94A3B8)),
-                ),
-              ],
+                  const SizedBox(height: 36),
+                  Card(
+                    elevation: 0,
+                    color: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                      side: const BorderSide(color: Color(0xFFE2E8F0)),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(22),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          TextField(
+                            controller: _usernameCtrl,
+                            textCapitalization: TextCapitalization.none,
+                            decoration: const InputDecoration(
+                              labelText: 'Username',
+                              prefixIcon: Icon(Icons.person_outline),
+                              border: OutlineInputBorder(),
+                            ),
+                          ),
+                          const SizedBox(height: 14),
+                          TextField(
+                            controller: _passwordCtrl,
+                            obscureText: _obscure,
+                            onSubmitted: (_) => _login(),
+                            decoration: InputDecoration(
+                              labelText: 'Password',
+                              prefixIcon: const Icon(Icons.lock_outline),
+                              border: const OutlineInputBorder(),
+                              suffixIcon: IconButton(
+                                icon: Icon(_obscure
+                                    ? Icons.visibility_off_outlined
+                                    : Icons.visibility_outlined),
+                                onPressed: () =>
+                                    setState(() => _obscure = !_obscure),
+                              ),
+                            ),
+                          ),
+                          if (_error != null) ...[
+                            const SizedBox(height: 10),
+                            Text(
+                              _error!,
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                color: Colors.red.shade700,
+                                fontSize: 13,
+                              ),
+                            ),
+                          ],
+                          if (_offlineAvailable) ...[
+                            const SizedBox(height: 10),
+                            const Text(
+                              'Offline sign-in available for this device',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                color: Color(0xFF1B5E20),
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                          const SizedBox(height: 20),
+                          EmeraldButton(
+                            expand: true,
+                            height: 48,
+                            onPressed: _loading ? null : _login,
+                            icon: _loading ? null : Icons.login,
+                            label: _loading ? 'Signing in...' : 'Login',
+                          ),
+                          const SizedBox(height: 10),
+                          TextButton(
+                            onPressed: _loading ? null : _forgotPassword,
+                            child: const Text('Forgot Password / PIN?'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 32),
+                  const Text(
+                    'Powered by $kPlatformProvider',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Color(0xFF94A3B8),
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  const Text(
+                    kPlatformUrl,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 12, color: Color(0xFF94A3B8)),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'v${kAppVersion.split('+').first}',
+                    textAlign: TextAlign.center,
+                    style:
+                        const TextStyle(fontSize: 12, color: Color(0xFF94A3B8)),
+                  ),
+                ],
+              ),
             ),
           ),
         ),

@@ -7,10 +7,9 @@ import '../db/app_db.dart';
 import '../models.dart';
 import '../receipt.dart';
 import '../security/secure_keystore.dart';
+import '../version.dart';
 
-/// Matches pubspec version, bumped together with app releases.
-const kAppVersion = '1.0.0+17';
-const kAppVersionShort = '1.0.0';
+export '../version.dart';
 
 class TransitApiException implements Exception {
   TransitApiException(this.message, {this.code, this.statusCode});
@@ -106,7 +105,8 @@ class TransitApi {
   static Future<TransitAccount> login(String username, String password) async {
     final base = await baseUrl();
     if (base.isEmpty) {
-      throw TransitApiException('No sync server configured. Please update the app.');
+      throw TransitApiException(
+          'No sync server configured. Please update the app.');
     }
     final resp = await http
         .post(
@@ -180,7 +180,8 @@ class TransitApi {
         deviceToken: (body['deviceToken'] ?? '').toString(),
         needsDeviceRegistration: false,
         offlineLease: (body['licenseExpiresAt'] ?? '').toString(),
-        minAppVersion: (body['minAppVersion'] ?? account.minAppVersion).toString(),
+        minAppVersion:
+            (body['minAppVersion'] ?? account.minAppVersion).toString(),
       );
     }
     throw TransitApiException(
@@ -252,7 +253,8 @@ class TransitApi {
     );
   }
 
-  static Future<http.Response> sendSync(List<Map<String, Object?>> tickets, String deviceToken) async {
+  static Future<http.Response> sendSync(
+      List<Map<String, Object?>> tickets, String deviceToken) async {
     final base = await baseUrl();
     return http
         .post(
@@ -340,7 +342,8 @@ class TransitApi {
         .timeout(const Duration(seconds: 20));
     final body = _jsonBody(resp);
     if (resp.statusCode >= 200 && resp.statusCode < 300) {
-      return Trip.fromJson((body['trip'] as Map?)?.cast<String, dynamic>() ?? const {});
+      return Trip.fromJson(
+          (body['trip'] as Map?)?.cast<String, dynamic>() ?? const {});
     }
     if (resp.statusCode == 403) {
       throw TransitApiException(
@@ -366,7 +369,8 @@ class TransitApi {
         .timeout(const Duration(seconds: 20));
     final body = _jsonBody(resp);
     if (resp.statusCode >= 200 && resp.statusCode < 300) {
-      return Trip.fromJson((body['trip'] as Map?)?.cast<String, dynamic>() ?? const {});
+      return Trip.fromJson(
+          (body['trip'] as Map?)?.cast<String, dynamic>() ?? const {});
     }
     throw TransitApiException(
       (body['error'] ?? 'Trip action failed').toString(),
@@ -562,7 +566,8 @@ class TransitApi {
     );
   }
 
-  static Future<Map<String, dynamic>> createPromotion(Map<String, dynamic> payload) async {
+  static Future<Map<String, dynamic>> createPromotion(
+      Map<String, dynamic> payload) async {
     final base = await baseUrl();
     final token = await _deviceToken();
     final resp = await http
@@ -659,12 +664,10 @@ Map<String, Object?> saleSyncPayload(Map<String, Object?> saleJson,
     'route_to': to,
     'route_code': s(saleJson['route_code'] ?? saleJson['routeCode']),
     'seat_number': s(saleJson['seat_number'] ?? saleJson['seatNumber']),
-    'customer_name':
-        s(saleJson['customer_name'] ?? saleJson['customerName']),
-    'customer_phone': s(
-        saleJson['customer_phone'] ??
-            saleJson['customer_mobile'] ??
-            saleJson['customerMobile']),
+    'customer_name': s(saleJson['customer_name'] ?? saleJson['customerName']),
+    'customer_phone': s(saleJson['customer_phone'] ??
+        saleJson['customer_mobile'] ??
+        saleJson['customerMobile']),
     'driver_name': s(saleJson['driver_name'] ?? saleJson['driver']),
     'driver_phone': s(saleJson['driver_phone'] ?? saleJson['driverPhone']),
     'conductor_name': s(saleJson['conductor_name'] ?? saleJson['conductor1']),
@@ -675,14 +678,13 @@ Map<String, Object?> saleSyncPayload(Map<String, Object?> saleJson,
     'custom_fare': numInt(saleJson['custom_fare'] ?? saleJson['customFare']),
     'departure_time':
         s(saleJson['departure_time'] ?? saleJson['departureTime']),
-    'luggage_linked_ticket_id': s(
-        saleJson['luggage_linked_ticket_id'] ??
-            saleJson['luggageLinkedTicketId']),
+    'luggage_linked_ticket_id': s(saleJson['luggage_linked_ticket_id'] ??
+        saleJson['luggageLinkedTicketId']),
     'amount': numInt(saleJson['total']),
     'cash_cents': numInt(saleJson['cash'] ?? saleJson['cash_cents']),
     'change_cents': numInt(saleJson['change'] ?? saleJson['change_cents']),
-    'created_at':
-        s(saleJson['created_at'] ?? saleJson['saleTime'], DateTime.now().toUtc().toIso8601String()),
+    'created_at': s(saleJson['created_at'] ?? saleJson['saleTime'],
+        DateTime.now().toUtc().toIso8601String()),
   };
 }
 

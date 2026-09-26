@@ -209,7 +209,8 @@ class Sale {
         }
       }
     }
-    final rawCustomer = _firstOf(j, ['customer_name', 'customerName', 'customer_phone_name']);
+    final rawCustomer =
+        _firstOf(j, ['customer_name', 'customerName', 'customer_phone_name']);
     final customerName = rawCustomer.isEmpty ? '' : rawCustomer;
     return Sale(
       id: j['id'] is int ? j['id'] as int : null,
@@ -238,8 +239,12 @@ class Sale {
       conductorId: _firstOf(j, ['conductor_id', 'conductorId']),
       paymentMethod: _firstOf(j, ['payment_method', 'paymentMethod']),
       customerName: customerName,
-      customerMobile: _firstOf(j,
-          ['customer_phone', 'customerPhone', 'customer_mobile', 'customerMobile']),
+      customerMobile: _firstOf(j, [
+        'customer_phone',
+        'customerPhone',
+        'customer_mobile',
+        'customerMobile'
+      ]),
       customFare: _intOf(j, ['custom_fare', 'customFare']),
       departureTime: _firstOf(j, ['departure_time', 'departureTime']),
       luggageLinkedTicketId:
@@ -334,6 +339,15 @@ class Trip {
   final int baseFareCents;
   final int totalSeats;
   final int seatsSold;
+
+  /// Prefix that marks a device-local on-the-go trip. These never exist on the
+  /// server schedule board, so the trip lifecycle must stay off the replay queue
+  /// (see TripController) — the local `trip_instances` row is the only record.
+  static const localTripPrefix = 'TRIP-';
+
+  /// True for a trip this device created on the fly (an on-the-go run) rather
+  /// than one mirrored from the server schedule.
+  bool get isLocal => id.startsWith(localTripPrefix);
 
   String get displayName {
     final route = routeName.isNotEmpty
@@ -442,7 +456,8 @@ class Promo {
   int discountFor(int subtotalCents) {
     if (!active || subtotalCents < minimumCents) return 0;
     final raw = type == 'FLAT' ? value : (subtotalCents * value / 100).round();
-    final capped = maxValueCents > 0 ? (raw > maxValueCents ? maxValueCents : raw) : raw;
+    final capped =
+        maxValueCents > 0 ? (raw > maxValueCents ? maxValueCents : raw) : raw;
     if (raw <= 0) return 0;
     return capped > subtotalCents ? subtotalCents : capped;
   }
@@ -642,7 +657,9 @@ class StaffProfile {
         id: (json['id'] as String?) ?? '',
         role: (json['role'] as String?) ?? 'DRIVER',
         fullName: (json['fullName'] as String?) ?? '',
-        phone: (json['phone'] as String?) ?? (json['phone_number'] as String?) ?? '',
+        phone: (json['phone'] as String?) ??
+            (json['phone_number'] as String?) ??
+            '',
         licenseNo: (json['licenseNo'] as String?) ?? '',
         status: (json['status'] as String?) ?? 'ACTIVE',
       );

@@ -21,6 +21,7 @@ TicketData _ticket({
   String companyAddress = '',
   String customerCare = '',
   String note = kTicketValidityNote,
+  List<SaleItem> items = const [],
 }) {
   return TicketData(
     companyName: companyName,
@@ -35,7 +36,7 @@ TicketData _ticket({
     companyAddress: companyAddress,
     routeCode: routeCode,
     routeName: routeName,
-    items: const [],
+    items: items,
     total: 500,
     currency: 'USD',
     driver: 'John Muvirimi',
@@ -62,8 +63,8 @@ bool listContains(List<int> list, List<int> needle) {
 void main() {
   test('route code appears before destination on same line, no label', () {
     final lines = buildTicketLines(_ticket());
-    final routeLine = lines
-        .firstWhere((l) => l.text.trim().contains('HARARE -> BULAWAYO'));
+    final routeLine =
+        lines.firstWhere((l) => l.text.trim().contains('HARARE -> BULAWAYO'));
     expect(routeLine.text.trim(), 'RT01 HARARE -> BULAWAYO');
     expect(routeLine.text.trim().split('\n'), hasLength(1));
     for (final l in lines) {
@@ -75,7 +76,8 @@ void main() {
   });
 
   test('departure time and trip number are absent', () {
-    final lines = buildTicketLines(_ticket(departureTime: '06:30', tripNo: 'T-5678'));
+    final lines =
+        buildTicketLines(_ticket(departureTime: '06:30', tripNo: 'T-5678'));
     for (final l in lines) {
       expect(l.text.contains('DEP'), isFalse,
           reason: 'departure time must not print: ${l.text}');
@@ -85,17 +87,19 @@ void main() {
   });
 
   test('company name centered, double-height when it fits the 58mm width', () {
-    final lines =
-        buildTicketLines(_ticket(companyName: 'Mupota Bus', slogan: 'Serving the nation'));
+    final lines = buildTicketLines(
+        _ticket(companyName: 'Mupota Bus', slogan: 'Serving the nation'));
     expect(lines.first.text.trim(), 'MUPOTA BUS');
     expect(lines.first.big, isTrue,
         reason: 'names up to 16 columns stay double-height to span the paper');
     expect(lines.first.bold, isTrue);
-    final tagline = lines.firstWhere((l) => l.text.trim() == 'SERVING THE NATION');
+    final tagline =
+        lines.firstWhere((l) => l.text.trim() == 'SERVING THE NATION');
     expect(tagline.bold, isTrue, reason: 'tagline prints in standard bold');
   });
 
-  test('long company name only steps to Font B double-height, never clipped', () {
+  test('long company name only steps to Font B double-height, never clipped',
+      () {
     final lines = buildTicketLines(_ticket(companyName: 'Mupota Bus Service'));
     expect(lines.first.big, isTrue,
         reason: 'names up to ~21 columns stay double-height, just one size '
@@ -125,20 +129,22 @@ void main() {
     expect(lines[addrIdx].small, isTrue,
         reason: 'the contact strip prints in the smaller font');
     expect(lines[careIdx].small, isTrue);
-    expect(texts.any((t) => t.length > 42),
-        isFalse,
+    expect(texts.any((t) => t.length > 42), isFalse,
         reason: 'no contact line may overflow the Font B width');
   });
 
   test('no contact strip when address and care are empty', () {
-    final lines = buildTicketLines(_ticket(companyAddress: '', customerCare: ''));
+    final lines =
+        buildTicketLines(_ticket(companyAddress: '', customerCare: ''));
     for (final l in lines) {
       expect(l.text.contains('CUSTOMER CARE'), isFalse);
     }
   });
 
-  test('metadata row shows BUS left / TKT right with equal bold typography', () {
-    final lines = buildTicketLines(_ticket(receiptNo: 'R-0001', busReg: 'AFR 1234'));
+  test('metadata row shows BUS left / TKT right with equal bold typography',
+      () {
+    final lines =
+        buildTicketLines(_ticket(receiptNo: 'R-0001', busReg: 'AFR 1234'));
     final texts = lines.map((l) => l.text.trim()).toList();
     final row = texts.firstWhere((t) => t.startsWith('BUS: AFR 1234'));
     expect(row, contains('TKT: #R-0001'));
@@ -152,9 +158,8 @@ void main() {
         reason: 'old BUS-only centered line must not print');
     expect(texts.indexWhere((t) => t.startsWith('TICKET NO')), -1,
         reason: 'legacy TICKET NO line must not duplicate when bus is present');
-    final content = lines
-        .where((l) => l.barcodeData == null && l.qrData == null)
-        .toList();
+    final content =
+        lines.where((l) => l.barcodeData == null && l.qrData == null).toList();
     expect(content.every((l) => l.text.trim().isNotEmpty), isTrue,
         reason: 'no blank text rows may remain (barcode/QR rows excepted)');
   });
@@ -173,10 +178,9 @@ void main() {
       routeCode: 'RT-0001',
       routeName: 'Sunningdale - Chitungwiza',
     ));
-    final routeLine = lines
-        .firstWhere((l) => l.text.trim().contains('RT-0001'));
-    expect(routeLine.text.trim(),
-        'RT-0001 SUNNINGDALE -> CHITUNGWIZA',
+    final routeLine =
+        lines.firstWhere((l) => l.text.trim().contains('RT-0001'));
+    expect(routeLine.text.trim(), 'RT-0001 SUNNINGDALE -> CHITUNGWIZA',
         reason: 'the complete route line must not be clipped');
     expect(routeLine.text.split('\n'), hasLength(1));
     expect(routeLine.small, isTrue,
@@ -203,9 +207,10 @@ void main() {
     expect(mobile.length, lessThanOrEqualTo(32));
   });
 
-  test('payment breakdown prints method, tendered and change from tendered', () {
-    final lines = buildTicketLines(
-        _ticket(paymentMethod: 'cash', tendered: 1000));
+  test('payment breakdown prints method, tendered and change from tendered',
+      () {
+    final lines =
+        buildTicketLines(_ticket(paymentMethod: 'cash', tendered: 1000));
     final texts = lines.map((l) => l.text.trim()).toList();
     final method = texts.firstWhere((t) => t.startsWith('PAYMENT METHOD:'));
     expect(method, contains('CASH'));
@@ -219,9 +224,9 @@ void main() {
   });
 
   test('exact payment yields zero change by default', () {
-    final lines = buildTicketLines(_ticket(tendered: 0, paymentMethod: 'ecocash'));
-    final change = lines
-        .firstWhere((l) => l.text.trim().startsWith('CHANGE:'));
+    final lines =
+        buildTicketLines(_ticket(tendered: 0, paymentMethod: 'ecocash'));
+    final change = lines.firstWhere((l) => l.text.trim().startsWith('CHANGE:'));
     expect(change.text.trim(), contains('USD 0.00'));
   });
 
@@ -272,8 +277,8 @@ void main() {
     final underlineIdx = texts.indexOf('-' * 32, changeIdx + 1);
     expect(underlineIdx, changeIdx + 1,
         reason: 'the underline sits right under the change figure');
-    final noteIdx = texts.indexWhere((t) => t.startsWith('PLEASE KEEP') ||
-        t.startsWith('Please keep'));
+    final noteIdx = texts.indexWhere(
+        (t) => t.startsWith('PLEASE KEEP') || t.startsWith('Please keep'));
     expect(noteIdx, greaterThan(underlineIdx),
         reason: 'statement prints under the payment underline');
     final footerIdx = texts.indexWhere((t) => t == 'Powered by', noteIdx + 1);
@@ -293,8 +298,7 @@ void main() {
     expect(footerIdx, greaterThan(noteIdx));
     expect(totalIdx, greaterThan(0));
     final bytes = buildTicket(_ticket(note: kTicketValidityNote));
-    final ascii =
-        String.fromCharCodes(bytes.where((b) => b >= 32 && b < 127));
+    final ascii = String.fromCharCodes(bytes.where((b) => b >= 32 && b < 127));
     expect(ascii, contains('Thank You!'),
         reason: 'the complete statement reaches the printer bytes');
   });
@@ -331,7 +335,9 @@ void main() {
         reason: 'the thermal ticket layout keeps only the CODE128 barcode');
   });
 
-  test('footer prints exactly like the app preview: Powered by / brand / website', () {
+  test(
+      'footer prints exactly like the app preview: Powered by / brand / website',
+      () {
     final lines = buildTicketLines(_ticket(website: 'preyone.co.zw'));
     final texts = lines.map((l) => l.text.trim()).toList();
     final byIdx = texts.indexOf('Powered by');
@@ -347,7 +353,8 @@ void main() {
         reason: 'the website prints last, exactly as the preview shows it');
   });
 
-  test('buildTicket emits a Code128 barcode followed by a 3-line tear feed', () {
+  test('buildTicket emits a Code128 barcode followed by a 3-line tear feed',
+      () {
     final bytes = buildTicket(_ticket());
 
     expect(listContains(bytes, [0x1D, 0x6B, 0x49]), isTrue,
@@ -356,8 +363,7 @@ void main() {
         reason: 'barcode height set to 28 dots (< 1 cm)');
     expect(listContains(bytes, [0x1B, 0x64, 0x03]), isTrue,
         reason: 'tear-off feed of exactly 3 lines after the barcode');
-    final ascii =
-        String.fromCharCodes(bytes.where((b) => b >= 32 && b < 127));
+    final ascii = String.fromCharCodes(bytes.where((b) => b >= 32 && b < 127));
     expect(ascii, contains('R-0001|T-5678|500'));
     expect(ascii.contains('Route Code'), isFalse);
   });
@@ -421,7 +427,9 @@ void main() {
       );
 
   group('trip manifest header', () {
-    test('long company name fits via the ticket font step, never forced double size', () {
+    test(
+        'long company name fits via the ticket font step, never forced double size',
+        () {
       final lines = buildTripManifestLines(
         companyName: 'Mupota Bus Services Harare',
         currency: 'USD',
@@ -435,7 +443,8 @@ void main() {
           reason: 'names over 21 columns must never be force-double-sized');
       expect(lines.first.text.trim(), 'MUPOTA BUS SERVICES HARARE');
       expect(lines.first.text.split('\n'), hasLength(1),
-          reason: 'the manifest header must fit the 58mm width like the ticket');
+          reason:
+              'the manifest header must fit the 58mm width like the ticket');
     });
 
     test('crew sits directly under company header, before TRIP MANIFEST', () {
@@ -450,14 +459,12 @@ void main() {
       );
       final texts = lines.map((l) => l.text.trim()).toList();
       final headerIdx = texts.indexOf('MUPOTA BUS');
-      final addressIdx =
-          texts.indexOf('10 KAGUYU STREET, HARARE');
+      final addressIdx = texts.indexOf('10 KAGUYU STREET, HARARE');
       final careIdx = texts.indexOf('CUSTOMER CARE +263772111111');
       final driverIdx = texts.indexWhere((t) => t.startsWith('DRIVER:'));
       final driverPhoneIdx = texts.indexWhere((t) => t == '+263771111111');
       final conductorIdx = texts.indexWhere((t) => t.startsWith('CONDUCTOR:'));
-      final conductorPhoneIdx =
-          texts.indexWhere((t) => t == '+263782222222');
+      final conductorPhoneIdx = texts.indexWhere((t) => t == '+263782222222');
       final manifestIdx = texts.indexOf('TRIP MANIFEST');
       expect(headerIdx, greaterThanOrEqualTo(0));
       expect(addressIdx, greaterThan(headerIdx),
@@ -486,8 +493,7 @@ void main() {
       final texts = lines.map((l) => l.text.trim()).toList();
       expect(texts.any((t) => t.contains('WALK-IN')), isFalse,
           reason: 'the manifest must not fabricate a WALK-IN PASSENGER name');
-      final seatRow = texts.firstWhere(
-          (t) => t.startsWith('S--'));
+      final seatRow = texts.firstWhere((t) => t.startsWith('S--'));
       expect(seatRow, contains('-'),
           reason: 'an unnamed passenger prints a dash as the name');
       expect(seatRow, contains('USD 5.00'),
@@ -497,7 +503,8 @@ void main() {
           reason: 'the ticket number prints as recorded');
     });
 
-    test('named passengers print exactly as recorded, ticket number intact', () {
+    test('named passengers print exactly as recorded, ticket number intact',
+        () {
       final lines = buildTripManifestLines(
         companyName: 'Mupota Bus',
         currency: 'USD',
@@ -519,8 +526,7 @@ void main() {
         tagline: 'Famba Nyore Nyore',
       );
       final texts = lines.map((l) => l.text.trim()).toList();
-      final seatRow =
-          texts.firstWhere((t) => t.startsWith('S04'));
+      final seatRow = texts.firstWhere((t) => t.startsWith('S04'));
       expect(seatRow, contains('TAPIWA MOYO'),
           reason: 'the recorded customer name is displayed uppercase');
       final tktRow = texts.firstWhere((t) => t.startsWith('#R-0007'));
@@ -577,8 +583,7 @@ void main() {
       final driverIdx = texts.indexWhere((t) => t.startsWith('DRIVER:'));
       final driverPhoneIdx = texts.indexWhere((t) => t == '+263771111111');
       final conductorIdx = texts.indexWhere((t) => t.startsWith('CONDUCTOR:'));
-      final conductorPhoneIdx =
-          texts.indexWhere((t) => t == '+263782222222');
+      final conductorPhoneIdx = texts.indexWhere((t) => t == '+263782222222');
       final titleIdx = texts.indexOf('END OF DAY REPORT');
       expect(driverIdx, greaterThan(careIdx));
       expect(driverPhoneIdx, greaterThan(driverIdx));
@@ -595,8 +600,11 @@ void main() {
         from: DateTime(2026, 9, 22),
         to: DateTime(2026, 9, 22, 23, 59),
         sales: [
-          mkSale(driver: 'Tendai Madondo', driverPhone: '0773111111',
-              conductor1: 'Rudo', conductorPhone: '0784111111'),
+          mkSale(
+              driver: 'Tendai Madondo',
+              driverPhone: '0773111111',
+              conductor1: 'Rudo',
+              conductorPhone: '0784111111'),
         ],
       );
       final texts = lines.map((l) => l.text.trim()).toList();
@@ -604,57 +612,60 @@ void main() {
       expect(driverIdx, greaterThanOrEqualTo(0));
       expect(texts, contains('+263773111111'),
           reason: 'the sale driver mobile is normalized to +263');
-      final conductorIdx =
-          texts.indexWhere((t) => t.startsWith('CONDUCTOR:'));
+      final conductorIdx = texts.indexWhere((t) => t.startsWith('CONDUCTOR:'));
       expect(conductorIdx, greaterThan(driverIdx));
       expect(texts, contains('+263784111111'));
-      expect(texts.indexOf('END OF DAY REPORT'),
-          greaterThan(conductorIdx));
+      expect(texts.indexOf('END OF DAY REPORT'), greaterThan(conductorIdx));
     });
   });
 
   group('trailing paper feed', () {
-    test('ticket default rolls out like the trip manifest so words are not cut', () {
-      final ticket = buildTicket(_ticket());
-      final manifest = buildTripManifest(
+    test('long jobs get a strict 1-line feed before the cut', () {
+      // A ticket long enough that the 12cm min-length guard produces no extra
+      // padding must end with exactly ESC d 0x01 before the cut — the old
+      // configurable 4/8-line default is gone.
+      final longTicket = buildTicket(_ticket(items: [
+        for (var i = 0; i < 12; i++)
+          SaleItem(name: 'Fare line $i', price: 100, qty: 1, total: 100),
+      ]));
+      // A manifest with many tickets is likewise far past 12cm.
+      final longManifest = buildTripManifest(
         companyName: 'Mupota Bus',
         currency: 'USD',
         trip: mkTrip(),
-        tickets: [mkSale()],
+        tickets: List.generate(40, (_) => mkSale()),
       );
-      expect(listContains(ticket, [0x1B, 0x64, 0x04]), isTrue,
-          reason: 'tickets default to the same 4-line roll-out as the manifest');
-      expect(listContains(manifest, [0x1B, 0x64, 0x04]), isTrue,
-          reason: 'the manifest keeps its 4-line roll-out');
+      expect(lastFeedCommand(longTicket), kTrailingFeedLines,
+          reason: 'tickets end with a strict feed(1) then cut');
+      expect(lastFeedCommand(longManifest), kTrailingFeedLines,
+          reason: 'the manifest keeps the same strict feed(1)');
     });
 
-    test('buildTicket honors the per-company feedLines', () {
-      final bytes = buildTicket(_ticket(), feedLines: 8);
-      expect(listContains(bytes, [0x1B, 0x64, 0x08]), isTrue,
-          reason: 'the full print rolls out beyond the cut');
-    });
-
-    test('buildReport honors the per-company feedLines', () {
+    test('short jobs roll out past 12cm so the footer is never cut', () {
+      // A minimal ticket (empty note, engineer-driver layout) is far under
+      // 12cm; the min-length padding still engages so the cut never shears the
+      // footer branding — but the padding is driven by length, not a bloaty
+      // per-company feed.
       final bytes = buildReport(
         companyName: 'Mupota Bus',
         currency: 'USD',
         from: DateTime(2026, 9, 22),
         to: DateTime(2026, 9, 22, 23, 59),
         sales: [mkSale()],
-        feedLines: 8,
       );
-      expect(listContains(bytes, [0x1B, 0x64, 0x08]), isTrue);
-    });
-
-    test('buildTripManifest honors the per-company feedLines', () {
-      final bytes = buildTripManifest(
-        companyName: 'Mupota Bus',
-        currency: 'USD',
-        trip: mkTrip(),
-        tickets: [mkSale()],
-        feedLines: 8,
-      );
-      expect(listContains(bytes, [0x1B, 0x64, 0x08]), isTrue);
+      expect(lastFeedCommand(bytes), greaterThan(kTrailingFeedLines));
     });
   });
+}
+
+/// Returns the trailing feed count of the final ESC d n command (the one right
+/// before the cut) in [bytes].
+int lastFeedCommand(List<int> bytes) {
+  var last = 0;
+  for (var i = 0; i < bytes.length - 2; i++) {
+    if (bytes[i] == 0x1B && bytes[i + 1] == 0x64) {
+      last = bytes[i + 2];
+    }
+  }
+  return last;
 }

@@ -75,8 +75,9 @@ class _LuggageTicketScreenState extends State<LuggageTicketScreen> {
   @override
   void initState() {
     super.initState();
-    _nameCtrl.text =
-        _isPlaceholderName(widget.sourceSale.customerName) ? '' : widget.sourceSale.customerName;
+    _nameCtrl.text = _isPlaceholderName(widget.sourceSale.customerName)
+        ? ''
+        : widget.sourceSale.customerName;
     _phoneCtrl.text = widget.sourceSale.customerMobile;
     _load();
   }
@@ -117,8 +118,12 @@ class _LuggageTicketScreenState extends State<LuggageTicketScreen> {
         if (profile.customerCare.isNotEmpty) {
           _customerCare = zimPhoneOrEmpty(profile.customerCare);
         }
-        if (profile.companyAddress.isNotEmpty) _companyAddress = profile.companyAddress;
-        if (profile.companyEmail.isNotEmpty) _companyEmail = profile.companyEmail;
+        if (profile.companyAddress.isNotEmpty) {
+          _companyAddress = profile.companyAddress;
+        }
+        if (profile.companyEmail.isNotEmpty) {
+          _companyEmail = profile.companyEmail;
+        }
         if (profile.currency.isNotEmpty) _currency = profile.currency;
         _receiptHeader = profile.receiptHeader;
         _receiptFooter = profile.receiptFooter;
@@ -136,7 +141,8 @@ class _LuggageTicketScreenState extends State<LuggageTicketScreen> {
           !_isPlaceholderName(hydrated.customerName)) {
         _nameCtrl.text = hydrated.customerName;
       }
-      if (_phoneCtrl.text.trim().isEmpty && hydrated.customerMobile.isNotEmpty) {
+      if (_phoneCtrl.text.trim().isEmpty &&
+          hydrated.customerMobile.isNotEmpty) {
         _phoneCtrl.text = hydrated.customerMobile;
       }
     }
@@ -154,24 +160,27 @@ class _LuggageTicketScreenState extends State<LuggageTicketScreen> {
       if (t.isEmpty) {
         return (
           sale: s,
-          warning: 'No server copy of the linked ticket yet — details may be incomplete.',
+          warning:
+              'No server copy of the linked ticket yet — details may be incomplete.',
         );
       }
       await AppDb.hydrateSale(
         s.id!,
-        customerName: (t['customerName'] ?? t['customer_name'] ?? '').toString(),
+        customerName:
+            (t['customerName'] ?? t['customer_name'] ?? '').toString(),
         customerMobile: (t['customerMobile'] ??
-                    t['customerPhone'] ??
-                    t['customer_mobile'] ??
-                    t['phone'] ??
-                    '')
-                .toString(),
+                t['customerPhone'] ??
+                t['customer_mobile'] ??
+                t['phone'] ??
+                '')
+            .toString(),
         busReg: (t['busReg'] ?? t['bus_reg'] ?? '').toString(),
         driver: (t['driverName'] ?? t['driver'] ?? '').toString(),
         driverPhone: (t['driverPhone'] ?? t['driver_phone'] ?? '').toString(),
         conductor1: (t['conductor1'] ?? t['conductor_name'] ?? '').toString(),
         conductor2: (t['conductor2'] ?? '').toString(),
-        conductorPhone: (t['conductorPhone'] ?? t['conductor_phone'] ?? '').toString(),
+        conductorPhone:
+            (t['conductorPhone'] ?? t['conductor_phone'] ?? '').toString(),
         departureTime: formatDepartureTime(
             (t['departureTime'] ?? t['departure_time'] ?? '').toString()),
         paymentMethod:
@@ -181,15 +190,15 @@ class _LuggageTicketScreenState extends State<LuggageTicketScreen> {
     } catch (_) {
       return (
         sale: s,
-        warning: 'Server unreachable — using local data for this luggage ticket.',
+        warning:
+            'Server unreachable — using local data for this luggage ticket.',
       );
     }
   }
 
   void _snack(String msg) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(msg)));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
   Future<void> _save() async {
@@ -266,16 +275,17 @@ class _LuggageTicketScreenState extends State<LuggageTicketScreen> {
   Future<void> _writeBackPassenger(Sale luggage) async {
     final src = widget.sourceSale;
     if (src.id == null || luggage.customerName.isEmpty) return;
-    final backfillName =
-        _isPlaceholderName(src.customerName) && !_isPlaceholderName(luggage.customerName);
-    final backfillPhone =
-        src.customerMobile.trim().isEmpty && luggage.customerMobile.trim().isNotEmpty;
+    final backfillName = _isPlaceholderName(src.customerName) &&
+        !_isPlaceholderName(luggage.customerName);
+    final backfillPhone = src.customerMobile.trim().isEmpty &&
+        luggage.customerMobile.trim().isNotEmpty;
     if (!backfillName && !backfillPhone) return;
     try {
       await AppDb.updateSaleCustomer(
         src.id,
         customerName: backfillName ? luggage.customerName : src.customerName,
-        customerMobile: backfillPhone ? luggage.customerMobile : src.customerMobile,
+        customerMobile:
+            backfillPhone ? luggage.customerMobile : src.customerMobile,
       );
     } catch (e) {
       debugPrint('Passenger write-back skipped: $e');
@@ -377,8 +387,8 @@ class _LuggageTicketScreenState extends State<LuggageTicketScreen> {
                 padding: const EdgeInsets.only(top: 8),
                 child: Text(
                   'Linked to ${sale.luggageLinkedTicketId}',
-                  style: const TextStyle(
-                      fontSize: 12, color: Color(0xFF64748B)),
+                  style:
+                      const TextStyle(fontSize: 12, color: Color(0xFF64748B)),
                 ),
               ),
           ],

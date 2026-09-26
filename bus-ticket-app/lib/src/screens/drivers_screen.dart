@@ -96,8 +96,8 @@ class _DriversScreenState extends State<DriversScreen> {
               onPressed: () {
                 final name = nameCtrl.text.trim();
                 if (name.isEmpty) return;
-                Navigator.of(ctx)
-                    .pop(_DriverResult(name, zimPhoneOrEmpty(phoneCtrl.text), active));
+                Navigator.of(ctx).pop(_DriverResult(
+                    name, zimPhoneOrEmpty(phoneCtrl.text), active));
               },
               child: const Text('Save'),
             ),
@@ -197,11 +197,14 @@ class _DriversScreenState extends State<DriversScreen> {
               child: _loading
                   ? const Center(child: CircularProgressIndicator())
                   : _drivers.isEmpty
-                      ? const Center(child: Text('No drivers yet. Add your first driver.'))
+                      ? const Center(
+                          child: Text('No drivers yet. Add your first driver.'))
                       : ListView.separated(
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 16, vertical: 8),
                           itemCount: _drivers.length,
-                          separatorBuilder: (_, __) => const SizedBox(height: 8),
+                          separatorBuilder: (_, __) =>
+                              const SizedBox(height: 8),
                           itemBuilder: (ctx, i) {
                             final d = _drivers[i];
                             return Card(
@@ -216,10 +219,10 @@ class _DriversScreenState extends State<DriversScreen> {
                                 ),
                               ),
                               child: ListTile(
-                                leading: CircleAvatar(
+                                leading: const CircleAvatar(
                                   radius: 20,
-                                  backgroundColor: const Color(0xFFE8F5E9),
-                                  child: const Icon(Icons.person,
+                                  backgroundColor: Color(0xFFE8F5E9),
+                                  child: Icon(Icons.person,
                                       color: Color(0xFF1B5E20)),
                                 ),
                                 title: Text(

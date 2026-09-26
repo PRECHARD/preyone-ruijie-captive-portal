@@ -102,6 +102,41 @@ const String kTicketValidityNote = 'Please keep your ticket safe. '
 const String kLuggageNote = 'Please check luggage taken out of compartments '
     'at every destination stop. Thank You!';
 
+/// Minimum physical length (mm) every printed job must reach on the 58mm roll.
+/// The auto-cutter shears whatever sits at the blade when `cut()` fires — when
+/// a short ticket's trailing feed is too small the footer branding ("Preyone
+/// Technologies" / "www.preyone.com") is cut off the page. Padding the feed so
+/// the roll-out always exceeds 12 cm keeps the full footer visible.
+const double kMinPrintLengthMm = 120.0;
+
+/// Approximate line-pitch on a 58mm thermal roll (30 dots @ 203 DPI = ESC 3
+/// default line feed). Used to size the min-length feed padding.
+const double _kLinePitchMm = 30.0 / (203.0 / 25.4);
+
+/// Approximate printed height (mm) of one [PreviewLine] on the roll, used by
+/// [_excessFeed] to estimate whether a job rolls out past [kMinPrintLengthMm].
+double _lineHeightMm(PreviewLine l) {
+  if (l.qrData != null) return 24.0;
+  if (l.barcodeData != null) return 3.6;
+  return l.big ? 6.1 : (l.small ? 2.1 : 3.2);
+}
+
+/// Extra trailing feed lines required (beyond [baseFeed]) so the entire job
+/// printed from [lines] physically reaches [kMinPrintLengthMm]. Guarantees the
+/// cut never shears the footer branding on short tickets.
+int _excessFeed(List<PreviewLine> lines, int baseFeed) {
+  var heightMm = 0.0;
+  for (final l in lines) {
+    heightMm += _lineHeightMm(l);
+    if (l.feedAfter > 0) heightMm += l.feedAfter * _kLinePitchMm;
+  }
+  heightMm += baseFeed * _kLinePitchMm;
+  if (heightMm >= kMinPrintLengthMm) return 0;
+  final missing = (kMinPrintLengthMm - heightMm) / _kLinePitchMm;
+  final extra = missing.ceil();
+  return extra > 200 ? 200 : extra;
+}
+
 class PreviewLine {
   const PreviewLine(
     this.text, {
@@ -205,8 +240,8 @@ List<PreviewLine> companyHeaderLines({
     if (header.length <= EscPos.paperCols ~/ 2) {
       lines.add(PreviewLine(header, center: true, bold: true, big: true));
     } else if (header.length <= _fontBCols ~/ 2) {
-      lines.add(PreviewLine(
-          header, center: true, bold: true, small: true, big: true));
+      lines.add(PreviewLine(header,
+          center: true, bold: true, small: true, big: true));
     } else {
       lines.add(_fitCenteredLine(header, bold: true));
     }
@@ -225,7 +260,8 @@ List<PreviewLine> companyHeaderLines({
         small: true));
   }
   if (tagline.trim().isNotEmpty) {
-    lines.add(PreviewLine(EscPos.center(up(tagline)), center: true, bold: true));
+    lines
+        .add(PreviewLine(EscPos.center(up(tagline)), center: true, bold: true));
   }
   return lines;
 }
@@ -330,8 +366,8 @@ List<PreviewLine> buildTicketLines(TicketData d) {
         formatRow('BUS: ${up(d.busReg)}', 'TKT: #${up(d.receiptNo)}'),
         bold: true));
   } else {
-    lines.add(PreviewLine(
-        EscPos.center('TICKET NO  ${up(d.receiptNo)}'), center: true, bold: true));
+    lines.add(PreviewLine(EscPos.center('TICKET NO  ${up(d.receiptNo)}'),
+        center: true, bold: true));
   }
   // Route line — the route code is printed immediately before the trip text on
   // the same horizontal line (no "Route Code" label):
@@ -361,8 +397,7 @@ List<PreviewLine> buildTicketLines(TicketData d) {
   lines.add(PreviewLine(EscPos.divider(), center: true));
   // Crew — compact rows, right-aligned to column 32.
   if (d.driver.isNotEmpty) {
-    lines.add(PreviewLine(
-        formatRow('Driver:', clipText(up(d.driver), 24))));
+    lines.add(PreviewLine(formatRow('Driver:', clipText(up(d.driver), 24))));
   }
   final conductor = d.conductor1.isNotEmpty ? d.conductor1 : d.conductor2;
   if (conductor.isNotEmpty) {
@@ -376,20 +411,17 @@ List<PreviewLine> buildTicketLines(TicketData d) {
       // The phone is the actionable detail on a 32-column ticket — when the
       // name + phone can't share one row, print them on separate rows so the
       // normalized number is never truncated.
-      lines.add(PreviewLine(
-          formatRow('Conductor:', clipText(up(conductor), 21))));
+      lines.add(
+          PreviewLine(formatRow('Conductor:', clipText(up(conductor), 21))));
       if (phone.isNotEmpty) {
-        lines.add(
-            PreviewLine(formatRow('Mobile:', formatZimPhone(phone))));
+        lines.add(PreviewLine(formatRow('Mobile:', formatZimPhone(phone))));
       }
     }
   }
   // Passenger — label/value rows across the full 32 columns.
-  final pax = d.customerName.trim().isEmpty
-      ? '-'
-      : up(d.customerName.trim());
-  lines.add(PreviewLine(formatRow('Passenger Name:', clipText(pax, 15)),
-      bold: true));
+  final pax = d.customerName.trim().isEmpty ? '-' : up(d.customerName.trim());
+  lines.add(
+      PreviewLine(formatRow('Passenger Name:', clipText(pax, 15)), bold: true));
   lines.add(PreviewLine(
       formatRow('Passenger Mobile:', formatZimPhone(d.customerMobile))));
   // Divider.
@@ -414,8 +446,8 @@ List<PreviewLine> buildTicketLines(TicketData d) {
       formatRow('PAYMENT METHOD:', paymentMethodLabel(d.paymentMethod))));
   lines.add(PreviewLine(
       formatRow('CASH TENDERED:', _ticketMoney(d.tenderedCents, d.currency))));
-  lines.add(
-      PreviewLine(formatRow('CHANGE:', _ticketMoney(d.changeCents, d.currency))));
+  lines.add(PreviewLine(
+      formatRow('CHANGE:', _ticketMoney(d.changeCents, d.currency))));
   // Underline the change figure directly beneath the payment info, then the
   // statement, then one blank line before the footer.
   lines.add(PreviewLine(EscPos.divider(), center: true));
@@ -428,8 +460,8 @@ List<PreviewLine> buildTicketLines(TicketData d) {
   }
   // Footer — exactly the app preview: "Powered by" / brand (bold) / website.
   lines.add(PreviewLine(EscPos.center('Powered by'), center: true));
-  lines.add(PreviewLine(
-      EscPos.center(up(kPlatformProvider)), center: true, bold: true));
+  lines.add(PreviewLine(EscPos.center(up(kPlatformProvider)),
+      center: true, bold: true));
   final website = d.website.trim().isEmpty ? kPlatformUrl : d.website.trim();
   lines.add(PreviewLine(EscPos.center(website), center: true));
   // CODE128 barcode (height stays well under the 1 cm print spec) — centered,
@@ -470,18 +502,17 @@ List<PreviewLine> buildReportLines({
   final conductor = shift != null && shift.conductorName.trim().isNotEmpty
       ? shift.conductorName
       : _firstNonEmpty(sales, (s) => s.conductor1);
-  final conductorPhone =
-      shift != null && shift.conductorPhone.trim().isNotEmpty
-          ? shift.conductorPhone
-          : _firstNonEmpty(sales, (s) => s.conductorPhone);
+  final conductorPhone = shift != null && shift.conductorPhone.trim().isNotEmpty
+      ? shift.conductorPhone
+      : _firstNonEmpty(sales, (s) => s.conductorPhone);
   lines.addAll(crewLines(
     driverName: driver,
     driverPhone: driverPhone,
     conductorName: conductor,
     conductorPhone: conductorPhone,
   ));
-  lines.add(
-      PreviewLine(EscPos.center('END OF DAY REPORT'), center: true, bold: true));
+  lines.add(PreviewLine(EscPos.center('END OF DAY REPORT'),
+      center: true, bold: true));
   lines.add(PreviewLine(
       EscPos.center('${from.year}-${two(from.month)}-${two(from.day)}'),
       center: true));
@@ -506,8 +537,8 @@ List<PreviewLine> buildReportLines({
       'Tickets: ${sales.length}   TOTAL  ${fmtMoney(total, currency)}';
   lines.add(PreviewLine(EscPos.center(totalLine), center: true, bold: true));
   lines.add(PreviewLine(EscPos.divider()));
-  lines.add(PreviewLine(
-      EscPos.center('Powered By $kPlatformProvider'), center: true, bold: true));
+  lines.add(PreviewLine(EscPos.center('Powered By $kPlatformProvider'),
+      center: true, bold: true));
   lines.add(PreviewLine(EscPos.center(kPlatformUrl), center: true));
 
   return lines;
@@ -528,7 +559,14 @@ String _manifestPayShort(String method) {
   }
 }
 
-List<int> _toBytes(List<PreviewLine> lines, {int feedLines = 4}) {
+/// Fixed trailing blank feed before the cut — strictly one line. The old
+/// configurable 8-line per-company default was wasteful on the roll; a single
+/// line keeps the cutter clear of the last printed row. [_excessFeed] still
+/// tops short jobs up to [kMinPrintLengthMm] so the footer branding is never
+/// sheared by the blade.
+const int kTrailingFeedLines = 1;
+
+List<int> _toBytes(List<PreviewLine> lines) {
   final b = <int>[];
   b.addAll(EscPos.init());
   for (final l in lines) {
@@ -555,13 +593,13 @@ List<int> _toBytes(List<PreviewLine> lines, {int feedLines = 4}) {
     b.addAll(EscPos.bold(false));
     if (l.feedAfter > 0) b.addAll(EscPos.feed(l.feedAfter));
   }
-  b.addAll(EscPos.feed(feedLines));
+  b.addAll(
+      EscPos.feed(kTrailingFeedLines + _excessFeed(lines, kTrailingFeedLines)));
   b.addAll(EscPos.cut());
   return b;
 }
 
-List<int> buildTicket(TicketData d, {int? feedLines}) => _toBytes(buildTicketLines(d),
-    feedLines: feedLines ?? 4);
+List<int> buildTicket(TicketData d) => _toBytes(buildTicketLines(d));
 
 List<int> buildReport({
   required String companyName,
@@ -573,7 +611,6 @@ List<int> buildReport({
   String companyAddress = '',
   String customerCare = '',
   DriverShift? shift,
-  int? feedLines,
 }) =>
     _toBytes(buildReportLines(
         companyName: companyName,
@@ -584,8 +621,7 @@ List<int> buildReport({
         tagline: tagline,
         companyAddress: companyAddress,
         customerCare: customerCare,
-        shift: shift),
-        feedLines: feedLines ?? 4);
+        shift: shift));
 
 List<PreviewLine> buildTripManifestLines({
   required String companyName,
@@ -609,9 +645,8 @@ List<PreviewLine> buildTripManifestLines({
     tagline: tagline,
   ));
   // Crew sits directly beneath the company header on the manifest.
-  final conductor = trip.conductor.isNotEmpty
-      ? trip.conductor
-      : (shift?.conductorName ?? '');
+  final conductor =
+      trip.conductor.isNotEmpty ? trip.conductor : (shift?.conductorName ?? '');
   final conductorPhone = trip.conductorPhone.isNotEmpty
       ? trip.conductorPhone
       : (shift?.conductorPhone ?? '');
@@ -623,29 +658,31 @@ List<PreviewLine> buildTripManifestLines({
   ));
   lines.add(
       PreviewLine(EscPos.center('TRIP MANIFEST'), center: true, bold: true));
-  lines.add(PreviewLine(EscPos.center(up(trip.tripNo)), center: true, bold: true));
+  lines.add(
+      PreviewLine(EscPos.center(up(trip.tripNo)), center: true, bold: true));
   final route = trip.routeName.isNotEmpty
       ? up(trip.routeName)
-      : [up(trip.routeFrom), up(trip.routeTo)].where((s) => s.isNotEmpty).join(' - ');
+      : [up(trip.routeFrom), up(trip.routeTo)]
+          .where((s) => s.isNotEmpty)
+          .join(' - ');
   if (route.isNotEmpty) {
     lines.add(PreviewLine(EscPos.center(route), center: true));
   }
   if (trip.busReg.isNotEmpty) {
-    lines.add(PreviewLine(EscPos.center('BUS: ${up(trip.busReg)}'), center: true));
+    lines.add(
+        PreviewLine(EscPos.center('BUS: ${up(trip.busReg)}'), center: true));
   }
   if (trip.departureTime.isNotEmpty) {
     lines.add(
         PreviewLine(EscPos.center('DEP: ${trip.departureTime}'), center: true));
   }
 
-  final ticketCount = tickets
-      .where((s) => s.ticketType == 'busFare')
-      .length;
+  final ticketCount = tickets.where((s) => s.ticketType == 'busFare').length;
   final grand = tickets.fold(0, (a, s) => a + s.total);
+  lines.add(PreviewLine(EscPos.left('TICKETS SOLD: $ticketCount'), bold: true));
   lines.add(PreviewLine(
-      EscPos.left('TICKETS SOLD: $ticketCount'), bold: true));
-  lines.add(PreviewLine(
-      EscPos.left('TOTAL REVENUE: ${fmtMoney(grand, currency)}'), bold: true));
+      EscPos.left('TOTAL REVENUE: ${fmtMoney(grand, currency)}'),
+      bold: true));
   lines.add(PreviewLine(EscPos.divider()));
 
   final sorted = [...tickets]..sort((a, b) {
@@ -670,23 +707,25 @@ List<PreviewLine> buildTripManifestLines({
             EscPos.right(phone, width: 14),
         small: true));
     if (s.ticketType == 'luggage') {
-      lines.add(PreviewLine(EscPos.left('* LUGGAGE TICKET *'),
-          small: true));
+      lines.add(PreviewLine(EscPos.left('* LUGGAGE TICKET *'), small: true));
     }
   }
   lines.add(PreviewLine(EscPos.divider()));
 
-  final cashTotal =
-      tickets.where((s) => s.paymentMethod == 'cash').fold(0, (a, s) => a + s.total);
-  final mobileTotal =
-      tickets.where((s) => s.paymentMethod != 'cash').fold(0, (a, s) => a + s.total);
-  lines.add(PreviewLine(EscPos.left('PASSENGERS $ticketCount/${trip.totalSeats}'),
+  final cashTotal = tickets
+      .where((s) => s.paymentMethod == 'cash')
+      .fold(0, (a, s) => a + s.total);
+  final mobileTotal = tickets
+      .where((s) => s.paymentMethod != 'cash')
+      .fold(0, (a, s) => a + s.total);
+  lines.add(PreviewLine(
+      EscPos.left('PASSENGERS $ticketCount/${trip.totalSeats}'),
       bold: true));
+  lines.add(PreviewLine(EscPos.left('Cash: ${fmtMoney(cashTotal, currency)}')));
+  lines.add(
+      PreviewLine(EscPos.left('Mobile: ${fmtMoney(mobileTotal, currency)}')));
   lines.add(PreviewLine(
-      EscPos.left('Cash: ${fmtMoney(cashTotal, currency)}')));
-  lines.add(PreviewLine(
-      EscPos.left('Mobile: ${fmtMoney(mobileTotal, currency)}')));
-  lines.add(PreviewLine(EscPos.left('GRAND TOTAL: ${fmtMoney(grand, currency)}'),
+      EscPos.left('GRAND TOTAL: ${fmtMoney(grand, currency)}'),
       bold: true));
   lines.add(PreviewLine(EscPos.divider()));
 
@@ -702,16 +741,16 @@ List<PreviewLine> buildTripManifestLines({
       lines.add(PreviewLine(EscPos.left('SHIFT END: OPEN')));
     }
   }
-  lines.add(PreviewLine(
-      EscPos.left('PRINTED: ${fmtDateTime(DateTime.now())}')));
+  lines
+      .add(PreviewLine(EscPos.left('PRINTED: ${fmtDateTime(DateTime.now())}')));
   lines.add(PreviewLine(EscPos.divider()));
   lines.add(PreviewLine(EscPos.center('CONDUCTOR SIGNATURE'),
       center: true, bold: true));
-  lines.add(PreviewLine(EscPos.center('________________________'),
-      center: true));
+  lines.add(
+      PreviewLine(EscPos.center('________________________'), center: true));
   lines.add(PreviewLine(EscPos.divider()));
-  lines.add(PreviewLine(
-      EscPos.center('Powered By $kPlatformProvider'), center: true, bold: true));
+  lines.add(PreviewLine(EscPos.center('Powered By $kPlatformProvider'),
+      center: true, bold: true));
   lines.add(PreviewLine(EscPos.center(kPlatformUrl), center: true));
 
   return lines;
@@ -726,7 +765,6 @@ List<int> buildTripManifest({
   String companyAddress = '',
   String customerCare = '',
   DriverShift? shift,
-  int? feedLines,
 }) =>
     _toBytes(buildTripManifestLines(
         companyName: companyName,
@@ -736,5 +774,4 @@ List<int> buildTripManifest({
         tagline: tagline,
         companyAddress: companyAddress,
         customerCare: customerCare,
-        shift: shift),
-        feedLines: feedLines ?? 4);
+        shift: shift));

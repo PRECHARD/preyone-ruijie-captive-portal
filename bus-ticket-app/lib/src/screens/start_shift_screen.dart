@@ -159,9 +159,8 @@ class _StartShiftScreenState extends State<StartShiftScreen> {
     try {
       final staff = await TransitApi.fetchStaff(role: 'DRIVER');
       await AppDb.upsertStaffRoster(staff);
-      final active = staff
-          .where((s) => s.active && s.fullName.trim().isNotEmpty)
-          .toList();
+      final active =
+          staff.where((s) => s.active && s.fullName.trim().isNotEmpty).toList();
       if (active.isNotEmpty) {
         return [
           for (final s in active)
@@ -188,8 +187,7 @@ class _StartShiftScreenState extends State<StartShiftScreen> {
 
   /// Pre-selects the operator themselves when they hold the DRIVER role,
   /// otherwise the first roster driver.
-  _DriverOption? _defaultDriver(
-      String operator, List<_DriverOption> options) {
+  _DriverOption? _defaultDriver(String operator, List<_DriverOption> options) {
     if (options.isEmpty) return null;
     final op = operator.trim().toLowerCase();
     if (op.isNotEmpty) {
@@ -285,9 +283,9 @@ class _StartShiftScreenState extends State<StartShiftScreen> {
     setState(() {
       _vehicles = vehicles;
       if (vehicles.isNotEmpty) {
-        _selectedVehicle =
-            vehicles.firstWhere((v) => v.registration == normalized,
-                orElse: () => vehicles.first);
+        _selectedVehicle = vehicles.firstWhere(
+            (v) => v.registration == normalized,
+            orElse: () => vehicles.first);
       }
     });
   }
@@ -313,9 +311,7 @@ class _StartShiftScreenState extends State<StartShiftScreen> {
                 physics: const AlwaysScrollableScrollPhysics(),
                 padding: const EdgeInsets.all(16),
                 children: [
-                  _activeShift != null
-                      ? _activeShiftCard()
-                      : _startShiftCard(),
+                  _activeShift != null ? _activeShiftCard() : _startShiftCard(),
                 ],
               ),
             ),
@@ -329,8 +325,7 @@ class _StartShiftScreenState extends State<StartShiftScreen> {
       children: [
         Card(
           elevation: 2,
-          shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(8)),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
           child: Padding(
             padding: const EdgeInsets.all(16),
             child: Column(
@@ -356,8 +351,7 @@ class _StartShiftScreenState extends State<StartShiftScreen> {
                 const Divider(height: 24),
                 _row(Icons.confirmation_number, 'Tickets', '$_ticketCount'),
                 const SizedBox(height: 8),
-                _row(Icons.payments, 'Gross',
-                    fmtMoney(_totalCents, _currency)),
+                _row(Icons.payments, 'Gross', fmtMoney(_totalCents, _currency)),
               ],
             ),
           ),
@@ -382,8 +376,7 @@ class _StartShiftScreenState extends State<StartShiftScreen> {
       child: const Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.radio_button_checked,
-              size: 16, color: Color(0xFF1B5E20)),
+          Icon(Icons.radio_button_checked, size: 16, color: Color(0xFF1B5E20)),
           SizedBox(width: 6),
           Text(
             'SHIFT OPEN',
@@ -404,13 +397,11 @@ class _StartShiftScreenState extends State<StartShiftScreen> {
         Icon(icon, size: 18, color: const Color(0xFF64748B)),
         const SizedBox(width: 8),
         Text('$label  ',
-            style: const TextStyle(
-                fontSize: 13, color: Color(0xFF64748B))),
+            style: const TextStyle(fontSize: 13, color: Color(0xFF64748B))),
         Expanded(
           child: Text(
             value,
-            style: const TextStyle(
-                fontSize: 14, fontWeight: FontWeight.w700),
+            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
           ),
         ),
       ],
@@ -423,8 +414,7 @@ class _StartShiftScreenState extends State<StartShiftScreen> {
       children: [
         Card(
           elevation: 2,
-          shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(8)),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
           child: Padding(
             padding: const EdgeInsets.all(16),
             child: Column(
@@ -452,13 +442,12 @@ class _StartShiftScreenState extends State<StartShiftScreen> {
                 const SizedBox(height: 10),
                 // Locked-in conductor rendered as a read-only white card.
                 Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 12, vertical: 10),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                   decoration: BoxDecoration(
                     color: const Color(0xFFFDFDFB),
                     borderRadius: BorderRadius.circular(8),
-                    border:
-                        Border.all(color: const Color(0xFFE2E8F0)),
+                    border: Border.all(color: const Color(0xFFE2E8F0)),
                   ),
                   child: Row(
                     children: [
@@ -535,12 +524,10 @@ class _StartShiftScreenState extends State<StartShiftScreen> {
                       for (final o in _driverOptions)
                         DropdownMenuItem(
                           value: o,
-                          child: Text(o.name,
-                              overflow: TextOverflow.ellipsis),
+                          child: Text(o.name, overflow: TextOverflow.ellipsis),
                         ),
                     ],
-                    onChanged: (d) =>
-                        setState(() => _selectedDriver = d),
+                    onChanged: (d) => setState(() => _selectedDriver = d),
                   ),
                 if (_selectedDriver != null &&
                     _selectedDriver!.phone.isNotEmpty) ...[

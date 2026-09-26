@@ -21,5 +21,8 @@ abstract final class Roles {
   /// during an active shift. Admins always can; field selling roles
   /// (CONDUCTOR, TICKET_SELLER) are explicitly privileged.
   static bool canEditFares(String role) =>
-      role == superAdmin || role == admin || role == conductor || role == ticketSeller;
+      role == superAdmin ||
+      role == admin ||
+      role == conductor ||
+      role == ticketSeller;
 }

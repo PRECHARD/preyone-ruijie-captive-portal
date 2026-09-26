@@ -84,7 +84,8 @@ class SyncService {
           final resp = await TransitApi.sendSync(payloads, token);
           return _handleResp(resp);
         } catch (_) {
-          return const SyncResult(ok: false, message: 'Nothing to sync, and server unreachable.');
+          return const SyncResult(
+              ok: false, message: 'Nothing to sync, and server unreachable.');
         }
       }
 
@@ -210,7 +211,9 @@ class SyncService {
   SyncResult _handleResp(http.Response resp) {
     Map<String, dynamic> body;
     try {
-      body = (jsonDecode(utf8.decode(resp.bodyBytes)) as Map?)?.cast<String, dynamic>() ?? {};
+      body = (jsonDecode(utf8.decode(resp.bodyBytes)) as Map?)
+              ?.cast<String, dynamic>() ??
+          {};
     } catch (_) {
       body = {};
     }
@@ -244,7 +247,8 @@ class SyncService {
       final disabled = SessionGuard.isRevoked(code);
       return SyncResult(
         ok: false,
-        critical: disabled || code == 'SESSION_EXPIRED' || code == 'DEVICE_NOT_FOUND',
+        critical:
+            disabled || code == 'SESSION_EXPIRED' || code == 'DEVICE_NOT_FOUND',
         deviceDisabled: disabled,
         message: (body['error'] ?? 'Access denied by server').toString(),
       );
@@ -256,16 +260,19 @@ class SyncService {
         ok: false,
         updateRequired: true,
         minAppVersion: minVersion,
-        message: (body['error'] ?? 'A newer version of the app is required.').toString(),
+        message: (body['error'] ?? 'A newer version of the app is required.')
+            .toString(),
       );
     }
 
     if (resp.statusCode == 404) {
-      return const SyncResult(ok: false, message: 'Sync endpoint not found on the server.');
+      return const SyncResult(
+          ok: false, message: 'Sync endpoint not found on the server.');
     }
 
     if (resp.statusCode >= 500) {
-      return const SyncResult(ok: false, message: 'Server error. Try again later.');
+      return const SyncResult(
+          ok: false, message: 'Server error. Try again later.');
     }
 
     return SyncResult(

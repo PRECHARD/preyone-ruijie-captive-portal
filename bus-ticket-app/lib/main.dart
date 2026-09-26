@@ -5,6 +5,7 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'src/app_state.dart';
 import 'src/db/app_db.dart';
@@ -25,18 +26,33 @@ import 'src/services/session_guard.dart';
 import 'src/services/printer_service.dart';
 import 'src/services/sync_service.dart';
 import 'src/services/transit_api.dart';
+import 'src/widgets/emerald_ui.dart';
 import 'services/fcm_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Edge-to-edge: the app draws its own light surface behind the status and
+  // navigation bars. Every screen in this app keeps a light background, so the
+  // bar icons stay dark (readable in sun) and the bars themselves stay
+  // transparent. Set once here; individual screens only need to change the
+  // brightness when they render a dark accent under the bar.
+  SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+  SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+    statusBarColor: Colors.transparent,
+    systemNavigationBarColor: Colors.transparent,
+    statusBarIconBrightness: Brightness.dark,
+    statusBarBrightness: Brightness.light,
+    systemNavigationBarIconBrightness: Brightness.dark,
+    systemNavigationBarContrastEnforced: false,
+  ));
 
   // Firebase bootstrap is best-effort and never fatal: an offline terminal or
   // a missing/expired google-services config must not block the local SQLite
   // POS flow from starting. On success, Crashlytics + FCM are wired up.
   try {
     await Firebase.initializeApp();
-    FlutterError.onError =
-        FirebaseCrashlytics.instance.recordFlutterFatalError;
+    FlutterError.onError = FirebaseCrashlytics.instance.recordFlutterFatalError;
     PlatformDispatcher.instance.onError = (error, stack) {
       FirebaseCrashlytics.instance.recordError(error, stack, fatal: true);
       return true;
@@ -55,21 +71,42 @@ Future<void> main() async {
 class PreyoneTransitApp extends StatelessWidget {
   const PreyoneTransitApp({super.key});
 
+  /// Emerald-flavoured Material 3 theme. The seed stays close to the brand
+  /// green so every generated surface/ripple stays in the emerald family,
+  /// while the explicit component themes below carry the higher-contrast
+  /// surfaces the field terminals need in direct sun.
+  static ThemeData _theme() {
+    final scheme =
+        ColorScheme.fromSeed(seedColor: const Color(0xFF1B5E20)).copyWith(
+      primary: kEmeraldDeep,
+      onPrimary: Colors.white,
+      secondary: kEmeraldJade,
+      onSecondary: kEmeraldInk,
+      surface: const Color(0xFFF5F7FA),
+    );
+    return ThemeData(
+      colorScheme: scheme,
+      useMaterial3: true,
+      appBarTheme: const AppBarTheme(
+        backgroundColor: Color(0xFFF5F7FA),
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        systemOverlayStyle: SystemUiOverlayStyle.dark,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: kPlatformName,
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF1B5E20)),
-        useMaterial3: true,
-        appBarTheme: const AppBarTheme(
-          backgroundColor: Color(0xFFF5F7FA),
-          elevation: 0,
-        ),
-      ),
-      routes: {
-        '/main': (context) => const MainShell(),
+      theme: _theme(),
+      onGenerateRoute: (settings) {
+        if (settings.name == '/main') {
+          return emeraldPageRoute<void>(const MainShell());
+        }
+        return null;
       },
       home: const Gate(),
     );
@@ -122,12 +159,12 @@ class MainShell extends StatefulWidget {
 }
 
 enum _NavItem {
-  dashboard('Dashboard', Icons.space_dashboard_outlined,
-      Icons.space_dashboard),
+  dashboard('Dashboard', Icons.space_dashboard_outlined, Icons.space_dashboard),
   ticketing('Ticketing', Icons.confirmation_number_outlined,
       Icons.confirmation_number),
   tickets('Tickets', Icons.receipt_long_outlined, Icons.receipt_long),
-  drivers('Drivers', Icons.directions_bus_outlined, Icons.directions_bus_filled),
+  drivers(
+      'Drivers', Icons.directions_bus_outlined, Icons.directions_bus_filled),
   conductors('Conductors', Icons.supervisor_account_outlined,
       Icons.supervisor_account),
   reports('Reports', Icons.insert_chart_outlined, Icons.insert_chart),
@@ -342,9 +379,9 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   void _logout() {
     SecureKeystore.instance.clearTokens();
     AppDb.setSetting('logged_in', '0');
-    Navigator.of(context).pushReplacement(MaterialPageRoute(
-      builder: (_) => const LoginScreen(),
-    ));
+    Navigator.of(context).pushReplacement(
+      emeraldPageRoute<void>(const LoginScreen()),
+    );
   }
 
   @override
@@ -379,11 +416,11 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
                       ),
                     ),
                     const SizedBox(width: 12),
-                    Expanded(
+                    const Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text(
+                          Text(
                             kPlatformName,
                             style: TextStyle(
                               fontSize: 17,
@@ -391,7 +428,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
                               color: Color(0xFF0F1E33),
                             ),
                           ),
-                          const Text(
+                          Text(
                             kPlatformDesc,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
@@ -414,9 +451,8 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
                   children: [
                     for (final item in _visibleItems)
                       ListTile(
-                        leading: Icon(_current == item
-                            ? item.selectedIcon
-                            : item.icon),
+                        leading: Icon(
+                            _current == item ? item.selectedIcon : item.icon),
                         selected: _current == item,
                         selectedColor: const Color(0xFF1B5E20),
                         selectedTileColor: const Color(0xFFE8F5E9),
@@ -424,8 +460,8 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
                           borderRadius: BorderRadius.circular(10),
                         ),
                         title: Text(item.label,
-                            style: const TextStyle(
-                                fontWeight: FontWeight.w600)),
+                            style:
+                                const TextStyle(fontWeight: FontWeight.w600)),
                         onTap: () => _selectItem(item),
                       ),
                   ],
@@ -451,8 +487,8 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
                 padding: const EdgeInsets.only(top: 2),
                 child: Text(
                   'v${kAppVersion.split('+').first}',
-                  style: const TextStyle(
-                      fontSize: 11, color: Color(0xFF94A3B8)),
+                  style:
+                      const TextStyle(fontSize: 11, color: Color(0xFF94A3B8)),
                 ),
               ),
               const SizedBox(height: 16),
@@ -478,7 +514,10 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
           const SizedBox(width: 8),
         ],
       ),
-      body: _body(),
+      body: EmeraldTabEntrance(
+        tabKey: _current,
+        child: _body(),
+      ),
     );
   }
 }

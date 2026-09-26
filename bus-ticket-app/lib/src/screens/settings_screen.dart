@@ -13,8 +13,10 @@ import '../services/printer_service.dart';
 import '../services/session_guard.dart';
 import '../services/sync_service.dart';
 import '../services/transit_api.dart';
+import '../widgets/emerald_ui.dart';
 import '../controllers/trip_controller.dart';
 import 'promotions_screen.dart';
+import 'route_templates_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -25,8 +27,20 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   static const _currencies = [
-    'USD', 'ZWL', 'ZAR', 'GBP', 'EUR', 'NGN', 'KES', 'UGX',
-    'TZS', 'ETB', 'GHS', 'BWP', 'MZN', 'MWK',
+    'USD',
+    'ZWL',
+    'ZAR',
+    'GBP',
+    'EUR',
+    'NGN',
+    'KES',
+    'UGX',
+    'TZS',
+    'ETB',
+    'GHS',
+    'BWP',
+    'MZN',
+    'MWK',
   ];
 
   final _companyCtrl = TextEditingController();
@@ -44,7 +58,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final _driverCtrl = TextEditingController();
   final _conductor1Ctrl = TextEditingController();
   final _conductor2Ctrl = TextEditingController();
-  final _paperFeedCtrl = TextEditingController();
 
   String _username = '';
   String _fullName = '';
@@ -85,7 +98,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _driverCtrl.dispose();
     _conductor1Ctrl.dispose();
     _conductor2Ctrl.dispose();
-    _paperFeedCtrl.dispose();
     super.dispose();
   }
 
@@ -108,30 +120,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final driver = await AppDb.getSetting('driver_name', '') ?? '';
     final conductor1 = await AppDb.getSetting('conductor1', '') ?? '';
     final conductor2 = await AppDb.getSetting('conductor2', '') ?? '';
-    final paperFeed = await AppDb.getSetting('ticket_paper_feed', '8') ?? '8';
     final username = await SecureKeystore.instance.readUsername() ?? '';
     final fullName = await SecureKeystore.instance.readFullName() ?? '';
     final role = await SecureKeystore.instance.readRole() ?? '';
     final addr = await AppDb.getSetting('printer_address', null);
     final name = await AppDb.getSetting('printer_name', null);
     final fares = await AppDb.getFares(onlyEnabled: false);
-    final allowOverride = (await AppDb.getSetting('allow_fare_override', '1')) == '1';
+    final allowOverride =
+        (await AppDb.getSetting('allow_fare_override', '1')) == '1';
     // Mirror the sell screen: prefer the cached server company profile (kept
     // fresh by every refreshCatalog) over local settings so the Settings form
     // shows the same live branding the ticketing screen prints.
     final profile = await AppDb.getCompanyProfile();
     if (!mounted) return;
     setState(() {
-      _companyCtrl.text = profile?.name.isNotEmpty == true
-          ? profile!.name
-          : company;
-      _sloganCtrl.text = profile?.slogan.isNotEmpty == true
-          ? profile!.slogan
-          : slogan;
+      _companyCtrl.text =
+          profile?.name.isNotEmpty == true ? profile!.name : company;
+      _sloganCtrl.text =
+          profile?.slogan.isNotEmpty == true ? profile!.slogan : slogan;
       _prefixCtrl.text = prefix;
-      _websiteCtrl.text = profile?.website.isNotEmpty == true
-          ? profile!.website
-          : website;
+      _websiteCtrl.text =
+          profile?.website.isNotEmpty == true ? profile!.website : website;
       _careCtrl.text = zimPhoneOrEmpty(profile?.customerCare.isNotEmpty == true
           ? profile!.customerCare
           : care);
@@ -141,9 +150,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _emailCtrl.text = profile?.companyEmail.isNotEmpty == true
           ? profile!.companyEmail
           : email;
-      _currency = profile?.currency.isNotEmpty == true
-          ? profile!.currency
-          : currency;
+      _currency =
+          profile?.currency.isNotEmpty == true ? profile!.currency : currency;
       _routeCodeCtrl.text = routeCode;
       _routeFromCtrl.text = routeFrom;
       _routeToCtrl.text = routeTo;
@@ -152,7 +160,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _driverCtrl.text = driver;
       _conductor1Ctrl.text = conductor1;
       _conductor2Ctrl.text = conductor2;
-      _paperFeedCtrl.text = paperFeed;
       _username = username;
       _fullName = fullName;
       _role = role;
@@ -164,8 +171,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   void _snack(String msg) {
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(msg)));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
   @override
@@ -178,6 +184,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         padding: const EdgeInsets.all(16),
         children: [
           _adminLocked(_companyCard()),
+          const SizedBox(height: 12),
+          _adminLocked(_routeTemplatesCard()),
           const SizedBox(height: 12),
           _securityCard(),
           const SizedBox(height: 12),
@@ -207,10 +215,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
           opacity: 0.5,
           child: ColorFiltered(
             colorFilter: const ColorFilter.matrix(<double>[
-              0.2126, 0.7152, 0.0722, 0, 0,
-              0.2126, 0.7152, 0.0722, 0, 0,
-              0.2126, 0.7152, 0.0722, 0, 0,
-              0, 0, 0, 1, 0,
+              0.2126,
+              0.7152,
+              0.0722,
+              0,
+              0,
+              0.2126,
+              0.7152,
+              0.0722,
+              0,
+              0,
+              0.2126,
+              0.7152,
+              0.0722,
+              0,
+              0,
+              0,
+              0,
+              0,
+              1,
+              0,
             ]),
             child: AbsorbPointer(child: child),
           ),
@@ -234,7 +258,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       child: ListTile(
         enabled: false,
         leading: const Icon(Icons.local_offer_outlined),
-        title: const Text('Promotions', style: TextStyle(color: Color(0xFF94A3B8))),
+        title: const Text('Promotions',
+            style: TextStyle(color: Color(0xFF94A3B8))),
         onTap: () => _snack('Admin Access Required'),
       ),
     );
@@ -243,16 +268,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Widget _promotionsCard() {
     return Card(
       child: ListTile(
-        leading: const Icon(Icons.local_offer_outlined,
-            color: Color(0xFFB45309)),
+        leading:
+            const Icon(Icons.local_offer_outlined, color: Color(0xFFB45309)),
         title: const Text('Promotions',
             style: TextStyle(fontWeight: FontWeight.w600)),
         subtitle: const Text('Manage voucher promo codes and discounts',
             style: TextStyle(fontSize: 12, color: Color(0xFF64748B))),
         trailing: const Icon(Icons.chevron_right),
-        onTap: () => Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => const PromotionsScreen()),
-        ),
+        onTap: () => Navigator.of(context)
+            .push(emeraldPageRoute<void>(const PromotionsScreen())),
       ),
     );
   }
@@ -264,8 +288,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Account',
-                style: Theme.of(context).textTheme.titleMedium),
+            Text('Account', style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 4),
             const Text(
               'Signed in to the Preyone Transit server. Your role and access rights are managed by your administrator.',
@@ -302,8 +325,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Company',
-                style: Theme.of(context).textTheme.titleMedium),
+            Text('Company', style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 12),
             TextField(
               controller: _companyCtrl,
@@ -343,11 +365,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       border: OutlineInputBorder(),
                     ),
                     items: _currencies
-                        .map((c) => DropdownMenuItem(
-                            value: c, child: Text(c)))
+                        .map((c) => DropdownMenuItem(value: c, child: Text(c)))
                         .toList(),
-                    onChanged: (v) =>
-                        setState(() => _currency = v ?? 'USD'),
+                    onChanged: (v) => setState(() => _currency = v ?? 'USD'),
                   ),
                 ),
               ],
@@ -385,18 +405,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
               keyboardType: TextInputType.emailAddress,
               decoration: const InputDecoration(
                 labelText: 'Company email (optional)',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _paperFeedCtrl,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                labelText: 'Paper feed after print (lines)',
-                hintText: '8',
-                helperText:
-                    'Extra blank lines so the whole print rolls out visible',
                 border: OutlineInputBorder(),
               ),
             ),
@@ -521,25 +529,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _saveCompany() async {
-    await AppDb.setSetting(
-        'company_name', up(_companyCtrl.text));
-    await AppDb.setSetting(
-        'company_slogan', _sloganCtrl.text.trim());
-    await AppDb.setSetting(
-        'receipt_prefix', up(_prefixCtrl.text));
+    await AppDb.setSetting('company_name', up(_companyCtrl.text));
+    await AppDb.setSetting('company_slogan', _sloganCtrl.text.trim());
+    await AppDb.setSetting('receipt_prefix', up(_prefixCtrl.text));
     await AppDb.setSetting('currency', _currency);
-    await AppDb.setSetting(
-        'website', _websiteCtrl.text.trim());
-    await AppDb.setSetting(
-        'customer_care', zimPhoneOrEmpty(_careCtrl.text));
-    await AppDb.setSetting(
-        'company_address', _addressCtrl.text.trim());
-    await AppDb.setSetting(
-        'company_email', _emailCtrl.text.trim());
-    final feed = int.tryParse(_paperFeedCtrl.text.trim()) ?? 8;
-    await AppDb.setSetting('ticket_paper_feed', feed < 3 ? '3' : '$feed');
-    await AppDb.setSetting(
-        'route_code', up(_routeCodeCtrl.text));
+    await AppDb.setSetting('website', _websiteCtrl.text.trim());
+    await AppDb.setSetting('customer_care', zimPhoneOrEmpty(_careCtrl.text));
+    await AppDb.setSetting('company_address', _addressCtrl.text.trim());
+    await AppDb.setSetting('company_email', _emailCtrl.text.trim());
+    await AppDb.setSetting('route_code', up(_routeCodeCtrl.text));
     final from = up(_routeFromCtrl.text);
     final to = up(_routeToCtrl.text);
     await AppDb.setSetting(
@@ -547,16 +545,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
         (from.isEmpty && to.isEmpty)
             ? ''
             : [from, to].where((p) => p.isNotEmpty).join(' - '));
-    await AppDb.setSetting(
-        'bus_reg', up(_busRegCtrl.text));
-    await AppDb.setSetting(
-        'trip_no', up(_tripNoCtrl.text));
-    await AppDb.setSetting(
-        'driver_name', up(_driverCtrl.text));
-    await AppDb.setSetting(
-        'conductor1', up(_conductor1Ctrl.text));
-    await AppDb.setSetting(
-        'conductor2', up(_conductor2Ctrl.text));
+    await AppDb.setSetting('bus_reg', up(_busRegCtrl.text));
+    await AppDb.setSetting('trip_no', up(_tripNoCtrl.text));
+    await AppDb.setSetting('driver_name', up(_driverCtrl.text));
+    await AppDb.setSetting('conductor1', up(_conductor1Ctrl.text));
+    await AppDb.setSetting('conductor2', up(_conductor2Ctrl.text));
     AppState.instance.refresh();
     _snack('Saved');
   }
@@ -569,8 +562,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text('Bluetooth Printer',
-                style:
-                    Theme.of(context).textTheme.titleMedium),
+                style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 8),
             Row(
               children: [
@@ -581,13 +573,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             ? 'Not configured'
                             : _printerAddress)
                         : '$_printerName\n$_printerAddress',
-                    style:
-                        Theme.of(context).textTheme.bodySmall,
+                    style: Theme.of(context).textTheme.bodySmall,
                   ),
                 ),
                 FilledButton.tonal(
-                  onPressed:
-                      (_scanning || _connecting) ? null : _scan,
+                  onPressed: (_scanning || _connecting) ? null : _scan,
                   child: const Text('Scan'),
                 ),
               ],
@@ -610,8 +600,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ListTile(
                   contentPadding: EdgeInsets.zero,
                   leading: const Icon(Icons.link),
-                  title: Text(
-                      d.name.isEmpty ? '(unnamed)' : d.name),
+                  title: Text(d.name.isEmpty ? '(unnamed)' : d.name),
                   subtitle: Text(d.address),
                   trailing: TextButton(
                     onPressed: () => _selectDevice(d),
@@ -629,17 +618,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         color: Color(0xFF64748B))),
               ),
               for (final d in _devices)
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: const Icon(Icons.print_outlined),
-                    title: Text(
-                        d.name.isEmpty ? '(unnamed)' : d.name),
-                    subtitle: Text(d.address),
-                    trailing: TextButton(
-                      onPressed: () => _selectDevice(d),
-                      child: const Text('Connect'),
-                    ),
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.print_outlined),
+                  title: Text(d.name.isEmpty ? '(unnamed)' : d.name),
+                  subtitle: Text(d.address),
+                  trailing: TextButton(
+                    onPressed: () => _selectDevice(d),
+                    child: const Text('Connect'),
                   ),
+                ),
             ],
             if (_printerAddress.isNotEmpty)
               Row(
@@ -728,8 +716,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           'If it keeps failing, unpair and re-pair it in phone Settings.');
       return;
     }
-    await AppDb.setSetting(
-        'printer_address', device.address);
+    await AppDb.setSetting('printer_address', device.address);
     await AppDb.setSetting('printer_name', device.name);
     setState(() {
       _printerAddress = device.address;
@@ -745,8 +732,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
     setState(() => _connecting = true);
     try {
-      final ok = await PrinterService.instance
-          .connectByAddress(_printerAddress);
+      final ok =
+          await PrinterService.instance.connectByAddress(_printerAddress);
       if (!mounted) return;
       _snack(ok
           ? 'Reconnected to ${_printerName.isEmpty ? _printerAddress : _printerName}'
@@ -771,8 +758,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _testPrint() async {
-    final connected = await PrinterService.instance
-        .connectByAddress(_printerAddress);
+    final connected =
+        await PrinterService.instance.connectByAddress(_printerAddress);
     if (!connected) {
       _snack('Printer not connected');
       return;
@@ -781,15 +768,43 @@ class _SettingsScreenState extends State<SettingsScreen> {
     b.addAll(EscPos.init());
     b.addAll(EscPos.alignCenter());
     b.addAll(EscPos.bold(true));
-    b.addAll(EscPos.text(
-        '${EscPos.center(_companyCtrl.text)}\n'));
+    b.addAll(EscPos.text('${EscPos.center(_companyCtrl.text)}\n'));
     b.addAll(EscPos.bold(false));
-    b.addAll(
-        EscPos.text('${EscPos.center('PRINTER TEST OK')}\n'));
+    b.addAll(EscPos.text('${EscPos.center('PRINTER TEST OK')}\n'));
     b.addAll(EscPos.feed(3));
     b.addAll(EscPos.cut());
     final ok = await PrinterService.instance.write(b);
     _snack(ok ? 'Printed test page' : 'Print failed');
+  }
+
+  Widget _routeTemplatesCard() {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Route templates',
+                style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 4),
+            const Text(
+              'Master routes a conductor uses to open an unscheduled run: list '
+              'the stages in travel order and price each leg. Templates stay on '
+              'this device and never join the server schedule board.',
+              style: TextStyle(fontSize: 12.5),
+            ),
+            const SizedBox(height: 10),
+            EmeraldGlassButton(
+              icon: Icons.route_outlined,
+              label: 'Manage route templates',
+              onPressed: () => Navigator.of(context).push<bool>(
+                emeraldPageRoute<bool>(const RouteTemplatesScreen()),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Widget _faresCard() {
@@ -803,9 +818,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               children: [
                 Expanded(
                   child: Text('Fares',
-                      style: Theme.of(context)
-                          .textTheme
-                          .titleMedium),
+                      style: Theme.of(context).textTheme.titleMedium),
                 ),
                 TextButton.icon(
                   onPressed: _addFare,
@@ -815,19 +828,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ],
             ),
             SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('Allow manual fare override',
-                    style: TextStyle(fontWeight: FontWeight.w600)),
-                subtitle: const Text(
-                    'Lets field staff enter a custom price for a fare. Custom '
-                    'prices are recorded and flagged on the ticket.'),
-                value: _allowFareOverride,
-                activeTrackColor:
-                    Theme.of(context).colorScheme.primary,
-                onChanged: _setAllowFareOverride,
-              ),
-              const Divider(height: 8),
-              for (final f in _fares)
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Allow manual fare override',
+                  style: TextStyle(fontWeight: FontWeight.w600)),
+              subtitle: const Text(
+                  'Lets field staff enter a custom price for a fare. Custom '
+                  'prices are recorded and flagged on the ticket.'),
+              value: _allowFareOverride,
+              activeTrackColor: Theme.of(context).colorScheme.primary,
+              onChanged: _setAllowFareOverride,
+            ),
+            const Divider(height: 8),
+            for (final f in _fares)
               ListTile(
                 contentPadding: EdgeInsets.zero,
                 title: Text(f.name),
@@ -837,14 +849,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     IconButton(
-                      icon:
-                          const Icon(Icons.edit_outlined),
+                      icon: const Icon(Icons.edit_outlined),
                       tooltip: 'Edit',
                       onPressed: () => _editFare(f),
                     ),
                     IconButton(
-                      icon: const Icon(
-                          Icons.delete_outline),
+                      icon: const Icon(Icons.delete_outline),
                       tooltip: 'Delete',
                       onPressed: () => _deleteFare(f),
                     ),
@@ -862,14 +872,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _setAllowFareOverride(bool value) async {
     setState(() => _allowFareOverride = value);
     await AppDb.setSetting('allow_fare_override', value ? '1' : '0');
-    _snack(value ? 'Manual fare overrides enabled' : 'Manual fare overrides disabled');
+    _snack(value
+        ? 'Manual fare overrides enabled'
+        : 'Manual fare overrides disabled');
   }
 
   /// Auto-fills the route code from From/To unless the admin typed one.
   void _autofillRouteCode() {
     if (_routeCodeCtrl.text.trim().isNotEmpty) return;
-    final auto = autoRouteCode(
-        _routeFromCtrl.text.trim(), _routeToCtrl.text.trim());
+    final auto =
+        autoRouteCode(_routeFromCtrl.text.trim(), _routeToCtrl.text.trim());
     if (auto.isNotEmpty) _routeCodeCtrl.text = auto;
   }
 
@@ -900,32 +912,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _fareDialog(Fare? existing) async {
-    final nameCtrl =
-        TextEditingController(text: existing?.name ?? '');
+    final nameCtrl = TextEditingController(text: existing?.name ?? '');
     final priceCtrl = TextEditingController(
-        text: existing == null
-            ? ''
-            : (existing.price / 100).toStringAsFixed(2));
+        text:
+            existing == null ? '' : (existing.price / 100).toStringAsFixed(2));
     final saved = await showDialog<_FareInput>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title:
-            Text(existing == null ? 'New fare' : 'Edit fare'),
+        title: Text(existing == null ? 'New fare' : 'Edit fare'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             TextField(
               controller: nameCtrl,
-              decoration:
-                  const InputDecoration(labelText: 'Name'),
+              decoration: const InputDecoration(labelText: 'Name'),
             ),
             const SizedBox(height: 12),
             TextField(
               controller: priceCtrl,
-              keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true),
-              decoration:
-                  const InputDecoration(labelText: 'Price'),
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(labelText: 'Price'),
             ),
           ],
         ),
@@ -937,11 +944,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
           FilledButton(
             onPressed: () {
               final name = nameCtrl.text.trim();
-              final cents =
-                  parseMoneyToCents(priceCtrl.text);
+              final cents = parseMoneyToCents(priceCtrl.text);
               if (name.isEmpty || cents == null) return;
-              Navigator.of(ctx)
-                  .pop(_FareInput(name, cents));
+              Navigator.of(ctx).pop(_FareInput(name, cents));
             },
             child: const Text('Save'),
           ),
@@ -971,8 +976,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text('Offline sync',
-                style:
-                    Theme.of(context).textTheme.titleMedium),
+                style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 6),
             const Text(
               'Sell tickets offline and sync automatically to the '
@@ -998,9 +1002,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               Padding(
                 padding: const EdgeInsets.only(top: 10),
                 child: Text(_syncStatus,
-                    style: Theme.of(context)
-                        .textTheme
-                        .bodySmall),
+                    style: Theme.of(context).textTheme.bodySmall),
               ),
             const SizedBox(height: 12),
             OutlinedButton.icon(
@@ -1011,8 +1013,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       height: 16,
                       child: CircularProgressIndicator(strokeWidth: 2))
                   : const Icon(Icons.report_gmailerrorred, size: 18),
-              label: Text(
-                  _forcingEnd ? 'Ending…' : 'Force End Stuck Run'),
+              label: Text(_forcingEnd ? 'Ending…' : 'Force End Stuck Run'),
               style: OutlinedButton.styleFrom(
                 foregroundColor: const Color(0xFFB45309),
                 side: const BorderSide(color: Color(0xFFB45309)),
@@ -1043,12 +1044,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ? 'All tickets on this device are synced.'
         : 'Warning: ${unsynced.length} ticket(s) are still unsynced. They are '
             'safe and stay queued — press "Sync Now" afterwards to upload them.';
+    if (!mounted) return;
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Force end stuck run?'),
-        content: Text(
-            'Release running trip: $labels.\n\n$pending\n\n'
+        content: Text('Release running trip: $labels.\n\n$pending\n\n'
             'This only clears the local run state — no tickets are deleted.'),
         actions: [
           TextButton(

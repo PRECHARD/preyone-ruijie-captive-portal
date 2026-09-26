@@ -33,8 +33,7 @@ void main() {
     });
 
     test('strips non-digit noise outside the number', () {
-      expect(zimPhoneOrEmpty('call 0772 111 111 now'),
-          '+263772111111');
+      expect(zimPhoneOrEmpty('call 0772 111 111 now'), '+263772111111');
     });
 
     test('formatZimPhone still reports N/A for display paths', () {

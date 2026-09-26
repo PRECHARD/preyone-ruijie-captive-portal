@@ -22,8 +22,8 @@ class FieldCrypto {
   static const _version = 'v1';
   static const _prefix = 'enc1:$_version:';
 
-  static const _missingKeyError =
-      SecurityException('FieldCrypto: AES key is missing. Refusing to use plaintext.');
+  static const _missingKeyError = SecurityException(
+      'FieldCrypto: AES key is missing. Refusing to use plaintext.');
 
   AesGcm? _aes;
   SecretKey? _key;
@@ -63,7 +63,9 @@ class FieldCrypto {
 
   Future<String?> decrypt(String? ciphertext) async {
     if (ciphertext == null || ciphertext.isEmpty) return ciphertext;
-    if (!ciphertext.startsWith(_prefix)) return ciphertext; // legacy plaintext passthrough
+    if (!ciphertext.startsWith(_prefix)) {
+      return ciphertext; // legacy plaintext passthrough
+    }
     // Encrypted data present but the key is missing: surface a hard error
     // rather than silently returning empty fields.
     _ensureKey();

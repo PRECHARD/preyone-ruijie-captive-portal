@@ -144,8 +144,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       label: 'Avg Fare',
                       value: _today.isEmpty
                           ? fmtMoney(0, _currency)
-                          : fmtMoney(
-                              (_todayRevenue / _today.length).round(),
+                          : fmtMoney((_todayRevenue / _today.length).round(),
                               _currency),
                     ),
                   ),
@@ -193,8 +192,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   ),
                 )
               else
-                for (final s in _recent)
-                  _recentTile(s),
+                for (final s in _recent) _recentTile(s),
             ],
           ),
         ),
@@ -259,10 +257,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
       ),
       child: ListTile(
         dense: true,
-        leading: CircleAvatar(
+        leading: const CircleAvatar(
           radius: 18,
-          backgroundColor: const Color(0xFFE8F5E9),
-          child: const Icon(Icons.confirmation_number,
+          backgroundColor: Color(0xFFE8F5E9),
+          child: Icon(Icons.confirmation_number,
               size: 18, color: Color(0xFF1B5E20)),
         ),
         title: Text(

@@ -5,9 +5,11 @@ import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart';
 
 import '../models.dart';
+import '../models/route_template.dart';
 import '../models/trip_model.dart' show SyncQueueEvent, TripInstance;
 import '../security/field_crypto.dart';
 import '../security/secure_keystore.dart';
+import '../uuid.dart';
 
 class AppDb {
   AppDb._();
@@ -28,7 +30,7 @@ class AppDb {
     final path = p.join(dir, 'bus_ticket.db');
     final database = await openDatabase(
       path,
-      version: 15,
+      version: 16,
       onCreate: (d, v) async {
         await d.execute('''
           CREATE TABLE fares (
@@ -168,6 +170,7 @@ class AppDb {
         await d.execute(
             'CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT)');
         await _createSyncSchema(d);
+        await _createRouteTemplateSchema(d);
       },
       onUpgrade: (d, oldVersion, newVersion) async {
         if (oldVersion < 2) {
@@ -342,6 +345,9 @@ class AppDb {
           await d.execute(
               "ALTER TABLE sales ADD COLUMN company_id TEXT NOT NULL DEFAULT ''");
         }
+        if (oldVersion < 16) {
+          await _createRouteTemplateSchema(d);
+        }
       },
     );
     await _seedFares(database);
@@ -391,6 +397,157 @@ class AppDb {
         ended_at TEXT NOT NULL DEFAULT ''
       )
     ''');
+  }
+
+  /// Shared between a fresh install (v16 onCreate) and upgrades (v16 onUpgrade):
+  /// the "master route templates" a conductor uses to open an unscheduled
+  /// on-the-go run — stage list plus the stage-to-stage fare matrix.
+  static Future<void> _createRouteTemplateSchema(Database d) async {
+    await d.execute('''
+      CREATE TABLE IF NOT EXISTS route_templates (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        code TEXT NOT NULL DEFAULT '',
+        description TEXT NOT NULL DEFAULT '',
+        active INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL DEFAULT ''
+      )
+    ''');
+    await d.execute('''
+      CREATE TABLE IF NOT EXISTS route_template_stages (
+        id TEXT PRIMARY KEY,
+        template_id TEXT NOT NULL,
+        seq INTEGER NOT NULL,
+        name TEXT NOT NULL
+      )
+    ''');
+    await d.execute(
+        'CREATE INDEX IF NOT EXISTS idx_rts_template ON route_template_stages(template_id, seq)');
+    await d.execute('''
+      CREATE TABLE IF NOT EXISTS route_template_fares (
+        id TEXT PRIMARY KEY,
+        template_id TEXT NOT NULL,
+        from_seq INTEGER NOT NULL,
+        to_seq INTEGER NOT NULL,
+        price_cents INTEGER NOT NULL DEFAULT 0
+      )
+    ''');
+    await d.execute(
+        'CREATE INDEX IF NOT EXISTS idx_rtf_template ON route_template_fares(template_id)');
+  }
+
+  /// All templates with their stages and fare matrix hydrated, in creation
+  /// order. Stages come back sorted by seq so callers can index by position.
+  static Future<List<RouteTemplate>> getRouteTemplates() async {
+    final d = await db;
+    final rows =
+        await d.query('route_templates', orderBy: 'created_at ASC, name ASC');
+    if (rows.isEmpty) return const [];
+    final ids = rows.map((r) => (r['id'] as String?) ?? '').toList();
+    final marks = List.filled(ids.length, '?').join(',');
+    final stageRows = await d.query(
+      'route_template_stages',
+      where: 'template_id IN ($marks)',
+      whereArgs: ids,
+      orderBy: 'template_id ASC, seq ASC',
+    );
+    final fareRows = await d.query(
+      'route_template_fares',
+      where: 'template_id IN ($marks)',
+      whereArgs: ids,
+      orderBy: 'template_id ASC, from_seq ASC, to_seq ASC',
+    );
+    final stagesBy = <String, List<RouteStage>>{};
+    for (final r in stageRows) {
+      final s = RouteStage.fromRow(r);
+      stagesBy.putIfAbsent(s.templateId, () => []).add(s);
+    }
+    final faresBy = <String, List<RouteStageFare>>{};
+    for (final r in fareRows) {
+      final f = RouteStageFare.fromRow(r);
+      faresBy.putIfAbsent(f.templateId, () => []).add(f);
+    }
+    return rows
+        .map((r) => RouteTemplate.fromRow(
+              r,
+              stages: stagesBy[(r['id'] as String?) ?? ''] ?? const [],
+              fares: faresBy[(r['id'] as String?) ?? ''] ?? const [],
+            ))
+        .toList();
+  }
+
+  static Future<RouteTemplate?> getRouteTemplate(String id) async {
+    final all = await getRouteTemplates();
+    for (final t in all) {
+      if (t.id == id) return t;
+    }
+    return null;
+  }
+
+  /// Inserts or updates [template] together with its full stage list and fare
+  /// matrix. Children are replaced wholesale in one transaction — the matrix is
+  /// small (stage count squared at worst) and a partial diff would risk orphan
+  /// rows when a stage is renamed or removed.
+  static Future<void> saveRouteTemplate(RouteTemplate template) async {
+    final d = await db;
+    await d.transaction((txn) async {
+      final id = template.id.isEmpty ? uuidV4() : template.id;
+      final row = template.toRow()..['id'] = id;
+      // Upsert: an UPDATE that matches nothing must not silently drop the
+      // template on the floor (a caller passing an id we no longer hold would
+      // otherwise see the save "succeed" with nothing written).
+      final changed = template.id.isEmpty
+          ? 0
+          : await txn
+              .update('route_templates', row, where: 'id = ?', whereArgs: [id]);
+      if (changed == 0) {
+        await txn.insert('route_templates', row);
+      }
+      await txn.delete('route_template_stages',
+          where: 'template_id = ?', whereArgs: [id]);
+      await txn.delete('route_template_fares',
+          where: 'template_id = ?', whereArgs: [id]);
+      var seq = 0;
+      for (final s in template.stages) {
+        seq++;
+        if (s.name.trim().isEmpty) continue;
+        await txn.insert('route_template_stages', {
+          'id': s.id.isEmpty ? uuidV4() : s.id,
+          'template_id': id,
+          'seq': s.seq > 0 ? s.seq : seq,
+          'name': s.name.trim(),
+        });
+      }
+      for (final f in template.fares) {
+        if (f.fromSeq == f.toSeq) continue;
+        await txn.insert('route_template_fares', {
+          'id': f.id.isEmpty ? uuidV4() : f.id,
+          'template_id': id,
+          'from_seq': f.fromSeq,
+          'to_seq': f.toSeq,
+          'price_cents': f.priceCents,
+        });
+      }
+    });
+  }
+
+  /// Deletes a template and its stages/matrix. Existing sales are untouched —
+  /// they only reference the trip, never the template.
+  static Future<void> deleteRouteTemplate(String id) async {
+    final d = await db;
+    await d.transaction((txn) async {
+      await txn.delete('route_template_fares',
+          where: 'template_id = ?', whereArgs: [id]);
+      await txn.delete('route_template_stages',
+          where: 'template_id = ?', whereArgs: [id]);
+      await txn.delete('route_templates', where: 'id = ?', whereArgs: [id]);
+    });
+  }
+
+  /// Active templates only (conductor-facing pickers).
+  static Future<List<RouteTemplate>> getActiveRouteTemplates() async {
+    final all = await getRouteTemplates();
+    return all.where((t) => t.active && t.isUsable).toList();
   }
 
   static Future<List<Fare>> getFares({bool onlyEnabled = true}) async {
@@ -471,14 +628,17 @@ class AppDb {
 
   // ── Field encryption helpers ──
 
-  static Future<String> _enc(String? v) async => (await FieldCrypto.instance.encrypt(v ?? '')) ?? '';
-  static Future<String> _dec(String? v) async => (await FieldCrypto.instance.decrypt(v ?? '')) ?? '';
+  static Future<String> _enc(String? v) async =>
+      (await FieldCrypto.instance.encrypt(v ?? '')) ?? '';
+  static Future<String> _dec(String? v) async =>
+      (await FieldCrypto.instance.decrypt(v ?? '')) ?? '';
 
   static Future<int> insertSale(Sale sale) async {
     final d = await db;
     final deviceId = await SecureKeystore.instance.readDeviceUuid();
     final rng = Random.secure();
-    final txId = '$deviceId-${DateTime.now().millisecondsSinceEpoch}-${rng.nextInt(0x10000).toRadixString(16)}';
+    final txId =
+        '$deviceId-${DateTime.now().millisecondsSinceEpoch}-${rng.nextInt(0x10000).toRadixString(16)}';
 
     final detailsJson = jsonEncode(sale.items.map((i) => i.toJson()).toList());
     final saleTime = sale.createdAt!.toIso8601String();
@@ -507,7 +667,8 @@ class AppDb {
       saleTime: saleTime,
     );
 
-    final sigBytes = await SecureKeystore.instance.sign(utf8.encode(payloadStr));
+    final sigBytes =
+        await SecureKeystore.instance.sign(utf8.encode(payloadStr));
     final sigB64 = base64UrlEncode(sigBytes).replaceAll('=', '');
 
     final encBusReg = await _enc(sale.busReg);
@@ -523,8 +684,8 @@ class AppDb {
     return d.insert('sales', {
       'receipt_no': sale.receiptNo,
       'ticket_type': sale.ticketType,
-      'company_id': (await SecureKeystore.instance.readCompanyId()) ??
-          sale.companyId,
+      'company_id':
+          (await SecureKeystore.instance.readCompanyId()) ?? sale.companyId,
       'route_code': sale.routeCode,
       'route_name': sale.routeName,
       'bus_reg': encBusReg,
@@ -573,8 +734,8 @@ class AppDb {
   /// Total sales rows (for paging "load more" in history).
   static Future<int> getSalesCount() async {
     final d = await db;
-    final result =
-        Sqflite.firstIntValue(await d.rawQuery('SELECT COUNT(*) AS c FROM sales'));
+    final result = Sqflite.firstIntValue(
+        await d.rawQuery('SELECT COUNT(*) AS c FROM sales'));
     return result ?? 0;
   }
 
@@ -582,8 +743,8 @@ class AppDb {
   static Future<Sale?> getSaleById(int? id) async {
     if (id == null) return null;
     final d = await db;
-    final rows = await d.query('sales',
-        where: 'id = ?', whereArgs: [id], limit: 1);
+    final rows =
+        await d.query('sales', where: 'id = ?', whereArgs: [id], limit: 1);
     if (rows.isEmpty) return null;
     return _saleFromRow(rows.first);
   }
@@ -594,13 +755,14 @@ class AppDb {
   static Future<Sale?> getSaleByTxId(String txId) async {
     if (txId.isEmpty) return null;
     final d = await db;
-    final rows = await d.query('sales',
-        where: 'tx_id = ?', whereArgs: [txId], limit: 1);
+    final rows =
+        await d.query('sales', where: 'tx_id = ?', whereArgs: [txId], limit: 1);
     if (rows.isEmpty) return null;
     return _saleFromRow(rows.first);
   }
 
-  static Future<List<Sale>> getSalesBetween(DateTime start, DateTime end) async {
+  static Future<List<Sale>> getSalesBetween(
+      DateTime start, DateTime end) async {
     final d = await db;
     final rows = await d.query('sales',
         where: 'created_at >= ? AND created_at <= ?',
@@ -768,10 +930,7 @@ class AppDb {
   static Future<String?> getSetting(String key, [String? fallback]) async {
     final d = await db;
     final rows = await d.query('settings',
-        columns: ['value'],
-        where: 'key = ?',
-        whereArgs: [key],
-        limit: 1);
+        columns: ['value'], where: 'key = ?', whereArgs: [key], limit: 1);
     if (rows.isEmpty) return fallback;
     return rows.first['value'] as String?;
   }
@@ -784,8 +943,7 @@ class AppDb {
     final d = await db;
     final placeholders = List.filled(keys.length, '?').join(', ');
     final rows = await d.rawQuery(
-        'SELECT key, value FROM settings WHERE key IN ($placeholders)',
-        keys);
+        'SELECT key, value FROM settings WHERE key IN ($placeholders)', keys);
     return {
       for (final r in rows)
         if (r['key'] != null)
@@ -801,14 +959,16 @@ class AppDb {
 
   static Future<String> nextReceiptNo() async {
     final prefix = (await getSetting('receipt_prefix', 'AGJ'))?.trim();
-    final count = int.tryParse(await getSetting('receipt_counter', '0') ?? '0') ?? 0;
+    final count =
+        int.tryParse(await getSetting('receipt_counter', '0') ?? '0') ?? 0;
     final next = count + 1;
     await setSetting('receipt_counter', '$next');
     if (prefix == null || prefix.isEmpty) return '$next';
     return '$prefix${next.toString().padLeft(4, '0')}';
   }
 
-  static Future<String> deviceId() async => SecureKeystore.instance.readDeviceUuid();
+  static Future<String> deviceId() async =>
+      SecureKeystore.instance.readDeviceUuid();
 
   // ---- Drivers ----
 
@@ -821,8 +981,7 @@ class AppDb {
 
   static Future<int> addDriver(String name, String phone) async {
     final d = await db;
-    return d
-        .insert('drivers', {'name': name, 'phone': phone, 'active': 1});
+    return d.insert('drivers', {'name': name, 'phone': phone, 'active': 1});
   }
 
   static Future<void> updateDriver(Driver driver) async {
@@ -845,8 +1004,7 @@ class AppDb {
 
   // ---- Conductors ----
 
-  static Future<List<Conductor>> getConductors(
-      {bool onlyActive = true}) async {
+  static Future<List<Conductor>> getConductors({bool onlyActive = true}) async {
     final d = await db;
     final rows = await d.query('conductors',
         where: onlyActive ? 'active = 1' : null, orderBy: 'name ASC');
@@ -855,8 +1013,7 @@ class AppDb {
 
   static Future<int> addConductor(String name, String phone) async {
     final d = await db;
-    return d
-        .insert('conductors', {'name': name, 'phone': phone, 'active': 1});
+    return d.insert('conductors', {'name': name, 'phone': phone, 'active': 1});
   }
 
   static Future<void> updateConductor(Conductor conductor) async {
@@ -889,15 +1046,10 @@ class AppDb {
     for (final s in staff) {
       final table = s.role == 'CONDUCTOR' ? 'conductors' : 'drivers';
       final existing = await d.query(table,
-          where: 'name = ? COLLATE NOCASE',
-          whereArgs: [s.fullName],
-          limit: 1);
+          where: 'name = ? COLLATE NOCASE', whereArgs: [s.fullName], limit: 1);
       if (existing.isNotEmpty) {
-        batch.update(
-            table,
-            {'phone': s.phone, 'active': s.active ? 1 : 0},
-            where: 'id = ?',
-            whereArgs: [existing.first['id']]);
+        batch.update(table, {'phone': s.phone, 'active': s.active ? 1 : 0},
+            where: 'id = ?', whereArgs: [existing.first['id']]);
       } else {
         batch.insert(table, {
           'name': s.fullName,
@@ -978,7 +1130,9 @@ class AppDb {
       await setSetting('active_trip', '');
       return;
     }
-    await setSetting('active_trip', jsonEncode({
+    await setSetting(
+        'active_trip',
+        jsonEncode({
           'id': trip.id,
           'tripNo': trip.tripNo,
           'routeCode': trip.routeCode,
@@ -1091,8 +1245,7 @@ class AppDb {
     final d = await db;
     final now = DateTime.now().toIso8601String();
     await d.transaction((txn) async {
-      await txn.update('driver_shifts',
-          {'status': 'CLOSED', 'closed_at': now},
+      await txn.update('driver_shifts', {'status': 'CLOSED', 'closed_at': now},
           where: "status = 'OPEN'");
       await txn.insert('driver_shifts', {
         'id': id,
@@ -1141,9 +1294,7 @@ class AppDb {
     if (trimmed.isEmpty) return null;
     final d = await db;
     final rows = await d.query('conductors',
-        where: 'name = ? COLLATE NOCASE',
-        whereArgs: [trimmed],
-        limit: 1);
+        where: 'name = ? COLLATE NOCASE', whereArgs: [trimmed], limit: 1);
     if (rows.isEmpty) return null;
     return Conductor.fromMap(rows.first);
   }
@@ -1151,8 +1302,8 @@ class AppDb {
   static Future<DriverShift?> getShift(String id) async {
     if (id.isEmpty) return null;
     final d = await db;
-    final rows = await d
-        .query('driver_shifts', where: 'id = ?', whereArgs: [id], limit: 1);
+    final rows = await d.query('driver_shifts',
+        where: 'id = ?', whereArgs: [id], limit: 1);
     if (rows.isEmpty) return null;
     return DriverShift.fromMap(rows.first);
   }
@@ -1171,8 +1322,8 @@ class AppDb {
   static Future<void> markShiftSynced(String id) async {
     if (id.isEmpty) return;
     final d = await db;
-    await d
-        .update('driver_shifts', {'synced': 1}, where: 'id = ?', whereArgs: [id]);
+    await d.update('driver_shifts', {'synced': 1},
+        where: 'id = ?', whereArgs: [id]);
   }
 
   // ---- Offline trip-lifecycle replay queue ----
@@ -1233,9 +1384,7 @@ class AppDb {
   static Future<TripInstance?> getRunningTripInstance() async {
     final d = await db;
     final rows = await d.query('trip_instances',
-        where: "status = 'RUNNING'",
-        orderBy: 'started_at DESC',
-        limit: 1);
+        where: "status = 'RUNNING'", orderBy: 'started_at DESC', limit: 1);
     if (rows.isEmpty) return null;
     return TripInstance.fromMap(rows.first);
   }
@@ -1246,13 +1395,13 @@ class AppDb {
   static Future<List<TripInstance>> getRunningTripInstances() async {
     final d = await db;
     final rows = await d.query('trip_instances',
-        where: "status = 'RUNNING'",
-        orderBy: 'started_at DESC');
+        where: "status = 'RUNNING'", orderBy: 'started_at DESC');
     return rows.map(TripInstance.fromMap).toList();
   }
 
   /// A RUNNING instance for one specific trip (newest first), or null.
-  static Future<TripInstance?> getRunningTripInstanceForTrip(String tripId) async {
+  static Future<TripInstance?> getRunningTripInstanceForTrip(
+      String tripId) async {
     if (tripId.isEmpty) return null;
     final d = await db;
     final rows = await d.query('trip_instances',
@@ -1267,7 +1416,8 @@ class AppDb {
   /// Ends every RUNNING instance for a trip with the same arrival stamp — a
   /// duplicate-start race can leave several RUNNING rows for one trip, so ending
   /// must clear all of them, never just one.
-  static Future<void> endRunningInstancesForTrip(String tripId, {DateTime? arrivedAt}) async {
+  static Future<void> endRunningInstancesForTrip(String tripId,
+      {DateTime? arrivedAt}) async {
     if (tripId.isEmpty) return;
     final d = await db;
     final arrived = arrivedAt ?? DateTime.now();

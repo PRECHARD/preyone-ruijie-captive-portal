@@ -69,31 +69,36 @@ class TripController {
 
     final eventUuid = uuidV4();
     var synced = 0;
-    try {
-      final fresh = await TransitApi.tripAction(trip.id, 'start');
-      await AppDb.upsertTrip(fresh);
-      synced = 1;
-    } catch (_) {
-      // Offline — the server is updated during the next sync.
-      synced = 0;
-    }
-    await AppDb.queueEvent(
-      eventType: TripEvents.started,
-      eventUuid: eventUuid,
-      tripId: trip.id,
-      tripNo: trip.tripNo,
-      shiftId: shiftId,
-      payload: jsonEncode({
-        'instanceId': instance.id,
-        'actualDeparture': instance.actualDeparture,
-        'conductor': (await SecureKeystore.instance.readFullName()) ?? '',
-        'busReg': trip.busReg,
-      }),
-    );
-    if (synced == 1) {
-      final queued = await AppDb.getUnsyncedEvents();
-      for (final e in queued) {
-        if (e.eventUuid == eventUuid) await AppDb.markEventSynced(e.id!);
+    // A local on-the-go trip has no server schedule to flip: the instance row
+    // above is the whole record. Queueing TRIP_STARTED would replay forever
+    // against a trip id the server has never seen.
+    if (!trip.isLocal) {
+      try {
+        final fresh = await TransitApi.tripAction(trip.id, 'start');
+        await AppDb.upsertTrip(fresh);
+        synced = 1;
+      } catch (_) {
+        // Offline — the server is updated during the next sync.
+        synced = 0;
+      }
+      await AppDb.queueEvent(
+        eventType: TripEvents.started,
+        eventUuid: eventUuid,
+        tripId: trip.id,
+        tripNo: trip.tripNo,
+        shiftId: shiftId,
+        payload: jsonEncode({
+          'instanceId': instance.id,
+          'actualDeparture': instance.actualDeparture,
+          'conductor': (await SecureKeystore.instance.readFullName()) ?? '',
+          'busReg': trip.busReg,
+        }),
+      );
+      if (synced == 1) {
+        final queued = await AppDb.getUnsyncedEvents();
+        for (final e in queued) {
+          if (e.eventUuid == eventUuid) await AppDb.markEventSynced(e.id!);
+        }
       }
     }
     AppState.instance.refresh();
@@ -125,31 +130,35 @@ class TripController {
 
     final eventUuid = uuidV4();
     var synced = 0;
-    try {
-      final fresh = await TransitApi.tripAction(instance.tripId, 'complete');
-      await AppDb.upsertTrip(fresh);
-      synced = 1;
-    } catch (_) {
-      synced = 0;
-    }
-    await AppDb.queueEvent(
-      eventType: TripEvents.ended,
-      eventUuid: eventUuid,
-      tripId: instance.tripId,
-      tripNo: instance.tripNo,
-      shiftId: instance.shiftId,
-      payload: jsonEncode({
-        'instanceId': instance.id,
-        'actualArrival': arrived.toUtc().toIso8601String(),
-        'sold': sold,
-        'grossCents': grossCents,
-        'cashCents': cashCents,
-      }),
-    );
-    if (synced == 1) {
-      final queued = await AppDb.getUnsyncedEvents();
-      for (final e in queued) {
-        if (e.eventUuid == eventUuid) await AppDb.markEventSynced(e.id!);
+    // Local on-the-go trips are not on the server board — see startTrip.
+    final trip = await AppDb.getTrip(instance.tripId);
+    if (trip == null || !trip.isLocal) {
+      try {
+        final fresh = await TransitApi.tripAction(instance.tripId, 'complete');
+        await AppDb.upsertTrip(fresh);
+        synced = 1;
+      } catch (_) {
+        synced = 0;
+      }
+      await AppDb.queueEvent(
+        eventType: TripEvents.ended,
+        eventUuid: eventUuid,
+        tripId: instance.tripId,
+        tripNo: instance.tripNo,
+        shiftId: instance.shiftId,
+        payload: jsonEncode({
+          'instanceId': instance.id,
+          'actualArrival': arrived.toUtc().toIso8601String(),
+          'sold': sold,
+          'grossCents': grossCents,
+          'cashCents': cashCents,
+        }),
+      );
+      if (synced == 1) {
+        final queued = await AppDb.getUnsyncedEvents();
+        for (final e in queued) {
+          if (e.eventUuid == eventUuid) await AppDb.markEventSynced(e.id!);
+        }
       }
     }
 
@@ -200,8 +209,7 @@ class TripController {
   }
 
   /// The live running instance on this device (null when nothing is running).
-  Future<TripInstance?> runningInstance() =>
-      AppDb.getRunningTripInstance();
+  Future<TripInstance?> runningInstance() => AppDb.getRunningTripInstance();
 
   /// Self-heals "ghost" runs. Called right after a successful catalog pull so
   /// the local trip mirror is fresh: any RUNNING instance whose trip is now

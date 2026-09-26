@@ -130,9 +130,11 @@ class SecureKeystore {
 
   // ── Token + auth session persistence ──────────────────────────────────
 
-  Future<void> saveSessionToken(String token) => _storage.write(key: _kSessionToken, value: token);
+  Future<void> saveSessionToken(String token) =>
+      _storage.write(key: _kSessionToken, value: token);
   Future<String?> readSessionToken() => _storage.read(key: _kSessionToken);
-  Future<void> saveDeviceToken(String token) => _storage.write(key: _kDeviceToken, value: token);
+  Future<void> saveDeviceToken(String token) =>
+      _storage.write(key: _kDeviceToken, value: token);
   Future<String?> readDeviceToken() => _storage.read(key: _kDeviceToken);
   Future<void> clearTokens() async {
     await _storage.delete(key: _kSessionToken);
@@ -174,8 +176,10 @@ class SecureKeystore {
   Future<String?> readCompanySlug() => _storage.read(key: _kCompanySlug);
   Future<String?> readOfflineLease() => _storage.read(key: _kOfflineLease);
 
-  Future<void> saveOfflineLease(String expiry) => _storage.write(key: _kOfflineLease, value: expiry);
-  Future<void> saveServerUrl(String url) => _storage.write(key: _kServerUrl, value: url);
+  Future<void> saveOfflineLease(String expiry) =>
+      _storage.write(key: _kOfflineLease, value: expiry);
+  Future<void> saveServerUrl(String url) =>
+      _storage.write(key: _kServerUrl, value: url);
   Future<String?> readServerUrl() async {
     final v = await _storage.read(key: _kServerUrl);
     if (v != null && v.isNotEmpty) return v;

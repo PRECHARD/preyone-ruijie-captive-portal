@@ -449,9 +449,8 @@ class TicketPreviewCard extends StatelessWidget {
   }
 
   Widget _customerSection() {
-    final name = data.customerName.trim().isEmpty
-        ? '-'
-        : up(data.customerName.trim());
+    final name =
+        data.customerName.trim().isEmpty ? '-' : up(data.customerName.trim());
     return Column(
       children: [
         _staffRow('PASSENGER', name, ''),
@@ -480,7 +479,8 @@ class TicketPreviewCard extends StatelessWidget {
                   ),
                 ),
                 Text(
-                  i.qty > 1 ? '${i.qty} pcs   ${fmtMoney(i.total, data.currency)}'
+                  i.qty > 1
+                      ? '${i.qty} pcs   ${fmtMoney(i.total, data.currency)}'
                       : fmtMoney(i.total, data.currency),
                   style: const TextStyle(
                     fontSize: 13.5,
