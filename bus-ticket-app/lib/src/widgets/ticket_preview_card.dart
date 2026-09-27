@@ -67,6 +67,11 @@ class TicketPreviewCard extends StatelessWidget {
         ),
         clipBehavior: Clip.antiAlias,
         child: Column(
+          // Intrinsic height only. The default `MainAxisSize.max` made the
+          // card claim ALL available height and then overflow it whenever the
+          // host bounded the height (Row child, Stack with StackFit.expand,
+          // nested Scaffold), which is what the Crashlytics trace shows.
+          mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Container(height: 5, color: _amber),

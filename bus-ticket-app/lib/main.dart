@@ -59,7 +59,8 @@ Future<void> main() async {
       // error + stack, never this text, so grep for the ECHO tags.
       const echo = 'E2E_LAYOUT_DIAG';
       debugPrint('$echo ${details.exceptionAsString()}');
-      for (final info in details.informationCollector?.call() ?? const <DiagnosticsNode>[]) {
+      for (final info in details.informationCollector?.call() ??
+          const <DiagnosticsNode>[]) {
         debugPrint('$echo $info');
       }
       FirebaseCrashlytics.instance.recordFlutterFatalError(details);
