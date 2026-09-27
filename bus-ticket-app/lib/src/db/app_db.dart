@@ -580,6 +580,62 @@ class AppDb {
     await d.delete('fares', where: 'id = ?', whereArgs: [id]);
   }
 
+  // ── Fare requests ─────────────────────────────────────────────────────────
+  // Field staff cannot edit the fare catalogue (that is a revenue control), but
+  // they often meet a tariff the device has never heard of. Rather than let
+  // them invent a fare or hit a dead end, they log a request here and an admin
+  // approves it into the real catalogue. Stored as a JSON array under the
+  // `settings` table so no schema migration is needed.
+
+  static const _fareRequestKey = 'fare_requests';
+
+  /// Pending fare requests, oldest first. Unparseable or foreign-shaped data is
+  /// treated as empty rather than throwing, so a bad write can never brick the
+  /// sell screen.
+  static Future<List<Map<String, Object?>>> getFareRequests() async {
+    final raw = await getSetting(_fareRequestKey, '[]');
+    if (raw == null || raw.trim().isEmpty) return [];
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return [];
+      return decoded
+          .whereType<Map<String, Object?>>()
+          .where((m) => m['name'] is String && (m['name'] as String).isNotEmpty)
+          .toList();
+    } on FormatException {
+      return [];
+    }
+  }
+
+  /// Records a conductor's request for a fare. Returns false when one with the
+  /// same name is already pending, so repeated taps cannot pile up duplicates.
+  static Future<bool> addFareRequest({
+    required String name,
+    required int price,
+    String? note,
+    String? by,
+  }) async {
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) return false;
+    final pending = await getFareRequests();
+    final exists = pending.any(
+        (m) => (m['name'] as String).toLowerCase() == trimmed.toLowerCase());
+    if (exists) return false;
+    pending.add(<String, Object?>{
+      'name': trimmed,
+      'price': price,
+      if (note != null && note.trim().isNotEmpty) 'note': note.trim(),
+      if (by != null && by.trim().isNotEmpty) 'by': by.trim(),
+      'at': DateTime.now().toIso8601String(),
+    });
+    await setSetting(_fareRequestKey, jsonEncode(pending));
+    return true;
+  }
+
+  static Future<void> clearFareRequests() async {
+    await setSetting(_fareRequestKey, '[]');
+  }
+
   // ── Helper: build canonical payload string (must match server exactly) ──
 
   static const _unitSep = '\x1f';

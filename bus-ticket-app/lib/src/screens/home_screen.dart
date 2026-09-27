@@ -1262,10 +1262,25 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _fareList() {
     if (_fares.isEmpty) {
-      return const Padding(
-        padding: EdgeInsets.all(16),
-        child:
-            Center(child: Text('No fares configured. Add them in Settings.')),
+      return Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          children: [
+            const Center(
+              child: Text(
+                'No fares configured on this device. '
+                'Ask an admin to set them up, or send a request below.',
+                textAlign: TextAlign.center,
+              ),
+            ),
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              onPressed: _requestFare,
+              icon: const Icon(Icons.help_outline, size: 18),
+              label: const Text('Request a fare'),
+            ),
+          ],
+        ),
       );
     }
     return Column(
@@ -1334,8 +1349,89 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
           ),
+        Padding(
+          padding: const EdgeInsets.only(top: 4, bottom: 4),
+          child: TextButton.icon(
+            onPressed: _requestFare,
+            icon: const Icon(Icons.help_outline, size: 16),
+            label: const Text('Need another fare? Request it'),
+          ),
+        ),
       ],
     );
+  }
+
+  /// Lets field staff log a fare the device does not carry. The fare catalogue
+  /// is an admin revenue control, so this records a request rather than
+  /// creating one - an admin approves it from Settings > Fare requests.
+  Future<void> _requestFare() async {
+    final nameCtrl = TextEditingController();
+    final priceCtrl = TextEditingController();
+    final noteCtrl = TextEditingController();
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Request a fare'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Fares are set by your admin. Send the details and they will add '
+              'it to the app.',
+              style: Theme.of(ctx).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: nameCtrl,
+              textCapitalization: TextCapitalization.characters,
+              decoration: const InputDecoration(labelText: 'Fare name'),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: priceCtrl,
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
+              decoration: InputDecoration(
+                labelText: 'Expected price',
+                prefixText: _currency == 'USD' ? r'$' : _currency,
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: noteCtrl,
+              decoration: const InputDecoration(labelText: 'Note (optional)'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Send request'),
+          ),
+        ],
+      ),
+    );
+    if (saved != true) return;
+    final name = nameCtrl.text.trim();
+    final cents = parseMoneyToCents(priceCtrl.text);
+    if (name.isEmpty || cents == null) {
+      _showToast('Enter a fare name and a valid price.');
+      return;
+    }
+    final added = await AppDb.addFareRequest(
+      name: name,
+      price: cents,
+      note: noteCtrl.text,
+      by: _conductor1,
+    );
+    if (!mounted) return;
+    _showToast(added
+        ? 'Request sent. An admin will add "$name".'
+        : '"$name" is already pending approval.');
   }
 
   Widget _luggageInput() {

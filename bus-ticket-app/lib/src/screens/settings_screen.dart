@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:bluetooth_print_plus/bluetooth_print_plus.dart';
 import 'package:flutter/material.dart';
 
@@ -5,6 +7,7 @@ import '../app_state.dart';
 import '../db/app_db.dart';
 import '../esc/esc_pos.dart';
 import '../format.dart';
+import '../models.dart';
 import '../roles.dart';
 import '../security/secure_keystore.dart';
 import '../services/printer_service.dart';
@@ -59,6 +62,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   List<BluetoothDevice> _devices = [];
   List<BluetoothDevice> _pairedDevices = [];
   bool _connecting = false;
+  List<Fare> _fares = [];
+  List<Map<String, Object?>> _fareRequests = [];
+  bool _allowFareOverride = true;
   bool _syncing = false;
   bool _forcingEnd = false;
   String _syncStatus = '';
@@ -90,6 +96,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final care = await AppDb.getSetting('customer_care', '') ?? '';
     final address = await AppDb.getSetting('company_address', '') ?? '';
     final email = await AppDb.getSetting('company_email', '') ?? '';
+    final fares = await AppDb.getFares(onlyEnabled: false);
+    final fareRequests = await AppDb.getFareRequests();
+    final allowOverride =
+        (await AppDb.getSetting('allow_fare_override', '1')) == '1';
     final username = await SecureKeystore.instance.readUsername() ?? '';
     final fullName = await SecureKeystore.instance.readFullName() ?? '';
     final role = await SecureKeystore.instance.readRole() ?? '';
@@ -124,6 +134,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _role = role;
       _printerAddress = addr ?? '';
       _printerName = name ?? '';
+      _fares = fares;
+      _fareRequests = fareRequests;
+      _allowFareOverride = allowOverride;
     });
   }
 
@@ -147,6 +160,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _securityCard(),
           const SizedBox(height: 12),
           _printerCard(),
+          const SizedBox(height: 12),
+          _adminLocked(_fareRequestsCard()),
           if (isAdmin) ...[
             const SizedBox(height: 12),
             _promotionsCard(),
@@ -639,6 +654,171 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
       ),
     );
+  }
+
+  /// Admin-only queue of fares conductors asked for, plus the manual-override
+  /// kill switch. Approving writes a real fare into the catalogue so it shows
+  /// up on every sell screen; declining just clears the request.
+  Widget _fareRequestsCard() {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text('Fares',
+                      style: Theme.of(context).textTheme.titleMedium),
+                ),
+                if (_fareRequests.isNotEmpty)
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.primary,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(
+                      '${_fareRequests.length}',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              _fareRequests.isEmpty
+                  ? 'Fares are defined by the server catalogue. Crew can '
+                      'request a missing fare from the ticketing screen.'
+                  : '${_fareRequests.length} fare '
+                      '${_fareRequests.length == 1 ? 'request' : 'requests'} '
+                      'from the crew.',
+              style: const TextStyle(fontSize: 12.5),
+            ),
+            const Divider(height: 20),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Allow manual fare override',
+                  style: TextStyle(fontWeight: FontWeight.w600)),
+              subtitle: const Text(
+                  'Lets field staff change a fare price during a sale. Custom '
+                  'prices are recorded and flagged on the ticket.'),
+              value: _allowFareOverride,
+              activeTrackColor: Theme.of(context).colorScheme.primary,
+              onChanged: _setAllowFareOverride,
+            ),
+            for (final r in _fareRequests) ...[
+              const Divider(height: 20),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: Text(r['name'] as String),
+                subtitle: Text(
+                  '${fmtMoney((r['price'] as num).toInt(), _currency)}'
+                  '${(r['by'] as String?)?.isNotEmpty == true ? '  •  ${r['by']}' : ''}'
+                  '${(r['at'] as String?)?.isNotEmpty == true ? '\n${_ago(r['at'] as String)}' : ''}',
+                ),
+                isThreeLine: (r['at'] as String?)?.isNotEmpty == true,
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.check_circle_outline),
+                      tooltip: 'Add to catalogue',
+                      onPressed: () => _approveFareRequest(r),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.delete_outline),
+                      tooltip: 'Dismiss',
+                      onPressed: () => _dismissFareRequest(r),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Renders an ISO timestamp as a short relative string. Falls back to the raw
+  /// value if it is unparseable rather than throwing inside a ListTile.
+  String _ago(String iso) {
+    final at = DateTime.tryParse(iso);
+    if (at == null) return iso;
+    final d = DateTime.now().difference(at);
+    if (d.inMinutes < 1) return 'just now';
+    if (d.inHours < 1) return '${d.inMinutes} min ago';
+    if (d.inDays < 1) return '${d.inHours} h ago';
+    return '${d.inDays} d ago';
+  }
+
+  Future<void> _setAllowFareOverride(bool value) async {
+    setState(() => _allowFareOverride = value);
+    await AppDb.setSetting('allow_fare_override', value ? '1' : '0');
+    _snack(value
+        ? 'Manual fare overrides enabled'
+        : 'Manual fare overrides disabled');
+  }
+
+  Future<void> _approveFareRequest(Map<String, Object?> r) async {
+    final name = r['name'] as String;
+    final price = (r['price'] as num).toInt();
+    final existing =
+        _fares.where((f) => f.name.trim().toLowerCase() == name.toLowerCase());
+    if (existing.isEmpty) {
+      await AppDb.addFare(name, price);
+    } else {
+      await AppDb.updateFare(Fare(
+        id: existing.first.id,
+        name: name,
+        price: price,
+        enabled: true,
+      ));
+    }
+    await _dropFareRequest(name);
+    AppState.instance.refresh();
+    await _load();
+    _snack('Added "$name" to fares');
+  }
+
+  Future<void> _dismissFareRequest(Map<String, Object?> r) async {
+    final name = r['name'] as String;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Dismiss request?'),
+        content: Text('Drop the request for "$name"? The fare is not added.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Dismiss'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    await _dropFareRequest(name);
+    await _load();
+  }
+
+  Future<void> _dropFareRequest(String name) async {
+    final rest = await AppDb.getFareRequests();
+    rest.removeWhere(
+        (m) => (m['name'] as String).toLowerCase() == name.toLowerCase());
+    await AppDb.setSetting('fare_requests', jsonEncode(rest));
+    if (!mounted) return;
+    setState(() => _fareRequests = rest);
   }
 
   Widget _syncCard() {
