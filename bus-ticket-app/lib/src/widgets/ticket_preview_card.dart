@@ -23,6 +23,10 @@ class TicketPreviewCard extends StatelessWidget {
   static const _dividerColor = Color(0xFFECE7DE);
   static const _amberg = Color(0xFFFBF5E6);
 
+  /// Width used only when a host gives this card an unbounded width, so that
+  /// `CrossAxisAlignment.stretch` never sees an infinite constraint.
+  static const double _unboundedFallbackWidth = 320;
+
   String get _website {
     final w = data.website.trim();
     return w.isEmpty ? kPlatformUrl : w;
@@ -38,73 +42,83 @@ class TicketPreviewCard extends StatelessWidget {
         data.conductor2.isNotEmpty;
     final hasItems = data.items.isNotEmpty;
 
-    return Container(
-      width: double.infinity,
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: _dividerColor, width: 1.2),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x18000000),
-            blurRadius: 20,
-            offset: Offset(0, 8),
-          ),
-        ],
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Container(height: 5, color: _amber),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 20, 20, 22),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                _header(company),
-                const SizedBox(height: 16),
-                _identityRow(),
-                const SizedBox(height: 14),
-                if (hasRoute) ...[
-                  _journeySection(),
-                  const SizedBox(height: 14),
-                ],
-                if (hasSeat) ...[
-                  _seatLine(),
-                  const SizedBox(height: 16),
-                ],
-                _divider(),
-                const SizedBox(height: 14),
-                if (hasStaff) ...[
-                  _staffSection(),
-                  const SizedBox(height: 14),
-                ],
-                _customerSection(),
-                const SizedBox(height: 14),
-                _divider(),
-                const SizedBox(height: 14),
-                if (hasItems) ...[
-                  _fareSection(),
-                  const SizedBox(height: 10),
-                ],
-                _totalRow(),
-                const SizedBox(height: 8),
-                _paymentBreakdown(),
-                const SizedBox(height: 12),
-                _validityNote(),
-                const SizedBox(height: 12),
-                _divider(),
-                const SizedBox(height: 16),
-                _footer(),
-                const SizedBox(height: 14),
-                _qrCode(),
-                const SizedBox(height: 14),
-                _barcode(),
-              ],
+    // This card is designed to fill a bounded width, and its internals rely on
+    // `CrossAxisAlignment.stretch`. If an ancestor hands us an *unbounded*
+    // width — a horizontal scroll view, a non-flex `Row` child, an unbounded
+    // `Wrap` — stretch forces `minWidth == maxWidth == infinity` and layout
+    // throws "BoxConstraints forces an infinite width", which then cascades
+    // into "RenderBox was not laid out: RenderConstrainedBox ... hasSize".
+    // Substituting a finite width keeps the card usable (and never a crash)
+    // in those hosts while leaving normal bounded parents untouched.
+    return LayoutBuilder(
+      builder: (context, constraints) => Container(
+        width: constraints.maxWidth.isFinite ? null : _unboundedFallbackWidth,
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: _dividerColor, width: 1.2),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x18000000),
+              blurRadius: 20,
+              offset: Offset(0, 8),
             ),
-          ),
-        ],
+          ],
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Container(height: 5, color: _amber),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 22),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _header(company),
+                  const SizedBox(height: 16),
+                  _identityRow(),
+                  const SizedBox(height: 14),
+                  if (hasRoute) ...[
+                    _journeySection(),
+                    const SizedBox(height: 14),
+                  ],
+                  if (hasSeat) ...[
+                    _seatLine(),
+                    const SizedBox(height: 16),
+                  ],
+                  _divider(),
+                  const SizedBox(height: 14),
+                  if (hasStaff) ...[
+                    _staffSection(),
+                    const SizedBox(height: 14),
+                  ],
+                  _customerSection(),
+                  const SizedBox(height: 14),
+                  _divider(),
+                  const SizedBox(height: 14),
+                  if (hasItems) ...[
+                    _fareSection(),
+                    const SizedBox(height: 10),
+                  ],
+                  _totalRow(),
+                  const SizedBox(height: 8),
+                  _paymentBreakdown(),
+                  const SizedBox(height: 12),
+                  _validityNote(),
+                  const SizedBox(height: 12),
+                  _divider(),
+                  const SizedBox(height: 16),
+                  _footer(),
+                  const SizedBox(height: 14),
+                  _qrCode(),
+                  const SizedBox(height: 14),
+                  _barcode(),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -221,25 +235,37 @@ class TicketPreviewCard extends StatelessWidget {
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Text(
-              fmtDate(data.time),
-              style: const TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: _muted,
+            // Flexible + scaleDown keeps the date/time pair on one line at any
+            // width or text scale instead of overflowing a fixed-width Row.
+            Flexible(
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  fmtDate(data.time),
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: _muted,
+                  ),
+                ),
               ),
             ),
             const Padding(
               padding: EdgeInsets.symmetric(horizontal: 10),
               child: Icon(Icons.circle, size: 4, color: _dividerColor),
             ),
-            Text(
-              fmtTime(data.time),
-              style: const TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: _ink,
-                fontFeatures: [FontFeature.tabularFigures()],
+            Flexible(
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  fmtTime(data.time),
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: _ink,
+                    fontFeatures: [FontFeature.tabularFigures()],
+                  ),
+                ),
               ),
             ),
           ],
@@ -471,6 +497,7 @@ class TicketPreviewCard extends StatelessWidget {
                 Expanded(
                   child: Text(
                     i.qty > 1 ? '${i.name}  ×${i.qty}' : i.name,
+                    overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
                       fontSize: 13.5,
                       fontWeight: FontWeight.w500,
@@ -478,15 +505,23 @@ class TicketPreviewCard extends StatelessWidget {
                     ),
                   ),
                 ),
-                Text(
-                  i.qty > 1
-                      ? '${i.qty} pcs   ${fmtMoney(i.total, data.currency)}'
-                      : fmtMoney(i.total, data.currency),
-                  style: const TextStyle(
-                    fontSize: 13.5,
-                    fontWeight: FontWeight.w700,
-                    color: _ink,
-                    fontFeatures: [FontFeature.tabularFigures()],
+                // Scale the amount down rather than letting an unbounded
+                // non-flex child overflow a narrow row.
+                Flexible(
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerRight,
+                    child: Text(
+                      i.qty > 1
+                          ? '${i.qty} pcs   ${fmtMoney(i.total, data.currency)}'
+                          : fmtMoney(i.total, data.currency),
+                      style: const TextStyle(
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w700,
+                        color: _ink,
+                        fontFeatures: [FontFeature.tabularFigures()],
+                      ),
+                    ),
                   ),
                 ),
               ],
@@ -505,32 +540,48 @@ class TicketPreviewCard extends StatelessWidget {
       ),
       child: Row(
         children: [
-          const Text(
-            'TOTAL FARE',
-            style: TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w800,
-              color: _navy,
-              letterSpacing: 0.3,
+          const Flexible(
+            child: Text(
+              'TOTAL FARE',
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w800,
+                color: _navy,
+                letterSpacing: 0.3,
+              ),
             ),
           ),
           const Spacer(),
-          Text(
-            (data.total / 100).toStringAsFixed(2),
-            style: const TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.w800,
-              color: _navy,
-              fontFeatures: [FontFeature.tabularFigures()],
-            ),
-          ),
-          const SizedBox(width: 2),
-          Text(
-            up(data.currency.trim().isEmpty ? 'USD' : data.currency),
-            style: const TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w800,
-              color: _muted,
+          // Scale the amount down rather than overflowing the row on narrow
+          // screens or at large accessibility text sizes.
+          Flexible(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerRight,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    (data.total / 100).toStringAsFixed(2),
+                    style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w800,
+                      color: _navy,
+                      fontFeatures: [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                  const SizedBox(width: 2),
+                  Text(
+                    up(data.currency.trim().isEmpty ? 'USD' : data.currency),
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w800,
+                      color: _muted,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ],
@@ -559,23 +610,35 @@ class TicketPreviewCard extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 3),
       child: Row(
         children: [
-          Text(
-            label,
-            style: const TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: _muted,
-              letterSpacing: 0.4,
+          // Flexible + ellipsis on the label and scaleDown on the value keep
+          // this pair on one line at any width or text scale; the Spacer still
+          // holds the value against the right edge when there is room.
+          Flexible(
+            child: Text(
+              label,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: _muted,
+                letterSpacing: 0.4,
+              ),
             ),
           ),
           const Spacer(),
-          Text(
-            value,
-            style: const TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w800,
-              color: _ink,
-              fontFeatures: [FontFeature.tabularFigures()],
+          Flexible(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerRight,
+              child: Text(
+                value,
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                  color: _ink,
+                  fontFeatures: [FontFeature.tabularFigures()],
+                ),
+              ),
             ),
           ),
         ],
@@ -646,14 +709,24 @@ class TicketPreviewCard extends StatelessWidget {
   }
 
   Widget _barcode() {
-    return BarcodeWidget(
-      barcode: Barcode.code128(),
-      data: barcodeDataFor(data),
-      height: 30,
-      width: double.infinity,
-      drawText: false,
-      color: _navy,
-      backgroundColor: Colors.white,
+    // `width: double.infinity` asks for a *forced* infinite width, which throws
+    // "BoxConstraints forces an infinite width" (and cascades into
+    // "RenderBox was not laid out: RenderConstrainedBox ... hasSize") whenever
+    // an ancestor hands this card unbounded width. Measure the real available
+    // width instead, and fall back to a sane fixed size when it is unbounded.
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final available = constraints.maxWidth;
+        return BarcodeWidget(
+          barcode: Barcode.code128(),
+          data: barcodeDataFor(data),
+          height: 30,
+          width: available.isFinite ? available : 320,
+          drawText: false,
+          color: _navy,
+          backgroundColor: Colors.white,
+        );
+      },
     );
   }
 

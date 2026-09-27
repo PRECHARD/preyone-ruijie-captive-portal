@@ -52,7 +52,18 @@ Future<void> main() async {
   // POS flow from starting. On success, Crashlytics + FCM are wired up.
   try {
     await Firebase.initializeApp();
-    FlutterError.onError = FirebaseCrashlytics.instance.recordFlutterFatalError;
+    FlutterError.onError = (FlutterErrorDetails details) {
+      // Dump the collected diagnostics to logcat BEFORE handing off. These
+      // errors arrive as two separate keys, so plain `adb logcat` / Crashlytics
+      // log output can split them apart. Crashlytics itself only receives the
+      // error + stack, never this text, so grep for the ECHO tags.
+      const echo = 'E2E_LAYOUT_DIAG';
+      debugPrint('$echo ${details.exceptionAsString()}');
+      for (final info in details.informationCollector?.call() ?? const <DiagnosticsNode>[]) {
+        debugPrint('$echo $info');
+      }
+      FirebaseCrashlytics.instance.recordFlutterFatalError(details);
+    };
     PlatformDispatcher.instance.onError = (error, stack) {
       FirebaseCrashlytics.instance.recordError(error, stack, fatal: true);
       return true;
