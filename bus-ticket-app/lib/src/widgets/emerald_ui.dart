@@ -164,7 +164,10 @@ class _EmeraldButtonState extends State<EmeraldButton> {
     final enabled = widget._enabled;
     final height = widget.height ?? (widget.dense ? 36 : 44);
     final content = Row(
-      mainAxisSize: widget.expand ? MainAxisSize.max : MainAxisSize.min,
+      // The SizedBox below supplies the stretch for `expand`, so the label row
+      // can always size to its content. That keeps a flexible child safe even
+      // if this button is ever placed in a horizontally unbounded host.
+      mainAxisSize: MainAxisSize.min,
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
         if (widget.icon != null) ...[
@@ -204,7 +207,6 @@ class _EmeraldButtonState extends State<EmeraldButton> {
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 260),
               height: height,
-              width: widget.expand ? double.infinity : null,
               padding: EdgeInsets.symmetric(
                 horizontal: widget.dense ? 14 : 20,
                 vertical: widget.dense ? 8 : 12,
@@ -217,7 +219,24 @@ class _EmeraldButtonState extends State<EmeraldButton> {
                     ? null
                     : Border.all(color: Colors.white.withValues(alpha: 0.5)),
               ),
-              child: Center(child: content),
+              // `expand` asks for the parent's width, NOT a literal infinite
+              // width. AnimatedContainer does not clamp a double.infinity
+              // width against the incoming constraints the way Container does -
+              // it forwards it as tightFor, so the child is handed
+              // `BoxConstraints(w=Infinity)` and every descendant (including
+              // the Row's Flexible) then fails to lay out with 'hasSize'.
+              // That is the exact crash reported from the field terminal.
+              //
+              // A finite `minWidth: 0, maxWidth: infinity` is safe: infinity is
+              // only ever an upper bound, never a forced size, so the label row
+              // still stretches to fill and shrinks when the host is narrower.
+              child: ConstrainedBox(
+                constraints: widget.expand
+                    ? const BoxConstraints(
+                        minWidth: 0, maxWidth: double.infinity)
+                    : const BoxConstraints(),
+                child: Center(child: content),
+              ),
             ),
           ),
         ),
@@ -339,7 +358,12 @@ class _EmeraldBannerState extends State<EmeraldBanner>
         final t = Curves.easeInOut.transform(_pulse.value);
         return Container(
           height: widget.height,
+          // Stretch to the parent rather than forcing an infinite width: a
+          // literal double.infinity here is forwarded as `tightFor` and any
+          // unbounded host hands the Row below `BoxConstraints(w=Infinity)`,
+          // which makes its Expanded child fail to lay out with 'hasSize'.
           width: double.infinity,
+          alignment: Alignment.centerLeft,
           decoration: BoxDecoration(
             gradient: const LinearGradient(
               colors: [kEmeraldLight, kEmeraldDeep],
@@ -376,7 +400,11 @@ class _EmeraldBannerState extends State<EmeraldBanner>
                   Icon(widget.leading, size: 18, color: Colors.white),
                   const SizedBox(width: 10),
                 ],
-                Expanded(child: widget.child),
+                // Expanded is illegal in an unbounded-width Row, which is how
+                // this banner crashed when hosted by a scroll view or a Row
+                // without a flex parent. Flexible with a loose fit degrades to
+                // the child's natural width instead of throwing.
+                Flexible(child: widget.child),
                 if (widget.trailing != null) widget.trailing!,
               ],
             ),

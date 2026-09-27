@@ -1167,25 +1167,46 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       );
     }
+    // A DropdownButton asserts that `value` matches EXACTLY ONE item, and the
+    // assert throws during build - which red-screens the whole ticketing tab
+    // in debug. Two real-world causes, both seen on the field terminal:
+    //   * `_driver` is normalised with up() (upper-cased) but the roster keeps
+    //     raw casing, so "DANIEL MUVIRIMI" matched no "Daniel Muvirimi" item.
+    //     Selecting from the list also set _driver = up(v), so the very next
+    //     rebuild re-tripped the assert.
+    //   * the roster can contain the same driver twice, so a matching name
+    //     appears more than once.
+    // Normalise both sides to the same key and de-duplicate, keeping the first
+    // phone seen for each name.
+    final options = <String, Driver>{};
+    for (final d in _drivers) {
+      final key = up(d.name);
+      if (key.isEmpty) continue;
+      options.putIfAbsent(key, () => d);
+    }
+
+    // Only pass a value that resolves to exactly one item; otherwise leave it
+    // null so the field renders empty instead of asserting. `_driver` is still
+    // what gets recorded on the sale.
+    final selected = up(_driver);
     return DropdownButtonFormField<String>(
-      initialValue: _driver,
+      initialValue: options.containsKey(selected) ? selected : null,
       isExpanded: true,
       decoration: const InputDecoration(
         labelText: 'Driver',
         isDense: true,
         border: OutlineInputBorder(),
       ),
-      items: _drivers
-          .map((d) => DropdownMenuItem(
-              value: d.name,
-              child: Text(d.name, overflow: TextOverflow.ellipsis)))
+      items: options.entries
+          .map((e) => DropdownMenuItem(
+              value: e.key,
+              child: Text(e.key, overflow: TextOverflow.ellipsis)))
           .toList(),
       onChanged: (v) {
-        final d = _drivers.firstWhere((x) => x.name == v,
-            orElse: () => Driver(name: v ?? ''));
+        final d = options[v];
         setState(() {
           _driver = up(v ?? '');
-          _driverPhone = d.phone;
+          _driverPhone = d?.phone ?? '';
         });
       },
     );
@@ -1301,15 +1322,23 @@ class _HomeScreenState extends State<HomeScreen> {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(
-                    fmtMoney(_priceOverrides[f.id] ?? f.price, _currency),
-                    style: TextStyle(
-                      color: _priceOverrides[f.id] != null
-                          ? Theme.of(context).colorScheme.primary
-                          : Colors.grey.shade800,
-                      fontWeight: _priceOverrides[f.id] != null
-                          ? FontWeight.w700
-                          : FontWeight.w600,
+                  // The price must be able to shrink: the trailing qty controls
+                  // claim a fixed 104px, which on a narrow terminal leaves the
+                  // price only ~128px, too little for a long amount plus the
+                  // pencil. Flexible + ellipsis truncates instead of
+                  // overflowing the row.
+                  Flexible(
+                    child: Text(
+                      fmtMoney(_priceOverrides[f.id] ?? f.price, _currency),
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: _priceOverrides[f.id] != null
+                            ? Theme.of(context).colorScheme.primary
+                            : Colors.grey.shade800,
+                        fontWeight: _priceOverrides[f.id] != null
+                            ? FontWeight.w700
+                            : FontWeight.w600,
+                      ),
                     ),
                   ),
                   if (_fareEditable)
@@ -1540,14 +1569,20 @@ class _HomeScreenState extends State<HomeScreen> {
                   ],
                 ),
               ),
-              EmeraldButton(
-                expand: true,
-                height: 48,
-                onPressed: _totalCents == 0 ? null : _startSale,
-                icon: Icons.print,
-                label: _type == TicketType.luggage
-                    ? 'Sell Luggage'
-                    : 'Sell & Print',
+              // `expand` stretches the button to fill its parent, which is
+              // wrong next to the Expanded total: at large text scales the
+              // two together exceed the row and overflow by ~70px. Flexible
+              // lets the Row allocate the remaining width instead, and the
+              // button's internal ellipsis handles a long label.
+              Flexible(
+                child: EmeraldButton(
+                  height: 48,
+                  onPressed: _totalCents == 0 ? null : _startSale,
+                  icon: Icons.print,
+                  label: _type == TicketType.luggage
+                      ? 'Sell Luggage'
+                      : 'Sell & Print',
+                ),
               ),
             ],
           ),
