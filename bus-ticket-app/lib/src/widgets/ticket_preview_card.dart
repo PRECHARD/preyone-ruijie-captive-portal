@@ -545,7 +545,8 @@ class TicketPreviewCard extends StatelessWidget {
       ),
       child: Row(
         children: [
-          const Flexible(
+          const Expanded(
+            flex: 3,
             child: Text(
               'TOTAL FARE',
               overflow: TextOverflow.ellipsis,
@@ -557,35 +558,44 @@ class TicketPreviewCard extends StatelessWidget {
               ),
             ),
           ),
-          const Spacer(),
-          // Scale the amount down rather than overflowing the row on narrow
-          // screens or at large accessibility text sizes.
-          Flexible(
-            child: FittedBox(
-              fit: BoxFit.scaleDown,
+          const SizedBox(width: 8),
+          // Give the amount a real share of the row and right-align it inside
+          // that share. A Flexible + Spacer pair split the free space evenly
+          // between them, so the amount sat at the LEFT edge of its own half
+          // and the whole payment column looked ragged. Expanded + Align is
+          // deterministic: the value is always flush with the row's right edge.
+          Expanded(
+            flex: 2,
+            child: Align(
               alignment: Alignment.centerRight,
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    (data.total / 100).toStringAsFixed(2),
-                    style: const TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.w800,
-                      color: _navy,
-                      fontFeatures: [FontFeature.tabularFigures()],
+              // Scale the amount down rather than overflowing the row on narrow
+              // screens or at large accessibility text sizes.
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerRight,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      (data.total / 100).toStringAsFixed(2),
+                      style: const TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w800,
+                        color: _navy,
+                        fontFeatures: [FontFeature.tabularFigures()],
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 2),
-                  Text(
-                    up(data.currency.trim().isEmpty ? 'USD' : data.currency),
-                    style: const TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w800,
-                      color: _muted,
+                    const SizedBox(width: 2),
+                    Text(
+                      up(data.currency.trim().isEmpty ? 'USD' : data.currency),
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w800,
+                        color: _muted,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),
@@ -612,13 +622,17 @@ class TicketPreviewCard extends StatelessWidget {
 
   Widget _breakdownRow(String label, String value) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
+      // The same 14px horizontal inset the total row uses inside its grey box,
+      // so the label column and the amount column form one straight grid and
+      // TOTAL FARE lines up with PAYMENT METHOD / CASH TENDERED / CHANGE.
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 3),
       child: Row(
         children: [
-          // Flexible + ellipsis on the label and scaleDown on the value keep
-          // this pair on one line at any width or text scale; the Spacer still
-          // holds the value against the right edge when there is room.
-          Flexible(
+          // Expanded + Align (not Flexible + Spacer) so the value is always
+          // flush right: two flex children split the free space evenly, which
+          // left the value at the left edge of its own half.
+          Expanded(
+            flex: 3,
             child: Text(
               label,
               overflow: TextOverflow.ellipsis,
@@ -630,18 +644,22 @@ class TicketPreviewCard extends StatelessWidget {
               ),
             ),
           ),
-          const Spacer(),
-          Flexible(
-            child: FittedBox(
-              fit: BoxFit.scaleDown,
+          const SizedBox(width: 8),
+          Expanded(
+            flex: 2,
+            child: Align(
               alignment: Alignment.centerRight,
-              child: Text(
-                value,
-                style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w800,
-                  color: _ink,
-                  fontFeatures: [FontFeature.tabularFigures()],
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerRight,
+                child: Text(
+                  value,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                    color: _ink,
+                    fontFeatures: [FontFeature.tabularFigures()],
+                  ),
                 ),
               ),
             ),

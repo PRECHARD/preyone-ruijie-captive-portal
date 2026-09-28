@@ -358,12 +358,16 @@ class _EmeraldBannerState extends State<EmeraldBanner>
         final t = Curves.easeInOut.transform(_pulse.value);
         return Container(
           height: widget.height,
-          // Stretch to the parent rather than forcing an infinite width: a
-          // literal double.infinity here is forwarded as `tightFor` and any
-          // unbounded host hands the Row below `BoxConstraints(w=Infinity)`,
-          // which makes its Expanded child fail to lay out with 'hasSize'.
-          width: double.infinity,
-          alignment: Alignment.centerLeft,
+          // No `width: double.infinity` and no `alignment` here, both on
+          // purpose. A literal infinity is forwarded as `tightFor`, so an
+          // unbounded host (a non-flex Row child, a horizontal scroll view)
+          // hands the Row below `BoxConstraints(w=Infinity)` and the crash
+          // returns. An alignment wraps the child in an Align, which passes
+          // LOOSE constraints and collapses the Row to its content, leaving
+          // the trailing pill stranded after the label instead of at the right
+          // edge. Passing constraints straight through lets a bounded host
+          // stretch the gradient while the LayoutBuilder below keeps an
+          // unbounded one legal.
           decoration: BoxDecoration(
             gradient: const LinearGradient(
               colors: [kEmeraldLight, kEmeraldDeep],
@@ -394,19 +398,46 @@ class _EmeraldBannerState extends State<EmeraldBanner>
           borderRadius: BorderRadius.circular(14),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            child: Row(
-              children: [
-                if (widget.leading != null) ...[
-                  Icon(widget.leading, size: 18, color: Colors.white),
-                  const SizedBox(width: 10),
-                ],
-                // Expanded is illegal in an unbounded-width Row, which is how
-                // this banner crashed when hosted by a scroll view or a Row
-                // without a flex parent. Flexible with a loose fit degrades to
-                // the child's natural width instead of throwing.
-                Flexible(child: widget.child),
-                if (widget.trailing != null) widget.trailing!,
-              ],
+            child: LayoutBuilder(
+              builder: (context, c) {
+                final lead = <Widget>[
+                  if (widget.leading != null) ...[
+                    Icon(widget.leading, size: 18, color: Colors.white),
+                    const SizedBox(width: 10),
+                  ],
+                ];
+                // Unbounded host: a Row with ANY flex child (Expanded,
+                // Flexible, Spacer) asserts here, so lay the pieces out at
+                // their natural widths and let the caller's own ellipsis deal
+                // with a long label. Nothing can be pushed to the right edge
+                // because there is no right edge.
+                if (!c.maxWidth.isFinite) {
+                  return Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      ...lead,
+                      widget.child,
+                      if (widget.trailing != null) widget.trailing!,
+                    ],
+                  );
+                }
+                // Bounded host: Expanded takes all the free space, so the
+                // trailing pill lands flush against the right padding.
+                return Row(
+                  children: [
+                    Expanded(
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          ...lead,
+                          Flexible(child: widget.child),
+                        ],
+                      ),
+                    ),
+                    if (widget.trailing != null) widget.trailing!,
+                  ],
+                );
+              },
             ),
           ),
         ),
