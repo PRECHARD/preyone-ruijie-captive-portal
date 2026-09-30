@@ -270,4 +270,66 @@ void main() {
     expect(find.text('Open run & start selling'), findsNothing);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('a second on-the-go run is refused while a trip is running',
+      (tester) async {
+    // One run at a time, enforced at the screen that creates it: the earlier
+    // test left a RUNNING instance behind, so this screen must refuse rather
+    // than plant a second row and strand the operator.
+    final running = await tester.runAsync(() => AppDb.getRunningTripInstance());
+    expect(running, isNotNull, reason: 'the first run should still be live');
+
+    // Re-activate a template so the form (not the empty state) is on screen.
+    await tester.runAsync(() async {
+      final rows = await AppDb.getRouteTemplates();
+      for (final t in rows) {
+        await AppDb.saveRouteTemplate(RouteTemplate(
+          id: t.id,
+          name: t.name,
+          code: t.code,
+          active: true,
+          stages: t.stages,
+          fares: t.fares,
+        ));
+      }
+    });
+
+    Trip? opened;
+    await tester.pumpWidget(MaterialApp(
+      home: Builder(builder: (context) => TextButton(
+            onPressed: () async {
+              opened = await Navigator.of(context).push<Trip>(
+                MaterialPageRoute(builder: (_) => const OnTheGoTripScreen()),
+              );
+            },
+            child: const Text('launch'),
+          )),
+    ));
+    await settle(tester);
+
+    await tester.tap(find.text('launch'));
+    await settle(tester);
+
+    // Pick a real leg, then try to open it.
+    final drop = find.byType(DropdownButtonFormField<int>).at(1);
+    await tester.tap(drop);
+    await settle(tester);
+    await tester.tap(find.text('CHITUNGWIZA').last);
+    await settle(tester);
+
+    await tester.tap(find.text('Open run & start selling'));
+    await settle(tester);
+    await settle(tester);
+
+    expect(find.textContaining('is running'), findsOneWidget,
+        reason: 'the operator must be told to end the current run first');
+    expect(opened, isNull, reason: 'no second run may be created');
+
+    // The running instance is untouched — the refusal must not have ended it.
+    final stillRunning =
+        await tester.runAsync(() => AppDb.getRunningTripInstance());
+    expect(stillRunning, isNotNull);
+    expect(stillRunning!.id, running!.id);
+    expect(tester.takeException(), isNull);
+  });
 }

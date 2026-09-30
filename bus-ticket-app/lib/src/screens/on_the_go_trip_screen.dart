@@ -147,8 +147,10 @@ class _OnTheGoTripScreenState extends State<OnTheGoTripScreen> {
     return '${up(who)}${s.vehicleReg.isNotEmpty ? ' · ${up(s.vehicleReg)}' : ''}';
   }
 
-  void _snack(String msg) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  void _snack(String msg, {SnackBarAction? action}) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(msg), action: action, duration: const Duration(seconds: 6)),
+    );
   }
 
   /// Opens a shift first when there is none — a run is always bound to a
@@ -182,6 +184,16 @@ class _OnTheGoTripScreenState extends State<OnTheGoTripScreen> {
     final t = _template;
     if (_creating) return;
     if (t == null) return;
+    // One run at a time. This screen is reachable from the ticketing page, so
+    // re-check the live instance here rather than trusting the caller's guard:
+    // a trip may have been opened between the launcher tap and this submit.
+    final running = await AppDb.getRunningTripInstance();
+    if (running != null) {
+      if (!mounted) return;
+      _snack('Trip ${running.tripNo} is running. '
+          'End it before opening another run.');
+      return;
+    }
     if (_boardSeq == null || _dropSeq == null) {
       _snack('Pick where the passenger boards and where they get off.');
       return;
@@ -192,7 +204,18 @@ class _OnTheGoTripScreenState extends State<OnTheGoTripScreen> {
     }
     final shift = await _ensureShift();
     if (shift == null || !mounted) {
-      if (shift == null) _snack('Start a driver shift before opening a run.');
+      // The conductor dismissed the shift screen without starting a shift.
+      // Explain the requirement and point them at the button that fixes it,
+      // rather than leaving a bare failure.
+      if (shift == null) {
+        _snack(
+          'No driver shift is open. Start a shift first, then open the run.',
+          action: SnackBarAction(
+            label: 'START SHIFT',
+            onPressed: () => _ensureShift(),
+          ),
+        );
+      }
       return;
     }
 
@@ -222,15 +245,20 @@ class _OnTheGoTripScreenState extends State<OnTheGoTripScreen> {
     );
 
     await AppDb.upsertTrip(trip);
-    await AppDb.setActiveTrip(trip);
     final instance =
         await TripController.instance.startTrip(trip, shiftId: shift.id);
     if (!mounted) return;
     setState(() => _creating = false);
     if (instance == null) {
+      // Do not leave the run selected: TripController refuses a second RUNNING
+      // row, and an active selection pointing at a trip that never opened is
+      // what strands the operator on the ticketing page.
       _snack('Could not open the run. Another trip may still be running.');
       return;
     }
+    // Only adopt the new run as the active selection once it actually started.
+    await AppDb.setActiveTrip(trip);
+    if (!mounted) return;
     Navigator.of(context).pop(trip);
   }
 

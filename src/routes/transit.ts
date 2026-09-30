@@ -39,6 +39,12 @@ export const transitRouter = Router();
 const DEVICE_TOKENS_IN = '30d';
 const SESSION_TOKENS_IN = '12h';
 
+// Loose UUID v4 shape check. transit_trips.id is a uuid column, but a device
+// mints ids for its own on-the-go runs (TRIP-<device>-<epoch>) that are not
+// uuids and can never exist server-side. Guards those out of uuid-typed
+// parameters before they reach Postgres.
+const UUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$/;
+
 // ── Shared helpers ─────────────────────────────────────────────────────
 
 /** Deterministic payload string the Android app signs for every sale. Must match the Dart side exactly. */
@@ -797,6 +803,18 @@ transitRouter.post('/tickets/sync', syncLimiter, requireTransitDevice, async (re
       // Resolve the trip_id (if supplied) against this company's trips so an
       // attacker can never attach a ticket to another company's trip.
       let tripId: string | null = str(ticket.trip_id ?? ticket.tripId) || null;
+      //
+      // The device mints ids for its own on-the-go runs (TRIP-<device>-<epoch>),
+      // which are NOT server uuids. transit_trips.id is a uuid column, so
+      // querying with one of those ids raised "invalid input syntax for type
+      // uuid" and rolled back the ENTIRE batch — one conductor-created run
+      // silently blocked every ticket on the device from ever syncing. Such a
+      // trip can never exist server-side by definition, so it is simply not
+      // resolvable: drop it and keep the ticket, exactly as an unknown id is
+      // handled below.
+      if (tripId && !UUID_RE.test(tripId)) {
+        tripId = null;
+      }
       if (tripId) {
         const { rows: tripRows } = await client.query(
           `SELECT id, bus_reg, driver, driver_phone,

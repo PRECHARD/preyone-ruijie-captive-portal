@@ -47,12 +47,16 @@ class TripController {
     // rejecting a different trip) keeps a double-tap / re-entry from planting a
     // second RUNNING row for the same trip — the exact duplicate-start race that
     // left operators locked out with a "ghost" run no longer showing END.
+    // Exactly one run per device. A trip that is already RUNNING is returned
+    // as-is (a double-tap must not plant a second instance), and a DIFFERENT
+    // trip already running blocks the start outright — the operator has to end
+    // the current run first, so tickets can never straddle two departures.
     final forTrip = await AppDb.getRunningTripInstanceForTrip(trip.id);
     if (forTrip != null) {
       return forTrip;
     }
     final existing = await AppDb.getRunningTripInstance();
-    if (existing != null && existing.tripId != trip.id) {
+    if (existing != null) {
       return null;
     }
 

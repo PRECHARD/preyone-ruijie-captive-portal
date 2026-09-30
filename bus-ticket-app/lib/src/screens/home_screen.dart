@@ -930,7 +930,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (running != null && running.tripId != picked.id) {
       if (!mounted) return;
       _showToast('Trip ${running.tripNo} is running. '
-          'End it before switching schedules.');
+          'End it before starting or switching to another trip.');
       return;
     }
     if (!mounted) return;
@@ -1039,10 +1039,14 @@ class _HomeScreenState extends State<HomeScreen> {
       _showToast('Start a driver shift before opening a trip.');
       return;
     }
-    final existing = _runningInstance;
+    // One trip at a time. Re-read the live instance rather than trusting the
+    // cached field: a trip could have been opened on another entry point (or
+    // restored by a sync) since this screen last built.
+    final existing = await AppDb.getRunningTripInstance();
     if (existing != null && existing.tripId != trip.id) {
+      if (!mounted) return;
       _showToast('Trip ${existing.tripNo} is already running. '
-          'End it before opening another.');
+          'End it before starting another trip.');
       return;
     }
     setState(() => _startingTrip = true);
@@ -1058,8 +1062,12 @@ class _HomeScreenState extends State<HomeScreen> {
     }
     if (!mounted) return;
     if (instance == null) {
-      _showToast('Could not open the trip. '
-          'Another trip may still be running.');
+      final blocker = await AppDb.getRunningTripInstance();
+      if (!mounted) return;
+      _showToast(blocker != null && blocker.tripId != trip.id
+          ? 'Trip ${blocker.tripNo} is already running. '
+              'End it before starting another trip.'
+          : 'Could not open the trip.');
       return;
     }
     if (_runningInstance?.id != instance.id) {
@@ -1632,6 +1640,12 @@ class _HomeScreenState extends State<HomeScreen> {
         // "No name" (rare: a true walk-in with nothing to record). Luggage
         // tickets never require one.
         final isBusFare = _type == TicketType.busFare;
+        // "No name available" is a deliberate, sticky walk-in declaration, not a
+        // transient form field: once ticked it must survive every rebuild the
+        // sheet performs (payment method, promo apply, cash entry) so the
+        // conductor is never forced to re-tick it just to move on to the next
+        // input, and it locks the name box so a stray keystroke cannot
+        // contradict the declaration.
         var noName = false;
 
         return StatefulBuilder(
@@ -1670,9 +1684,12 @@ class _HomeScreenState extends State<HomeScreen> {
             // A bus-fare ticket needs a passenger name unless "No name" is
             // deliberately ticked — cash handed must also clear the total.
             final nameGiven = _customerNameController.text.trim().isNotEmpty;
-            final valid = cashMethod
-                ? cash >= due && (nameGiven || isBusFare == false || noName)
-                : (nameGiven || isBusFare == false || noName);
+            // The walk-in tick satisfies the passenger-name requirement on its
+            // own, so the conductor can continue through the remaining inputs
+            // (phone, payment method, promo, cash) and still confirm the sale.
+            final nameOk = nameGiven || !isBusFare || noName;
+            final valid =
+                cashMethod ? cash >= due && nameOk : nameOk;
             final change = cashMethod ? cash - due : 0;
             return Padding(
               padding:
@@ -1690,11 +1707,24 @@ class _HomeScreenState extends State<HomeScreen> {
                       TextField(
                         controller: _customerNameController,
                         textCapitalization: TextCapitalization.characters,
+                        // Locked while the walk-in tick is on: the ticket is
+                        // being recorded without a name, so accepting typing
+                        // here would leave the box contradicting the ticket.
+                        readOnly: noName,
                         decoration: InputDecoration(
                           labelText: 'Customer name & surname',
-                          hintText: 'Walk-in passenger',
+                          hintText: noName
+                              ? 'No name — walk-in ticket'
+                              : 'Walk-in passenger',
                           isDense: true,
+                          filled: noName,
+                          fillColor: noName
+                              ? const Color(0xFFF1F5F9)
+                              : null,
                           border: const OutlineInputBorder(),
+                          suffixIcon: noName
+                              ? const Icon(Icons.lock_outline, size: 18)
+                              : null,
                           errorText: isBusFare && !noName && !nameGiven
                               ? 'Passenger name required'
                               : null,
@@ -1707,8 +1737,14 @@ class _HomeScreenState extends State<HomeScreen> {
                           children: [
                             Checkbox(
                               value: noName,
-                              onChanged: (v) =>
-                                  setSheet(() => noName = v ?? false),
+                              onChanged: (v) => setSheet(() {
+                                noName = v ?? false;
+                                // Ticking means "record no name". Anything
+                                // half-typed in the box is discarded so the
+                                // saved sale and the field agree; unticking
+                                // unlocks the box for a real name.
+                                if (noName) _customerNameController.clear();
+                              }),
                             ),
                             const Expanded(
                               child: Text('No name available (walk-in)',

@@ -14,6 +14,7 @@
 import 'dart:io';
 
 import 'package:bus_ticket_app/src/db/app_db.dart';
+import 'package:bus_ticket_app/src/models.dart';
 import 'package:bus_ticket_app/src/screens/home_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -110,6 +111,7 @@ void main() {
       await d.delete('fares');
       await d.delete('driver_shifts');
       await d.delete('drivers');
+      await d.delete('trips');
       await d.delete('settings');
     });
   }
@@ -154,6 +156,31 @@ void main() {
       ]) {
         await AppDb.addFare(f[0] as String, f[1] as int);
       }
+    });
+  }
+
+  /// A bus fare needs a selected trip before the sell button is live, so the
+  /// walk-in sheet tests have to give the screen a real schedule to sell on.
+  /// The screen reads it through getActiveTrip (a settings-backed JSON blob),
+  /// so both the row and the selection are needed.
+  Future<void> seedActiveTrip(WidgetTester tester) async {
+    await tester.runAsync(() async {
+      final d = await AppDb.db;
+      await d.delete('trips');
+      final trip = Trip(
+        id: 'trip-walkin',
+        tripNo: 'T-101',
+        routeCode: 'HRE-CHI',
+        routeFrom: 'HARARE',
+        routeTo: 'CHITUNGWIZA',
+        routeName: 'HARARE - CHITUNGWIZA',
+        busReg: 'AGJ-001',
+        driver: 'TATENDA',
+        conductor: 'RUDO',
+        status: 'SCHEDULED',
+      );
+      await AppDb.upsertTrip(trip);
+      await AppDb.setActiveTrip(trip);
     });
   }
 
@@ -282,6 +309,105 @@ void main() {
 
     expect(find.text('Adult'), findsWidgets);
     expect(overflows, isEmpty, reason: overflows.join('\n=====\n'));
+  });
+
+  testWidgets('the walk-in tick locks the name box and still allows the sale',
+      (tester) async {
+    // "No name available" has to be sticky: it must survive the sheet
+    // rebuilding for payment method / promo / cash, keep the name box locked so
+    // a stray keystroke cannot contradict the ticket, and on its own satisfy the
+    // passenger-name requirement so the conductor can confirm and move on.
+    useFieldViewport(tester);
+    await resetDb(tester);
+    await seed(tester);
+    await seedActiveTrip(tester);
+
+    await tester.pumpWidget(
+      const MaterialApp(home: HomeScreen()),
+    );
+    await settle(tester);
+
+    // The fare rows and the sell button live at the bottom of one long scroll
+    // view. Take an Adult fare with its + button so the total is non-zero and
+    // the sell button comes alive. The screen has no ListView — it is a
+    // SingleChildScrollView — so the drag targets the first Scrollable.
+    final add = find.byIcon(Icons.add_circle_outline).first;
+    for (var i = 0; i < 12; i++) {
+      await tester.ensureVisible(add);
+      await settle(tester);
+      await tester.drag(find.byType(Scrollable).first, const Offset(0, -400));
+      await settle(tester);
+    }
+    await tester.tap(add);
+    await settle(tester);
+
+    final sell = find.text('Sell & Print');
+    await tester.ensureVisible(sell);
+    await settle(tester);
+    await tester.tap(sell);
+    await settle(tester);
+    expect(find.text('Passenger details'), findsOneWidget,
+        reason: 'the passenger sheet must open for a bus fare');
+
+    final nameBox = find.widgetWithText(TextField, 'Customer name & surname');
+    expect(nameBox, findsOneWidget);
+
+    // Unticked, the box is editable and the requirement is enforced.
+    expect(tester.widget<TextField>(nameBox).readOnly, isFalse);
+    final confirm = find.widgetWithText(FilledButton, 'Confirm & Print');
+    expect(tester.widget<FilledButton>(confirm).onPressed, isNull,
+        reason: 'a bus fare with no name and no walk-in tick cannot confirm');
+
+    // Tender the cash so the ONLY thing still holding the sale back is the
+    // missing passenger name. From here on the button state is a clean read on
+    // the walk-in tick.
+    final cashField = find.widgetWithText(TextField, 'Cash tendered');
+    await tester.enterText(cashField, '5.00');
+    await settle(tester);
+    expect(tester.widget<FilledButton>(confirm).onPressed, isNull,
+        reason: 'cash alone is not enough: the name is still required');
+
+    // Tick it. The box must lock and the button must come alive.
+    // The tick is the checkbox itself; the label is a sibling in the same Row.
+    await tester.tap(find.byType(Checkbox));
+    await settle(tester);
+    expect(tester.widget<TextField>(nameBox).readOnly, isTrue,
+        reason: 'ticking the walk-in must lock the name box');
+    expect(
+        find.descendant(
+            of: nameBox, matching: find.byIcon(Icons.lock_outline)),
+        findsOneWidget,
+        reason: 'the locked box must say so');
+    expect(tester.widget<FilledButton>(confirm).onPressed, isNotNull,
+        reason: 'the walk-in tick alone satisfies the name requirement');
+
+    // Now change the inputs further down the sheet. The tick must survive:
+    // switching to EcoCash, typing cash-equivalent text elsewhere and applying
+    // a promo all rebuild the sheet.
+    await tester.tap(find.text('EcoCash'));
+    await settle(tester);
+    expect(tester.widget<TextField>(nameBox).readOnly, isTrue,
+        reason: 'switching payment method must not drop the walk-in tick');
+    expect(tester.widget<FilledButton>(confirm).onPressed, isNotNull,
+        reason: 'EcoCash needs no cash tendered, so the sale stays confirmable');
+
+    await tester.enterText(find.byType(TextField).last, 'SAVE10');
+    await settle(tester);
+    await tester.tap(find.text('Apply'));
+    await settle(tester);
+
+    expect(tester.widget<TextField>(nameBox).readOnly, isTrue,
+        reason: 'applying a promo must not drop the walk-in tick');
+    expect(tester.widget<FilledButton>(confirm).onPressed, isNotNull,
+        reason: 'the walk-in sale must remain confirmable after a promo');
+
+    // Untick and the box is editable again, and the requirement returns.
+    await tester.tap(find.byType(Checkbox));
+    await settle(tester);
+    expect(tester.widget<TextField>(nameBox).readOnly, isFalse,
+        reason: 'unticking must unlock the box for a real name');
+
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('Ticketing handles an empty fare catalogue', (tester) async {
