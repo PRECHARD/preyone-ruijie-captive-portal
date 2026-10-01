@@ -14,8 +14,16 @@ vi.mock('../src/db/pool', () => {
   };
 });
 
+vi.mock('../src/services/notificationService', () => ({
+  sendPortalAccountCreated: vi.fn().mockResolvedValue(true),
+  sendPortalSignupConfirmation: vi.fn().mockResolvedValue(true),
+  sendPortalEmailVerification: vi.fn().mockResolvedValue(true),
+  sendPortalForgotPassword: vi.fn().mockResolvedValue(true),
+}));
+
 import { authRouter } from '../src/routes/auth';
 import { pool } from '../src/db/pool';
+import { sendPortalForgotPassword } from '../src/services/notificationService';
 
 function createApp() {
   const app = express();
@@ -176,7 +184,7 @@ describe('POST /api/auth/register', () => {
   it('creates account for valid request', async () => {
     vi.mocked(pool.query)
       .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce(undefined);
+      .mockResolvedValueOnce({ rows: [{ id: 'jane-user' }], rowCount: 1 });
 
     const res = await request(createApp())
       .post('/api/auth/register')
@@ -226,5 +234,57 @@ describe('GET /api/auth/status', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.active).toBe(true);
+  });
+});
+
+describe('POST /api/auth/request-password-reset', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('emails a reset link for a registered email without revealing existence', async () => {
+    (pool.query as any).mockResolvedValueOnce({ rows: [{ id: 'u1', full_name: 'John Doe', email: 'john@example.com', password_hash: 'hash' }] });
+
+    const res = await request(createApp())
+      .post('/api/auth/request-password-reset')
+      .send({ email: 'john@example.com' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.message).toContain('reset link has been sent');
+    const update = (pool.query as any).mock.calls[1];
+    expect(update[0]).toContain('reset_password_token');
+    expect(sendPortalForgotPassword).toHaveBeenCalledWith('john@example.com', expect.any(String), 'John Doe');
+  });
+
+  it('does not reveal whether an unknown account exists', async () => {
+    (pool.query as any).mockResolvedValueOnce({ rows: [] });
+
+    const res = await request(createApp())
+      .post('/api/auth/request-password-reset')
+      .send({ email: 'nobody@example.com' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.message).toContain('reset link has been sent');
+    expect(sendPortalForgotPassword).not.toHaveBeenCalled();
+  });
+
+  it('looks up by phone when an email is not supplied', async () => {
+    (pool.query as any).mockResolvedValueOnce({ rows: [{ id: 'u2', full_name: 'Jane Doe', email: 'jane@example.com', password_hash: 'hash' }] });
+
+    const res = await request(createApp())
+      .post('/api/auth/request-password-reset')
+      .send({ phone: '+263771327202' });
+
+    expect(res.status).toBe(200);
+    const sql = (pool.query as any).mock.calls[0][0];
+    expect(sql).toContain('phone = $1');
+  });
+
+  it('rejects a request with neither email nor phone', async () => {
+    const res = await request(createApp())
+      .post('/api/auth/request-password-reset')
+      .send({});
+
+    expect(res.status).toBe(422);
   });
 });

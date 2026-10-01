@@ -6,6 +6,11 @@ vi.mock('../src/db/pool', () => ({
   pool: { query: vi.fn() },
 }));
 
+vi.mock('../src/middleware/rbac', () => ({
+  loadPermissions: vi.fn(() => Promise.resolve([])),
+  FIELD_STAFF_ROLES: ['CONDUCTOR', 'DRIVER', 'TICKET_SELLER'],
+}));
+
 import { pool } from '../src/db/pool';
 
 const SECRET = process.env.JWT_SECRET || 'preyone-jwt-secret-change-in-production';
@@ -52,7 +57,7 @@ describe('requireAdminAuth middleware', () => {
 
   it('rejects deactivated users', async () => {
     const token = jwt.sign({ id: 'user-1', email: 'a@b', role: 'Staff', fullName: 'Test' }, SECRET, { expiresIn: '1h' });
-    (pool.query as any).mockResolvedValue({ rows: [{ id: 'user-1', approved: false }] });
+    (pool.query as any).mockResolvedValue({ rows: [{ id: 'user-1', approved: false, role: 'Staff', company_id: null }] });
 
     const req = makeReq(token);
     const res = makeRes();
@@ -67,7 +72,7 @@ describe('requireAdminAuth middleware', () => {
 
   it('allows requests with a valid token', async () => {
     const token = jwt.sign({ id: 'user-1', email: 'a@b', role: 'CEO', fullName: 'Test' }, SECRET, { expiresIn: '1h' });
-    (pool.query as any).mockResolvedValue({ rows: [{ id: 'user-1', approved: true }] });
+    (pool.query as any).mockResolvedValue({ rows: [{ id: 'user-1', approved: true, role: 'CEO', company_id: null }] });
 
     const req = makeReq(token);
     const res = makeRes();
@@ -76,6 +81,35 @@ describe('requireAdminAuth middleware', () => {
     await requireAdminAuth(req, res as any, next);
 
     expect(next).toHaveBeenCalled();
-    expect(req.adminUser).toMatchObject({ id: 'user-1', email: 'a@b', role: 'CEO', fullName: 'Test' });
+    expect(req.adminUser).toMatchObject({ id: 'user-1', email: 'a@b', role: 'CEO', fullName: 'Test', companyId: null, permissions: [] });
+  });
+
+  it('rejects field staff (CONDUCTOR) with 403 lockout', async () => {
+    const token = jwt.sign({ id: 'user-1', email: 'a@b', role: 'CONDUCTOR', fullName: 'Field User' }, SECRET, { expiresIn: '1h' });
+    (pool.query as any).mockResolvedValue({ rows: [{ id: 'user-1', approved: true, role: 'CONDUCTOR', company_id: 'c1' }] });
+
+    const req = makeReq(token);
+    const res = makeRes();
+    const next = vi.fn();
+
+    await requireAdminAuth(req, res as any, next);
+
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(res.json).toHaveBeenCalledWith({ error: 'Field staff must use the Preyone Transit Mobile App.' });
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('rejects field staff (DRIVER) with 403 lockout', async () => {
+    const token = jwt.sign({ id: 'user-1', email: 'a@b', role: 'DRIVER', fullName: 'Field User' }, SECRET, { expiresIn: '1h' });
+    (pool.query as any).mockResolvedValue({ rows: [{ id: 'user-1', approved: true, role: 'DRIVER', company_id: 'c1' }] });
+
+    const req = makeReq(token);
+    const res = makeRes();
+    const next = vi.fn();
+
+    await requireAdminAuth(req, res as any, next);
+
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(next).not.toHaveBeenCalled();
   });
 });
