@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { pool } from '../db/pool';
+import { FIELD_STAFF_ROLES, loadPermissions } from './rbac';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'preyone-jwt-secret-change-in-production';
 let _jwtSecretWarned = false;
@@ -17,6 +18,10 @@ export interface AdminUser {
   email: string;
   role: string;
   fullName: string;
+  /** Set for Level 1 company admins; null (Level 0) for platform operators. */
+  companyId?: string | null;
+  /** Effective permission codes resolved from role_permissions + user_permissions. */
+  permissions?: string[];
 }
 
 declare global {
@@ -35,14 +40,32 @@ export async function requireAdminAuth(req: Request, res: Response, next: NextFu
   }
 
   try {
-    const decoded = jwt.verify(auth.slice(7), getJwtSecret()) as AdminUser;
+    const decoded = jwt.verify(auth.slice(7), getJwtSecret(), { algorithms: ['HS256'] }) as AdminUser;
     // Check if user still exists and is approved (revoke deactivated users)
-    const { rows } = await pool.query('SELECT id, approved FROM admin_users WHERE id = $1', [decoded.id]);
+    const { rows } = await pool.query(
+      'SELECT id, approved, role, company_id FROM admin_users WHERE id = $1',
+      [decoded.id]
+    );
     if (rows.length === 0 || !rows[0].approved) {
       res.status(401).json({ error: 'Account deactivated or removed' });
       return;
     }
-    req.adminUser = decoded;
+    // Field staff must never use the web admin portal
+    if (FIELD_STAFF_ROLES.includes(rows[0].role)) {
+      res.status(403).json({ error: 'Field staff must use the Preyone Transit Mobile App.' });
+      return;
+    }
+    const permissions = await loadPermissions(
+      rows[0].role,
+      decoded.id,
+      rows[0].company_id ?? null,
+    );
+    req.adminUser = {
+      ...decoded,
+      role: rows[0].role,
+      companyId: rows[0].company_id ?? null,
+      permissions,
+    };
     next();
   } catch (err) {
     if (err instanceof jwt.JsonWebTokenError || err instanceof jwt.TokenExpiredError) {
