@@ -16,6 +16,8 @@ import 'dart:io';
 import 'package:bus_ticket_app/src/db/app_db.dart';
 import 'package:bus_ticket_app/src/models.dart';
 import 'package:bus_ticket_app/src/screens/home_screen.dart';
+import 'package:bus_ticket_app/src/widgets/emerald_ui.dart';
+import 'package:bus_ticket_app/src/widgets/ticket_preview_card.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -311,12 +313,13 @@ void main() {
     expect(overflows, isEmpty, reason: overflows.join('\n=====\n'));
   });
 
-  testWidgets('the walk-in tick locks the name box and still allows the sale',
+  testWidgets('the walk-in toggle locks both fields and still allows the sale',
       (tester) async {
     // "No name available" has to be sticky: it must survive the sheet
-    // rebuilding for payment method / promo / cash, keep the name box locked so
-    // a stray keystroke cannot contradict the ticket, and on its own satisfy the
-    // passenger-name requirement so the conductor can confirm and move on.
+    // rebuilding for payment method / promo / cash, lock BOTH the name and the
+    // phone box so a stray keystroke cannot contradict the ticket, and on its
+    // own satisfy the passenger-name requirement so the conductor can confirm
+    // and move on.
     useFieldViewport(tester);
     await resetDb(tester);
     await seed(tester);
@@ -350,44 +353,71 @@ void main() {
         reason: 'the passenger sheet must open for a bus fare');
 
     final nameBox = find.widgetWithText(TextField, 'Customer name & surname');
+    final phoneBox = find.widgetWithText(TextField, 'Phone number');
     expect(nameBox, findsOneWidget);
+    expect(phoneBox, findsOneWidget);
 
-    // Unticked, the box is editable and the requirement is enforced.
+    // Untoggled, both boxes are editable and the requirement is enforced.
     expect(tester.widget<TextField>(nameBox).readOnly, isFalse);
+    expect(tester.widget<TextField>(phoneBox).readOnly, isFalse);
     final confirm = find.widgetWithText(FilledButton, 'Confirm & Print');
     expect(tester.widget<FilledButton>(confirm).onPressed, isNull,
-        reason: 'a bus fare with no name and no walk-in tick cannot confirm');
+        reason: 'a bus fare with no name and no walk-in toggle cannot confirm');
 
     // Tender the cash so the ONLY thing still holding the sale back is the
     // missing passenger name. From here on the button state is a clean read on
-    // the walk-in tick.
+    // the walk-in toggle.
     final cashField = find.widgetWithText(TextField, 'Cash tendered');
     await tester.enterText(cashField, '5.00');
     await settle(tester);
     expect(tester.widget<FilledButton>(confirm).onPressed, isNull,
         reason: 'cash alone is not enough: the name is still required');
 
-    // Tick it. The box must lock and the button must come alive.
-    // The tick is the checkbox itself; the label is a sibling in the same Row.
-    await tester.tap(find.byType(Checkbox));
+    // The control must be a toggle switch, not a checkbox.
+    final walkIn = find.byType(Switch);
+    expect(find.byType(Checkbox), findsNothing,
+        reason: 'the walk-in control is specified as a toggle switch');
+    expect(walkIn, findsOneWidget);
+
+    // Placed directly underneath the phone input it governs.
+    await tester.ensureVisible(walkIn);
+    await settle(tester);
+    expect(tester.getTopLeft(walkIn).dy,
+        greaterThan(tester.getTopLeft(phoneBox).dy),
+        reason: 'the walk-in toggle must sit below the phone number field');
+    expect(
+        tester.getTopLeft(walkIn).dy - tester.getBottomLeft(phoneBox).dy,
+        lessThan(72),
+        reason: 'and directly beneath it, not pushed far down the sheet');
+
+    // Active state wears the app's signature emerald green.
+    expect(tester.widget<Switch>(walkIn).activeThumbColor, kEmeraldJade);
+    expect(tester.widget<Switch>(walkIn).activeTrackColor, kEmeraldJade);
+
+    // Toggle it on. Both boxes must lock and the button must come alive.
+    await tester.tap(walkIn);
     await settle(tester);
     expect(tester.widget<TextField>(nameBox).readOnly, isTrue,
-        reason: 'ticking the walk-in must lock the name box');
+        reason: 'toggling the walk-in on must lock the name box');
+    expect(tester.widget<TextField>(phoneBox).readOnly, isTrue,
+        reason: 'toggling the walk-in on must lock the phone box too');
     expect(
         find.descendant(
             of: nameBox, matching: find.byIcon(Icons.lock_outline)),
         findsOneWidget,
         reason: 'the locked box must say so');
     expect(tester.widget<FilledButton>(confirm).onPressed, isNotNull,
-        reason: 'the walk-in tick alone satisfies the name requirement');
+        reason: 'the walk-in toggle alone satisfies the name requirement');
 
-    // Now change the inputs further down the sheet. The tick must survive:
+    // Now change the inputs further down the sheet. The toggle must survive:
     // switching to EcoCash, typing cash-equivalent text elsewhere and applying
     // a promo all rebuild the sheet.
     await tester.tap(find.text('EcoCash'));
     await settle(tester);
-    expect(tester.widget<TextField>(nameBox).readOnly, isTrue,
-        reason: 'switching payment method must not drop the walk-in tick');
+    expect(tester.widget<Switch>(walkIn).value, isTrue,
+        reason: 'switching payment method must not drop the walk-in toggle');
+    expect(tester.widget<TextField>(nameBox).readOnly, isTrue);
+    expect(tester.widget<TextField>(phoneBox).readOnly, isTrue);
     expect(tester.widget<FilledButton>(confirm).onPressed, isNotNull,
         reason: 'EcoCash needs no cash tendered, so the sale stays confirmable');
 
@@ -396,16 +426,296 @@ void main() {
     await tester.tap(find.text('Apply'));
     await settle(tester);
 
-    expect(tester.widget<TextField>(nameBox).readOnly, isTrue,
-        reason: 'applying a promo must not drop the walk-in tick');
+    expect(tester.widget<Switch>(walkIn).value, isTrue,
+        reason: 'applying a promo must not drop the walk-in toggle');
+    expect(tester.widget<TextField>(nameBox).readOnly, isTrue);
+    expect(tester.widget<TextField>(phoneBox).readOnly, isTrue);
     expect(tester.widget<FilledButton>(confirm).onPressed, isNotNull,
         reason: 'the walk-in sale must remain confirmable after a promo');
 
-    // Untick and the box is editable again, and the requirement returns.
-    await tester.tap(find.byType(Checkbox));
+    // Switching it back off is the ONLY thing that may unlock the boxes.
+    await tester.tap(walkIn);
     await settle(tester);
+    expect(tester.widget<Switch>(walkIn).value, isFalse);
     expect(tester.widget<TextField>(nameBox).readOnly, isFalse,
-        reason: 'unticking must unlock the box for a real name');
+        reason: 'switching off must unlock the box for a real name');
+    expect(tester.widget<TextField>(phoneBox).readOnly, isFalse,
+        reason: 'switching off must unlock the phone box too');
+
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Sell & Print hides the live preview by default and toggles it',
+      (tester) async {
+    // On the real terminal the always-on preview pushed Confirm & Print off the
+    // bottom of the sheet. The preview is now opt-in, so the ticket that is
+    // about to be printed is checked deliberately rather than by accident.
+    useFieldViewport(tester);
+    await resetDb(tester);
+    await seed(tester);
+    await seedActiveTrip(tester);
+
+    await tester.pumpWidget(
+      const MaterialApp(home: HomeScreen()),
+    );
+    await settle(tester);
+
+    // The main screen carries its own preview; the sheet's is the extra one.
+    expect(find.byType(TicketPreviewCard), findsOneWidget,
+        reason: 'only the main screen preview should be on screen to start');
+
+    final add = find.byIcon(Icons.add_circle_outline).first;
+    for (var i = 0; i < 12; i++) {
+      await tester.ensureVisible(add);
+      await settle(tester);
+      await tester.drag(find.byType(Scrollable).first, const Offset(0, -400));
+      await settle(tester);
+    }
+    await tester.tap(add);
+    await settle(tester);
+
+    final sell = find.text('Sell & Print');
+    await tester.ensureVisible(sell);
+    await settle(tester);
+    await tester.tap(sell);
+    await settle(tester);
+    expect(find.text('Passenger details'), findsOneWidget);
+
+    // Hidden by default: opening the sheet must not add a second preview.
+    expect(find.byType(TicketPreviewCard), findsOneWidget,
+        reason: 'the sheet preview must be hidden by default');
+
+    final toggle = find.widgetWithText(TextButton, 'Live preview');
+    expect(toggle, findsOneWidget,
+        reason: 'a control to show the preview must exist');
+
+    await tester.ensureVisible(toggle);
+    await settle(tester);
+    await tester.tap(toggle);
+    await settle(tester);
+
+    expect(find.byType(TicketPreviewCard), findsNWidgets(2),
+        reason: 'tapping Live preview must reveal the sheet preview');
+
+    // And the toggle must put it away again, otherwise the operator cannot get
+    // back the room the hidden-by-default state just gave them.
+    final hideToggle = find.widgetWithText(TextButton, 'Hide preview');
+    expect(hideToggle, findsOneWidget);
+    await tester.ensureVisible(hideToggle);
+    await settle(tester);
+    await tester.tap(hideToggle);
+    await settle(tester);
+
+    expect(find.byType(TicketPreviewCard), findsOneWidget,
+        reason: 'the toggle must hide the preview again');
+
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Cancel, Live preview and Confirm & Print share one row',
+      (tester) async {
+    // Three separate lines meant the operator had to hunt for Confirm, and at
+    // the tightest fleet width the three fixed-width buttons overflowed.
+    useTightViewport(tester);
+    await resetDb(tester);
+    await seed(tester);
+    await seedActiveTrip(tester);
+
+    final overflows = <String>[];
+    final prior = FlutterError.onError;
+    FlutterError.onError = (d) {
+      overflows.add('${d.exception}');
+      prior?.call(d);
+    };
+    addTearDown(() => FlutterError.onError = prior);
+
+    await tester.pumpWidget(
+      const MaterialApp(home: HomeScreen()),
+    );
+    await settle(tester);
+
+    final add = find.byIcon(Icons.add_circle_outline).first;
+    for (var i = 0; i < 12; i++) {
+      await tester.ensureVisible(add);
+      await settle(tester);
+      await tester.drag(find.byType(Scrollable).first, const Offset(0, -400));
+      await settle(tester);
+    }
+    await tester.tap(add);
+    await settle(tester);
+
+    final sell = find.text('Sell & Print');
+    await tester.ensureVisible(sell);
+    await settle(tester);
+    await tester.tap(sell);
+    await settle(tester);
+
+    final cancel = find.widgetWithText(TextButton, 'Cancel');
+    final preview = find.widgetWithText(TextButton, 'Live preview');
+    final confirm = find.widgetWithText(FilledButton, 'Confirm & Print');
+    expect(cancel, findsOneWidget);
+    expect(preview, findsOneWidget);
+    expect(confirm, findsOneWidget);
+
+    // All three must resolve to the same Row rather than three stacked rows.
+    Row? rowOf(Finder f) =>
+        tester.element(f).findAncestorWidgetOfExactType<Row>();
+    final cancelRow = rowOf(cancel);
+    expect(cancelRow, isNotNull);
+    expect(rowOf(preview), same(cancelRow),
+        reason: 'Live preview must sit in the same row as Cancel');
+    expect(rowOf(confirm), same(cancelRow),
+        reason: 'Confirm & Print must sit in the same row as Cancel');
+
+    // They must be laid out on one horizontal line, not merely in one Row
+    // that wraps.
+    final cancelY = tester.getTopLeft(cancel).dy;
+    final previewY = tester.getTopLeft(preview).dy;
+    final confirmY = tester.getTopLeft(confirm).dy;
+    expect((cancelY - previewY).abs(), lessThan(1.0));
+    expect((cancelY - confirmY).abs(), lessThan(1.0));
+
+    expect(overflows, isEmpty, reason: overflows.join('\n=====\n'));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('the walk-in toggle survives the keyboard opening on any field',
+      (tester) async {
+    // Regression for the field being usable at all: tapping a TEXT input opens
+    // the soft keyboard, which changes MediaQuery viewInsets and rebuilds the
+    // bottom-sheet route. The toggle state used to be declared inside the
+    // showModalBottomSheet builder closure, so every route rebuild re-ran that
+    // body and reset it to false — the switch silently turned itself off the
+    // moment the conductor reached for the cash or promo box.
+    useFieldViewport(tester);
+    await resetDb(tester);
+    await seed(tester);
+    await seedActiveTrip(tester);
+
+    await tester.pumpWidget(
+      const MaterialApp(home: HomeScreen()),
+    );
+    await settle(tester);
+
+    final add = find.byIcon(Icons.add_circle_outline).first;
+    for (var i = 0; i < 12; i++) {
+      await tester.ensureVisible(add);
+      await settle(tester);
+      await tester.drag(find.byType(Scrollable).first, const Offset(0, -400));
+      await settle(tester);
+    }
+    await tester.tap(add);
+    await settle(tester);
+
+    final sell = find.text('Sell & Print');
+    await tester.ensureVisible(sell);
+    await settle(tester);
+    await tester.tap(sell);
+    await settle(tester);
+
+    final walkIn = find.byType(Switch);
+    final nameBox = find.widgetWithText(TextField, 'Customer name & surname');
+    final phoneBox = find.widgetWithText(TextField, 'Phone number');
+
+    await tester.ensureVisible(walkIn);
+    await settle(tester);
+    await tester.tap(walkIn);
+    await settle(tester);
+    expect(tester.widget<Switch>(walkIn).value, isTrue);
+
+    // Focus each text field in turn. Each tap is what opens the keyboard on a
+    // real device, and therefore what used to reset the toggle.
+    for (final label in ['Cash tendered', 'Code e.g. SAVE10']) {
+      final field = find.widgetWithText(TextField, label);
+      expect(field, findsOneWidget, reason: '$label must be on the sheet');
+      await tester.ensureVisible(field);
+      await settle(tester);
+      await tester.tap(field);
+      // Flutter's test harness has no soft keyboard, so tapping alone would not
+      // move viewInsets and the route would never rebuild — which is precisely
+      // what let the original bug hide from the earlier tests. Raising the view
+      // inset by hand is the same MediaQuery change a real keyboard produces.
+      tester.view.viewInsets = const FakeViewPadding(bottom: 320);
+      addTearDown(tester.view.reset);
+      await settle(tester);
+
+      expect(tester.widget<Switch>(walkIn).value, isTrue,
+          reason: 'tapping $label must not switch the walk-in toggle off');
+      expect(tester.widget<TextField>(nameBox).readOnly, isTrue,
+          reason: 'the name box must stay locked after touching $label');
+      expect(tester.widget<TextField>(phoneBox).readOnly, isTrue,
+          reason: 'the phone box must stay locked after touching $label');
+
+      // Closing the keyboard is the other half of the same round trip.
+      tester.view.viewInsets = FakeViewPadding.zero;
+      await settle(tester);
+      expect(tester.widget<Switch>(walkIn).value, isTrue,
+          reason: 'dismissing the keyboard must not drop the walk-in toggle');
+    }
+
+    // The preview toggle lives in the same sheet state and was vulnerable to
+    // the identical reset, so pin it too.
+    await tester.tap(find.widgetWithText(TextButton, 'Live preview'));
+    await settle(tester);
+    expect(find.widgetWithText(TextButton, 'Hide preview'), findsOneWidget);
+    final promoField = find.widgetWithText(TextField, 'Code e.g. SAVE10');
+    await tester.ensureVisible(promoField);
+    await settle(tester);
+    await tester.tap(promoField);
+    await settle(tester);
+    expect(find.widgetWithText(TextButton, 'Hide preview'), findsOneWidget,
+        reason: 'tapping a field must not close the preview the operator opened');
+
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('the walk-in toggle resets for the next sale', (tester) async {
+    // The flip side of holding the state at method scope: it must still start
+    // fresh for the following passenger, or one walk-in would leak into every
+    // ticket after it.
+    useFieldViewport(tester);
+    await resetDb(tester);
+    await seed(tester);
+    await seedActiveTrip(tester);
+
+    await tester.pumpWidget(
+      const MaterialApp(home: HomeScreen()),
+    );
+    await settle(tester);
+
+    final add = find.byIcon(Icons.add_circle_outline).first;
+    for (var i = 0; i < 12; i++) {
+      await tester.ensureVisible(add);
+      await settle(tester);
+      await tester.drag(find.byType(Scrollable).first, const Offset(0, -400));
+      await settle(tester);
+    }
+    await tester.tap(add);
+    await settle(tester);
+
+    for (var pass = 0; pass < 2; pass++) {
+      final sell = find.text('Sell & Print');
+      await tester.ensureVisible(sell);
+      await settle(tester);
+      await tester.tap(sell);
+      await settle(tester);
+
+      final walkIn = find.byType(Switch);
+      expect(tester.widget<Switch>(walkIn).value, isFalse,
+          reason: 'pass ${pass + 1} must open with the toggle already off');
+      await tester.ensureVisible(walkIn);
+      await settle(tester);
+      await tester.tap(walkIn);
+      await settle(tester);
+      expect(tester.widget<Switch>(walkIn).value, isTrue);
+
+      // Close the sheet without selling.
+      final cancel = find.widgetWithText(TextButton, 'Cancel');
+      await tester.ensureVisible(cancel);
+      await settle(tester);
+      await tester.tap(cancel);
+      await settle(tester);
+    }
 
     expect(tester.takeException(), isNull);
   });

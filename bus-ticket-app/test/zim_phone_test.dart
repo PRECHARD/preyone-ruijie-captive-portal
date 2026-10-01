@@ -40,4 +40,42 @@ void main() {
       expect(formatZimPhone(''), 'N/A');
     });
   });
+
+  group('363 prefix is normalized regardless of length', () {
+    // Regression: the 0363/363 branches used to require length >= 12 / >= 11, so
+    // a short stored value such as "363" fell through every branch and was sent
+    // to the printer verbatim — tickets came out reading "CUSTOMER CARE 363".
+    // The printer was never at fault; it rendered the bad bytes faithfully.
+    test('bare 363 no longer reaches the paper', () {
+      expect(formatZimPhone('363'), '+263');
+      expect(zimPhoneOrEmpty('363'), '+263');
+    });
+
+    test('short 363-prefixed values are rewritten, not passed through', () {
+      expect(zimPhoneOrEmpty('363784111'), '+263784111');
+      expect(zimPhoneOrEmpty('0363771'), '+263771');
+    });
+
+    test('full-length 363 forms still normalize identically', () {
+      expect(zimPhoneOrEmpty('363772717003'), '+263772717003');
+      expect(zimPhoneOrEmpty('0363772717003'), '+263772717003');
+      expect(zimPhoneOrEmpty('+363772717003'), '+263772717003');
+    });
+
+    test('a 363-prefixed value with spaces is still cleaned up', () {
+      expect(zimPhoneOrEmpty('363 772 717003'), '+263772717003');
+    });
+
+    test('genuine +263 numbers are untouched', () {
+      expect(zimPhoneOrEmpty('+263772717003'), '+263772717003');
+    });
+
+    test('a number with no subscriber digits yields a bare country code', () {
+      // Nothing can invent the missing subscriber digits: a stored value that
+      // is only "363" normalizes to "+263" and no further. That is a data
+      // problem to correct at source, not a formatting one.
+      expect(formatZimPhone('+363'), '+263');
+      expect(formatZimPhone('0363'), '+263');
+    });
+  });
 }

@@ -61,6 +61,26 @@ class _HomeScreenState extends State<HomeScreen> {
   String _receiptFooter = '';
   String _routeCode = '';
   String _routeFrom = '';
+
+  /// The passenger name as the conductor is typing it on the Sell & Print
+  /// sheet, captured on every keystroke so the linked luggage ticket can be
+  /// pre-filled the instant the operator answers "Yes" to the luggage prompt.
+  ///
+  /// The sale itself is not written until Confirm, so the luggage screen would
+  /// otherwise have to re-derive the name from the server copy — which fails
+  /// whenever the device is offline, forcing a retype of a name the conductor
+  /// already entered. Cached here in memory only; never persisted, so it can
+  /// never leak into an unrelated ticket.
+  String _draftPassengerName = '';
+
+  /// The passenger phone number, cached on exactly the same terms as
+  /// [_draftPassengerName]: every keystroke on the Sell & Print sheet, in
+  /// memory only, never persisted.
+  ///
+  /// Cached alongside the name rather than being left to the saved sale because
+  /// the operator should never retype a contact number they already entered,
+  /// and because an offline device has no server copy to fall back on.
+  String _draftPassengerPhone = '';
   String _routeTo = '';
   String _busReg = '';
   String _tripNo = '';
@@ -1624,30 +1644,50 @@ class _HomeScreenState extends State<HomeScreen> {
       setState(() {});
     }
 
-    final promoCtrl = TextEditingController();
+final promoCtrl = TextEditingController();
+
+    // Per-sale sheet state, declared HERE rather than inside the
+    // showModalBottomSheet builder.
+    //
+    // This scope matters: a builder closure body is re-executed every time the
+    // route rebuilds, which includes far more than setState — most visibly the
+    // keyboard opening and closing, since viewInsets feeds MediaQuery. Anything
+    // declared inside it therefore starts over at its default on every rebuild,
+    // while the already-built widget tree still referenced the previous
+    // instance. That silently flipped the walk-in switch back off the moment
+    // the conductor tapped into the cash-tendered or promo-code box, because
+    // opening the keyboard rebuilt the sheet.
+    //
+    // Declared at method scope, these are evaluated exactly once per sale — when
+    // _startSale runs — so they survive every rebuild for the life of the sheet
+    // and are still reset to their defaults for the next passenger.
+    String sheetPayment = 'cash';
+    String? promoError;
+    String appliedCode = '';
+    int discount = 0;
+    // Snapshotted with the rest of the sheet state. _type cannot change while
+    // the sheet is modal, so reading it once here is equivalent to reading it
+    // live, and it belongs with the other per-sale values rather than in a
+    // closure body that re-runs.
+    final isBusFare = _type == TicketType.busFare;
+    // Live preview is hidden by default: on a field terminal the preview
+    // pushes the Confirm button off-screen, which is the one control that
+    // must always be reachable. The operator opts in when they want to
+    // check the layout before committing to a print.
+    var showPreview = false;
+    // "No name available" is a deliberate, sticky walk-in declaration, not a
+    // transient form field: once toggled on it must survive every rebuild the
+    // sheet performs (keyboard, payment method, promo apply, cash entry) so
+    // the conductor is never forced to re-toggle it just to move on to the
+    // next input, and it locks both boxes so a stray keystroke cannot
+    // contradict the declaration. Only the switch itself may ever turn it off.
+    var noName = false;
 
     if (!mounted) return;
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       builder: (ctx) {
-        // promo/payment state persists inside the sheet's own StatefulBuilder.
-        String sheetPayment = 'cash';
-        String? promoError;
-        String appliedCode = '';
-        int discount = 0;
-        // Names are required for bus-fare tickets unless the conductor ticks
-        // "No name" (rare: a true walk-in with nothing to record). Luggage
-        // tickets never require one.
-        final isBusFare = _type == TicketType.busFare;
-        // "No name available" is a deliberate, sticky walk-in declaration, not a
-        // transient form field: once ticked it must survive every rebuild the
-        // sheet performs (payment method, promo apply, cash entry) so the
-        // conductor is never forced to re-tick it just to move on to the next
-        // input, and it locks the name box so a stray keystroke cannot
-        // contradict the declaration.
-        var noName = false;
-
         return StatefulBuilder(
           builder: (ctx, setSheet) {
             Future<void> applyPromo() async {
@@ -1729,39 +1769,95 @@ class _HomeScreenState extends State<HomeScreen> {
                               ? 'Passenger name required'
                               : null,
                         ),
-                        onChanged: (_) => setSheet(() {}),
+                        // Cache the name on every keystroke (not just on save)
+                        // so a linked luggage ticket can adopt it immediately.
+                        onChanged: (v) {
+                          _draftPassengerName = v.trim();
+                          setSheet(() {});
+                        },
                       ),
-                      const SizedBox(height: 4),
-                      if (isBusFare)
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: _customerPhoneController,
+                        keyboardType: TextInputType.phone,
+                        // Locked on the same terms as the name box: while the
+                        // walk-in toggle is on, the ticket is being recorded
+                        // without passenger identity, so neither box may be
+                        // edited. readOnly (not disabled) is deliberate — a
+                        // disabled field drops out of the tab order and greys
+                        // out its text, while readOnly keeps the value legible
+                        // and still selectable/copyable.
+                        readOnly: noName,
+                        decoration: InputDecoration(
+                          labelText: 'Phone number',
+                          isDense: true,
+                          filled: noName,
+                          fillColor: noName
+                              ? const Color(0xFFF1F5F9)
+                              : null,
+                          border: const OutlineInputBorder(),
+                          suffixIcon: noName
+                              ? const Icon(Icons.lock_outline, size: 18)
+                              : null,
+                        ),
+                        // Cache the phone on every keystroke, matching the name,
+                        // so the luggage ticket inherits the contact number
+                        // without a retype.
+                        onChanged: (v) {
+                          _draftPassengerPhone = v.trim();
+                          setSheet(() {});
+                        },
+                      ),
+                      if (isBusFare) ...[
+                        const SizedBox(height: 8),
+                        // Directly under the phone box it governs. A toggle
+                        // rather than a checkbox because "walk-in" is a mode
+                        // that locks two fields, and a switch communicates that
+                        // persistent state better than a tick that reads as a
+                        // one-off assertion.
                         Row(
                           children: [
-                            Checkbox(
+                            Switch(
                               value: noName,
+                              activeThumbColor: kEmeraldJade,
+                              activeTrackColor: kEmeraldJade,
+                              inactiveThumbColor:
+                                  Theme.of(ctx).colorScheme.onSurfaceVariant,
+                              inactiveTrackColor:
+                                  Theme.of(ctx).colorScheme.surfaceContainerHighest,
                               onChanged: (v) => setSheet(() {
-                                noName = v ?? false;
-                                // Ticking means "record no name". Anything
-                                // half-typed in the box is discarded so the
-                                // saved sale and the field agree; unticking
-                                // unlocks the box for a real name.
-                                if (noName) _customerNameController.clear();
+                                noName = v;
+                                // Switching on means "record no name". Anything
+                                // half-typed in the name box is discarded so the
+                                // saved sale and the field agree; switching off
+                                // unlocks both boxes for a real identity.
+                                if (noName) {
+                                  _customerNameController.clear();
+                                  // The cached name must be dropped too, or a
+                                  // name left over from the previous passenger
+                                  // would be handed to the luggage form for a
+                                  // sale that deliberately records no name. The
+                                  // cached phone is deliberately KEPT: a walk-in
+                                  // can still be reachable on a number, and the
+                                  // phone box keeps its value.
+                                  _draftPassengerName = '';
+                                }
+                                // Note the absence of any reset here. The toggle
+                                // is only ever changed by this handler, so it
+                                // cannot switch itself off when the sheet
+                                // rebuilds for payment method, promo or cash
+                                // tendered.
                               }),
                             ),
+                            const SizedBox(width: 4),
                             const Expanded(
                               child: Text('No name available (walk-in)',
                                   style: TextStyle(fontSize: 13)),
                             ),
                           ],
                         ),
+                      ],
                       const SizedBox(height: 8),
-                      TextField(
-                        controller: _customerPhoneController,
-                        keyboardType: TextInputType.phone,
-                        decoration: const InputDecoration(
-                          labelText: 'Phone number',
-                          isDense: true,
-                          border: OutlineInputBorder(),
-                        ),
-                      ),
                       const Divider(height: 20),
                       Text('Payment method',
                           style: Theme.of(ctx).textTheme.titleSmall),
@@ -1937,7 +2033,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           ),
                         ),
                       const SizedBox(height: 14),
-                      if (cashMethod) ...[
+                      if (cashMethod && showPreview) ...[
                         Text('Live preview',
                             style: Theme.of(ctx).textTheme.titleSmall),
                         const SizedBox(height: 8),
@@ -1951,23 +2047,59 @@ class _HomeScreenState extends State<HomeScreen> {
                         )),
                         const SizedBox(height: 14),
                       ],
+                      // Cancel / Live preview / Confirm all share one row so
+                      // they stay on a single horizontal line at any width.
+                      // Each button is Flexible rather than intrinsically sized:
+                      // three fixed-width buttons overflow a 360dp terminal at a
+                      // large text scale, whereas Flexible lets the Row divide
+                      // the space and each label ellipsize inside its own box.
                       Row(
-                        mainAxisAlignment: MainAxisAlignment.end,
                         children: [
-                          TextButton(
-                            onPressed: () => Navigator.of(ctx).pop(),
-                            child: const Text('Cancel'),
+                          Flexible(
+                            child: TextButton(
+                              onPressed: () => Navigator.of(ctx).pop(),
+                              child: const Text(
+                                'Cancel',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
                           ),
                           const SizedBox(width: 8),
-                          FilledButton(
-                            onPressed: valid
-                                ? () => _confirmSale(cashMethod ? cash : due,
-                                    paymentMethod: sheetPayment,
-                                    promoCode: appliedCode,
-                                    discount: discount,
-                                    noName: noName)
-                                : null,
-                            child: const Text('Confirm & Print'),
+                          Flexible(
+                            child: TextButton.icon(
+                              onPressed: () =>
+                                  setSheet(() => showPreview = !showPreview),
+                              icon: Icon(
+                                showPreview
+                                    ? Icons.visibility_off_outlined
+                                    : Icons.visibility_outlined,
+                                size: 18,
+                              ),
+                              label: Text(
+                                showPreview ? 'Hide preview' : 'Live preview',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Flexible(
+                            child: FilledButton(
+                              onPressed: valid
+                                  ? () => _confirmSale(
+                                      cashMethod ? cash : due,
+                                      paymentMethod: sheetPayment,
+                                      promoCode: appliedCode,
+                                      discount: discount,
+                                      noName: noName)
+                                  : null,
+                              child: const Text(
+                                'Confirm & Print',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
                           ),
                         ],
                       ),
@@ -2016,7 +2148,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final items = _currentItems();
     final total = _totalCents - discount < 0 ? 0 : _totalCents - discount;
     final sale = Sale(
-      receiptNo: await AppDb.nextReceiptNo(),
+      receiptNo: await AppDb.nextReceiptNo(busReg: _effectiveBusReg),
       ticketType: _type.name,
       items: items,
       total: total,
@@ -2128,11 +2260,27 @@ class _HomeScreenState extends State<HomeScreen> {
     // with the passenger and trip details carried over.
     if (_type == TicketType.busFare && sale.ticketType == 'busFare') {
       final wantsLuggage = await _offerLuggageUpsell();
+      // Clear both drafts as soon as the prompt is answered so the next
+      // passenger can never inherit the previous one's identity. The local
+      // copies are taken BEFORE the clear and only used on an explicit "Yes".
+      final capturedName = _draftPassengerName;
+      final capturedPhone = _draftPassengerPhone;
+      _draftPassengerName = '';
+      _draftPassengerPhone = '';
       if (wantsLuggage == true) {
         final saved = await AppDb.getSaleById(saleId);
         if (saved != null && mounted) {
-          await Navigator.of(context).push(
-              emeraldPageRoute<void>(LuggageTicketScreen(sourceSale: saved)));
+          await Navigator.of(context).push(emeraldPageRoute<void>(
+            LuggageTicketScreen(
+              sourceSale: saved,
+              // "No" never reaches this branch, so the luggage form is only
+              // ever pre-filled on an explicit Yes. Passing them as separate
+              // arguments (rather than the luggage screen reaching back into
+              // home state) keeps the hand-off explicit and testable.
+              passengerNameHint: capturedName,
+              passengerPhoneHint: capturedPhone,
+            ),
+          ));
         }
       }
     }

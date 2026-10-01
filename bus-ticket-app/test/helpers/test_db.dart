@@ -27,7 +27,18 @@ import 'package:sqlite3/common.dart' show CommonDatabase;
 Future<String> useTestDatabaseDir(String name) async {
   sqfliteFfiInit();
   final dir = Directory(p.join('.dart_tool', 'test_dbs', name)).absolute;
-  if (!dir.existsSync()) dir.createSync(recursive: true);
+  // Start every run from an empty directory. A file left by a previous run
+  // skips onCreate, so a fixture that should be a legacy v16 database is
+  // silently an already-migrated v17 one and its seed insert collides on the
+  // primary key — the test then fails for a reason that has nothing to do with
+  // the code under test, and only on the second run.
+  if (dir.existsSync()) {
+    for (final entity in dir.listSync()) {
+      entity.deleteSync(recursive: true);
+    }
+  } else {
+    dir.createSync(recursive: true);
+  }
   sqfliteFfiHandler = _RedirectedHandler(sqfliteFfiHandler, dir.path);
   databaseFactory = createDatabaseFactoryFfi(noIsolate: true);
   return dir.path;

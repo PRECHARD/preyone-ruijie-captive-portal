@@ -56,6 +56,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String _fullName = '';
   String _role = '';
   String _currency = 'USD';
+
+  /// Effective permission codes from the server. Null means "not delivered"
+  /// (older backend / session predating the field) and every gate must fall
+  /// back to the role default rather than denying access.
+  List<String>? _permissions;
+
+  /// Whether this operator may create/edit/delete master route templates.
+  bool get _canManageTemplates =>
+      Roles.canManageRouteTemplates(_role, _permissions);
   String _printerAddress = '';
   String _printerName = '';
   bool _scanning = false;
@@ -103,6 +112,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final username = await SecureKeystore.instance.readUsername() ?? '';
     final fullName = await SecureKeystore.instance.readFullName() ?? '';
     final role = await SecureKeystore.instance.readRole() ?? '';
+    final permissions = await SecureKeystore.instance.readPermissions();
     final addr = await AppDb.getSetting('printer_address', null);
     final name = await AppDb.getSetting('printer_name', null);
     // Mirror the sell screen: prefer the cached server company profile (kept
@@ -132,6 +142,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _username = username;
       _fullName = fullName;
       _role = role;
+      _permissions = permissions;
       _printerAddress = addr ?? '';
       _printerName = name ?? '';
       _fares = fares;
@@ -155,7 +166,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
         children: [
           _adminLocked(_companyCard()),
           const SizedBox(height: 12),
-          _adminLocked(_routeTemplatesCard()),
+          // Route templates are gated on the narrow `route.templates.manage`
+          // capability, not on being an admin: a company whose owner is field
+          // staff can be granted it without promoting them. They still see the
+          // card greyed out if they lack it, so the feature is discoverable.
+          _capabilityLocked(_routeTemplatesCard(), _canManageTemplates,
+              'Route Template Access Required',
+              'Ask your company admin for route template access. You can still '
+                  'use every template your company has already published.'),
           const SizedBox(height: 12),
           _securityCard(),
           const SizedBox(height: 12),
@@ -177,8 +195,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   /// Renders a card in grayscale for non-admins and shows an "Admin Access
   /// Required" toast on tap. Admins get the fully interactive card.
-  Widget _adminLocked(Widget child) {
-    if (Roles.isAdmin(_role)) return child;
+  Widget _adminLocked(Widget child) =>
+      _capabilityLocked(child, Roles.isAdmin(_role), 'Admin Access Required', null);
+
+  /// Grays out [child] and explains on tap when [allowed] is false. Same
+  /// discoverability as [ _adminLocked] but keyed to a capability rather than
+  /// to being an admin, so a field-staff operator granted a narrow capability
+  /// is not locked out and a genuinely-unauthorised one sees why.
+  Widget _capabilityLocked(
+    Widget child,
+    bool allowed,
+    String title,
+    String? detail,
+  ) {
+    if (allowed) return child;
     return Stack(
       children: [
         Opacity(
@@ -213,7 +243,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           child: Material(
             color: Colors.transparent,
             child: InkWell(
-              onTap: () => _snack('Admin Access Required'),
+              onTap: () => _snack(detail == null ? title : '$title\n$detail'),
               splashColor: Colors.transparent,
               highlightColor: Colors.transparent,
             ),
@@ -638,8 +668,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
             const SizedBox(height: 4),
             const Text(
               'Master routes a conductor uses to open an unscheduled run: list '
-              'the stages in travel order and price each leg. Templates stay on '
-              'this device and never join the server schedule board.',
+              'the stages in travel order and price each leg. Templates are owned '
+              'by your company and sync to every device, so a price change here '
+              'reaches the whole fleet. They never join the server schedule board.',
               style: TextStyle(fontSize: 12.5),
             ),
             const SizedBox(height: 10),
@@ -948,7 +979,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
       await SyncService.instance.refreshCatalog();
     }
     if (!mounted) return;
+    // The pull above re-delivers the effective permission list, so a grant made
+    // while this screen was open takes effect without a re-login. Re-read it or
+    // the card would stay greyed out until the operator navigated away and back.
+    final refreshed = await SecureKeystore.instance.readPermissions();
+    if (!mounted) return;
     setState(() {
+      _permissions = refreshed;
       _syncing = false;
       _syncStatus = result.message;
     });

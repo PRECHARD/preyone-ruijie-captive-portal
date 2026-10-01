@@ -16,10 +16,34 @@ import '../services/transit_api.dart';
 /// [Sale.luggageLinkedTicketId] so the two tickets stay grouped on the server
 /// and in reports.
 class LuggageTicketScreen extends StatefulWidget {
-  const LuggageTicketScreen({super.key, required this.sourceSale});
+  const LuggageTicketScreen({
+    super.key,
+    required this.sourceSale,
+    this.passengerNameHint = '',
+    this.passengerPhoneHint = '',
+  });
 
   /// The completed bus-fare sale the passenger just paid for.
   final Sale sourceSale;
+
+  /// The passenger name as the conductor typed it on the bus-fare ticket,
+  /// captured before the sale was written.
+  ///
+  /// The saved [sourceSale] is the durable copy, but a device running offline
+  /// (or one whose sync has not yet pushed the sale) has no server copy to
+  /// re-read the name from, and a walk-in bus fare carries a placeholder rather
+  /// than a real name. This hint lets the operator's real, already-typed name
+  /// carry straight over instead of forcing a retype. Empty when the passenger
+  /// answered "No" to the luggage prompt, or when the name was left blank /
+  /// declared as a walk-in, in which case the field falls back to its previous
+  /// behaviour.
+  final String passengerNameHint;
+
+  /// The passenger phone number as typed on the bus-fare ticket, cached on the
+  /// same terms as [passengerNameHint] so the contact number is never retyped.
+  /// Empty when the operator answered "No", in which case the phone falls back
+  /// to whatever the saved sale carries.
+  final String passengerPhoneHint;
 
   @override
   State<LuggageTicketScreen> createState() => _LuggageTicketScreenState();
@@ -75,10 +99,25 @@ class _LuggageTicketScreenState extends State<LuggageTicketScreen> {
   @override
   void initState() {
     super.initState();
-    _nameCtrl.text = _isPlaceholderName(widget.sourceSale.customerName)
-        ? ''
-        : widget.sourceSale.customerName;
-    _phoneCtrl.text = widget.sourceSale.customerMobile;
+    // Precedence for the passenger name, best source first:
+    //   1. The hint the conductor typed on the bus-fare ticket. Survives
+    //      offline, and is a real name even when the sale stored a walk-in
+    //      placeholder.
+    //   2. The name already on the bus-fare sale, unless that is a walk-in
+    //      placeholder (which must not be copied onto a luggage ticket).
+    //   3. Blank - the operator types the real name.
+    final hint = widget.passengerNameHint.trim();
+    if (hint.isNotEmpty && !_isPlaceholderName(hint)) {
+      _nameCtrl.text = hint;
+    } else {
+      _nameCtrl.text = _isPlaceholderName(widget.sourceSale.customerName)
+          ? ''
+          : widget.sourceSale.customerName;
+    }
+    // Phone has no placeholder concept, so the hint simply wins when present.
+    final phoneHint = widget.passengerPhoneHint.trim();
+    _phoneCtrl.text =
+        phoneHint.isNotEmpty ? phoneHint : widget.sourceSale.customerMobile;
     _load();
   }
 
@@ -155,15 +194,23 @@ class _LuggageTicketScreenState extends State<LuggageTicketScreen> {
   Future<({Sale? sale, String? warning})> _hydrateSourceOrWarning() async {
     final s = widget.sourceSale;
     if (s.txId.isEmpty || s.id == null) return (sale: s, warning: null);
+
+    // Only the network read is guarded. A local database failure was previously
+    // caught by the same blanket catch and misreported as "server unreachable",
+    // which sent operators looking for a network fault that never existed.
+    Map<String, dynamic> t;
     try {
-      final t = await TransitApi.fetchTicket(s.txId);
-      if (t.isEmpty) {
-        return (
-          sale: s,
-          warning:
-              'No server copy of the linked ticket yet — details may be incomplete.',
-        );
-      }
+      t = await TransitApi.fetchTicket(s.txId);
+    } catch (e) {
+      debugPrint('Luggage source hydration skipped (offline?): $e');
+      return (sale: s, warning: _offlineWarning(s));
+    }
+
+    if (t.isEmpty) {
+      return (sale: s, warning: _offlineWarning(s));
+    }
+
+    try {
       await AppDb.hydrateSale(
         s.id!,
         customerName:
@@ -187,13 +234,25 @@ class _LuggageTicketScreenState extends State<LuggageTicketScreen> {
             (t['paymentMethod'] ?? t['payment_method'] ?? '').toString(),
       );
       return (sale: await AppDb.getSaleById(s.id!) ?? s, warning: null);
-    } catch (_) {
-      return (
-        sale: s,
-        warning:
-            'Server unreachable — using local data for this luggage ticket.',
-      );
+    } catch (e) {
+      // Persisting the enriched copy is a best-effort enhancement; the local
+      // sale still carries everything the ticket needs to be issued, so this is
+      // logged rather than surfaced as a warning.
+      debugPrint('Luggage source enrichment not persisted: $e');
+      return (sale: s, warning: null);
     }
+  }
+
+  /// Offline is a normal operating mode for this app, so it is only worth
+  /// telling the operator about when the local copy is actually missing the
+  /// trip details this screen exists to inherit. Silently using local data is
+  /// correct behaviour, not an error.
+  String? _offlineWarning(Sale s) {
+    final hasTripContext = s.tripNo.trim().isNotEmpty &&
+        (s.busReg.trim().isNotEmpty || s.driver.trim().isNotEmpty);
+    return hasTripContext
+        ? null
+        : 'Offline — trip details on this luggage ticket may be incomplete.';
   }
 
   void _snack(String msg) {
@@ -219,7 +278,7 @@ class _LuggageTicketScreenState extends State<LuggageTicketScreen> {
     try {
       final src = _src;
       final sale = Sale(
-        receiptNo: await AppDb.nextReceiptNo(),
+        receiptNo: await AppDb.nextReceiptNo(busReg: src.busReg),
         ticketType: 'luggage',
         items: [
           SaleItem(name: desc, price: price, qty: 1, total: price),
@@ -429,10 +488,20 @@ class _LuggageTicketScreenState extends State<LuggageTicketScreen> {
             style: const TextStyle(color: Color(0xFF64748B)),
           ),
           const SizedBox(height: 16),
+          // Matches the bus-fare ticket's handling of the same field: the same
+          // all-caps input, and no extra length cap. The concise label is what
+          // keeps the row from crowding the value on a narrow terminal, and a
+          // hard cap here would have silently dropped the tail of a name the
+          // conductor just typed and could already see in full on the bus-fare
+          // sheet. The printed name is clipped separately in receipt.dart.
           TextField(
             controller: _nameCtrl,
+            textCapitalization: TextCapitalization.characters,
             decoration: const InputDecoration(
-              labelText: 'Passenger name',
+              // Concise label, matching the printed "Passenger" wording. The
+              // longer "Passenger name" left too little room for the value.
+              labelText: 'Passenger',
+              hintText: 'Full name',
               isDense: true,
               border: OutlineInputBorder(),
             ),

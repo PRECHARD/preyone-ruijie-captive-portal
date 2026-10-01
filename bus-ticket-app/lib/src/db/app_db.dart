@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:math';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart';
 
@@ -25,12 +26,29 @@ class AppDb {
     await db;
   }
 
-  static Future<Database> _open() async {
+  /// Test-only seam. [dbPath] lets a suite create a genuinely fresh database per
+  /// test; production always opens the single shared `bus_ticket.db`.
+  @visibleForTesting
+  static Future<Database> initForTest({String? dbPath}) async {
     final dir = await getDatabasesPath();
-    final path = p.join(dir, 'bus_ticket.db');
+    await closeForTest();
+    _db = await _open(pathOverride: dbPath == null ? null : p.join(dir, dbPath));
+    return _db!;
+  }
+
+  /// Releases the open handle so a test can delete or replace the file.
+  @visibleForTesting
+  static Future<void> closeForTest() async {
+    await _db?.close();
+    _db = null;
+  }
+
+  static Future<Database> _open({String? pathOverride}) async {
+    final dir = await getDatabasesPath();
+    final path = pathOverride ?? p.join(dir, 'bus_ticket.db');
     final database = await openDatabase(
       path,
-      version: 16,
+      version: 17,
       onCreate: (d, v) async {
         await d.execute('''
           CREATE TABLE fares (
@@ -157,7 +175,8 @@ class AppDb {
             status TEXT NOT NULL DEFAULT 'OPEN',
             started_at TEXT NOT NULL DEFAULT '',
             closed_at TEXT NOT NULL DEFAULT '',
-            synced INTEGER NOT NULL DEFAULT 0
+            synced INTEGER NOT NULL DEFAULT 0,
+            close_pushed INTEGER NOT NULL DEFAULT 1
           )
         ''');
         await d.execute('''
@@ -301,7 +320,8 @@ class AppDb {
               status TEXT NOT NULL DEFAULT 'OPEN',
               started_at TEXT NOT NULL DEFAULT '',
               closed_at TEXT NOT NULL DEFAULT '',
-              synced INTEGER NOT NULL DEFAULT 0
+              synced INTEGER NOT NULL DEFAULT 0,
+              close_pushed INTEGER NOT NULL DEFAULT 1
             )
           ''');
           await d.execute('''
@@ -347,6 +367,10 @@ class AppDb {
         }
         if (oldVersion < 16) {
           await _createRouteTemplateSchema(d);
+        }
+        if (oldVersion < 17) {
+          await d.execute(
+              "ALTER TABLE driver_shifts ADD COLUMN close_pushed INTEGER NOT NULL DEFAULT 1");
         }
       },
     );
@@ -548,6 +572,73 @@ class AppDb {
   static Future<List<RouteTemplate>> getActiveRouteTemplates() async {
     final all = await getRouteTemplates();
     return all.where((t) => t.active && t.isUsable).toList();
+  }
+
+  /// Mirror the company's authoritative template set from the server.
+  ///
+  /// Wholesale replace, not a merge: a template deleted on the server must
+  /// disappear here too, or a terminal keeps offering a route the operator has
+  /// withdrawn. Done in one transaction so a conductor can never observe a
+  /// half-applied set (stages updated but fares not) mid-sale.
+  ///
+  /// Ids are preserved from the server so the mirror is stable across syncs.
+  /// Local edits are *not* pushed — see `SyncService`, which seeds once and then
+  /// treats the server as the source of truth.
+  static Future<void> replaceRouteTemplates(List<RouteTemplate> fromServer) async {
+    final d = await db;
+    await d.transaction((txn) async {
+      final keep = <String>[];
+      for (final t in fromServer) {
+        // A server row without an id is unusable as a mirror key; skip it
+        // rather than let a NULL/empty primary key collide.
+        if (t.id.isEmpty) continue;
+        keep.add(t.id);
+        final row = t.toRow();
+        final changed = await txn.update('route_templates', row,
+            where: 'id = ?', whereArgs: [t.id]);
+        if (changed == 0) {
+          await txn.insert('route_templates', row);
+        }
+        await txn.delete('route_template_stages',
+            where: 'template_id = ?', whereArgs: [t.id]);
+        await txn.delete('route_template_fares',
+            where: 'template_id = ?', whereArgs: [t.id]);
+        for (final s in t.stages) {
+          await txn.insert('route_template_stages', {
+            'id': s.id.isEmpty ? uuidV4() : s.id,
+            'template_id': t.id,
+            'seq': s.seq > 0 ? s.seq : 1,
+            'name': s.name.trim(),
+          });
+        }
+        for (final f in t.fares) {
+          if (f.fromSeq == f.toSeq) continue;
+          await txn.insert('route_template_fares', {
+            'id': f.id.isEmpty ? uuidV4() : f.id,
+            'template_id': t.id,
+            'from_seq': f.fromSeq,
+            'to_seq': f.toSeq,
+            'price_cents': f.priceCents,
+          });
+        }
+      }
+      // Drop anything the server no longer lists. Children go with the parent
+      // so no orphan stages/matrix rows are left behind.
+      final marks = List.filled(keep.length, '?').join(',');
+      final stale = keep.isEmpty
+          ? await txn.query('route_templates')
+          : await txn.query('route_templates',
+              where: 'id NOT IN ($marks)', whereArgs: keep);
+      for (final row in stale) {
+        final id = (row['id'] as String?) ?? '';
+        if (id.isEmpty) continue;
+        await txn.delete('route_template_fares',
+            where: 'template_id = ?', whereArgs: [id]);
+        await txn.delete('route_template_stages',
+            where: 'template_id = ?', whereArgs: [id]);
+        await txn.delete('route_templates', where: 'id = ?', whereArgs: [id]);
+      }
+    });
   }
 
   static Future<List<Fare>> getFares({bool onlyEnabled = true}) async {
@@ -1013,14 +1104,114 @@ class AppDb {
         conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
-  static Future<String> nextReceiptNo() async {
-    final prefix = (await getSetting('receipt_prefix', 'AGJ'))?.trim();
-    final count =
+  /// Extracts the leading alphabetic plate letters of a vehicle registration.
+  ///
+  /// Zimbabwean registrations read `ABC 1234` / `ABC-1234` / `1234 ABC`, so the
+  /// letters can lead or trail. Returns null when the registration carries no
+  /// usable letters (a plate like `1234567` has none).
+  static String? absLetters(String reg) {
+    final cleaned = reg.toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]'), '');
+    if (cleaned.isEmpty) return null;
+    final m = RegExp(r'^[A-Z]+').firstMatch(cleaned);
+    if (m != null) return m.group(0);
+    final t = RegExp(r'[A-Z]+').firstMatch(cleaned);
+    if (t != null) return t.group(0);
+    return null;
+  }
+
+  /// Issues a ticket number that is unique across the whole company, forever.
+  ///
+  /// Format: `<ABS PLATE LETTERS><device discriminator><counter>` — for example
+  /// `AGJ-7F2-0041`.
+  ///
+  /// Why each part is there:
+  ///   * **ABS plate letters first** (as the operation requires) so a ticket can
+  ///     be traced to a physical bus by eye, straight from the printout.
+  ///   * **device discriminator** — the counter is a per-device setting, so two
+  ///     buses would otherwise both mint `AGJ0001` and the numbers would collide.
+  ///     The discriminator is derived from the stable device UUID, so it does not
+  ///     change when the app is reinstalled, the operator changes, or the bus is
+  ///     swapped, and the same device keeps its own sequence for good.
+  ///   * **counter** — monotonic and persisted, never reused.
+  ///
+  /// The bus registration takes precedence over the admin-configured
+  /// `receipt_prefix`; the prefix remains the fallback so a ticket is still
+  /// numbered when no shift (and therefore no bus) is active.
+  static Future<String> nextReceiptNo({String? busReg}) async {
+    final plate = busReg == null ? null : absLetters(busReg);
+    final configured = (await getSetting('receipt_prefix', 'AGJ'))?.trim();
+    final prefix = (plate != null && plate.isNotEmpty)
+        ? plate
+        : (configured == null || configured.isEmpty
+            ? 'TKT'
+            : configured.toUpperCase());
+
+    final uuid = await SecureKeystore.instance.readDeviceUuid();
+    final tag = _deviceDiscriminator(uuid);
+
+    // Seed the counter past any ticket already issued by this device so a
+    // reinstall (counter back to 0) can never re-mint a number that this
+    // device has already handed out.
+    final highest = await _highestLocalSequence();
+    final stored =
         int.tryParse(await getSetting('receipt_counter', '0') ?? '0') ?? 0;
-    final next = count + 1;
+    final next = (stored > highest ? stored : highest) + 1;
     await setSetting('receipt_counter', '$next');
-    if (prefix == null || prefix.isEmpty) return '$next';
-    return '$prefix${next.toString().padLeft(4, '0')}';
+
+    return '$prefix-$tag-${next.toString().padLeft(4, '0')}';
+  }
+
+  /// Reduces a device UUID to a short, stable, upper-case tag.
+  ///
+  /// Three base-36 characters give 46656 possible tags, so an accidental
+  /// collision between two handsets in one company is negligible (and, unlike a
+  /// two-character tag, stays negligible as the fleet grows). Two characters
+  /// would only give 1296 — fine for four buses, but the production fleet has
+  /// already outgrown that, and a collision here means two different tickets
+  /// printed with the same number.
+  ///
+  /// The tag is derived from the device UUID only, so it survives reinstalls,
+  /// operator changes and bus swaps.
+  ///
+  /// The server rejects a duplicate `(company_id, client_receipt_no)` at sync
+  /// time via a unique index, which is what stops a collision from silently
+  /// becoming two entries in the books. Note the index applies to *tagged*
+  /// numbers only; the untagged `AGJ0001`-style numbers issued before this
+  /// feature existed are grandfathered and are never rejected.
+  /// Exposed for tests: the stable per-device tag used in ticket numbers.
+  @visibleForTesting
+  static String deviceDiscriminatorForTest(String uuid) =>
+      _deviceDiscriminator(uuid);
+
+  static String _deviceDiscriminator(String uuid) {
+    var h = 0x811c9dc5;
+    for (final c in uuid.toLowerCase().codeUnits) {
+      h ^= c;
+      h = (h * 0x01000193) & 0xFFFFFFFF;
+    }
+    return (h % 46656).toRadixString(36).toUpperCase().padLeft(3, '0');
+  }
+
+  /// Highest sequence this device has already issued, recovered from the local
+  /// ticket table. Used to stop a wiped counter from reissuing old numbers.
+  static Future<int> _highestLocalSequence() async {
+    try {
+      final d = await db;
+      final rows = await d.rawQuery(
+        "SELECT receipt_no FROM sales WHERE receipt_no LIKE ?",
+        ['%-%-%'],
+      );
+      var highest = 0;
+      for (final r in rows) {
+        final no = (r['receipt_no'] as String?) ?? '';
+        final tail = no.split('-').last;
+        final v = int.tryParse(tail);
+        if (v != null && v > highest) highest = v;
+      }
+      return highest;
+    } catch (_) {
+      return 0;
+    }
   }
 
   static Future<String> deviceId() async =>
@@ -1364,6 +1555,14 @@ class AppDb {
     return DriverShift.fromMap(rows.first);
   }
 
+  /// Closes the open shift and flags it as awaiting a close push.
+  ///
+  /// `close_pushed` is what makes end-of-shift reliable rather than best-effort:
+  /// previously an offline close was silently dropped and the server kept
+  /// showing the shift as OPEN, so admin saw a driver still on duty hours after
+  /// the conductor had gone home. `closed_at` is captured here as well, so the
+  /// close can be pushed verbatim later and the server records the real finish
+  /// time instead of whenever the handset happened to reconnect.
   static Future<void> closeActiveShift() async {
     final d = await db;
     await d.update(
@@ -1371,8 +1570,25 @@ class AppDb {
         {
           'status': 'CLOSED',
           'closed_at': DateTime.now().toIso8601String(),
+          'close_pushed': 0,
         },
         where: "status = 'OPEN'");
+  }
+
+  /// Closed shifts whose end has not yet reached the server, oldest first.
+  static Future<List<DriverShift>> getUnpushedClosedShifts() async {
+    final d = await db;
+    final rows = await d.query('driver_shifts',
+        where: "status = 'CLOSED' AND close_pushed = 0",
+        orderBy: 'closed_at ASC');
+    return rows.map(DriverShift.fromMap).toList();
+  }
+
+  static Future<void> markShiftClosePushed(String id) async {
+    if (id.isEmpty) return;
+    final d = await db;
+    await d.update('driver_shifts', {'close_pushed': 1},
+        where: 'id = ?', whereArgs: [id]);
   }
 
   static Future<void> markShiftSynced(String id) async {

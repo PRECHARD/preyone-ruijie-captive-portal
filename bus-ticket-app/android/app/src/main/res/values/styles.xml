@@ -13,6 +13,21 @@
 
          This Theme is only used starting with V2 of Flutter's Android embedding. -->
     <style name="NormalTheme" parent="@android:style/Theme.Light.NoTitleBar">
-        <item name="android:windowBackground">?android:colorBackground</item>
+        <!-- Explicit light surface instead of ?android:colorBackground. The
+             system resolves that attribute to BLACK on a handset in dark mode,
+             and because the app runs edge-to-edge the window background is what
+             shows through the transparent status and navigation bars. That is
+             why the bars appeared black: the app colour never reached them. -->
+        <item name="android:windowBackground">@color/app_surface</item>
+        <!-- Draw the system bar areas ourselves and keep them transparent so
+             the app surface shows through, with dark icons for the light
+             surface. Flutter re-applies the same style at runtime. -->
+        <item name="android:windowDrawsSystemBarBackgrounds">true</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
+        <item name="android:enforceNavigationBarContrast">false</item>
+        <item name="android:enforceStatusBarContrast">false</item>
     </style>
 </resources>

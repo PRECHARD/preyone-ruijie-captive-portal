@@ -89,12 +89,17 @@ class RouteTemplate {
 
   /// Full round-trip through JSON — used by the offline catalog mirror so a
   /// template survives a reinstall-free DB copy without a second query.
+  ///
+  /// [createdAt] is carried so a server→device mirror does not rewrite it on
+  /// every sync (which would reshuffle the `created_at ASC` display order and
+  /// lose the server's authoritative ordering).
   Map<String, dynamic> toJson() => {
         'id': id,
         'name': name,
         'code': code,
         'description': description,
         'active': active,
+        'createdAt': (createdAt ?? DateTime.now()).toUtc().toIso8601String(),
         'stages': stages.map((s) => s.toJson()).toList(),
         'fares': fares.map((f) => f.toJson()).toList(),
       };
@@ -107,6 +112,7 @@ class RouteTemplate {
         code: str(j['code']),
         description: str(j['description']),
         active: j['active'] != false,
+        createdAt: DateTime.tryParse(str(j['createdAt']))?.toLocal(),
         stages: (j['stages'] as List? ?? const [])
             .whereType<Map>()
             .map((e) => RouteStage.fromJson(Map<String, dynamic>.from(e)))

@@ -54,6 +54,7 @@ class _LoginScreenState extends State<LoginScreen> {
       companyId: account.companyId,
       companySlug: account.companySlug,
       offlineLease: account.offlineLease,
+      permissions: account.permissions,
     );
     await AppDb.setSetting('logged_in', '1');
     await AppDb.setSetting('logged_username', account.username);

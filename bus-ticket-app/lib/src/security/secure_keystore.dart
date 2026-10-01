@@ -21,6 +21,7 @@ class SecureKeystore {
   static const _kFullName = 'preyone_full_name';
   static const _kRole = 'preyone_role';
   static const _kCompanyId = 'preyone_company_id';
+  static const _kPermissions = 'preyone_permissions';
   static const _kOfflineLease = 'preyone_offline_lease';
   static const _kServerUrl = 'preyone_server_url';
   static const _kCompanySlug = 'preyone_company_slug';
@@ -146,6 +147,7 @@ class SecureKeystore {
     await _storage.delete(key: _kCompanyId);
     await _storage.delete(key: _kOfflineLease);
     await _storage.delete(key: _kCompanySlug);
+    await _storage.delete(key: _kPermissions);
   }
 
   Future<void> saveAuthSession({
@@ -156,6 +158,7 @@ class SecureKeystore {
     required String companyId,
     required String companySlug,
     String? offlineLease,
+    List<String>? permissions,
   }) async {
     await _storage.write(key: _kUserId, value: userId);
     await _storage.write(key: _kUsername, value: username);
@@ -166,6 +169,13 @@ class SecureKeystore {
     if (offlineLease != null) {
       await _storage.write(key: _kOfflineLease, value: offlineLease);
     }
+    // Only overwrite when the server actually sent a list. A session restored
+    // from an older server (or a login response with no permissions field) must
+    // leave any previously stored list alone so a stale-but-granted capability
+    // is not silently dropped mid-shift.
+    if (permissions != null) {
+      await writePermissions(permissions);
+    }
   }
 
   Future<String?> readUserId() => _storage.read(key: _kUserId);
@@ -175,6 +185,38 @@ class SecureKeystore {
   Future<String?> readCompanyId() => _storage.read(key: _kCompanyId);
   Future<String?> readCompanySlug() => _storage.read(key: _kCompanySlug);
   Future<String?> readOfflineLease() => _storage.read(key: _kOfflineLease);
+
+  /// Effective permission codes from the server (role defaults + per-user +
+  /// company grants). Comma-separated in secure storage; refreshed on every
+  /// heartbeat so a grant or revocation lands without a re-login.
+  Future<void> writePermissions(List<String> permissions) async {
+    final cleaned =
+        permissions.map((p) => p.trim()).where((p) => p.isNotEmpty).toSet().toList()
+          ..sort();
+    // An empty list is a real answer ("this account holds nothing") and must stay
+    // distinguishable from "the server never sent one". Deleting the key here
+    // would make readPermissions() return null, and every caller would fall back
+    // to role defaults — silently re-granting capabilities the server just
+    // revoked. Persist the empty set as an empty value instead.
+    if (cleaned.isEmpty) {
+      await _storage.write(key: _kPermissions, value: '');
+      return;
+    }
+    await _storage.write(key: _kPermissions, value: cleaned.join(','));
+  }
+
+  /// Null when the server has never sent a list — callers must fall back to
+  /// role-based checks rather than treating it as "no permissions". An empty
+  /// list means the server said "no permissions" and must be honoured as such.
+  Future<List<String>?> readPermissions() async {
+    final raw = await _storage.read(key: _kPermissions);
+    if (raw == null) return null;
+    return raw
+        .split(',')
+        .map((p) => p.trim())
+        .where((p) => p.isNotEmpty)
+        .toList();
+  }
 
   Future<void> saveOfflineLease(String expiry) =>
       _storage.write(key: _kOfflineLease, value: expiry);

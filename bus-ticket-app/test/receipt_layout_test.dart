@@ -20,6 +20,8 @@ TicketData _ticket({
   String website = '',
   String companyAddress = '',
   String customerCare = '',
+  String customerName = '',
+  String customerMobile = '',
   String note = kTicketValidityNote,
   List<SaleItem> items = const [],
 }) {
@@ -46,6 +48,8 @@ TicketData _ticket({
     paymentMethod: paymentMethod,
     tendered: tendered,
     conductorPhone: conductorPhone,
+    customerName: customerName,
+    customerMobile: customerMobile,
     note: note,
   );
 }
@@ -478,6 +482,59 @@ void main() {
       expect(conductorPhoneIdx, greaterThan(conductorIdx));
       expect(manifestIdx, greaterThan(conductorPhoneIdx),
           reason: 'crew prints BEFORE the TRIP MANIFEST title');
+    });
+  });
+
+  group('passenger row labelling', () {
+    test('the label is "Passenger", not "Passenger Name"', () {
+      final lines = buildTicketLines(
+          _ticket(customerName: 'Tapiwa Moyo', customerMobile: '0773334444'));
+      final texts = lines.map((l) => l.text).toList();
+
+      expect(texts.any((t) => t.trimLeft().startsWith('Passenger:')), isTrue,
+          reason: 'the passenger row must use the concise label');
+      expect(texts.any((t) => t.contains('Passenger Name:')), isFalse,
+          reason: 'the long label must be gone');
+      // The mobile row is a separate label and is deliberately left alone.
+      expect(
+          texts.any((t) => t.trimLeft().startsWith('Passenger Mobile:')),
+          isTrue);
+    });
+
+    test('the shorter label buys room so long names print unclipped', () {
+      // 'Passenger:' is 10 characters against formatRow's 32-column budget, so
+      // 21 remain for the value. A 21-character name must therefore survive
+      // whole; under the old 15-character 'Passenger Name:' label this name was
+      // cut mid-word.
+      const longName = 'TSVANGIRAI MASANGWANA'; // exactly 21 characters
+      expect(longName.length, 21);
+
+      final lines =
+          buildTicketLines(_ticket(customerName: longName, customerMobile: ''));
+      final row = lines
+          .map((l) => l.text)
+          .firstWhere((t) => t.trimLeft().startsWith('Passenger:'));
+
+      expect(row, contains(longName),
+          reason: 'a 21-character name must print in full');
+      expect(row.trimRight().length, lessThanOrEqualTo(32),
+          reason: 'the row must still fit the 32-column ticket');
+      expect(row.trimRight().length, 32,
+          reason: 'and should use the space the shorter label freed');
+    });
+
+    test('a name longer than the budget is clipped, never wrapped', () {
+      const absurd = 'CHRISTOPHER TATENDA MUVIRIMI JR';
+      final lines =
+          buildTicketLines(_ticket(customerName: absurd, customerMobile: ''));
+      final row = lines
+          .map((l) => l.text)
+          .firstWhere((t) => t.trimLeft().startsWith('Passenger:'));
+
+      expect(row.trimRight().length, lessThanOrEqualTo(32));
+      expect(row, contains(absurd.substring(0, 21)),
+          reason: 'the overflow is cut at the budget, not wrapped to a 2nd row');
+      expect(row.contains(absurd), isFalse);
     });
   });
 

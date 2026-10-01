@@ -11,12 +11,32 @@ import '../uuid.dart';
 /// A selectable staff member for the "Assigned Driver" dropdown. Populated
 /// from the live admin-managed roster (`/staff?role=DRIVER`) or, when offline,
 /// from the cached local drivers table.
+///
+/// Value equality is essential here, not cosmetic. The dropdown compares
+/// `initialValue` against `items` and asserts that EXACTLY ONE item matches;
+/// without `==` it compares by identity, and this screen builds its option list
+/// twice (once in initState, again after the roster sync) producing fresh
+/// objects each time. The field would then hold a first-load object that no
+/// longer exists in `items`, the assert fires during build, and Flutter paints
+/// the whole screen with the red ErrorWidget. Matching on id+name means a
+/// refreshed roster is correctly treated as the same selection.
+@immutable
 class _DriverOption {
   const _DriverOption({required this.id, required this.name, this.phone = ''});
 
   final String id;
   final String name;
   final String phone;
+
+  @override
+  bool operator ==(Object other) =>
+      other is _DriverOption && other.id == id && other.name == name;
+
+  @override
+  int get hashCode => Object.hash(id, name);
+
+  @override
+  String toString() => '_DriverOption($id, $name)';
 }
 
 /// Starts (or closes) a driver shift locally: the logged-in operator is
@@ -185,17 +205,22 @@ class _StartShiftScreenState extends State<StartShiftScreen> {
     ];
   }
 
-  /// Pre-selects the operator themselves when they hold the DRIVER role,
-  /// otherwise the first roster driver.
+  /// Pre-selects the operator themselves when they hold the DRIVER role.
+  ///
+  /// Deliberately does NOT fall back to `options.first`. Silently pre-selecting
+  /// an arbitrary roster driver is dangerous on a conductor terminal: the driver
+  /// printed on the ticket and the one legally on the bus can differ, and nobody
+  /// notices until an accident is traced to the wrong name. When the operator is
+  /// not themselves a driver we leave the field empty so the assignment is a
+  /// deliberate act. `_startShift` already refuses to proceed without one.
   _DriverOption? _defaultDriver(String operator, List<_DriverOption> options) {
     if (options.isEmpty) return null;
     final op = operator.trim().toLowerCase();
-    if (op.isNotEmpty) {
-      for (final o in options) {
-        if (o.name.trim().toLowerCase() == op) return o;
-      }
+    if (op.isEmpty) return null;
+    for (final o in options) {
+      if (o.name.trim().toLowerCase() == op) return o;
     }
-    return options.first;
+    return null;
   }
 
   Future<void> _startShift() async {
@@ -555,7 +580,10 @@ class _StartShiftScreenState extends State<StartShiftScreen> {
                   )
                 else
                   DropdownButtonFormField<Vehicle>(
-                    key: ObjectKey(_selectedVehicle),
+                    // Key on the registration rather than the instance: the
+                    // roster refresh swaps in new Vehicle objects, and the
+                    // dropdown assert requires value equality to hold.
+                    key: ValueKey<String>(_selectedVehicle?.registration ?? ''),
                     initialValue: _selectedVehicle,
                     isExpanded: true,
                     decoration: const InputDecoration(

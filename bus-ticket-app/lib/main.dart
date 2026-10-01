@@ -192,6 +192,48 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   _NavItem _current = _NavItem.dashboard;
   String _role = '';
 
+  /// Android hardware back, per the operation's rule:
+  ///   * not on the dashboard  -> return to the dashboard (never exit from deep
+  ///     inside a screen; a conductor selling tickets should not lose the app by
+  ///     a stray swipe)
+  ///   * on the dashboard, once -> tell the user, arm the exit
+  ///   * on the dashboard, twice within [_exitArmWindow] -> leave the app
+  ///
+  /// The window is short so an accidental double press still exits, but a
+  /// deliberate second press after reading the message does.
+  static const _exitArmWindow = Duration(seconds: 2);
+  DateTime? _exitArmedAt;
+
+  /// Handles the Android hardware back press at the shell level.
+  ///
+  /// `onPopInvokedWithResult` is a void callback, so this cannot report "let the
+  /// platform close the app" by returning a value — `canPop` is hard-wired to
+  /// false so the navigator never pops the tab away. The exit therefore has to be
+  /// requested explicitly with [SystemNavigator.pop].
+  void _handleBack() {
+    final now = DateTime.now();
+    final armedAt = _exitArmedAt;
+    if (_current != _NavItem.dashboard) {
+      _exitArmedAt = null;
+      _switchTo(_NavItem.dashboard);
+      return;
+    }
+    if (armedAt != null && now.difference(armedAt) < _exitArmWindow) {
+      _exitArmedAt = null;
+      SystemNavigator.pop();
+      return;
+    }
+    _exitArmedAt = now;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        const SnackBar(
+          content: Text('Press back again to close Preyone.'),
+          duration: _exitArmWindow,
+        ),
+      );
+  }
+
   final Connectivity _connectivity = Connectivity();
   StreamSubscription<List<ConnectivityResult>>? _connSub;
   bool _wasOnline = false;
@@ -398,8 +440,16 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      drawer: Drawer(
+    return PopScope(
+      // The shell is the app's root once signed in, so it must intercept the
+      // back gesture itself instead of letting the navigator pop the tab away.
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        _handleBack();
+      },
+      child: Scaffold(
+        drawer: Drawer(
         child: SafeArea(
           child: Column(
             children: [
@@ -526,9 +576,10 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
           const SizedBox(width: 8),
         ],
       ),
-      body: EmeraldTabEntrance(
-        tabKey: _current,
-        child: _body(),
+        body: EmeraldTabEntrance(
+          tabKey: _current,
+          child: _body(),
+        ),
       ),
     );
   }

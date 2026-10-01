@@ -112,9 +112,9 @@ String formatZimPhone(String raw) {
   v = v.replaceAll(RegExp(r'[^0-9+]'), '');
   if (v.startsWith('+363')) {
     v = '+263${v.substring(4)}';
-  } else if (v.startsWith('0363') && v.length >= 12) {
+  } else if (v.startsWith('0363')) {
     v = '+263${v.substring(4)}';
-  } else if (v.startsWith('363') && v.length >= 11) {
+  } else if (v.startsWith('363')) {
     v = '+263${v.substring(3)}';
   }
   if (v.startsWith('07') || v.startsWith('08')) {

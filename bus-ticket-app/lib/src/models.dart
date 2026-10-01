@@ -749,6 +749,20 @@ class Vehicle {
   final String registration;
   final bool active;
 
+  // Value equality keeps DropdownButtonFormField<Vehicle> stable across a
+  // roster refresh: the dropdown asserts that exactly one item equals the
+  // current value, and the refresh hands us new Vehicle instances each time.
+  // A vehicle is identified by its registration, which is unique per company.
+  @override
+  bool operator ==(Object other) =>
+      other is Vehicle && other.registration == registration;
+
+  @override
+  int get hashCode => registration.hashCode;
+
+  @override
+  String toString() => 'Vehicle($registration)';
+
   Map<String, Object?> toMap() => {
         'id': id,
         'registration': registration,

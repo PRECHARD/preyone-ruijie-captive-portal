@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import '../db/app_db.dart';
 import '../format.dart';
 import '../models/route_template.dart';
+import '../services/sync_service.dart';
+import '../services/transit_api.dart';
 import '../widgets/emerald_ui.dart';
 
 /// Admin editor for the "master route templates": the stage list plus the
@@ -69,7 +71,19 @@ class _RouteTemplatesScreenState extends State<RouteTemplatesScreen> {
       ),
     );
     if (ok != true) return;
-    await AppDb.deleteRouteTemplate(t.id);
+    // Delete centrally first, then locally: a local delete the server rejected
+    // would silently return on the next pull with no explanation. Offline, fall
+    // back to the local delete so the operator's intent is still honoured.
+    try {
+      await SyncService.instance.deleteRouteTemplateFromServer(t.id);
+    } on TransitApiException catch (e) {
+      await AppDb.deleteRouteTemplate(t.id);
+      _snack('Deleted on this device only — ${e.message}');
+      await _load();
+      return;
+    } catch (_) {
+      await AppDb.deleteRouteTemplate(t.id);
+    }
     await _load();
     _snack('Template deleted.');
   }
@@ -349,7 +363,7 @@ class _RouteTemplateEditorState extends State<_RouteTemplateEditor> {
         ));
       }
     }
-    await AppDb.saveRouteTemplate(RouteTemplate(
+    final draft = RouteTemplate(
       id: existing?.id ?? '',
       name: name,
       code: _codeCtrl.text.trim(),
@@ -358,7 +372,26 @@ class _RouteTemplateEditorState extends State<_RouteTemplateEditor> {
       createdAt: existing?.createdAt,
       stages: _stages,
       fares: fares,
-    ));
+    );
+
+    // The company owns the master set, so a successful save goes to the server
+    // and the device mirrors whatever the server returns (authoritative id and
+    // timestamps). Falling back to a local-only save keeps this usable when the
+    // terminal is offline; the next catalog sync will reconcile it.
+    try {
+      await SyncService.instance.saveRouteTemplateToServer(draft);
+    } on TransitApiException catch (e) {
+      await AppDb.saveRouteTemplate(draft);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(
+          'Saved on this device only — could not reach the company (${e.message}). '
+          'It will sync when you are back online.',
+        ),
+      ));
+    } catch (_) {
+      await AppDb.saveRouteTemplate(draft);
+    }
     if (!mounted) return;
     Navigator.of(context).pop(true);
   }

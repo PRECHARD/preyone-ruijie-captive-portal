@@ -1,10 +1,12 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:http/http.dart' as http;
 
 import '../config/env.dart';
 import '../db/app_db.dart';
 import '../models.dart';
+import '../models/route_template.dart';
 import '../receipt.dart';
 import '../security/secure_keystore.dart';
 import '../version.dart';
@@ -35,6 +37,7 @@ class TransitAccount {
     this.deviceDisabled = false,
     this.offlineLease,
     this.minAppVersion = '',
+    this.permissions,
   });
 
   final String userId;
@@ -50,6 +53,10 @@ class TransitAccount {
   final bool deviceDisabled;
   final String? offlineLease;
   final String minAppVersion;
+
+  /// Effective permission codes from the server. Null when the server did not
+  /// send the field (older backend) — callers must fall back to role checks.
+  final List<String>? permissions;
 }
 
 class TransitApi {
@@ -58,6 +65,20 @@ class TransitApi {
 
   static String? _baseUrl;
   static String? _deviceModel;
+
+  /// Test seam. Shift-close replay is the one path whose PAYLOAD is business
+  /// critical: the server can only record the crew of a shift that began and
+  /// ended offline if the handset sends those details, and nothing on the
+  /// server can recover them. Without an injectable client the payload cannot
+  /// be asserted at all, because every call is a real network request.
+  static http.Client? _clientOverride;
+
+  /// Installs a client for tests. Pass null to restore the real one.
+  @visibleForTesting
+  static void debugSetClient(http.Client? client) => _clientOverride = client;
+
+  static http.Client get _client =>
+      _clientOverride ?? (http.Client());
 
   /// The production endpoint is hardcoded — field staff never configure a
   /// server URL. Legacy keystore/db overrides are ignored so every device
@@ -141,6 +162,7 @@ class TransitApi {
         deviceDisabled: body['deviceDisabled'] == true,
         offlineLease: (body['licenseExpiresAt'] ?? '').toString(),
         minAppVersion: (body['minAppVersion'] ?? '').toString(),
+        permissions: _permissionList(user['permissions']),
       );
     }
 
@@ -149,6 +171,14 @@ class TransitApi {
       code: (body['code'] ?? '').toString(),
       statusCode: resp.statusCode,
     );
+  }
+
+  /// Extract a permission list from a response field, preserving the difference
+  /// between "server sent an empty list" (no capabilities) and "server did not
+  /// send the field" (unknown — fall back to role checks).
+  static List<String>? _permissionList(Object? raw) {
+    if (raw is! List) return null;
+    return raw.map((e) => e.toString()).where((e) => e.isNotEmpty).toList();
   }
 
   /// Registers this device to the logged-in account (one-user-one-device).
@@ -182,6 +212,9 @@ class TransitApi {
         offlineLease: (body['licenseExpiresAt'] ?? '').toString(),
         minAppVersion:
             (body['minAppVersion'] ?? account.minAppVersion).toString(),
+        permissions: _permissionList(
+                (body['user'] as Map?)?['permissions'] ?? body['permissions']) ??
+            account.permissions,
       );
     }
     throw TransitApiException(
@@ -238,6 +271,13 @@ class TransitApi {
         .timeout(const Duration(seconds: 20));
     final body = _jsonBody(resp);
     if (resp.statusCode >= 200 && resp.statusCode < 300) {
+      // The heartbeat re-delivers the effective permission list, so a grant or
+      // revocation made while this terminal is in the field takes effect without
+      // a re-login. Absent on an older server → leave whatever we stored.
+      final permissions = _permissionList(body['permissions']);
+      if (permissions != null) {
+        await SecureKeystore.instance.writePermissions(permissions);
+      }
       return body;
     }
     if (resp.statusCode == 401 || resp.statusCode == 403) {
@@ -494,14 +534,43 @@ class TransitApi {
     );
   }
 
-  static Future<Map<String, dynamic>> closeShift(String shiftId) async {
+  /// Ends a shift. [closedAt] is the moment the conductor actually finished;
+  /// it is sent so an offline close is recorded on the server with the real
+  /// time rather than the time the handset reconnected.
+  ///
+  /// The crew details travel with the close because a shift that began and ended
+  /// while the handset was offline never reached the server at all; the server
+  /// upserts it as already closed rather than rejecting an unknown shift.
+  static Future<Map<String, dynamic>> closeShift(
+    String shiftId, {
+    String? closedAt,
+    String? driverId,
+    String? driverName,
+    String? driverPhone,
+    String? conductorName,
+    String? conductorPhone,
+    String? vehicleReg,
+  }) async {
     final base = await baseUrl();
     final token = await _deviceToken();
-    final resp = await http
+    final payload = <String, Object?>{'shiftId': shiftId};
+    void put(String key, String? value) {
+      if (value != null && value.trim().isNotEmpty) payload[key] = value.trim();
+    }
+
+    put('closedAt', closedAt);
+    put('driverId', driverId);
+    put('driverName', driverName);
+    put('driverPhone', driverPhone);
+    put('conductorName', conductorName);
+    put('conductorPhone', conductorPhone);
+    put('vehicleReg', vehicleReg);
+
+    final resp = await _client
         .post(
           Uri.parse('$base/api/transit/shifts/close'),
           headers: await _headers(token: token),
-          body: jsonEncode({'shiftId': shiftId}),
+          body: jsonEncode(payload),
         )
         .timeout(const Duration(seconds: 20));
     final body = _jsonBody(resp);
@@ -614,6 +683,126 @@ class TransitApi {
     }
     throw TransitApiException(
       (body['error'] ?? 'Could not update promotion').toString(),
+      statusCode: resp.statusCode,
+    );
+  }
+
+  // ── Master route templates ──────────────────────────────────────────
+  // Readable by every device (all conductors need them to open an on-the-go
+  // run offline). Writes need `route.templates.manage`, which the company may
+  // be granted even when its owner is field staff.
+
+  static Future<List<RouteTemplate>> fetchRouteTemplates() async {
+    final base = await baseUrl();
+    final token = await _deviceToken();
+    final headers = await _headers(token: token);
+    // Same reasoning as fetchStaff: a stale HTTP cache would silently serve an
+    // old fare matrix to a terminal that is about to sell against it.
+    headers['Cache-Control'] = 'no-cache';
+    final resp = await http
+        .get(Uri.parse('$base/api/transit/route-templates'), headers: headers)
+        .timeout(const Duration(seconds: 20));
+    final body = _jsonBody(resp);
+    if (resp.statusCode >= 200 && resp.statusCode < 300) {
+      return (body['routeTemplates'] as List? ?? const [])
+          .whereType<Map>()
+          .map((e) => RouteTemplate.fromJson(Map<String, dynamic>.from(e)))
+          .toList();
+    }
+    if (resp.statusCode == 401 || resp.statusCode == 403) {
+      throw TransitApiException(
+        (body['error'] ?? 'Access denied').toString(),
+        code: (body['code'] ?? 'FORBIDDEN').toString(),
+        statusCode: resp.statusCode,
+      );
+    }
+    throw TransitApiException(
+      (body['error'] ?? 'Could not load route templates').toString(),
+      statusCode: resp.statusCode,
+    );
+  }
+
+  /// Body shape shared by create and update. The server re-validates and
+  /// renumbers, so sending [template] verbatim is safe.
+  static Map<String, dynamic> _routeTemplatePayload(RouteTemplate template) => {
+        'name': template.name,
+        'code': template.code,
+        'description': template.description,
+        'active': template.active,
+        'stages': [
+          for (final s in template.stages)
+            {'seq': s.seq, 'name': s.name}
+        ],
+        'fares': [
+          for (final f in template.fares)
+            {
+              'fromSeq': f.fromSeq,
+              'toSeq': f.toSeq,
+              'priceCents': f.priceCents,
+            }
+        ],
+      };
+
+  static Future<RouteTemplate> createRouteTemplate(
+      RouteTemplate template) async {
+    final base = await baseUrl();
+    final token = await _deviceToken();
+    final resp = await http
+        .post(
+          Uri.parse('$base/api/transit/route-templates'),
+          headers: await _headers(token: token),
+          body: jsonEncode(_routeTemplatePayload(template)),
+        )
+        .timeout(const Duration(seconds: 20));
+    final body = _jsonBody(resp);
+    if (resp.statusCode >= 200 && resp.statusCode < 300) {
+      return RouteTemplate.fromJson(
+          Map<String, dynamic>.from(body['routeTemplate'] as Map));
+    }
+    throw TransitApiException(
+      (body['error'] ?? 'Could not create route template').toString(),
+      code: (body['code'] ?? '').toString(),
+      statusCode: resp.statusCode,
+    );
+  }
+
+  static Future<RouteTemplate> updateRouteTemplate(
+      String id, RouteTemplate template) async {
+    final base = await baseUrl();
+    final token = await _deviceToken();
+    final resp = await http
+        .put(
+          Uri.parse('$base/api/transit/route-templates/$id'),
+          headers: await _headers(token: token),
+          body: jsonEncode(_routeTemplatePayload(template)),
+        )
+        .timeout(const Duration(seconds: 20));
+    final body = _jsonBody(resp);
+    if (resp.statusCode >= 200 && resp.statusCode < 300) {
+      return RouteTemplate.fromJson(
+          Map<String, dynamic>.from(body['routeTemplate'] as Map));
+    }
+    throw TransitApiException(
+      (body['error'] ?? 'Could not update route template').toString(),
+      code: (body['code'] ?? '').toString(),
+      statusCode: resp.statusCode,
+    );
+  }
+
+  static Future<void> deleteRouteTemplate(String id) async {
+    final base = await baseUrl();
+    final token = await _deviceToken();
+    final resp = await http
+        .delete(
+          Uri.parse('$base/api/transit/route-templates/$id'),
+          headers: await _headers(token: token),
+        )
+        .timeout(const Duration(seconds: 20));
+    final body = _jsonBody(resp);
+    if (resp.statusCode >= 200 && resp.statusCode < 300) return;
+    throw TransitApiException(
+      (body['error'] ?? 'Could not delete route template').toString(),
+      code: (body['code'] ?? '').toString(),
       statusCode: resp.statusCode,
     );
   }

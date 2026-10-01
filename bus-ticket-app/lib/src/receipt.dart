@@ -420,8 +420,14 @@ List<PreviewLine> buildTicketLines(TicketData d) {
   }
   // Passenger — label/value rows across the full 32 columns.
   final pax = d.customerName.trim().isEmpty ? '-' : up(d.customerName.trim());
+  // The label is "Passenger:", not "Passenger Name:", and that is what buys the
+  // name room: formatRow lays the pair across 32 columns with at least one
+  // separating space, so the 15-character label left only 16 for the value and
+  // forced the aggressive 15-character clip. The 10-character label leaves 21,
+  // so long names now print in full instead of being truncated mid-word.
+  // 'Passenger:' (10) + 1 space + 21 = 32 exactly.
   lines.add(
-      PreviewLine(formatRow('Passenger Name:', clipText(pax, 15)), bold: true));
+      PreviewLine(formatRow('Passenger:', clipText(pax, 21)), bold: true));
   lines.add(PreviewLine(
       formatRow('Passenger Mobile:', formatZimPhone(d.customerMobile))));
   // Divider.

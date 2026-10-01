@@ -2,4 +2,8 @@
 <resources>
     <color name="launch_background_color">#1B5E20</color>
     <color name="ic_launcher_background">#1B5E20</color>
+    <!-- The app's light surface (matches ColorScheme.surface in lib/main.dart).
+         Used as the window background so the edge-to-edge status and navigation
+         bars show the app colour rather than black. -->
+    <color name="app_surface">#F5F7FA</color>
 </resources>

@@ -166,8 +166,10 @@ void main() {
     final after = await raw(readOnly: true);
     addTearDown(after.close);
 
-    expect((await after.rawQuery('PRAGMA user_version')).first.values.first, 16,
-        reason: 'sqflite must stamp the migrated database as v16');
+    // A v15 database is migrated by the CURRENT declared version (now 17), so
+    // this asserts the chain ran to completion rather than stopping at 16.
+    expect((await after.rawQuery('PRAGMA user_version')).first.values.first, 17,
+        reason: 'sqflite must stamp the migrated database at the current version');
 
     final tables = (await after
             .rawQuery("SELECT name FROM sqlite_master WHERE type='table'"))
@@ -187,11 +189,24 @@ void main() {
         .toSet();
     expect(indexes, containsAll(['idx_rts_template', 'idx_rtf_template']));
 
-    // Every pre-existing table must be byte-for-byte unchanged.
+    // Every pre-existing table must be unchanged, judged only on the columns
+    // the v15 device actually had. A later migration step (v16 -> v17) adds
+    // driver_shifts.close_pushed, so comparing the whole row map would fail on
+    // the new column rather than on any real data loss.
     final afterRows = await snapshot(after, v15Tables);
     for (final t in v15Tables) {
-      expect(afterRows[t], before[t],
-          reason: '$t rows must survive v15 -> v16');
+      final prior = before[t] ?? const <Map<String, Object?>>[];
+      final current = afterRows[t] ?? const <Map<String, Object?>>[];
+      final projected = current.map((row) {
+        if (row.isEmpty || prior.isEmpty) return row;
+        final keys = prior.first.keys.toSet();
+        return <String, Object?>{
+          for (final entry in row.entries)
+            if (keys.contains(entry.key)) entry.key: entry.value,
+        };
+      }).toList();
+      expect(projected, prior,
+          reason: '$t rows must survive v15 -> v17 with their original values');
     }
 
     // ---- New tables start empty; the real CRUD works on the upgraded file --
@@ -264,10 +279,21 @@ void main() {
         0,
         reason: 'deleting a template must not leave orphan stages');
 
-    // The upgrade must not have disturbed the v15 data written above.
+    // The upgrade must not have disturbed the v15 data written above. Compared
+    // on the v15 column set only, since a later migration step (v16 -> v17)
+    // adds driver_shifts.close_pushed.
     final final_ = await snapshot(after, v15Tables);
     for (final t in v15Tables) {
-      expect(final_[t], before[t], reason: '$t changed after CRUD ran');
+      final prior = before[t] ?? const <Map<String, Object?>>[];
+      final current = final_[t] ?? const <Map<String, Object?>>[];
+      final keys = prior.isEmpty ? <String>{} : prior.first.keys.toSet();
+      final projected = current
+          .map((row) => <String, Object?>{
+                for (final entry in row.entries)
+                  if (keys.contains(entry.key)) entry.key: entry.value,
+              })
+          .toList();
+      expect(projected, prior, reason: '$t changed after CRUD ran');
     }
   });
 }

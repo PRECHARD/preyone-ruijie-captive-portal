@@ -4,9 +4,15 @@ import 'package:http/http.dart' as http;
 
 import '../db/app_db.dart';
 import '../controllers/trip_controller.dart';
+import '../models/route_template.dart';
+import '../roles.dart';
 import '../security/secure_keystore.dart';
 import 'session_guard.dart';
 import 'transit_api.dart';
+
+/// Set to '1' on a terminal once its hand-entered templates have been pushed as
+/// the company seed. After that the server owns the master set.
+const String _kTemplatesSeeded = 'route_templates_seeded';
 
 class SyncResult {
   const SyncResult({
@@ -74,6 +80,34 @@ class SyncService {
             await AppDb.markShiftSynced(activeShift.id);
           }
         } catch (_) {}
+      }
+
+      // End-of-shift must reach admin, not just the handset. A close that
+      // happened offline (or during a dropped connection) is replayed here with
+      // the time the conductor actually finished, so the admin trip schedule
+      // shows the shift as closed instead of a driver still on duty.
+      //
+      // The close is sent on its own, without a preceding /shifts/start: that
+      // call reopens the shift and collides with idx_one_open_shift whenever the
+      // conductor has already started their next shift, which stranded the queue
+      // behind a 409. The server upserts the close instead.
+      for (final closed in await AppDb.getUnpushedClosedShifts()) {
+        try {
+          await TransitApi.closeShift(
+            closed.id,
+            closedAt: closed.closedAt?.toIso8601String(),
+            driverId: closed.driverId,
+            driverName: closed.driverName,
+            driverPhone: closed.driverPhone,
+            conductorName: closed.conductorName,
+            conductorPhone: closed.conductorPhone,
+            vehicleReg: closed.vehicleReg,
+          );
+          await AppDb.markShiftClosePushed(closed.id);
+        } catch (_) {
+          // Still offline — it stays queued and is retried next sync.
+          break;
+        }
       }
 
       final pending = await AppDb.getUnsyncedSales();
@@ -173,6 +207,22 @@ class SyncService {
         await AppDb.upsertStaffRoster(staff);
       } catch (_) {}
 
+      // Re-deliver the effective permission list before anything reads a gate.
+      // A company can grant (or revoke) a capability centrally while this
+      // terminal is already signed in, and the operator never re-logs-in; without
+      // this the device would keep the permissions it stored at login time and
+      // the newly granted capability would never unlock. Best-effort: an
+      // unreachable or older server must not break the catalog pull.
+      try {
+        await TransitApi.check();
+      } catch (_) {}
+
+      // Master route templates. Best-effort like the roster: a failure here must
+      // never break selling, and the local snapshot keeps working offline.
+      try {
+        await _syncRouteTemplates();
+      } catch (_) {}
+
       // Sync the currently-active local trip with the freshest server copy.
       final active = await AppDb.getActiveTrip();
       if (active != null && active.id.isNotEmpty) {
@@ -189,6 +239,86 @@ class SyncService {
     } catch (_) {
       // Offline — keep the local snapshot.
     }
+  }
+
+  /// Master route templates: seed the company once, then mirror the server.
+  ///
+  /// Before a terminal has ever pulled, any templates it holds were hand-entered
+  /// on that device and exist nowhere else, so they are pushed up as the
+  /// company's seed. After that the server is authoritative and the device only
+  /// pulls — so a template deleted or repriced centrally disappears here too.
+  ///
+  /// The seed is gated on `route.templates.manage`, so a terminal whose operator
+  /// cannot manage templates never tries to push and never flips the flag; it
+  /// simply waits for the company's templates to arrive.
+  Future<void> _syncRouteTemplates() async {
+    final seeded = (await AppDb.getSetting(_kTemplatesSeeded, '0')) == '1';
+    final role = await SecureKeystore.instance.readRole() ?? '';
+    final permissions = await SecureKeystore.instance.readPermissions();
+    final canManage =
+        Roles.canManageRouteTemplates(role, permissions);
+
+    final remote = await TransitApi.fetchRouteTemplates();
+
+    if (!seeded) {
+      if (canManage) {
+        final local = await AppDb.getRouteTemplates();
+        // Push only what the company does not already have. An existing server
+        // entry is never overwritten by a device copy — otherwise the first
+        // terminal to sync would clobber real central data.
+        final remoteIds = remote.map((t) => t.id).toSet();
+        final toPush =
+            local.where((t) => t.id.isNotEmpty && !remoteIds.contains(t.id));
+        for (final t in toPush) {
+          try {
+            await TransitApi.createRouteTemplate(t);
+          } catch (_) {
+            // A single rejected template must not abort the rest of the seed.
+          }
+        }
+        // Re-pull so the mirror holds the server's authoritative ids for
+        // everything, including what we just uploaded.
+        final afterSeed = await TransitApi.fetchRouteTemplates();
+        await AppDb.replaceRouteTemplates(afterSeed);
+        await AppDb.setSetting(_kTemplatesSeeded, '1');
+        return;
+      }
+      // Cannot seed (this operator has no manage capability), but we can still
+      // mirror whatever the company already publishes.
+      //
+      // Guard: an empty server set on a device that still holds hand-entered
+      // templates is ambiguous — it means either "the company has none yet" or
+      // "central management has not rolled out". Wiping on that reading would
+      // silently destroy routes the operator can see but not recreate, so leave
+      // them alone and wait for the company to publish something.
+      if (remote.isEmpty) {
+        final localCount = (await AppDb.getRouteTemplates()).length;
+        if (localCount > 0) return;
+      }
+      await AppDb.replaceRouteTemplates(remote);
+      return;
+    }
+
+    await AppDb.replaceRouteTemplates(remote);
+  }
+
+  /// Pushes the local edits for one template to the server and mirrors the
+  /// server's response back, so the device converges on the authoritative copy
+  /// (including the server-assigned id and timestamps).
+  Future<RouteTemplate> saveRouteTemplateToServer(RouteTemplate template) async {
+    final result = template.id.isEmpty
+        ? await TransitApi.createRouteTemplate(template)
+        : await TransitApi.updateRouteTemplate(template.id, template);
+    await AppDb.saveRouteTemplate(result);
+    return result;
+  }
+
+  /// Deletes a template centrally, then locally. Server first: a local delete
+  /// that the server rejected would leave the template reappearing on the next
+  /// pull with no explanation.
+  Future<void> deleteRouteTemplateFromServer(String id) async {
+    await TransitApi.deleteRouteTemplate(id);
+    await AppDb.deleteRouteTemplate(id);
   }
 
   /// Pulls the freshest admin-managed staff roster (all roles) and upserts it
@@ -235,10 +365,18 @@ class SyncService {
       final duplicates = body['duplicates'] ?? 0;
       final conflicts = body['conflicts'] ?? 0;
       final rejected = (body['rejected'] as List?)?.length ?? 0;
+      // A ticket number another sale already owns. The paper is already in a
+      // passenger's hand, so retrying will never succeed — it needs the office
+      // to reconcile two real tickets. Said plainly so the conductor reports it
+      // instead of assuming the sale vanished.
+      final duplicateReceipts = body['duplicate_receipts'] ?? 0;
       var msg = '$synced sale(s) synced';
       if (duplicates > 0) msg += ', $duplicates duplicate(s)';
       if (conflicts > 0) msg += ', $conflicts seat conflict(s)';
       if (rejected > 0) msg += ', $rejected rejected (invalid signature)';
+      if (duplicateReceipts > 0) {
+        msg += ', $duplicateReceipts duplicate ticket number(s) — report to the office';
+      }
       return SyncResult(ok: true, message: msg);
     }
 

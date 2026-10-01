@@ -32,7 +32,11 @@ void main() {
         options: OpenDatabaseOptions(readOnly: true));
     addTearDown(d.close);
 
-    expect((await d.rawQuery('PRAGMA user_version')).first.values.first, 16);
+    // The app has since moved past v16 (that step is covered by
+    // db_migration_v16_to_v17_test.dart). This suite still guards that a
+    // brand-new install runs the FULL onCreate chain, so it asserts the current
+    // declared version rather than the one the file was written for.
+    expect((await d.rawQuery('PRAGMA user_version')).first.values.first, 17);
 
     final tables =
         (await d.rawQuery("SELECT name FROM sqlite_master WHERE type='table'"))
