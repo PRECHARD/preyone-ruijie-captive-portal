@@ -59,12 +59,12 @@ export function buildRuijieSuccessUrl(req: Request, config: WISPrSessionConfig):
     }
 
     u.searchParams.set('token', config.sessionToken);
-    u.searchParams.set('loginUrl', config.loginUrl || '');
-    u.searchParams.set('origUrl', config.originalUrl || '');
-    u.searchParams.set('nas_ip', config.nasip || '');
-    u.searchParams.set('nas_mac', config.nasMac || '');
-    u.searchParams.set('ssid', config.ssid || '');
-    u.searchParams.set('voucher', config.voucherCode || '');
+    if (config.loginUrl) u.searchParams.set('loginUrl', config.loginUrl);
+    if (config.originalUrl) u.searchParams.set('origUrl', config.originalUrl);
+    if (config.nasip) u.searchParams.set('nas_ip', config.nasip);
+    if (config.nasMac) u.searchParams.set('nas_mac', config.nasMac);
+    if (config.ssid) u.searchParams.set('ssid', config.ssid);
+    if (config.voucherCode) u.searchParams.set('voucher', config.voucherCode);
     if (config.macAddress) {
       u.searchParams.set('mac', config.macAddress);
       u.searchParams.set('client_mac', config.macAddress);

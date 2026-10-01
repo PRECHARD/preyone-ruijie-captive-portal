@@ -35,22 +35,41 @@ const signupValidators = [
   body('phone').trim().optional({ values: 'falsy' }),
   body('email').trim().optional({ values: 'falsy' }),
   body('voucherCode').trim().notEmpty().withMessage('Voucher code is required'),
-  body('acceptedTos').custom((value) => value === true).withMessage('You must accept the terms'),
+  body('acceptedTos').custom((value) => value === true || value === 'true').withMessage('You must accept the terms'),
   body('password').optional({ values: 'falsy' }).matches(STRONG_PASSWORD_RE).withMessage('Password must be at least 8 characters with uppercase, lowercase, number, and special character'),
 ];
 
 authRouter.post('/signup', signupLimiter, signupValidators, async (req: Request, res: Response) => {
+  const isForm = req.is('application/x-www-form-urlencoded') || req.is('multipart/form-data');
+
+  // Redirect back to the portal page preserving gateway params, with an error message
+  const formErrorRedirect = (msg: string) => {
+    const params = new URLSearchParams();
+    for (const [k, v] of Object.entries(req.query)) {
+      if (k !== 'error' && typeof v === 'string') params.set(k, v);
+    }
+    params.set('error', msg);
+    res.redirect(303, '/?' + params.toString());
+  };
+
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
-    res.status(422).json({ errors: errors.array() });
+    if (isForm) {
+      const msg = errors.array().map(e => e.msg).join('. ');
+      formErrorRedirect(msg);
+    } else {
+      res.status(422).json({ errors: errors.array() });
+    }
     return;
   }
 
-  const { fullName, phone, email, voucherCode, acceptedTos, password } = req.body as {
-    fullName: string; phone?: string; email?: string; voucherCode: string; acceptedTos: boolean; password?: string;
+  const { fullName, phone, email, voucherCode, password } = req.body as {
+    fullName: string; phone?: string; email?: string; voucherCode: string; password?: string;
   };
+  // Normalize acceptedTos — form submissions send string "true", JSON sends boolean true
+  const acceptedTos = req.body.acceptedTos === true || req.body.acceptedTos === 'true';
   const signupPhone = phone || 'N/A';
-  const signupEmail = email || '';
+  const signupEmail = email?.trim() || null;
   const macAddress = (req.query.client_mac as string) ?? (req.query.mac as string) ?? (req.query.clientMac as string) ?? (req.headers['x-client-mac'] as string) ?? null;
   const ipAddress  = (req.query.ip  as string) ?? req.ip ?? null;
   const nasip      = (req.query.nas_ip as string) ?? (req.query.nasip as string) ?? (req.query.wlanacname as string) ?? null;
@@ -72,17 +91,20 @@ authRouter.post('/signup', signupLimiter, signupValidators, async (req: Request,
 
     if (rows.length === 0) {
       await client.query('ROLLBACK');
+      if (isForm) { formErrorRedirect('Invalid Voucher code.'); return; }
       res.status(400).json({ error: 'Invalid Voucher code.' });
       return;
     }
     const v = rows[0];
     if (v.used_count >= v.max_uses) {
       await client.query('ROLLBACK');
+      if (isForm) { formErrorRedirect('Voucher has already reached maximum allocations.'); return; }
       res.status(400).json({ error: 'Voucher has already reached maximum allocations.' });
       return;
     }
     if (v.expires_at && new Date(v.expires_at) < new Date()) {
       await client.query('ROLLBACK');
+      if (isForm) { formErrorRedirect('Voucher has expired.'); return; }
       res.status(400).json({ error: 'Voucher has expired.' });
       return;
     }
@@ -94,12 +116,21 @@ authRouter.post('/signup', signupLimiter, signupValidators, async (req: Request,
 
     const emailVerificationToken = password ? uuidv4() : null;
 
-    const { rows: userRows } = await client.query<{ id: string }>(
+    let { rows: userRows } = await client.query<{ id: string }>(
       `INSERT INTO users (full_name, phone, email, voucher_code, accepted_tos, mac_address, ip_address, session_token, session_expires_at, password_hash, email_verification_token)
        VALUES ($1, $2, $3, $4, $5, $6, $7::inet, $8, $9, $10, $11)
+       ON CONFLICT (email) DO NOTHING
        RETURNING id`,
       [fullName, signupPhone, signupEmail, voucherCode, acceptedTos, macAddress, ipAddress, sessionToken, sessionExpires, passwordHash, emailVerificationToken]
     );
+    if (userRows.length === 0 && signupEmail) {
+      ({ rows: userRows } = await client.query<{ id: string }>(
+        `INSERT INTO users (full_name, phone, email, voucher_code, accepted_tos, mac_address, ip_address, session_token, session_expires_at, password_hash, email_verification_token)
+         VALUES ($1, $2, NULL, $3, $4, $5, $6::inet, $7, $8, $9, $10)
+         RETURNING id`,
+        [fullName, signupPhone, voucherCode, acceptedTos, macAddress, ipAddress, sessionToken, sessionExpires, passwordHash, emailVerificationToken]
+      ));
+    }
 
     await client.query(
       `INSERT INTO voucher_redemptions (voucher_id, voucher_code, user_id, full_name, mac_address, ip_address) VALUES ($1, $2, $3, $4, $5, $6::inet)`,
@@ -161,28 +192,41 @@ authRouter.post('/signup', signupLimiter, signupValidators, async (req: Request,
       },
     };
 
+    // Direct gateway hand-off. The ext_login url/redirect must carry the
+    // ORIGINAL url the client was trying to reach (AGENTS.md gotcha #4), so
+    // buildRuijieSuccessUrl() owns this URL. Do not rebuild it by hand here and
+    // do not route it through success.html: that was tried, broke the captive
+    // portal, and was reverted (c826e8e -> 7657296).
     const ruijieSuccessUrl = buildRuijieSuccessUrl(req, redirectConfig);
-    res.json({
-      success: true,
-      sessionToken,
-      sessionExpiresAt: sessionExpires.toISOString(),
-      redirectUrl: ruijieSuccessUrl,
-      bandwidthMbpsUp: v.bandwidth_mbps_up,
-      bandwidthMbpsDown: v.bandwidth_mbps_down,
-      dataLimitGb: v.data_limit_gb,
-      isUncapped: v.is_uncapped,
-      durationMin: sessionDurationMin,
-      macAddress: macAddress,
-      ipAddress: ipAddress,
-      voucherCode: voucherCode.toUpperCase(),
-      packageTier: v.package_tier,
-      loginUrl: loginUrl,
-    });
+
+    // A plain form submission cannot read a JSON body, so it gets a 303. Both
+    // paths still land on the same ext_login URL.
+    if (isForm) {
+      res.redirect(303, ruijieSuccessUrl);
+    } else {
+      res.json({
+        success: true,
+        sessionToken,
+        sessionExpiresAt: sessionExpires.toISOString(),
+        redirectUrl: ruijieSuccessUrl,
+        bandwidthMbpsUp: v.bandwidth_mbps_up,
+        bandwidthMbpsDown: v.bandwidth_mbps_down,
+        dataLimitGb: v.data_limit_gb,
+        isUncapped: v.is_uncapped,
+        durationMin: sessionDurationMin,
+        macAddress: macAddress,
+        ipAddress: ipAddress,
+        voucherCode: voucherCode.toUpperCase(),
+        packageTier: v.package_tier,
+        loginUrl: loginUrl,
+      });
+    }
   } catch (err) {
     if (client) {
       await client.query('ROLLBACK');
     }
     console.error('Signup error:', err);
+    if (isForm) { formErrorRedirect('Authentication failed.'); return; }
     res.status(500).json({ error: 'Authentication failed.' });
   } finally {
     if (client) {
@@ -301,11 +345,17 @@ authRouter.post('/register', signupLimiter, registerValidators, async (req: Requ
   const emailVerificationToken = uuidv4();
 
   try {
-    await pool.query(
+    const { rowCount } = await pool.query(
       `INSERT INTO users (full_name, phone, email, accepted_tos, password_hash, email_verification_token)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (email) DO NOTHING`,
       [fullName, phone, email, true, passwordHash, emailVerificationToken]
     );
+
+    if (rowCount === 0) {
+      res.status(409).json({ error: 'An account with this email already exists. Please sign in instead.' });
+      return;
+    }
 
     // Send verification email (non-blocking)
     sendPortalAccountCreated(email, fullName, emailVerificationToken);
@@ -391,7 +441,7 @@ authRouter.get('/me', async (req: Request, res: Response) => {
     const token = authHeader.slice(7);
     let payload: any;
     try {
-      payload = jwt.verify(token, getJwtSecret());
+      payload = jwt.verify(token, getJwtSecret(), { algorithms: ['HS256'] });
     } catch {
       res.status(401).json({ error: 'Invalid or expired token.' });
       return;
@@ -423,7 +473,7 @@ authRouter.get('/portal-sessions', async (req: Request, res: Response) => {
     const token = authHeader.slice(7);
     let payload: any;
     try {
-      payload = jwt.verify(token, getJwtSecret());
+      payload = jwt.verify(token, getJwtSecret(), { algorithms: ['HS256'] });
     } catch {
       res.status(401).json({ error: 'Invalid or expired token.' });
       return;
@@ -490,7 +540,7 @@ authRouter.post('/send-verification', async (req: Request, res: Response) => {
     }
     const token = authHeader.slice(7);
     let payload: any;
-    try { payload = jwt.verify(token, getJwtSecret()); } catch { res.status(401).json({ error: 'Invalid token.' }); return; }
+    try { payload = jwt.verify(token, getJwtSecret(), { algorithms: ['HS256'] }); } catch { res.status(401).json({ error: 'Invalid token.' }); return; }
 
     const { rows } = await pool.query('SELECT id, full_name, email, email_verified FROM users WHERE id = $1', [payload.id]);
     if (rows.length === 0) { res.status(404).json({ error: 'User not found.' }); return; }
@@ -558,6 +608,57 @@ authRouter.post('/forgot-password', forgotLimiter, async (req: Request, res: Res
   }
 });
 
+// ── Request Password Reset (Brevo email, mobile + portal) ─────────────
+const requestResetLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  message: { error: 'Too many requests.' },
+});
+
+/**
+ * Request a password reset for a registered portal account. Accepts either an
+ * email or a phone number so the mobile login screen can offer the same link
+ * for both login identifiers. Sends the preyone.com-branded HTML reset email
+ * via Brevo SMTP. Always answers the same non-revealing message.
+ */
+authRouter.post('/request-password-reset', requestResetLimiter, async (req: Request, res: Response) => {
+  try {
+    const { email, phone } = req.body as { email?: string; phone?: string };
+    const identifier = (email || phone || '').trim();
+    if (!identifier) {
+      res.status(422).json({ error: 'Email or phone is required.' });
+      return;
+    }
+    const lookupField = email ? 'email' : 'phone';
+    const lookupValue = email ? email.trim() : phone!.trim();
+
+    const { rows } = await pool.query(
+      `SELECT id, full_name, email, password_hash FROM users WHERE ${lookupField} = $1`,
+      [lookupValue]
+    );
+    if (rows.length === 0 || !rows[0].password_hash) {
+      // Don't reveal whether the account exists
+      res.json({ message: 'If that account is registered, a reset link has been sent.' });
+      return;
+    }
+
+    const user = rows[0];
+    const resetToken = uuidv4();
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+
+    await pool.query(
+      'UPDATE users SET reset_password_token = $1, reset_password_expires_at = $2 WHERE id = $3',
+      [resetToken, expiresAt, user.id]
+    );
+
+    sendPortalForgotPassword(user.email, resetToken, user.full_name);
+    res.json({ message: 'If that account is registered, a reset link has been sent.' });
+  } catch (err) {
+    console.error('Request password reset error:', err);
+    res.status(500).json({ error: 'Failed to process request.' });
+  }
+});
+
 // ── Verify Reset Token ───────────────────────────────────────────────
 authRouter.get('/verify-reset-token', async (req: Request, res: Response) => {
   try {
@@ -617,7 +718,7 @@ authRouter.post('/change-password', async (req: Request, res: Response) => {
     const token = authHeader.slice(7);
     let payload: any;
     try {
-      payload = jwt.verify(token, getJwtSecret());
+      payload = jwt.verify(token, getJwtSecret(), { algorithms: ['HS256'] });
     } catch {
       res.status(401).json({ error: 'Invalid or expired token.' });
       return;
