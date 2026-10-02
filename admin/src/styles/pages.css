@@ -117,7 +117,12 @@
   font-size: 1.6rem;
   letter-spacing: 1px;
   text-transform: uppercase;
-  color: var(--text);
+  background: linear-gradient(92deg, #ffffff 5%, #00e5ff 60%, #7a0e57 110%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 0 8px rgba(0, 229, 255, 0.18)) drop-shadow(0 2px 18px rgba(168, 85, 247, 0.24));
 }
 
 .page-header-extra {

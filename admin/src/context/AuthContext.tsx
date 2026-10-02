@@ -24,10 +24,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const token = api.getToken();
-    if (!token) { setLoading(false); return; }
-    // Validate token by fetching /me
+    // Validate token by fetching /me (Bearer if present; cookie session otherwise)
     fetch('/api/admin/auth/me', {
-      headers: { Authorization: `Bearer ${token}` },
+      credentials: 'include',
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
     })
       .then(r => r.json())
       .then(data => {
@@ -44,6 +44,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = useCallback(async (email: string, password: string) => {
     const res = await fetch('/api/admin/auth/login', {
       method: 'POST',
+      credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password }),
     });
@@ -68,6 +69,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     api.clearToken();
     localStorage.removeItem('admin_user');
     setUser(null);
+    fetch('/api/admin/auth/logout', { method: 'POST', credentials: 'include' }).catch(() => {});
   }, []);
 
   return (
