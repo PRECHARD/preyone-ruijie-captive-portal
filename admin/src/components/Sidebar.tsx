@@ -6,7 +6,13 @@ import {
   FiUserCheck, FiPieChart, FiUserPlus, FiPackage, FiServer,
   FiMessageSquare, FiAlertTriangle, FiDownload, FiSettings,
   FiChevronLeft, FiChevronRight,
+  FiShoppingCart, FiBox, FiBookOpen, FiTrendingUp,
+  FiExternalLink, FiFileText as FiInvoice,
+  FiBriefcase, FiSmartphone,
 } from 'react-icons/fi';
+
+const POS_URL = import.meta.env.VITE_POS_URL || 'https://pos.preyone.com';
+const INVOICE_URL = import.meta.env.VITE_INVOICE_URL || 'https://invoices.preyone.com';
 
 interface SidebarLink {
   label: string;
@@ -21,7 +27,21 @@ interface LinkGroup {
   links: SidebarLink[];
 }
 
-const groups: LinkGroup[] = [
+const POS_GROUPS: LinkGroup[] = [
+  {
+    label: 'Preyone POS',
+    links: [
+      { label: 'POS Sales', section: 'pos-sales', roles: ['Staff', 'Manager', 'CEO'], icon: <FiShoppingCart /> },
+      { label: 'Inventory', section: 'pos-inventory', roles: ['Staff', 'Manager', 'CEO'], icon: <FiBox /> },
+      { label: 'Customers', section: 'pos-customers', roles: ['Staff', 'Manager', 'CEO'], icon: <FiBookOpen /> },
+      { label: 'Devices & Endpoints', section: 'devices', roles: ['Manager', 'CEO'], icon: <FiSmartphone /> },
+      { label: 'Company Profile', section: 'company-profile', roles: ['CEO'], icon: <FiBriefcase /> },
+      { label: 'POS Reports', section: 'pos-reports', roles: ['Manager', 'CEO'], icon: <FiTrendingUp /> },
+    ],
+  },
+];
+
+const WIFI_GROUPS: LinkGroup[] = [
   {
     label: 'Overview',
     links: [
@@ -65,10 +85,12 @@ const groups: LinkGroup[] = [
   },
 ];
 
-export default function Sidebar({ activeSection, onNavigate, notifCounts, alertsUnack }: { activeSection: string; onNavigate: (s: string) => void; notifCounts?: { unreadBroadcasts: number; pendingApprovals: number; pendingHandovers: number; pendingStaff: number; total: number }; alertsUnack?: number }) {
+export default function Sidebar({ activeSection, onNavigate, notifCounts, alertsUnack, activeProduct }: { activeSection: string; onNavigate: (s: string) => void; notifCounts?: { unreadBroadcasts: number; pendingApprovals: number; pendingHandovers: number; pendingStaff: number; total: number }; alertsUnack?: number; activeProduct: 'pos' | 'wifi' }) {
   const { user } = useAuth();
   const role = user?.role || 'Staff';
   const [collapsed, setCollapsed] = useState(false);
+
+  const groups = activeProduct === 'pos' ? POS_GROUPS : WIFI_GROUPS;
 
   const badgeFor = (link: SidebarLink): number | null => {
     if (link.section === 'alerts' && alertsUnack && alertsUnack > 0) return alertsUnack;
@@ -95,7 +117,7 @@ export default function Sidebar({ activeSection, onNavigate, notifCounts, alerts
                     onClick={() => onNavigate(l.section)}
                     title={collapsed ? l.label : undefined}
                   >
-                    {l.icon}
+                    <span className="sidebar-link-ic">{l.icon}</span>
                     {!collapsed && <span>{l.label}</span>}
                     {!collapsed && badge !== null && <span className="sidebar-badge">{badge > 99 ? '99+' : badge}</span>}
                   </button>
@@ -105,6 +127,17 @@ export default function Sidebar({ activeSection, onNavigate, notifCounts, alerts
           );
         })}
       </nav>
+      <div className="sidebar-group sidebar-openapps" style={{ marginTop: 'auto', paddingTop: 4 }}>
+        {!collapsed && <span className="sidebar-group-label">Open Apps</span>}
+        <button className="sidebar-link" onClick={() => window.open(POS_URL, '_blank')} title={collapsed ? 'Open POS Terminal' : undefined}>
+          <span className="sidebar-link-ic"><FiExternalLink /></span>
+          {!collapsed && <span>POS Terminal</span>}
+        </button>
+        <button className="sidebar-link" onClick={() => window.open(INVOICE_URL, '_blank')} title={collapsed ? 'Open Invoice System' : undefined}>
+          <span className="sidebar-link-ic"><FiInvoice /></span>
+          {!collapsed && <span>Invoice System</span>}
+        </button>
+      </div>
       <button className="sidebar-collapse-btn" onClick={() => setCollapsed(!collapsed)} title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
         {collapsed ? <FiChevronRight /> : <FiChevronLeft />}
       </button>
