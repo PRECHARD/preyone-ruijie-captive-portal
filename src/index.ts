@@ -116,7 +116,9 @@ app.get('/robots.txt', (_req, res) => {
   res.send('User-agent: *\nAllow: /\n\nSitemap: https://preyone.com/sitemap.xml\n');
 });
 
-const portalLoginUrl = 'http://wifi.preyone.com/login?gw=true';
+// Advertise /connect (voucher form) rather than /login (account sign-in), so OS
+// captive-portal detection drops a phone straight onto the redemption page.
+const portalLoginUrl = 'http://wifi.preyone.com/connect?gw=true';
 
 // Captive portal detection — serves WISPr XML so Apple/Android/Windows
 // devices detect the captive portal and show the OS-level login popup.
@@ -200,7 +202,7 @@ app.use((req, res, next) => {
     res.setHeader('X-Captive-Portal', 'true');
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
     // Let known non-static routes pass through to their route handlers
-    if (['/login', '/account', '/forgot-password', '/reset-password'].includes(req.path)) {
+    if (['/login', '/account', '/forgot-password', '/reset-password', '/connect'].includes(req.path)) {
       return next();
     }
     // Strip Range header — the gateway preserves original request headers (e.g. from video streaming)
@@ -274,6 +276,17 @@ app.get('/login', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public
 app.get('/account', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'manage-account.html')));
 app.get('/forgot-password', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'forgot-password.html')));
 app.get('/reset-password', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'reset-password.html')));
+
+// Self-service connect. This is the URL the gateway's "Portal URL" should point
+// at: the customer lands straight on the voucher box instead of the account
+// sign-in form at /login. Any gateway query string (?client_mac=…&login_url=…&ssid=…)
+// is preserved because the page forwards location.search to /api/auth/signup,
+// which needs those params to build the ext_login authorization URL.
+app.get('/connect', (_req, res) => {
+  res.setHeader('X-Captive-Portal', 'true');
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
+});
 
 // Fallback for unmatched routes
 app.get('*', (_req, res) => {

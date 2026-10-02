@@ -9,6 +9,7 @@ import { pool } from '../db/pool';
 import { buildRuijieSuccessUrl, WISPrSessionConfig } from '../utils/redirect';
 import { transformToWISPrProfile } from '../utils/wisprTransformer';
 import { sendPortalAccountCreated, sendPortalSignupConfirmation, sendPortalEmailVerification, sendPortalForgotPassword } from '../services/notificationService';
+import { listDevices, unbindDevice, getDeviceLimit, normalizeMac } from '../services/deviceBinding';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'preyone-jwt-secret-change-in-production';
 function getJwtSecret(): string {
@@ -84,10 +85,14 @@ authRouter.post('/signup', signupLimiter, signupValidators, async (req: Request,
     await client.query('BEGIN');
 
     const { rows } = await client.query<{
-      id: string; duration_min: number; max_uses: number; used_count: number; expires_at: string | null;
+      id: string; code: string; duration_min: number; max_uses: number; used_count: number; expires_at: string | null;
       data_limit_gb: number | null; is_uncapped: boolean; bandwidth_mbps_up: number; bandwidth_mbps_down: number;
       package_tier: string;
-    }>('SELECT id, duration_min, max_uses, used_count, expires_at, data_limit_gb, is_uncapped, bandwidth_mbps_up, bandwidth_mbps_down, package_tier FROM vouchers WHERE code = $1 FOR UPDATE', [voucherCode.toUpperCase()]);
+    // Match case-insensitively: Ruijie mints lowercase codes ('e7wj7w') while legacy
+    // Preyone codes are uppercase. The canonical stored casing is read back from
+    // the row and used downstream, because Ruijie's gateway must receive the exact
+    // code it issued.
+    }>('SELECT id, code, duration_min, max_uses, used_count, expires_at, data_limit_gb, is_uncapped, bandwidth_mbps_up, bandwidth_mbps_down, package_tier FROM vouchers WHERE UPPER(code) = $1 FOR UPDATE', [voucherCode.trim().toUpperCase()]);
 
     if (rows.length === 0) {
       await client.query('ROLLBACK');
@@ -96,6 +101,9 @@ authRouter.post('/signup', signupLimiter, signupValidators, async (req: Request,
       return;
     }
     const v = rows[0];
+    // Authoritative, vendor-issued casing. Never re-case this before handing it
+    // to the Ruijie gateway.
+    const canonicalCode = v.code;
     if (v.used_count >= v.max_uses) {
       await client.query('ROLLBACK');
       if (isForm) { formErrorRedirect('Voucher has already reached maximum allocations.'); return; }
@@ -121,20 +129,20 @@ authRouter.post('/signup', signupLimiter, signupValidators, async (req: Request,
        VALUES ($1, $2, $3, $4, $5, $6, $7::inet, $8, $9, $10, $11)
        ON CONFLICT (email) DO NOTHING
        RETURNING id`,
-      [fullName, signupPhone, signupEmail, voucherCode, acceptedTos, macAddress, ipAddress, sessionToken, sessionExpires, passwordHash, emailVerificationToken]
+      [fullName, signupPhone, signupEmail, canonicalCode, acceptedTos, macAddress, ipAddress, sessionToken, sessionExpires, passwordHash, emailVerificationToken]
     );
     if (userRows.length === 0 && signupEmail) {
       ({ rows: userRows } = await client.query<{ id: string }>(
         `INSERT INTO users (full_name, phone, email, voucher_code, accepted_tos, mac_address, ip_address, session_token, session_expires_at, password_hash, email_verification_token)
          VALUES ($1, $2, NULL, $3, $4, $5, $6::inet, $7, $8, $9, $10)
          RETURNING id`,
-        [fullName, signupPhone, voucherCode, acceptedTos, macAddress, ipAddress, sessionToken, sessionExpires, passwordHash, emailVerificationToken]
+        [fullName, signupPhone, canonicalCode, acceptedTos, macAddress, ipAddress, sessionToken, sessionExpires, passwordHash, emailVerificationToken]
       ));
     }
 
     await client.query(
       `INSERT INTO voucher_redemptions (voucher_id, voucher_code, user_id, full_name, mac_address, ip_address) VALUES ($1, $2, $3, $4, $5, $6::inet)`,
-      [v.id, voucherCode.toUpperCase(), userRows[0].id, fullName, macAddress, ipAddress]
+      [v.id, canonicalCode, userRows[0].id, fullName, macAddress, ipAddress]
     );
 
     // Create WISPr profile for data tracking
@@ -166,7 +174,7 @@ authRouter.post('/signup', signupLimiter, signupValidators, async (req: Request,
 
     // Send confirmation email (non-blocking)
     if (signupEmail) {
-      sendPortalSignupConfirmation(signupEmail, fullName, voucherCode.toUpperCase());
+      sendPortalSignupConfirmation(signupEmail, fullName, canonicalCode);
     }
 
     // Send email verification if password was set (non-blocking)
@@ -182,7 +190,7 @@ authRouter.post('/signup', signupLimiter, signupValidators, async (req: Request,
       loginUrl: loginUrl || undefined,
       nasMac: nasMac || undefined,
       ssid: ssid || undefined,
-      voucherCode: voucherCode.toUpperCase(),
+      voucherCode: canonicalCode,
       packageData: {
         data_limit_gb: v.data_limit_gb,
         is_uncapped: v.is_uncapped,
@@ -216,7 +224,7 @@ authRouter.post('/signup', signupLimiter, signupValidators, async (req: Request,
         durationMin: sessionDurationMin,
         macAddress: macAddress,
         ipAddress: ipAddress,
-        voucherCode: voucherCode.toUpperCase(),
+        voucherCode: canonicalCode,
         packageTier: v.package_tier,
         loginUrl: loginUrl,
       });
@@ -484,7 +492,7 @@ authRouter.get('/portal-sessions', async (req: Request, res: Response) => {
               v.data_limit_gb, v.is_uncapped, v.bandwidth_mbps_up, v.bandwidth_mbps_down, v.package_tier,
               wp.data_used_bytes, wp.data_quota_bytes
        FROM users u
-       LEFT JOIN vouchers v ON UPPER(u.voucher_code) = v.code
+       LEFT JOIN vouchers v ON UPPER(u.voucher_code) = UPPER(v.code)
        LEFT JOIN wispr_profiles wp ON wp.user_id = u.id
        WHERE u.id = $1 AND u.session_expires_at > NOW()
        ORDER BY u.session_expires_at DESC`,
@@ -507,7 +515,7 @@ authRouter.get('/status', async (req: Request, res: Response) => {
               v.data_limit_gb, v.is_uncapped, p.tier_name AS package_tier
        FROM users u
        LEFT JOIN wispr_profiles wp ON wp.user_id = u.id
-       LEFT JOIN vouchers v ON UPPER(u.voucher_code) = v.code
+       LEFT JOIN vouchers v ON UPPER(u.voucher_code) = UPPER(v.code)
        LEFT JOIN packages p ON p.tier_name = v.package_tier
        WHERE u.session_token = $1`,
       [token]
@@ -759,5 +767,98 @@ authRouter.post('/change-password', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('Change password error:', err);
     res.status(500).json({ error: 'Password change failed.' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// Device management for a redeemed voucher.
+//
+// One purchase can cover several devices. Devices attach themselves the first
+// time they authenticate with the code (see gatewayRouter /api/radius/auth), so
+// these endpoints are for *seeing* what is attached and freeing a slot when a
+// phone is lost or sold — without spending another max_uses allocation.
+//
+// Authenticated with the same opaque session token as /api/auth/status, never
+// with the voucher code: a code is shareable, a session token is not.
+async function resolveVoucherForSession(token: string) {
+  const { rows } = await pool.query(
+    `SELECT u.voucher_code, v.id AS voucher_id, v.package_tier, v.max_devices, v.expires_at
+     FROM users u
+     JOIN vouchers v ON UPPER(u.voucher_code) = UPPER(v.code)
+     WHERE u.session_token = $1`,
+    [token]
+  );
+  return rows[0] || null;
+}
+
+authRouter.get('/devices', async (req: Request, res: Response) => {
+  try {
+    const token = req.query.token as string;
+    if (!token) { res.status(400).json({ error: 'Missing token' }); return; }
+
+    const voucher = await resolveVoucherForSession(token);
+    if (!voucher) {
+      res.status(404).json({ error: 'No voucher found for this session.' });
+      return;
+    }
+
+    const devices = await listDevices(voucher.voucher_id);
+    const limit = await getDeviceLimit(voucher.package_tier, voucher.max_devices);
+    const active = devices.filter((d) => d.isActive);
+
+    res.json({
+      voucherCode: voucher.voucher_code,
+      deviceLimit: limit,
+      devicesActive: active.length,
+      slotsRemaining: Math.max(0, limit - active.length),
+      devices: devices.map((d) => ({
+        id: d.id,
+        macAddress: d.macAddress,
+        label: d.label,
+        isActive: d.isActive,
+        boundAt: d.boundAt,
+        lastSeenAt: d.lastSeenAt,
+      })),
+    });
+  } catch (err) {
+    console.error('Device list error:', err);
+    res.status(500).json({ error: 'Failed to fetch devices.' });
+  }
+});
+
+authRouter.delete('/devices', async (req: Request, res: Response) => {
+  try {
+    const token = req.query.token as string;
+    const mac = req.query.mac as string;
+    if (!token) { res.status(400).json({ error: 'Missing token' }); return; }
+    if (!normalizeMac(mac)) { res.status(400).json({ error: 'Invalid device address.' }); return; }
+
+    const voucher = await resolveVoucherForSession(token);
+    if (!voucher) {
+      res.status(404).json({ error: 'No voucher found for this session.' });
+      return;
+    }
+
+    // Scoped to the caller's own voucher, so one customer can never unbind
+    // another customer's device by guessing a MAC.
+    const removed = await unbindDevice(voucher.voucher_id, mac);
+    if (!removed) {
+      res.status(404).json({ error: 'Device not found on this voucher.' });
+      return;
+    }
+
+    const limit = await getDeviceLimit(voucher.package_tier, voucher.max_devices);
+    const remaining = await listDevices(voucher.voucher_id);
+    const active = remaining.filter((d) => d.isActive).length;
+
+    res.json({
+      removed: true,
+      deviceLimit: limit,
+      devicesActive: active,
+      slotsRemaining: Math.max(0, limit - active),
+    });
+  } catch (err) {
+    console.error('Device unbind error:', err);
+    res.status(500).json({ error: 'Failed to remove device.' });
   }
 });

@@ -74,7 +74,7 @@ adminRouter.get('/access-log', async (req: Request, res: Response) => {
     SELECT al.id, al.event, al.mac_address, al.ip_address, al.detail, al.created_at, u.full_name
       FROM access_log al
       LEFT JOIN users u ON u.id = al.user_id
-      LEFT JOIN vouchers v ON UPPER(u.voucher_code) = v.code
+      LEFT JOIN vouchers v ON UPPER(u.voucher_code) = UPPER(v.code)
   `;
   if (scope) query += ` WHERE ${scope}`;
   query += ' ORDER BY al.created_at DESC LIMIT 1000';
@@ -902,7 +902,7 @@ adminRouter.get('/active-sessions', async (req: Request, res: Response) => {
            v.code AS voucher_code,
            wp.data_used_bytes, wp.data_quota_bytes, wp.session_start
     FROM users u
-    LEFT JOIN vouchers v ON UPPER(u.voucher_code) = v.code
+    LEFT JOIN vouchers v ON UPPER(u.voucher_code) = UPPER(v.code)
     LEFT JOIN wispr_profiles wp ON wp.user_id = u.id
     WHERE u.session_expires_at > NOW()
     ${userScope ? 'AND ' + userScope : ''}
@@ -1240,7 +1240,7 @@ adminRouter.get('/bandwidth/top-users', async (req: Request, res: Response) => {
            wp.session_start, wp.is_uncapped
     FROM wispr_profiles wp
     INNER JOIN users u ON u.id = wp.user_id
-    LEFT JOIN vouchers v ON UPPER(u.voucher_code) = v.code
+    LEFT JOIN vouchers v ON UPPER(u.voucher_code) = UPPER(v.code)
     WHERE wp.session_end IS NULL
     ${scope ? 'AND ' + scope : ''}
     ORDER BY wp.data_used_bytes DESC
@@ -1983,7 +1983,7 @@ adminRouter.get('/qos-view', async (_req: Request, res: Response) => {
       p.tier_name, p.display_name
     FROM wispr_profiles wp
     INNER JOIN users u ON u.id = wp.user_id
-    LEFT JOIN vouchers v ON UPPER(u.voucher_code) = v.code
+    LEFT JOIN vouchers v ON UPPER(u.voucher_code) = UPPER(v.code)
     LEFT JOIN packages p ON v.data_limit_gb IS NOT DISTINCT FROM p.data_limit_gb AND p.deleted_at IS NULL
       AND v.bandwidth_mbps_up = p.bandwidth_mbps_up
       AND v.bandwidth_mbps_down = p.bandwidth_mbps_down

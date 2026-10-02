@@ -1180,6 +1180,50 @@ const SQL = `
   CREATE UNIQUE INDEX IF NOT EXISTS idx_ruijie_vouchers_code_no ON ruijie_vouchers (code_no);
   CREATE INDEX IF NOT EXISTS idx_ruijie_vouchers_payment ON ruijie_vouchers (payment_id);
   CREATE INDEX IF NOT EXISTS idx_ruijie_vouchers_tier ON ruijie_vouchers (tier_name);
+
+  -- ════════════════ Multi-device Voucher Binding ════════════════
+  -- One voucher code can authorize several devices (a phone, a laptop, a TV).
+  -- Historically a device could only be attached by redeeming the code again,
+  -- which burned another max_uses allocation and created a second user row.
+  -- vouchers.max_devices existed but nothing ever read it.
+  --
+  -- Devices are bound at RADIUS auth time, because that is the only point where
+  -- we learn the real client MAC from the gateway. Redemption still works
+  -- unchanged; this table is additive.
+  CREATE TABLE IF NOT EXISTS voucher_devices (
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    voucher_id    UUID NOT NULL REFERENCES vouchers(id) ON DELETE CASCADE,
+    voucher_code  TEXT NOT NULL,
+    user_id       UUID REFERENCES users(id) ON DELETE SET NULL,
+    mac_address   TEXT NOT NULL,
+    -- 12-hex uppercase, no separators. Stored normalized so RADIUS lookups are
+    -- an index hit instead of a REPLACE() on every auth attempt.
+    mac_norm      TEXT NOT NULL,
+    label         TEXT,
+    is_active     BOOLEAN NOT NULL DEFAULT TRUE,
+    bound_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_seen_at  TIMESTAMPTZ,
+    unbound_at    TIMESTAMPTZ,
+    UNIQUE (voucher_id, mac_norm)
+  );
+
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_voucher_devices_voucher_mac
+    ON voucher_devices (voucher_id, mac_norm);
+  CREATE INDEX IF NOT EXISTS idx_voucher_devices_mac_norm ON voucher_devices (mac_norm);
+  CREATE INDEX IF NOT EXISTS idx_voucher_devices_user ON voucher_devices (user_id);
+
+  -- Backfill: any user that already has a MAC from a past redemption becomes
+  -- that voucher's first bound device, so enabling the device limit never locks
+  -- out a device that is working today.
+  INSERT INTO voucher_devices (voucher_id, voucher_code, user_id, mac_address, mac_norm, label)
+  SELECT v.id, v.code, u.id, u.mac_address,
+         REPLACE(REPLACE(UPPER(u.mac_address), ':', ''), '-', ''),
+         'existing session'
+  FROM users u
+  JOIN vouchers v ON v.code = u.voucher_code
+  WHERE u.mac_address IS NOT NULL
+    AND REPLACE(REPLACE(UPPER(u.mac_address), ':', ''), '-', '') ~ '^[0-9A-F]{12}$'
+  ON CONFLICT (voucher_id, mac_norm) DO NOTHING;
 `;
 
 (async () => {
