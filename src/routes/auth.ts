@@ -127,7 +127,7 @@ authRouter.post('/signup', signupLimiter, signupValidators, async (req: Request,
     let { rows: userRows } = await client.query<{ id: string }>(
       `INSERT INTO users (full_name, phone, email, voucher_code, accepted_tos, mac_address, ip_address, session_token, session_expires_at, password_hash, email_verification_token)
        VALUES ($1, $2, $3, $4, $5, $6, $7::inet, $8, $9, $10, $11)
-       ON CONFLICT (email) DO NOTHING
+       ON CONFLICT (email) WHERE email IS NOT NULL AND email != '' DO NOTHING
        RETURNING id`,
       [fullName, signupPhone, signupEmail, canonicalCode, acceptedTos, macAddress, ipAddress, sessionToken, sessionExpires, passwordHash, emailVerificationToken]
     );
@@ -356,7 +356,7 @@ authRouter.post('/register', signupLimiter, registerValidators, async (req: Requ
     const { rowCount } = await pool.query(
       `INSERT INTO users (full_name, phone, email, accepted_tos, password_hash, email_verification_token)
        VALUES ($1, $2, $3, $4, $5, $6)
-       ON CONFLICT (email) DO NOTHING`,
+       ON CONFLICT (email) WHERE email IS NOT NULL AND email != '' DO NOTHING`,
       [fullName, phone, email, true, passwordHash, emailVerificationToken]
     );
 
