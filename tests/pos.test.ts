@@ -24,12 +24,13 @@ describe('POS computeTotals', () => {
     expect(subtotal).toBeCloseTo(3.34, 2);
   });
 
-  it('applies discount then tax on the discounted base', () => {
-    // subtotal 100, discount 10% → base 90, tax 15% → 13.5, total 103.5
+  it('applies discount to subtotal and derives tax-inclusive tax amount', () => {
+    // subtotal 100, discount 10% → discounted base 90; tax is the VAT share
+    // embedded in that base: 90 × 15/115 ≈ 11.74; total excludes tax.
     const { discountAmount, taxAmount, total } = computeTotals([{ price: 100, qty: 1 }], 10, 15);
     expect(discountAmount).toBeCloseTo(10, 2);
-    expect(taxAmount).toBeCloseTo(13.5, 2);
-    expect(total).toBeCloseTo(103.5, 2);
+    expect(taxAmount).toBeCloseTo(11.74, 2);
+    expect(total).toBeCloseTo(90, 2);
   });
 
   it('handles empty carts safely', () => {
