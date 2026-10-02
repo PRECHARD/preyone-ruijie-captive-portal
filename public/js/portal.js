@@ -1,48 +1,164 @@
-(function () {
+﻿(function () {
   'use strict';
   
-  // --- PACKAGE PURCHASE FLOW ---
+  // --- PACKAGE PURCHASE FLOW (Pesepay / EcoCash) ---
   const packageButtons = document.querySelectorAll('.pkg-action');
   const ruijieParams = new URLSearchParams(location.search);
   let selectedPackage = null;
+  let paymentPollTimer = null;
+  // Set once /status reports supportRequired, so the give-up message stops
+  // claiming "we have not received your payment" when the money is confirmed.
+  let paymentSupportPending = false;
+  // Remembered so the give-up screen can still quote the reference.
+  let lastPaymentReference = null;
+  // Set when the customer is sent back from Pesepay's hosted page, so the modal
+  // can resume polling instead of asking for a phone number again.
+  let pendingReturn = null;
 
   function showPackagePaymentModal(packageData, triggerBtn) {
     // Highlight the clicked button
     if (triggerBtn) {
       triggerBtn.classList.add('pkg-action--selected');
     }
-    
+
     // Create modal overlay
     const modal = document.createElement('div');
     modal.className = 'payment-modal-overlay';
     modal.innerHTML = `
       <div class="payment-modal">
         <button class="modal-close" aria-label="Close">&times;</button>
-        <h2>Confirm Purchase: ${packageData['data-display-name']}</h2>
+        <h2>Make Preyone Payment: ${packageData['data-display-name']}</h2>
         <div class="modal-details">
           <p><strong>Package:</strong> ${packageData['data-tier']}</p>
           <p><strong>Price:</strong> $${packageData['data-amount']} USD (${packageData['data-period']})</p>
-          <p><strong>Data:</strong> ${packageData['data-is-uncapped'] === 'true' ? 'Uncapped' : packageData['data-data-limit'] + 'GB'}</p>
+          <p><strong>Data:</strong> ${packageData['data-is-uncapped'] === 'true' ? 'Unlimited' : packageData['data-data-limit'] + 'GB'}</p>
           <p><strong>Speed:</strong> ${packageData['data-bandwidth-down']} Mbps download</p>
-          <p><strong>Payment Method:</strong> <span class="ecocash-badge">Eco<span class="ecocash-red">Cash</span></span></p>
         </div>
-        <div class="modal-form">
+        <form class="modal-form" id="pesepay-form" novalidate>
           <div class="field">
-            <label for="payment-phone">Phone Number for Payment</label>
-            <input id="payment-phone" type="tel" placeholder="+263 771 327 202" value="${escHtml(document.getElementById('phone')?.value || '')}" required />
-            <span class="field-error" id="err-payment-phone"></span>
+            <label for="pesepay-phone">Zimbabwe Phone Number</label>
+            <input type="tel" id="pesepay-phone" placeholder="e.g. 0771 327 202" autocomplete="tel" />
+            <div class="field-error" id="pesepay-phone-error"></div>
           </div>
-          <button id="confirm-payment-btn" class="btn-primary">Proceed to Payment</button>
-          <p class="modal-notice">You will be redirected to EcoCash to complete the payment.</p>
-        </div>
+          <button type="submit" id="confirm-payment-btn">
+            <span class="btn-text">Pay $${packageData['data-amount']} USD</span>
+            <span class="btn-spinner" style="display:none"></span>
+          </button>
+          <div class="field-success" id="pesepay-result" style="display:none"></div>
+          <div class="modal-notice" id="pesepay-status">A payment request will be sent to your phone. Approve it with your EcoCash PIN.</div>
+        </form>
       </div>
     `;
-    
+
     // Prevent background scroll
     document.body.style.overflow = 'hidden';
     document.body.appendChild(modal);
-    
+
+    const form = modal.querySelector('#pesepay-form');
+    const phoneEl = form.querySelector('#pesepay-phone');
+    const phoneErrorEl = form.querySelector('#pesepay-phone-error');
+    const payBtn = form.querySelector('#confirm-payment-btn');
+    const btnText = payBtn.querySelector('.btn-text');
+    const btnSpinner = payBtn.querySelector('.btn-spinner');
+    const statusEl = form.querySelector('#pesepay-status');
+    const resultEl = form.querySelector('#pesepay-result');
+
+    function setLoading(loading, label) {
+      payBtn.disabled = loading;
+      btnSpinner.style.display = loading ? 'inline-block' : 'none';
+      btnText.textContent = loading ? (label || 'Processing\u2026') : `Pay $${packageData['data-amount']} USD`;
+    }
+
+    function setStatus(msg) {
+      statusEl.textContent = msg;
+      statusEl.style.display = 'block';
+    }
+
+    const SUPPORT_WHATSAPP = '263771327202';
+
+    // pesepay_reference comes from our own payments table, but it is still
+    // interpolated into HTML, so encode it rather than trusting it.
+    function escapeHtml(value) {
+      return String(value == null ? '' : value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    // The customer has paid, but Ruijie Cloud could not issue the code yet
+    // (outage, or the tier has no mapped group). We must never imply their money
+    // is lost, and must never show a voucher that does not exist. Polling
+    // continues, so this state can resolve itself into a real code.
+    function showSupportPending(reference, attemptsLeft) {
+      const ref = reference ? escapeHtml(reference) : 'not recorded yet';
+      const waText = encodeURIComponent(
+        'Hi Preyone, my payment went through but my WiFi code has not arrived yet. ' +
+        'Payment reference: ' + reference + ' (package: ' + packageData['data-tier'] + ')'
+      );
+      const stayOpen =
+        attemptsLeft * 3 >= 60
+          ? 'Keep this page open and your code will appear here automatically.'
+          : 'If it does not appear shortly, message us and we will sort it out.';
+
+      statusEl.style.display = 'block';
+      statusEl.innerHTML = [
+        '<div class="pay-support">',
+        '<p class="pay-support-title">Your payment went through \u2014 we are finishing your connection.</p>',
+        '<p class="pay-support-body">Issuing your WiFi code is taking longer than usual. ' + stayOpen + '</p>',
+        '<p class="pay-support-ref">Reference: <strong>' + ref + '</strong></p>',
+        '<a class="pay-support-wa" href="https://wa.me/' + SUPPORT_WHATSAPP + '?text=' + waText +
+          '" target="_blank" rel="noopener">Message us on WhatsApp</a>',
+        '<p class="pay-support-note">Our support team has been notified automatically.</p>',
+        '</div>'
+      ].join('');
+    }
+
+    function showPaymentFailure(detail) {
+      stopPolling();
+      setLoading(false);
+      form.querySelectorAll('.field').forEach((f) => { f.style.display = 'none'; });
+      payBtn.style.display = 'none';
+      statusEl.style.display = 'none';
+      resultEl.removeAttribute('style');
+      resultEl.className = 'field-success payment-fail';
+      resultEl.style.display = 'block';
+      resultEl.innerHTML = [
+        '<svg class="payment-fail-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">' +
+          '<path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" stroke="#ef476f" stroke-width="1.8" stroke-linejoin="round"/>' +
+          '<path d="M12 9v4" stroke="#ef476f" stroke-width="2" stroke-linecap="round"/>' +
+          '<path d="M12 17h.01" stroke="#ef476f" stroke-width="2" stroke-linecap="round"/>' +
+        '</svg>',
+        '<p class="payment-fail-title">Payment was not successful.</p>',
+        typeof detail === 'string' && detail ? '<p class="payment-fail-detail">' + detail + '</p>' : '',
+        '<div class="payment-fail-actions">' +
+          '<button type="button" class="payment-btn payment-btn--try">Try again</button>' +
+          '<button type="button" class="payment-btn payment-btn--close">Close</button>' +
+        '</div>'
+      ].join('');
+      resultEl.querySelector('.payment-btn--try').addEventListener('click', resetPaymentForm);
+      resultEl.querySelector('.payment-btn--close').addEventListener('click', closeModal);
+    }
+
+    function resetPaymentForm() {
+      form.querySelectorAll('.field').forEach((f) => { f.style.display = ''; });
+      payBtn.style.display = '';
+      statusEl.style.display = '';
+      resultEl.className = 'field-success';
+      resultEl.innerHTML = '';
+      resultEl.style.display = 'none';
+      phoneEl.value = '';
+      paymentSupportPending = false;
+      lastPaymentReference = null;
+      setLoading(false);
+      phoneEl.focus();
+    }
+
     function closeModal() {
+      if (paymentPollTimer) {
+        clearTimeout(paymentPollTimer);
+        paymentPollTimer = null;
+      }
       modal.classList.add('payment-modal-overlay--closing');
       setTimeout(() => {
         modal.remove();
@@ -53,79 +169,174 @@
       }
       selectedPackage = null;
     }
-    
+
+    function stopPolling() {
+      if (paymentPollTimer) {
+        clearTimeout(paymentPollTimer);
+        paymentPollTimer = null;
+      }
+    }
+
+    function pollPaymentStatus(paymentId, statusToken, attemptsLeft) {
+      stopPolling();
+      if (attemptsLeft <= 0) {
+        setLoading(false);
+        // Never tell a customer whose money is confirmed that we have not
+        // received it. Fall back to the support panel instead.
+        if (paymentSupportPending) {
+          showSupportPending(lastPaymentReference, 0);
+        } else {
+          setStatus('We haven\'t received confirmation yet. Check your phone for a pending prompt, then try again.');
+        }
+        return;
+      }
+
+      fetch(`/api/payments/status/${paymentId}?token=${encodeURIComponent(statusToken)}`)
+        .then((r) => {
+          if (r.status === 401 || r.status === 403) {
+            throw Object.assign(new Error('Payment session expired'), { fatal: true });
+          }
+          return r.ok ? r.json() : Promise.reject(new Error('status unavailable'));
+        })
+        .then((data) => {
+          if (data.status === 'completed') {
+            stopPolling();
+            setLoading(false);
+            form.querySelectorAll('.field').forEach((f) => { f.style.display = 'none'; });
+            phoneEl.style.display = 'none';
+            payBtn.style.display = 'none';
+            statusEl.style.display = 'none';
+            resultEl.style.display = 'block';
+            resultEl.innerHTML = [
+              '<strong style="font-size:1rem">Payment complete!</strong>',
+              '<span style="display:block;margin:.6rem 0 .4rem;color:rgba(255,255,255,.75)">Your voucher code:</span>',
+              '<code style="display:inline-block;font-size:1.25rem;letter-spacing:.12em;padding:.5rem .9rem;border-radius:10px;background:rgba(37,211,102,.12);border:1px solid rgba(37,211,102,.35);color:#4ade80;user-select:all">' + data.voucherCode + '</code>',
+              '<span style="display:block;margin-top:.7rem;font-size:.85rem;line-height:1.5">A login page will open automatically — enter this code there to connect to the internet. If it does not open, visit <strong>www.preyone.com</strong> on your device.</span>'
+            ].join('');
+            return;
+          }
+          if (data.status === 'failed') {
+            showPaymentFailure('Your payment was declined. Check your balance and try again.');
+            return;
+          }
+          // Paid, but no code yet. Reassure, surface the reference for support,
+          // and keep polling — a later poll may still mint successfully.
+          if (data.supportRequired) {
+            paymentSupportPending = true;
+            lastPaymentReference = data.reference || null;
+            showSupportPending(data.reference, attemptsLeft);
+          } else {
+            setStatus('Waiting for payment confirmation\u2026 Check your phone for the PIN prompt. (Keep this page open)');
+          }
+          paymentPollTimer = setTimeout(() => pollPaymentStatus(paymentId, statusToken, attemptsLeft - 1), 3000);
+        })
+        .catch((err) => {
+          if (err && err.fatal) {
+            stopPolling();
+            setLoading(false);
+            showPaymentFailure('Your payment session expired. If you were charged, contact support with your reference.');
+            return;
+          }
+          paymentPollTimer = setTimeout(() => pollPaymentStatus(paymentId, statusToken, attemptsLeft - 1), 3000);
+        });
+    }
+
+    form.querySelector('#pesepay-phone').addEventListener('input', () => {
+      phoneErrorEl.textContent = '';
+    });
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const phone = phoneEl.value.trim();
+      if (!/^(\+?263|0)?7\d{8}$/.test(phone.replace(/[\s-]/g, ''))) {
+        phoneErrorEl.textContent = 'Enter a valid Zimbabwe mobile number, e.g. 0771 327 202.';
+        return;
+      }
+      resultEl.className = 'field-success';
+      resultEl.style.display = 'none';
+      resultEl.style.color = '';
+      resultEl.style.background = '';
+      resultEl.style.border = '';
+      setLoading(true, 'Processing Payment\u2026');
+
+      try {
+        const result = await initiatePackagePayment(packageData, phone.replace(/[\s-]/g, ''));
+        if (result.status === 'failed') {
+          showPaymentFailure(result.error || 'Your payment was declined. Check your balance and try again.');
+          return;
+        }
+
+        // Pesepay sends the EcoCash request straight to the customer's phone as
+        // a USSD pull prompt, so there is no hosted page to redirect to — the
+        // pesepayPollUrl we get back is a JSON status endpoint that must NOT be
+        // shown in a browser. Poll our own status endpoint from here instead.
+        if (!result.paymentId || !result.statusToken) {
+          showPaymentFailure('We could not reach EcoCash. Please try again in a moment.');
+          return;
+        }
+        form.querySelectorAll('.field').forEach((f) => { f.style.display = 'none'; });
+        phoneEl.style.display = 'none';
+        payBtn.style.display = 'none';
+        setLoading(true, 'Waiting for approval\u2026');
+        setStatus('A payment request has been sent to your phone. Approve it with your EcoCash PIN. (Keep this page open)');
+        pollPaymentStatus(result.paymentId, result.statusToken, 300);
+      } catch (err) {
+        console.error('Payment error:', err);
+        showPaymentFailure((err && err.message) || 'Something unexpected went wrong. Please try again.');
+      }
+    });
+
+    // Re-opened automatically after returning from Pesepay: start polling straight
+    // away instead of showing the phone-number form again.
+    if (pendingReturn && pendingReturn.paymentId) {
+      form.querySelectorAll('.field').forEach((f) => { f.style.display = 'none'; });
+      phoneEl.style.display = 'none';
+      payBtn.style.display = 'none';
+      setLoading(true, 'Checking payment\u2026');
+      setStatus('Waiting for payment confirmation\u2026');
+      pollPaymentStatus(pendingReturn.paymentId, pendingReturn.token, 300);
+      pendingReturn = null;
+    }
+
     // Close modal on X click
     modal.querySelector('.modal-close').addEventListener('click', closeModal);
-    
+
     // Close on outside click
     modal.addEventListener('click', (e) => {
       if (e.target === modal) closeModal();
     });
-    
-    // Handle confirm button
-    modal.querySelector('#confirm-payment-btn').addEventListener('click', async () => {
-      const phone = modal.querySelector('#payment-phone').value.trim();
-      
-      if (!phone) {
-        modal.querySelector('#err-payment-phone').textContent = 'Phone number is required';
-        return;
-      }
-      
-      closeModal();
-      await initiatePackagePayment(packageData, phone);
-    });
-    
-    // Focus input
-    setTimeout(() => modal.querySelector('#payment-phone')?.focus(), 400);
   }
 
   async function initiatePackagePayment(packageData, phone) {
     const fullName = document.getElementById('fullName')?.value.trim() || 'Guest User';
     const macAddress = ruijieParams.get('mac') || ruijieParams.get('clientMac');
-    const ipAddress = ruijieParams.get('ip');
-    const ruijieAuthUrl = ruijieParams.get('url') || ruijieParams.get('originalUrl') || ruijieParams.get('ruijieAuthUrl') || null;
 
     const paymentData = {
       tier: packageData['data-tier'],
-      displayName: packageData['data-display-name'],
       amount: parseFloat(packageData['data-amount']),
       currency: packageData['data-currency'],
-      billingPeriod: packageData['data-period'],
-      dataLimitGb: packageData['data-is-uncapped'] === 'true' ? null : parseFloat(packageData['data-data-limit']),
-      isUncapped: packageData['data-is-uncapped'] === 'true',
-      bandwidthUp: parseInt(packageData['data-bandwidth-up']),
-      bandwidthDown: parseInt(packageData['data-bandwidth-down']),
       phone,
       fullName,
       macAddress,
-      ipAddress,
-      ruijieAuthUrl,
     };
 
+    const response = await fetch('/api/payments/initiate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(paymentData),
+    });
+
+    let result;
     try {
-      const response = await fetch('/api/payments/initiate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(paymentData),
-      });
-
-      const result = await response.json();
-
-      if (!response.ok) {
-        alert('Payment initiation failed: ' + (result.error || 'Unknown error'));
-        return;
-      }
-
-      // Redirect to Pesepay checkout
-      if (result.pesepayPollUrl) {
-        window.location.href = result.pesepayPollUrl;
-      } else {
-        alert('Payment processing initiated. Redirecting...');
-      }
-    } catch (error) {
-      console.error('Payment error:', error);
-      alert('Network error during payment: ' + error.message);
+      result = await response.json();
+    } catch {
+      throw new Error('Invalid response from server');
     }
+
+    if (!response.ok) {
+      throw new Error(result.error || 'Payment initiation failed');
+    }
+    return result;
   }
 
   // Add event listeners to all package buttons
@@ -148,32 +359,55 @@
     });
   });
 
+  // --- RETURN FROM PESEPAY ---
+  // /api/payments/return sends the customer back here with ?pay=&tok= once they
+  // have approved (or abandoned) the EcoCash push. The status endpoint tells us
+  // which package was bought, so we can re-open that package's modal and let it
+  // resume polling — otherwise the voucher would be invisible until the customer
+  // started a brand new payment.
+  (function resumeAfterPesepayReturn() {
+    const params = new URLSearchParams(window.location.search);
+    const paymentId = params.get('pay');
+    const token = params.get('tok');
+    const failure = params.get('payment');
+    if (!paymentId && !token && !failure) return;
+
+    // Drop the token from the address bar so a refresh cannot replay this path.
+    if (window.history && window.history.replaceState) {
+      window.history.replaceState({}, document.title, window.location.pathname + window.location.hash);
+    }
+
+    if (failure) {
+      alert('We could not find that payment. Please start again.');
+      return;
+    }
+    if (!paymentId || !token) return;
+
+    fetch('/api/payments/status/' + encodeURIComponent(paymentId) + '?token=' + encodeURIComponent(token))
+      .then(function (r) { return r.ok ? r.json() : Promise.reject(new Error('lookup failed')); })
+      .then(function (data) {
+        pendingReturn = { paymentId: paymentId, token: token };
+        for (let i = 0; i < packageButtons.length; i++) {
+          if (packageButtons[i].dataset.tier === data.tier) {
+            packageButtons[i].click();
+            return;
+          }
+        }
+        pendingReturn = null;
+        alert('Payment received, but we could not reopen the package. Refresh to see your voucher.');
+      })
+      .catch(function () {
+        alert('We could not check that payment. Please refresh and try again.');
+      });
+  })();
+
   // --- FORM HELPERS ---
   const voucherParams = new URLSearchParams(location.search);
 
   function redirectToSuccess(json) {
-    var redirect = json.redirectUrl || '/success.html';
-    var dest = new URL(redirect, location.origin);
-    if (json.sessionToken) dest.searchParams.set('token', json.sessionToken);
-    if (json.sessionExpiresAt) dest.searchParams.set('expires', json.sessionExpiresAt);
-    if (json.bandwidthMbpsUp) dest.searchParams.set('bwUp', json.bandwidthMbpsUp);
-    if (json.bandwidthMbpsDown) dest.searchParams.set('bwDown', json.bandwidthMbpsDown);
-    if (json.dataLimitGb != null) dest.searchParams.set('dataLimit', json.dataLimitGb);
-    if (json.isUncapped != null) dest.searchParams.set('uncapped', json.isUncapped);
-    if (json.durationMin) dest.searchParams.set('dur', json.durationMin);
-    if (json.macAddress) dest.searchParams.set('mac', json.macAddress);
-    if (json.ipAddress) dest.searchParams.set('ip', json.ipAddress);
-    if (json.voucherCode) dest.searchParams.set('voucher', json.voucherCode);
-    if (json.packageTier) dest.searchParams.set('pkg', json.packageTier);
-    if (json.loginUrl) dest.searchParams.set('loginUrl', json.loginUrl);
-    // Forward gateway params so success page can trigger authorization
-    var cp = new URLSearchParams(location.search);
-    if (cp.get('nasip')) dest.searchParams.set('nasip', cp.get('nasip'));
-    if (cp.get('nas_ip')) dest.searchParams.set('nas_ip', cp.get('nas_ip'));
-    if (cp.get('url')) dest.searchParams.set('origUrl', cp.get('url'));
-    if (cp.get('nas_mac')) dest.searchParams.set('nas_mac', cp.get('nas_mac'));
-    if (cp.get('ssid')) dest.searchParams.set('ssid', cp.get('ssid'));
-    location.href = dest.toString();
+    // Navigate directly to the ext_login URL (or success.html fallback) returned by the server.
+    // Do NOT re-encode or add extra params — the server already built the correct URL.
+    location.href = json.redirectUrl || '/success.html';
   }
 
   async function submitForm(data, errorEl) {
@@ -227,24 +461,17 @@
   }
 
   if (quickForm) {
-    quickForm.addEventListener('submit', async function (e) {
-      e.preventDefault();
+    quickForm.addEventListener('submit', function (e) {
       var code = document.getElementById('accessCode').value.trim();
-      if (!code) { setFieldError('accessCode', 'Access code is required.'); return; }
-
-      setQuickLoading(true);
-      var loadingEl = document.getElementById('bodyLoading');
-      if (loadingEl) loadingEl.classList.remove('hidden');
-
-      await submitForm({
-        fullName: 'Guest',
-        phone: 'N/A',
-        email: '',
-        voucherCode: code,
-        acceptedTos: true,
-      }, document.getElementById('form-error'));
-
-      setQuickLoading(false);
+      if (!code) {
+        e.preventDefault();
+        setFieldError('accessCode', 'Access code is required.');
+        return;
+      }
+      // Set form action to include original gateway params (client_mac, nas_ip, etc.)
+      quickForm.action = '/api/auth/signup?' + voucherParams.toString();
+      // Submit naturally — browser POSTs to server, server returns 302 redirect to ext_login,
+      // browser follows as top-level navigation, no JS dependency for the redirect.
     });
   }
 

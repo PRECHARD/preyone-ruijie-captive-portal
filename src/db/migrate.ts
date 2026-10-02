@@ -76,10 +76,9 @@ const SQL = `
     amount                  NUMERIC(10,2) NOT NULL,
     currency                TEXT NOT NULL DEFAULT 'USD',
     payment_method          TEXT NOT NULL DEFAULT 'EcoCash',
-    pesepay_reference       TEXT,
+    pesepay_reference      TEXT,
+    pesepay_poll_url       TEXT,
     merchant_reference      TEXT,
-    pesepay_poll_url        TEXT,
-    ruijie_auth_url         TEXT,
     client_mac              TEXT,
     status                  TEXT NOT NULL DEFAULT 'pending',
     created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -87,13 +86,52 @@ const SQL = `
     error_message           TEXT
   );
 
+  -- ════════════════ ContiPay → Pesepay rollback ════════════════
+  -- ContiPay was not approved, so the online gateway is Pesepay again. A brief
+  -- ContiPay deployment renamed pesepay_reference to contipay_transaction_index
+  -- and dropped pesepay_poll_url, so put both back.
+  --
+  -- This REPLACES the forward ContiPay rename rather than being added after it.
+  -- Both cannot coexist: the forward block is conditional on pesepay_reference
+  -- existing while contipay_transaction_index does not, so it would rename the
+  -- column straight back on the next migration run and the two would flip-flop.
+  DO $$ BEGIN
+    IF EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_name = 'payments' AND column_name = 'contipay_transaction_index'
+    ) AND NOT EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_name = 'payments' AND column_name = 'pesepay_reference'
+    ) THEN
+      ALTER TABLE payments RENAME COLUMN contipay_transaction_index TO pesepay_reference;
+    END IF;
+  END $$;
+
+  DO $$ BEGIN
+    IF EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'idx_payments_contipay_txn_index') THEN
+      ALTER INDEX idx_payments_contipay_txn_index RENAME TO idx_payments_pesepay_ref;
+    END IF;
+  END $$;
+
+  -- pesepay_poll_url holds the hosted Pesepay page the customer is redirected
+  -- to in order to approve the EcoCash push; it is written on every initiate.
+  ALTER TABLE payments ADD COLUMN IF NOT EXISTS pesepay_poll_url TEXT;
+
   CREATE INDEX IF NOT EXISTS idx_payments_user_id ON payments (user_id);
   CREATE INDEX IF NOT EXISTS idx_payments_status ON payments (status);
   CREATE INDEX IF NOT EXISTS idx_payments_pesepay_ref ON payments (pesepay_reference);
   CREATE INDEX IF NOT EXISTS idx_payments_merchant_ref ON payments (merchant_reference);
 
-  -- ContiPay online purchases: minted voucher is attached to the completed payment
+  -- Online purchases: the minted voucher is attached to the completed payment
   ALTER TABLE payments ADD COLUMN IF NOT EXISTS voucher_code TEXT;
+
+  -- Per-payment secret appended to the resultUrl we hand Pesepay and echoed
+  -- back on its callback. Primary authentication is the AES-CBC payload; this
+  -- token is an additional check whenever the gateway sends it back, so it must
+  -- be unique per payment for that check to be meaningful.
+  ALTER TABLE payments ADD COLUMN IF NOT EXISTS webhook_token TEXT;
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_webhook_token
+    ON payments (webhook_token) WHERE webhook_token IS NOT NULL;
 
   CREATE TABLE IF NOT EXISTS wispr_profiles (
     id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -587,6 +625,49 @@ const SQL = `
   );
   CREATE INDEX IF NOT EXISTS idx_transit_promotions_company ON transit_promotions (company_id, active);
 
+  -- ── Master route templates ────────────────────────────────────────────────
+  -- A company-owned, reusable stage list + stage-to-stage fare matrix that a
+  -- conductor uses to open an UNSCHEDULED on-the-go run. Deliberately NOT a
+  -- trip: it never appears in the trip picker, never receives tickets and is
+  -- never scheduled. Mirrors the POS local tables (route_templates /
+  -- route_template_stages / route_template_fares) so the device can cache the
+  -- whole set for offline selling and reconcile by id.
+  CREATE TABLE IF NOT EXISTS transit_route_templates (
+    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id   UUID NOT NULL REFERENCES transit_companies(id) ON DELETE CASCADE,
+    name         TEXT NOT NULL,
+    code         TEXT NOT NULL DEFAULT '',
+    description  TEXT NOT NULL DEFAULT '',
+    active       BOOLEAN NOT NULL DEFAULT TRUE,
+    created_by   UUID REFERENCES transit_users(id),
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+  CREATE INDEX IF NOT EXISTS idx_transit_route_templates_company
+    ON transit_route_templates (company_id, active);
+
+  CREATE TABLE IF NOT EXISTS transit_route_template_stages (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    template_id UUID NOT NULL REFERENCES transit_route_templates(id) ON DELETE CASCADE,
+    seq         INTEGER NOT NULL,
+    name        TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_trts_template
+    ON transit_route_template_stages (template_id, seq);
+
+  -- Fare matrix leg, always stored in forward order (from_seq < to_seq) to match
+  -- the POS: a return leg looks the pair up swapped. price_cents of 0 means
+  -- "not priced yet" and the sale falls back to the standard tariff.
+  CREATE TABLE IF NOT EXISTS transit_route_template_fares (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    template_id UUID NOT NULL REFERENCES transit_route_templates(id) ON DELETE CASCADE,
+    from_seq    INTEGER NOT NULL,
+    to_seq      INTEGER NOT NULL,
+    price_cents INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE INDEX IF NOT EXISTS idx_trtf_template
+    ON transit_route_template_fares (template_id);
+
   CREATE TABLE IF NOT EXISTS transit_tickets (
     id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     company_id       UUID NOT NULL REFERENCES transit_companies(id) ON DELETE CASCADE,
@@ -676,6 +757,18 @@ const SQL = `
     PRIMARY KEY (user_id, permission_code)
   );
 
+  -- company_permissions: capability granted to EVERY user of a transit company,
+  -- regardless of role. Used to hand a narrow capability (e.g. route template
+  -- management) to a company whose owner is field staff, without inventing a
+  -- new role or widening the holder's role_permissions.
+  CREATE TABLE IF NOT EXISTS company_permissions (
+    company_id      UUID NOT NULL REFERENCES transit_companies(id) ON DELETE CASCADE,
+    permission_code TEXT NOT NULL REFERENCES permissions(code) ON DELETE CASCADE,
+    granted_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (company_id, permission_code)
+  );
+  CREATE INDEX IF NOT EXISTS idx_company_permissions_company ON company_permissions (company_id);
+
   -- Level 1 company admins belong to a transit company; NULL (Level 0) means platform ops
   ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS company_id UUID REFERENCES transit_companies(id);
   CREATE INDEX IF NOT EXISTS idx_admin_users_company ON admin_users (company_id);
@@ -689,7 +782,7 @@ const SQL = `
   ALTER TABLE transit_users ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
 
   -- ════════════════ Payment / Transaction Constraints ════════════════
-  DROP INDEX IF EXISTS idx_payments_pesepay_ref;
+  DROP INDEX IF EXISTS idx_payments_contipay_txn_index;
   CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_pesepay_ref ON payments (pesepay_reference) WHERE pesepay_reference IS NOT NULL;
   DROP INDEX IF EXISTS idx_payments_merchant_ref;
   CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_merchant_ref ON payments (merchant_reference) WHERE merchant_reference IS NOT NULL;
@@ -723,6 +816,31 @@ const SQL = `
     ALTER TABLE transit_tickets ADD CONSTRAINT transit_tickets_status_check CHECK (status IN ('SYNCED', 'SEAT_CONFLICT', 'INVALID_SIGNATURE', 'CANCELLED'));
   EXCEPTION WHEN duplicate_object THEN NULL;
   END $$;
+
+  -- ════════════════ Transit Ticket Number Uniqueness ════════════════
+  -- A printed ticket number must identify exactly one sale, otherwise the same
+  -- number can be traced back to two different passengers.
+  --
+  -- The index covers ONLY tagged numbers (PREFIX-ABC-NNNN, where ABC is a
+  -- 3-character per-device tag). That format is what the app now issues; it
+  -- embeds a device discriminator so two handsets sharing a plate prefix
+  -- cannot both mint AGJ0001.
+  --
+  -- Untagged numbers are deliberately EXCLUDED, not cleaned up. Production
+  -- issued 364 tickets in the older untagged format with no device component,
+  -- and 80 of those rows share a number with another row (19 distinct numbers,
+  -- 4 handsets, ~$583 of genuinely real sales across 9 trips). Those are real
+  -- paid sales, so demoting or deleting them to satisfy a constraint would
+  -- rewrite the company's history and would not change the paper already in
+  -- passengers' hands. They are grandfathered here and need business-led
+  -- reconciliation, not a migration.
+  --
+  -- CANCELLED rows are excluded so voiding a ticket releases its number.
+  DROP INDEX IF EXISTS idx_transit_tickets_receipt_unique;
+  CREATE UNIQUE INDEX idx_transit_tickets_receipt_unique ON transit_tickets
+    (company_id, client_receipt_no)
+    WHERE status <> 'CANCELLED'
+      AND client_receipt_no ~ '^[A-Z0-9]+-[0-9A-Z]{3}-[0-9]+$';
 
   -- ════════════════ Transit Ticket Sync (idempotency + origin/destination) ════════════════
   ALTER TABLE transit_tickets ADD COLUMN IF NOT EXISTS ticket_id TEXT;
@@ -760,6 +878,12 @@ const SQL = `
     device_id     UUID REFERENCES transit_devices(id),
     driver_id     TEXT NOT NULL DEFAULT '',
     driver_name   TEXT NOT NULL DEFAULT '',
+    -- Crew details are pushed by the conductor's handset at shift start so the
+    -- admin trip schedule shows who was actually on the bus, and so the server
+    -- has the contacts needed to reach the crew.
+    driver_phone    TEXT NOT NULL DEFAULT '',
+    conductor_name  TEXT NOT NULL DEFAULT '',
+    conductor_phone TEXT NOT NULL DEFAULT '',
     vehicle_reg   TEXT NOT NULL DEFAULT '',
     status        TEXT NOT NULL DEFAULT 'OPEN',
     ticket_count  INTEGER NOT NULL DEFAULT 0,
@@ -841,6 +965,221 @@ const SQL = `
       FOREIGN KEY (created_by) REFERENCES transit_users(id) ON DELETE SET NULL;
   EXCEPTION WHEN duplicate_object THEN NULL;
   END $$;
+
+  -- ════════════════ POS (Preyone Point of Sale) ════════════════
+  -- Allow Cashier role on admin users + PIN login support
+  ALTER TABLE admin_users DROP CONSTRAINT IF EXISTS admin_users_role_check;
+  ALTER TABLE admin_users ADD CONSTRAINT admin_users_role_check
+    CHECK (role IN ('CEO', 'Manager', 'Staff', 'Cashier'));
+  ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS pin_hash TEXT;
+
+  -- Product catalogue / stock
+  CREATE TABLE IF NOT EXISTS pos_products (
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name                TEXT NOT NULL,
+    sku                 TEXT,
+    barcode             TEXT,
+    category            TEXT,
+    price               NUMERIC(12,2) NOT NULL DEFAULT 0 CHECK (price >= 0),
+    cost_price          NUMERIC(12,2) NOT NULL DEFAULT 0 CHECK (cost_price >= 0),
+    stock_qty           NUMERIC(12,2) NOT NULL DEFAULT 0,
+    track_stock         BOOLEAN NOT NULL DEFAULT TRUE,
+    low_stock_threshold NUMERIC(12,2) NOT NULL DEFAULT 0,
+    active              BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_pos_products_sku     ON pos_products (sku)     WHERE sku IS NOT NULL;
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_pos_products_barcode ON pos_products (barcode) WHERE barcode IS NOT NULL;
+  CREATE INDEX IF NOT EXISTS idx_pos_products_name   ON pos_products (lower(name));
+  CREATE INDEX IF NOT EXISTS idx_pos_products_active ON pos_products (active);
+
+  -- Client book
+  CREATE TABLE IF NOT EXISTS pos_customers (
+    id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name       TEXT NOT NULL,
+    phone      TEXT,
+    email      TEXT,
+    address    TEXT,
+    notes      TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_pos_customers_name ON pos_customers (lower(name));
+
+  -- Till shifts (cash-up sessions)
+  CREATE TABLE IF NOT EXISTS pos_shifts (
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    cashier_id    UUID NOT NULL REFERENCES admin_users(id),
+    opening_float NUMERIC(12,2) NOT NULL DEFAULT 0,
+    opened_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    closed_at     TIMESTAMPTZ,
+    expected_cash NUMERIC(12,2),
+    counted_cash  NUMERIC(12,2),
+    variance      NUMERIC(12,2),
+    status        TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'closed')),
+    notes         TEXT
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_pos_shifts_cashier ON pos_shifts (cashier_id);
+  CREATE INDEX IF NOT EXISTS idx_pos_shifts_status  ON pos_shifts (status);
+  CREATE INDEX IF NOT EXISTS idx_pos_shifts_opened  ON pos_shifts (opened_at);
+
+  -- Documents: till receipts (sale), invoices, quotations
+  CREATE SEQUENCE IF NOT EXISTS pos_doc_number_seq;
+
+  CREATE TABLE IF NOT EXISTS pos_documents (
+    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    doc_number   TEXT UNIQUE NOT NULL,
+    doc_type     TEXT NOT NULL CHECK (doc_type IN ('sale', 'invoice', 'quotation')),
+    channel      TEXT NOT NULL DEFAULT 'till' CHECK (channel IN ('till', 'online', 'office')),
+    status       TEXT NOT NULL DEFAULT 'draft'
+                 CHECK (status IN ('draft', 'unpaid', 'partial', 'paid', 'sent', 'void')),
+    customer_id  UUID REFERENCES pos_customers(id) ON DELETE SET NULL,
+    cashier_id   UUID REFERENCES admin_users(id) ON DELETE SET NULL,
+    shift_id     UUID REFERENCES pos_shifts(id) ON DELETE SET NULL,
+    issue_date   DATE NOT NULL DEFAULT CURRENT_DATE,
+    due_date     DATE,
+    subtotal     NUMERIC(12,2) NOT NULL DEFAULT 0,
+    discount_pct NUMERIC(5,2)  NOT NULL DEFAULT 0,
+    tax_pct      NUMERIC(5,2)  NOT NULL DEFAULT 0,
+    total        NUMERIC(12,2) NOT NULL DEFAULT 0,
+    amount_paid  NUMERIC(12,2) NOT NULL DEFAULT 0,
+    notes        TEXT,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_pos_documents_number   ON pos_documents (doc_number);
+  CREATE INDEX IF NOT EXISTS idx_pos_documents_customer ON pos_documents (customer_id);
+  CREATE INDEX IF NOT EXISTS idx_pos_documents_status   ON pos_documents (status);
+  CREATE INDEX IF NOT EXISTS idx_pos_documents_type     ON pos_documents (doc_type);
+  CREATE INDEX IF NOT EXISTS idx_pos_documents_shift    ON pos_documents (shift_id);
+  CREATE INDEX IF NOT EXISTS idx_pos_documents_created  ON pos_documents (created_at);
+
+  CREATE TABLE IF NOT EXISTS pos_document_items (
+    id            BIGSERIAL PRIMARY KEY,
+    document_id   UUID NOT NULL REFERENCES pos_documents(id) ON DELETE CASCADE,
+    product_id    UUID REFERENCES pos_products(id) ON DELETE SET NULL,
+    description   TEXT NOT NULL,
+    price         NUMERIC(12,2) NOT NULL DEFAULT 0,
+    qty           NUMERIC(12,2) NOT NULL DEFAULT 1,
+    line_total    NUMERIC(12,2) NOT NULL DEFAULT 0,
+    position      INTEGER NOT NULL DEFAULT 0
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_pos_doc_items_document ON pos_document_items (document_id);
+  CREATE INDEX IF NOT EXISTS idx_pos_doc_items_product  ON pos_document_items (product_id);
+
+  CREATE TABLE IF NOT EXISTS pos_document_payments (
+    id            BIGSERIAL PRIMARY KEY,
+    document_id   UUID NOT NULL REFERENCES pos_documents(id) ON DELETE CASCADE,
+    amount        NUMERIC(12,2) NOT NULL CHECK (amount > 0),
+    method        TEXT NOT NULL DEFAULT 'cash'
+                  CHECK (method IN ('cash', 'card', 'ecocash', 'bank', 'pesepay', 'other')),
+    reference     TEXT,
+    paid_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    recorded_by   UUID REFERENCES admin_users(id) ON DELETE SET NULL,
+    shift_id      UUID REFERENCES pos_shifts(id) ON DELETE SET NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_pos_doc_pay_document ON pos_document_payments (document_id);
+  CREATE INDEX IF NOT EXISTS idx_pos_doc_pay_method   ON pos_document_payments (method);
+  CREATE INDEX IF NOT EXISTS idx_pos_doc_pay_paid_at  ON pos_document_payments (paid_at);
+
+  -- Company profile (single source of truth for receipts/notifications)
+  CREATE TABLE IF NOT EXISTS companies (
+    id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name           TEXT NOT NULL DEFAULT 'Preyone',
+    tagline        TEXT,
+    address        TEXT,
+    email          TEXT,
+    support_phone  TEXT,
+    website        TEXT,
+    logo_path      TEXT,
+    currency       TEXT NOT NULL DEFAULT 'USD',
+    tax_pct        NUMERIC(5,2) NOT NULL DEFAULT 0,
+    invoice_prefix TEXT NOT NULL DEFAULT 'INV',
+    quote_prefix   TEXT NOT NULL DEFAULT 'QT',
+    receipt_footer TEXT,
+    terms_text     TEXT,
+    updated_by     UUID REFERENCES admin_users(id) ON DELETE SET NULL,
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+  ALTER TABLE companies ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+  INSERT INTO companies (name, tagline, email, support_phone, currency, tax_pct)
+  SELECT 'Preyone', 'Connecting People. Powering Business.', 'info@preyone.com', '+263771327202', 'USD', 0
+  WHERE NOT EXISTS (SELECT 1 FROM companies);
+
+  -- POS devices & endpoints (desktop / web / android)
+  CREATE TABLE IF NOT EXISTS pos_devices (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    device_id   TEXT UNIQUE NOT NULL,
+    device_type TEXT NOT NULL DEFAULT 'android' CHECK (device_type IN ('desktop', 'web', 'android')),
+    name        TEXT NOT NULL,
+    branch      TEXT,
+    company_id  UUID REFERENCES companies(id) ON DELETE SET NULL,
+    app_version TEXT,
+    server_url  TEXT,
+    status      TEXT NOT NULL DEFAULT 'registered' CHECK (status IN ('registered', 'active', 'suspended')),
+    last_seen   TIMESTAMPTZ,
+    notes       TEXT,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+  CREATE INDEX IF NOT EXISTS idx_pos_devices_type     ON pos_devices (device_type);
+  CREATE INDEX IF NOT EXISTS idx_pos_devices_status   ON pos_devices (status);
+  CREATE INDEX IF NOT EXISTS idx_pos_devices_last_seen ON pos_devices (last_seen);
+
+  -- Demo devices so the Devices & Endpoints console has data to show
+  INSERT INTO pos_devices (device_id, device_type, name, branch, app_version, status, last_seen)
+  SELECT 'demo-desktop-01', 'desktop', 'Front Desk Desktop', 'Head Office', '1.0.0', 'active', NOW() - INTERVAL '5 minutes'
+  WHERE NOT EXISTS (SELECT 1 FROM pos_devices WHERE device_id = 'demo-desktop-01');
+  INSERT INTO pos_devices (device_id, device_type, name, branch, app_version, status, last_seen)
+  SELECT 'demo-android-01', 'android', 'Till Tablet (Hall)', 'Hall', '2.4.3', 'active', NOW() - INTERVAL '2 minutes'
+  WHERE NOT EXISTS (SELECT 1 FROM pos_devices WHERE device_id = 'demo-android-01');
+
+  -- ════════════════ Ruijie Cloud Voucher Integration ════════════════
+  -- Maps sellable package tiers to Ruijie Cloud user groups (seed via
+  -- scripts/fetch-ruijie-profiles.ts once RUIJIE_CLOUD credentials exist).
+  CREATE TABLE IF NOT EXISTS voucher_profiles (
+    id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tier_name            TEXT NOT NULL REFERENCES packages(tier_name) ON DELETE CASCADE,
+    ruijie_user_group_id TEXT NOT NULL,
+    ruijie_profile_uuid  TEXT NOT NULL,
+    ruijie_group_name    TEXT,
+    time_period_min      INTEGER,
+    quota_mb             INTEGER,
+    no_of_device         INTEGER,
+    rate_limit_kbps      INTEGER,
+    active               BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (tier_name)
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_voucher_profiles_tier ON voucher_profiles (tier_name);
+  CREATE INDEX IF NOT EXISTS idx_voucher_profiles_active ON voucher_profiles (active);
+
+  -- Audit trail of every Ruijie Cloud code minted through this portal.
+  CREATE TABLE IF NOT EXISTS ruijie_vouchers (
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    code_no       TEXT NOT NULL,
+    tier_name     TEXT,
+    user_group_id TEXT,
+    profile_uuid  TEXT,
+    ruijie_expiry BIGINT,
+    payment_id    UUID REFERENCES payments(id) ON DELETE SET NULL,
+    source        TEXT NOT NULL DEFAULT 'online' CHECK (source IN ('online','staff','pos','seed','manual')),
+    comment       TEXT,
+    raw_response  JSONB,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_ruijie_vouchers_code_no ON ruijie_vouchers (code_no);
+  CREATE INDEX IF NOT EXISTS idx_ruijie_vouchers_payment ON ruijie_vouchers (payment_id);
+  CREATE INDEX IF NOT EXISTS idx_ruijie_vouchers_tier ON ruijie_vouchers (tier_name);
 `;
 
 (async () => {
@@ -851,7 +1190,7 @@ const SQL = `
     // Seed packages table (idempotent upsert — updates existing tiers, inserts new ones)
     const packages = [
       // Orange band
-      ['PreLite', 'Daily Basic', 0.99, 'USD', 'daily', 1440, 5, false, 5, 5, 1],
+      ['PreLite', 'Daily Basic', 1.00, 'USD', 'daily', 1440, 5, false, 5, 5, 1],
       ['PreLite Plus', 'Starter', 1.99, 'USD', '2days', 2880, 10, false, 5, 5, 1],
       ['PreLink', 'Weekly Standard', 4.99, 'USD', 'weekly', 10080, 20, false, 5, 5, 1],
       // Cyan band
@@ -971,6 +1310,7 @@ const SQL = `
       ['operations.manage', 'Daily operations: routes, trips, assignments'],
       ['finance.view', 'Refunds, audit logs, financials'],
       ['transit.field_app', 'Mobile field app access (CONDUCTOR/DRIVER/TICKET_SELLER)'],
+      ['route.templates.manage', 'Create/edit/delete company master route templates. Grantable to a company so a field-staff owner can maintain them without becoming an admin.'],
     ];
     for (const [code, description] of permissions) {
       await client.query(
@@ -1010,11 +1350,57 @@ const SQL = `
       ['CONDUCTOR', 'transit.field_app'],
       ['DRIVER', 'transit.field_app'],
       ['TICKET_SELLER', 'transit.field_app'],
+      // Route template management. Field roles (CONDUCTOR/DRIVER/TICKET_SELLER)
+      // are deliberately absent: a company whose owner is field staff receives
+      // this via company_permissions instead of a role-wide default.
+      ['SUPER_ADMIN', 'route.templates.manage'],
+      ['COMPANY_ADMIN', 'route.templates.manage'],
+      ['MANAGER', 'route.templates.manage'],
+      ['OPERATIONS', 'route.templates.manage'],
     ];
     for (const [role, permission] of rolePermissionMap) {
       await client.query(
         'INSERT INTO role_permissions (role, permission_code) VALUES ($1, $2) ON CONFLICT DO NOTHING',
         [role, permission]
+      );
+    }
+
+    // ── Company capability grants (opt-in) ──
+    // The seeded company's owner is field staff (a conductor who bought the
+    // product), so they need route template management via a COMPANY grant
+    // rather than by being promoted to COMPANY_ADMIN. Every user of the company
+    // inherits it; nobody else does, and no other permission widens.
+    //
+    // This is OPT-IN and refuses to guess. It previously ran unless
+    // TRANSIT_GRANT_ROUTE_TEMPLATES=0, which meant any deployment whose
+    // TRANSIT_COMPANY_SLUG was unset silently granted the capability to the
+    // default 'preyone-transit' tenant — on the live VPS that company is
+    // Preyone Freights, so the migration handed an unrelated company the
+    // permission. Two explicit settings are now required: which company, and
+    // that the grant is wanted at all. Existing grants are untouched (this only
+    // ever inserts), so switching the default off cannot revoke a live grant.
+    const grantRouteTemplates = process.env.TRANSIT_GRANT_ROUTE_TEMPLATES === '1';
+    if (grantRouteTemplates) {
+      if (!process.env.TRANSIT_COMPANY_SLUG) {
+        throw new Error(
+          'TRANSIT_GRANT_ROUTE_TEMPLATES=1 requires TRANSIT_COMPANY_SLUG to name the ' +
+            'company that should receive "route.templates.manage". Refusing to guess: ' +
+            'the default slug (preyone-transit) belongs to a different tenant.'
+        );
+      }
+      await client.query(
+        `INSERT INTO company_permissions (company_id, permission_code)
+         VALUES ($1, 'route.templates.manage')
+         ON CONFLICT (company_id, permission_code) DO NOTHING`,
+        [companyId]
+      );
+      console.log(
+        `Granted "route.templates.manage" to company "${companySlug}" (all company users, incl. field staff).`
+      );
+    } else {
+      console.log(
+        'Skipped the "route.templates.manage" company grant ' +
+          '(opt-in: set TRANSIT_GRANT_ROUTE_TEMPLATES=1 together with TRANSIT_COMPANY_SLUG).'
       );
     }
 
@@ -1037,6 +1423,16 @@ const SQL = `
         }
       }
     }
+
+    // Crew contacts on shifts. Additive and idempotent: existing rows keep their
+    // values, and new pushes from the handset start filling these in. Without
+    // them the admin trip schedule could only show a driver's name, never a
+    // contact for the crew actually on the bus.
+    await client.query(`
+      ALTER TABLE transit_shifts ADD COLUMN IF NOT EXISTS driver_phone TEXT NOT NULL DEFAULT '';
+      ALTER TABLE transit_shifts ADD COLUMN IF NOT EXISTS conductor_name TEXT NOT NULL DEFAULT '';
+      ALTER TABLE transit_shifts ADD COLUMN IF NOT EXISTS conductor_phone TEXT NOT NULL DEFAULT '';
+    `);
 
     console.log('Migration complete. Packages + transit + RBAC seeded.');
   } finally {

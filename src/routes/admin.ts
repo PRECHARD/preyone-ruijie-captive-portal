@@ -1,9 +1,13 @@
 import { Router, Request, Response } from 'express';
 import crypto from 'crypto';
+import rateLimit from 'express-rate-limit';
 import { pool } from '../db/pool';
 import { requireAdminAuth, requireRole } from '../middleware/adminAuth';
+import { PERMISSIONS, requirePermission, scopeUserVoucherCodeCondition, scopeVoucherCondition } from '../middleware/rbac';
 import { recordAuditLog } from './adminAuth';
 import { sendAdminApprovedNotification, sendAdminRejectedNotification } from '../services/notificationService';
+import { isRuijieCloudConfigured, mintRuijieVoucherForTier } from '../services/ruijieMint';
+import { RuijieApiError } from '../services/ruijieCloud';
 import ExcelJS from 'exceljs';
 import path from 'path';
 import fs from 'fs';
@@ -11,6 +15,39 @@ import fs from 'fs';
 export const adminRouter = Router();
 
 adminRouter.use(requireAdminAuth);
+
+const adminGeneralLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 600,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests. Try again later.' },
+});
+adminRouter.use(adminGeneralLimiter);
+
+// When Ruijie Cloud is configured it is the network's single source of access:
+// every staff-sold code MUST be minted from Ruijie (never a local placeholder).
+// Returns null when Ruijie is not configured so legacy local minting continues.
+interface StaffRuijieMint {
+  code: string;
+  profile: string;
+  userGroupId: string;
+  expiryTime: number | null;
+}
+async function staffRuijieMint(packageTier: string, comment: string): Promise<StaffRuijieMint | null> {
+  if (!isRuijieCloudConfigured()) return null;
+  const minted = await mintRuijieVoucherForTier(packageTier, comment);
+  return {
+    code: minted.codeNo,
+    profile: minted.profile,
+    userGroupId: minted.userGroupId,
+    expiryTime: minted.expiryTime ?? null,
+  };
+}
+
+const RUIJIE_VOUCHER_AUDIT_SQL = `INSERT INTO ruijie_vouchers
+  (code_no, tier_name, user_group_id, profile_uuid, ruijie_expiry, payment_id, source, comment)
+  VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`;
 
 adminRouter.get('/users', async (req: Request, res: Response) => {
   if (req.adminUser!.role === 'Staff') {
@@ -30,31 +67,43 @@ adminRouter.get('/users', async (req: Request, res: Response) => {
   }
 });
 
-adminRouter.get('/access-log', async (_req: Request, res: Response) => {
-  const { rows } = await pool.query(
-    `SELECT al.id, al.event, al.mac_address, al.ip_address, al.detail, al.created_at, u.full_name
-      FROM access_log al LEFT JOIN users u ON u.id = al.user_id ORDER BY al.created_at DESC LIMIT 1000`
-  );
+adminRouter.get('/access-log', async (req: Request, res: Response) => {
+  const params: any[] = [];
+  const scope = scopeVoucherCondition(req, params);
+  let query = `
+    SELECT al.id, al.event, al.mac_address, al.ip_address, al.detail, al.created_at, u.full_name
+      FROM access_log al
+      LEFT JOIN users u ON u.id = al.user_id
+      LEFT JOIN vouchers v ON UPPER(u.voucher_code) = v.code
+  `;
+  if (scope) query += ` WHERE ${scope}`;
+  query += ' ORDER BY al.created_at DESC LIMIT 1000';
+  const { rows } = await pool.query(query, params);
   res.json(rows);
 });
 
 adminRouter.get('/packages', async (_req: Request, res: Response) => {
   const { rows } = await pool.query(
-    'SELECT * FROM packages ORDER BY price_amount ASC'
+    'SELECT * FROM packages WHERE deleted_at IS NULL ORDER BY price_amount ASC'
   );
   res.json(rows);
 });
 
 adminRouter.post('/vouchers', async (req: Request, res: Response) => {
-  const { code, maxUses = 1, expiresAt, priceAmount, packageTier } = req.body as {
+  const { code, maxUses = 1, expiresAt, priceAmount, packageTier, paymentMethod, paymentReference } = req.body as {
     code: string; maxUses?: number; expiresAt?: string; priceAmount?: number | null; packageTier?: string;
+    paymentMethod?: string; paymentReference?: string;
   };
+
+  const saleMethod = paymentMethod && paymentMethod.trim() ? paymentMethod.trim() : 'Cash';
+  const saleReference = paymentReference && paymentReference.trim() ? paymentReference.trim() : null;
 
   let durationMin = 60;
   let dataLimitGb: number | null = null;
   let isUncapped = true;
   let bandwidthUp = 2;
   let bandwidthDown = 5;
+  let maxDevices: number | null = null;
   let resolvedPackageTier: string | null = null;
 
   if (!code) { res.status(422).json({ error: 'code is required' }); return; }
@@ -68,7 +117,7 @@ adminRouter.post('/vouchers', async (req: Request, res: Response) => {
     }
   }
 
-  const approvalTiers = ['PreMAX', 'PreULTRA', 'PreEXECUTIVE'];
+  const approvalTiers = ['PreMax', 'PreUltra', 'PreExecutive'];
   if (packageTier && req.adminUser!.role === 'Staff' && approvalTiers.includes(packageTier)) {
     res.status(403).json({
       error: 'Staff cannot sell Restricted packages. Submit an approval request for management authorization.',
@@ -79,8 +128,8 @@ adminRouter.post('/vouchers', async (req: Request, res: Response) => {
 
   if (packageTier) {
     const { rows: pkgs } = await pool.query(
-      `SELECT tier_name, display_name, duration_min, data_limit_gb, is_uncapped, bandwidth_mbps_up, bandwidth_mbps_down
-       FROM packages WHERE tier_name = $1`,
+      `SELECT tier_name, display_name, duration_min, data_limit_gb, is_uncapped, bandwidth_mbps_up, bandwidth_mbps_down, max_devices
+       FROM packages WHERE tier_name = $1 AND deleted_at IS NULL`,
       [packageTier]
     );
     if (pkgs.length === 0) { res.status(422).json({ error: 'Package not found' }); return; }
@@ -90,23 +139,42 @@ adminRouter.post('/vouchers', async (req: Request, res: Response) => {
     isUncapped = pkg.is_uncapped;
     bandwidthUp = pkg.bandwidth_mbps_up;
     bandwidthDown = pkg.bandwidth_mbps_down;
+    maxDevices = pkg.max_devices;
     resolvedPackageTier = pkg.tier_name;
   }
 
   const soldBy = req.adminUser!.role === 'Staff' ? req.adminUser!.id : (priceAmount ? req.adminUser!.id : null);
 
+  // Ruijie Cloud: the code shown to the customer comes from the mint, never the
+  // staff-typed value. A sale without a resolvable package cannot be minted.
+  let ruijieMint: StaffRuijieMint | null = null;
+  if (isRuijieCloudConfigured()) {
+    if (!resolvedPackageTier) {
+      throw new RuijieApiError('missing_tier', 'Ruijie Cloud requires a package tier to mint a voucher');
+    }
+    ruijieMint = await staffRuijieMint(resolvedPackageTier, `Staff sale by ${req.adminUser!.fullName}`);
+  }
+  const voucherCode = ruijieMint ? ruijieMint.code : code.toUpperCase();
+
   const { rows } = await pool.query(
-    `INSERT INTO vouchers (code, duration_min, max_uses, expires_at, data_limit_gb, is_uncapped, bandwidth_mbps_up, bandwidth_mbps_down, sold_by, price_amount, package_tier)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
-    [code.toUpperCase(), durationMin, maxUses, expiresAt ?? null, dataLimitGb, isUncapped, bandwidthUp, bandwidthDown, soldBy, priceAmount ?? null, resolvedPackageTier]
+    `INSERT INTO vouchers (code, duration_min, max_uses, expires_at, data_limit_gb, is_uncapped, bandwidth_mbps_up, bandwidth_mbps_down, sold_by, price_amount, package_tier, max_devices)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *`,
+    [voucherCode, durationMin, maxUses, expiresAt ?? null, dataLimitGb, isUncapped, bandwidthUp, bandwidthDown, soldBy, priceAmount ?? null, resolvedPackageTier, maxDevices]
   );
+
+  if (ruijieMint) {
+    await pool.query(RUIJIE_VOUCHER_AUDIT_SQL, [
+      ruijieMint.code, resolvedPackageTier, ruijieMint.userGroupId, ruijieMint.profile,
+      ruijieMint.expiryTime ?? null, null, 'staff', null,
+    ]);
+  }
 
   // Log sale if price was set
   if (priceAmount && soldBy && rows.length > 0) {
     await pool.query(
-      `INSERT INTO sales (voucher_id, voucher_code, sold_by, sold_by_name, amount, currency)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
-      [rows[0].id, rows[0].code, soldBy, req.adminUser!.fullName, priceAmount, 'USD']
+      `INSERT INTO sales (voucher_id, voucher_code, sold_by, sold_by_name, amount, currency, payment_method, payment_reference)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [rows[0].id, rows[0].code, soldBy, req.adminUser!.fullName, priceAmount, 'USD', saleMethod, saleReference]
     );
   }
 
@@ -130,9 +198,10 @@ adminRouter.get('/vouchers', async (req: Request, res: Response) => {
 
 adminRouter.get('/my-sales', async (req: Request, res: Response) => {
   const { rows } = await pool.query(
-    `SELECT v.*, a.full_name AS sold_by_name
+    `SELECT v.*, a.full_name AS sold_by_name, s.payment_method, s.payment_reference
      FROM vouchers v
-     LEFT JOIN admin_users a ON a.id = v.sold_by
+     LEFT JOIN admin_users a ON a.id = v.sold_by AND a.deleted_at IS NULL
+     LEFT JOIN sales s ON s.voucher_id = v.id
      WHERE v.sold_by = $1
      ORDER BY v.created_at DESC`,
     [req.adminUser!.id]
@@ -151,6 +220,11 @@ const RD = 'FFB91C1C';     // red (total row bg)
 const NV = 'FF000080';     // navy blue (title)
 const WH = 'FFFFFFFF';     // white
 
+async function loadCompany(): Promise<any | null> {
+  const { rows } = await pool.query('SELECT * FROM companies ORDER BY created_at LIMIT 1');
+  return rows[0] || null;
+}
+
 async function sendStyledSalesExcel(
   res: Response,
   rows: any[],
@@ -165,9 +239,11 @@ async function sendStyledSalesExcel(
   const { sheetName, columns, subtitle, mapRow, fileName } = opts;
   const colCount = columns.length;
   const lastCol = String.fromCharCode(64 + colCount);
+  const company = (await loadCompany()) || {};
+  const brandName = (company?.name as string) || 'Preyone';
 
   const wb = new ExcelJS.Workbook();
-  wb.creator = 'Preyone Network';
+  wb.creator = company?.name || 'Preyone Network';
   const ws = wb.addWorksheet(sheetName);
   ws.columns = columns;
 
@@ -182,7 +258,12 @@ async function sendStyledSalesExcel(
   }
 
   // Logo — left edge, 16:9 ratio preserved
-  const logoPath = path.join(__dirname, '..', '..', 'public', 'images', 'staff-excel-preyonelogo.png');
+  let logoFile = 'staff-excel-preyonelogo.png';
+  if (company?.logo_path && !/^https?:/.test(company.logo_path)) {
+    const cand = path.join(__dirname, '..', '..', 'public', 'images', company.logo_path);
+    if (fs.existsSync(cand)) logoFile = company.logo_path;
+  }
+  const logoPath = path.join(__dirname, '..', '..', 'public', 'images', logoFile);
   if (fs.existsSync(logoPath)) {
     const logoImg = wb.addImage({ filename: logoPath, extension: 'png' });
     ws.addImage(logoImg, { tl: { col: 0, row: 0 }, ext: { width: 320, height: 180 } });
@@ -196,14 +277,15 @@ async function sendStyledSalesExcel(
 
   // Title — Copperplate Gothic, navy blue
   ws.mergeCells(`A8:${lastCol}8`);
-  ws.getCell('A8').value = 'Preyone Ultranet Wi-Fi Sales Report';
+  ws.getCell('A8').value = brandName;
   ws.getCell('A8').font = { name: 'Copperplate Gothic', size: 18, bold: true, color: { argb: NV } };
 
   // Subtitle
   let r = 9;
-  if (subtitle) {
+  const sub = subtitle || (company?.tagline as string) || null;
+  if (sub) {
     ws.mergeCells(`A${r}:${lastCol}${r}`);
-    ws.getCell(`A${r}`).value = subtitle;
+    ws.getCell(`A${r}`).value = sub;
     ws.getCell(`A${r}`).font = { name: 'Calibri', size: 12, color: { argb: DPB } };
     r++;
   }
@@ -212,9 +294,24 @@ async function sendStyledSalesExcel(
   ws.mergeCells(`A${r}:${lastCol}${r}`);
   ws.getCell(`A${r}`).value = `Generated: ${new Date().toLocaleString()}`;
   ws.getCell(`A${r}`).font = { name: 'Calibri', size: 10, italic: true, color: { argb: DPB } };
+  r++;
 
-  // Header row — big titles
-  const hrRow = r + 2;
+  const contact = [company?.support_phone, company?.website, company?.email].filter(Boolean).join('  ·  ');
+  if (contact) {
+    ws.mergeCells(`A${r}:${lastCol}${r}`);
+    ws.getCell(`A${r}`).value = contact;
+    ws.getCell(`A${r}`).font = { name: 'Calibri', size: 9, italic: true, color: { argb: NP } };
+    r++;
+  }
+  if (company?.address) {
+    ws.mergeCells(`A${r}:${lastCol}${r}`);
+    ws.getCell(`A${r}`).value = company.address;
+    ws.getCell(`A${r}`).font = { name: 'Calibri', size: 9, italic: true, color: { argb: NP } };
+    r++;
+  }
+
+  const hrRow = r + 1;
+  ws.views = [{ state: 'frozen', ySplit: hrRow }];
   const hr = ws.getRow(hrRow);
   hr.values = columns.map(c => c.header);
   hr.height = 38;
@@ -227,7 +324,8 @@ async function sendStyledSalesExcel(
   }
 
   // Data rows
-  const priceIdx = columns.findIndex(c => c.header === 'Price (USD)') + 1;
+  const priceIdx = columns.findIndex(c => c.header.startsWith('Price (')) + 1;
+  if (priceIdx > 0) hr.getCell(priceIdx).value = `Price (${(company?.currency as string) || 'USD'})`;
   let rowNum = hrRow + 1;
   for (const r of rows) {
     const dRow = ws.getRow(rowNum);
@@ -271,7 +369,9 @@ async function sendStyledSalesExcel(
   if (priceIdx > 0) totalRow.getCell(priceIdx).font = { name: 'Calibri', size: 14, bold: true, color: { argb: WH } };
 
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-  res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+  const brandFile = brandName.replace(/[^A-Za-z0-9 _-]/g, '').replace(/\s+/g, '_') || 'Preyone';
+  const finalName = (fileName as string).replace(/^Preyone/, brandFile);
+  res.setHeader('Content-Disposition', `attachment; filename="${finalName}"`);
   await wb.xlsx.write(res);
   res.end();
 }
@@ -283,7 +383,7 @@ adminRouter.get('/my-sales/export', async (req: Request, res: Response) => {
     const { rows } = await pool.query(
       `SELECT v.*, a.full_name AS sold_by_name
        FROM vouchers v
-       LEFT JOIN admin_users a ON a.id = v.sold_by
+       LEFT JOIN admin_users a ON a.id = v.sold_by AND a.deleted_at IS NULL
        WHERE v.sold_by = $1
        ORDER BY v.created_at DESC`,
       [req.adminUser!.id]
@@ -315,26 +415,26 @@ adminRouter.get('/my-sales/export', async (req: Request, res: Response) => {
 
 // ── Staff Sales Aggregated (CEO/Manager only) ──
 
-adminRouter.get('/staff-sales', requireRole('CEO', 'Manager'), async (_req: Request, res: Response) => {
+adminRouter.get('/staff-sales', requirePermission(PERMISSIONS.COMPANY_ADMIN), async (_req: Request, res: Response) => {
   const { rows: staffSummary } = await pool.query(`
     SELECT a.id, a.full_name, a.role, COUNT(v.id)::int AS total_sales, COALESCE(SUM(v.price_amount), 0)::float AS total_amount
     FROM admin_users a
     INNER JOIN vouchers v ON v.sold_by = a.id
-    WHERE a.role IN ('Staff', 'Manager')
+    WHERE a.role IN ('Staff', 'Manager') AND a.deleted_at IS NULL
     GROUP BY a.id, a.full_name, a.role
     ORDER BY total_amount DESC
   `);
   const { rows: allSales } = await pool.query(`
     SELECT v.*, a.full_name AS sold_by_name
     FROM vouchers v
-    LEFT JOIN admin_users a ON a.id = v.sold_by
+    LEFT JOIN admin_users a ON a.id = v.sold_by AND a.deleted_at IS NULL
     WHERE v.sold_by IS NOT NULL
     ORDER BY v.created_at DESC
   `);
   const { rows: dailyBreakdown } = await pool.query(`
     SELECT DATE(v.created_at) AS sale_date, a.full_name, a.role, COUNT(v.id)::int AS sales_count, COALESCE(SUM(v.price_amount), 0)::float AS total_amount
     FROM vouchers v
-    INNER JOIN admin_users a ON a.id = v.sold_by
+    INNER JOIN admin_users a ON a.id = v.sold_by AND a.deleted_at IS NULL
     WHERE a.role IN ('Staff', 'Manager')
     GROUP BY DATE(v.created_at), a.full_name, a.role
     ORDER BY sale_date DESC, a.full_name ASC
@@ -344,12 +444,12 @@ adminRouter.get('/staff-sales', requireRole('CEO', 'Manager'), async (_req: Requ
 
 // ── All Staff Sales Export (Excel, CEO/Manager only) ──
 
-adminRouter.get('/staff-sales/export', requireRole('CEO', 'Manager'), async (req: Request, res: Response) => {
+adminRouter.get('/staff-sales/export', requirePermission(PERMISSIONS.COMPANY_ADMIN), async (req: Request, res: Response) => {
   try {
     const { rows } = await pool.query(
       `SELECT v.*, a.full_name AS sold_by_name
        FROM vouchers v
-       LEFT JOIN admin_users a ON a.id = v.sold_by
+       LEFT JOIN admin_users a ON a.id = v.sold_by AND a.deleted_at IS NULL
        WHERE v.sold_by IS NOT NULL
        ORDER BY v.created_at DESC`
     );
@@ -382,11 +482,11 @@ adminRouter.get('/staff-sales/export', requireRole('CEO', 'Manager'), async (req
 
 // ── Per-Staff Sales Export (Excel, CEO/Manager only) ──
 
-adminRouter.get('/staff-sales/export/:staffId', requireRole('CEO', 'Manager'), async (req: Request, res: Response) => {
+adminRouter.get('/staff-sales/export/:staffId', requirePermission(PERMISSIONS.COMPANY_ADMIN), async (req: Request, res: Response) => {
   try {
     const { staffId } = req.params;
     const { rows: staffRows } = await pool.query(
-      'SELECT full_name FROM admin_users WHERE id = $1', [staffId]
+      'SELECT full_name FROM admin_users WHERE id = $1 AND deleted_at IS NULL', [staffId]
     );
     if (!staffRows.length) {
       res.status(404).json({ error: 'Staff not found' });
@@ -396,7 +496,7 @@ adminRouter.get('/staff-sales/export/:staffId', requireRole('CEO', 'Manager'), a
     const { rows } = await pool.query(
       `SELECT v.*, a.full_name AS sold_by_name
        FROM vouchers v
-       LEFT JOIN admin_users a ON a.id = v.sold_by
+       LEFT JOIN admin_users a ON a.id = v.sold_by AND a.deleted_at IS NULL
        WHERE v.sold_by = $1
        ORDER BY v.created_at DESC`,
       [staffId]
@@ -426,9 +526,9 @@ adminRouter.get('/staff-sales/export/:staffId', requireRole('CEO', 'Manager'), a
   }
 });
 
-adminRouter.get('/admin-users', requireRole('CEO', 'Manager'), async (_req: Request, res: Response) => {
+adminRouter.get('/admin-users', requirePermission(PERMISSIONS.COMPANY_ADMIN), async (_req: Request, res: Response) => {
   const { rows } = await pool.query(
-    'SELECT id, full_name, email, phone, role, created_at FROM admin_users ORDER BY created_at DESC'
+    'SELECT id, full_name, email, phone, role, created_at FROM admin_users WHERE deleted_at IS NULL ORDER BY created_at DESC'
   );
   res.json(rows);
 });
@@ -437,7 +537,7 @@ adminRouter.get('/admin-users', requireRole('CEO', 'Manager'), async (_req: Requ
 
 const dashboardCache: { data: any; expiresAt: number } = { data: null, expiresAt: 0 };
 
-adminRouter.get('/dashboard', requireRole('CEO', 'Manager'), async (_req: Request, res: Response) => {
+adminRouter.get('/dashboard', requirePermission(PERMISSIONS.COMPANY_ADMIN), async (_req: Request, res: Response) => {
   if (Date.now() < dashboardCache.expiresAt && dashboardCache.data) {
     res.json(dashboardCache.data);
     return;
@@ -499,7 +599,7 @@ adminRouter.get('/dashboard', requireRole('CEO', 'Manager'), async (_req: Reques
   }
 });
 
-adminRouter.get('/revenue', requireRole('CEO', 'Manager'), async (_req: Request, res: Response) => {
+adminRouter.get('/revenue', requirePermission(PERMISSIONS.COMPANY_ADMIN), async (_req: Request, res: Response) => {
   const { rows: revenue } = await pool.query(`
     SELECT COALESCE(SUM(amount), 0)::float AS total_revenue
     FROM transactions WHERE status = 'completed'
@@ -546,7 +646,7 @@ adminRouter.get('/revenue', requireRole('CEO', 'Manager'), async (_req: Request,
 
 // ── Dashboard Sales (daily/weekly/monthly) ──
 
-adminRouter.get('/dashboard/sales', requireRole('CEO', 'Manager'), async (_req: Request, res: Response) => {
+adminRouter.get('/dashboard/sales', requirePermission(PERMISSIONS.COMPANY_ADMIN), async (_req: Request, res: Response) => {
   const { rows: daily } = await pool.query(`
     SELECT COALESCE(SUM(amount), 0)::float AS amount, COUNT(*)::int AS count
     FROM sales WHERE sold_at >= CURRENT_DATE
@@ -646,7 +746,7 @@ adminRouter.get('/time-logs', async (req: Request, res: Response) => {
     const { rows: logs } = await pool.query(`
       SELECT t.id, t.admin_user_id, a.full_name, a.role, t.clock_in, t.clock_out, t.duration_min
       FROM staff_time_logs t
-      LEFT JOIN admin_users a ON a.id = t.admin_user_id
+      LEFT JOIN admin_users a ON a.id = t.admin_user_id AND a.deleted_at IS NULL
       ORDER BY t.clock_in DESC LIMIT 500
     `);
     const { rows: summary } = await pool.query(`
@@ -655,6 +755,7 @@ adminRouter.get('/time-logs', async (req: Request, res: Response) => {
         COALESCE(SUM(t.duration_min), 0)::int AS total_minutes
       FROM admin_users a
       LEFT JOIN staff_time_logs t ON t.admin_user_id = a.id
+      WHERE a.deleted_at IS NULL
       GROUP BY a.id, a.full_name, a.role
       ORDER BY total_minutes DESC
     `);
@@ -672,23 +773,23 @@ adminRouter.get('/time-logs', async (req: Request, res: Response) => {
 
 // ── Staff Management (CEO/Manager only) ──
 
-adminRouter.get('/staff', requireRole('CEO', 'Manager'), async (_req: Request, res: Response) => {
+adminRouter.get('/staff', requirePermission(PERMISSIONS.COMPANY_ADMIN), async (_req: Request, res: Response) => {
   const { rows } = await pool.query(
     `SELECT id, full_name, email, phone, role, approved, created_at
-     FROM admin_users WHERE role IN ('Staff', 'Manager') ORDER BY created_at DESC`
+     FROM admin_users WHERE role IN ('Staff', 'Manager') AND deleted_at IS NULL ORDER BY created_at DESC`
   );
   res.json(rows);
 });
 
-adminRouter.get('/staff-pending', requireRole('CEO', 'Manager'), async (_req: Request, res: Response) => {
+adminRouter.get('/staff-pending', requirePermission(PERMISSIONS.COMPANY_ADMIN), async (_req: Request, res: Response) => {
   const { rows } = await pool.query(
     `SELECT id, full_name, email, phone, role, created_at
-     FROM admin_users WHERE role IN ('Staff', 'Manager') AND approved = FALSE ORDER BY created_at DESC`
+     FROM admin_users WHERE role IN ('Staff', 'Manager') AND approved = FALSE AND deleted_at IS NULL ORDER BY created_at DESC`
   );
   res.json(rows);
 });
 
-adminRouter.post('/staff-approve/:id', requireRole('CEO', 'Manager'), async (req: Request, res: Response) => {
+adminRouter.post('/staff-approve/:id', requirePermission(PERMISSIONS.COMPANY_ADMIN), async (req: Request, res: Response) => {
   const { id } = req.params;
   const { rows } = await pool.query(
     `UPDATE admin_users SET approved = TRUE WHERE id = $1 AND role = 'Staff' RETURNING id, full_name, email, role, approved`,
@@ -701,10 +802,10 @@ adminRouter.post('/staff-approve/:id', requireRole('CEO', 'Manager'), async (req
   res.json({ message: 'Staff account approved', user: approvedUser });
 });
 
-adminRouter.post('/staff-reject/:id', requireRole('CEO', 'Manager'), async (req: Request, res: Response) => {
+adminRouter.post('/staff-reject/:id', requirePermission(PERMISSIONS.COMPANY_ADMIN), async (req: Request, res: Response) => {
   const { id } = req.params;
   const { rows } = await pool.query(
-    `DELETE FROM admin_users WHERE id = $1 AND role = 'Staff' AND approved = FALSE RETURNING id, full_name, email`,
+    `UPDATE admin_users SET deleted_at = NOW(), status = 'inactive' WHERE id = $1 AND role = 'Staff' AND approved = FALSE AND deleted_at IS NULL RETURNING id, full_name, email`,
     [id]
   );
   if (rows.length === 0) { res.status(404).json({ error: 'Pending staff account not found' }); return; }
@@ -714,7 +815,7 @@ adminRouter.post('/staff-reject/:id', requireRole('CEO', 'Manager'), async (req:
 });
 
 // Staff online/offline status (CEO/Manager only)
-adminRouter.get('/staff-status', requireRole('CEO', 'Manager'), async (_req: Request, res: Response) => {
+adminRouter.get('/staff-status', requirePermission(PERMISSIONS.COMPANY_ADMIN), async (_req: Request, res: Response) => {
   const { rows } = await pool.query(
     `SELECT a.id, a.full_name, a.role, a.approved,
             t.id AS shift_id, t.clock_in, t.clock_out,
@@ -723,14 +824,14 @@ adminRouter.get('/staff-status', requireRole('CEO', 'Manager'), async (_req: Req
      LEFT JOIN LATERAL (
        SELECT id, clock_in, clock_out FROM staff_time_logs WHERE admin_user_id = a.id ORDER BY clock_in DESC LIMIT 1
      ) t ON true
-     WHERE a.role IN ('Staff', 'Manager')
+     WHERE a.role IN ('Staff', 'Manager') AND a.deleted_at IS NULL
      ORDER BY is_online DESC, a.full_name ASC`
   );
   const onlineCount = rows.filter((r: any) => r.is_online).length;
   res.json({ statuses: rows, onlineCount, totalStaff: rows.length });
 });
 
-adminRouter.post('/staff-deactivate/:id', requireRole('CEO', 'Manager'), async (req: Request, res: Response) => {
+adminRouter.post('/staff-deactivate/:id', requirePermission(PERMISSIONS.COMPANY_ADMIN), async (req: Request, res: Response) => {
   const { id } = req.params;
   const { rows } = await pool.query(
     `UPDATE admin_users SET approved = FALSE WHERE id = $1 AND role = 'Staff' RETURNING id, full_name, email, role, approved`,
@@ -741,7 +842,7 @@ adminRouter.post('/staff-deactivate/:id', requireRole('CEO', 'Manager'), async (
   res.json({ message: 'Staff account deactivated', user: rows[0] });
 });
 
-adminRouter.post('/staff-activate/:id', requireRole('CEO', 'Manager'), async (req: Request, res: Response) => {
+adminRouter.post('/staff-activate/:id', requirePermission(PERMISSIONS.COMPANY_ADMIN), async (req: Request, res: Response) => {
   const { id } = req.params;
   const { rows } = await pool.query(
     `UPDATE admin_users SET approved = TRUE WHERE id = $1 AND role = 'Staff' RETURNING id, full_name, email, role, approved`,
@@ -752,10 +853,10 @@ adminRouter.post('/staff-activate/:id', requireRole('CEO', 'Manager'), async (re
   res.json({ message: 'Staff account activated', user: rows[0] });
 });
 
-adminRouter.post('/staff-remove/:id', requireRole('CEO', 'Manager'), async (req: Request, res: Response) => {
+adminRouter.post('/staff-remove/:id', requirePermission(PERMISSIONS.COMPANY_ADMIN), async (req: Request, res: Response) => {
   const { id } = req.params;
   const { rows } = await pool.query(
-    `DELETE FROM admin_users WHERE id = $1 AND role = 'Staff' RETURNING id, full_name`,
+    `UPDATE admin_users SET deleted_at = NOW(), status = 'inactive' WHERE id = $1 AND role = 'Staff' AND deleted_at IS NULL RETURNING id, full_name`,
     [id]
   );
   if (rows.length === 0) { res.status(404).json({ error: 'Staff account not found' }); return; }
@@ -767,17 +868,21 @@ adminRouter.post('/staff-remove/:id', requireRole('CEO', 'Manager'), async (req:
 
 adminRouter.get('/voucher-redemptions', async (req: Request, res: Response) => {
   const voucherId = req.query.voucher_id as string | undefined;
+  const params: any[] = [];
+  const conditions: string[] = [];
+  if (voucherId) {
+    params.push(voucherId);
+    conditions.push(`vr.voucher_id = $${params.length}`);
+  }
+  const scope = scopeVoucherCondition(req, params);
+  if (scope) conditions.push(scope);
   let query = `
     SELECT vr.id, vr.voucher_code, vr.full_name, vr.mac_address, vr.ip_address, vr.created_at,
            v.code AS voucher_code_lookup
     FROM voucher_redemptions vr
     LEFT JOIN vouchers v ON v.id = vr.voucher_id
   `;
-  const params: any[] = [];
-  if (voucherId) {
-    query += ' WHERE vr.voucher_id = $1';
-    params.push(voucherId);
-  }
+  if (conditions.length > 0) query += ` WHERE ${conditions.join(' AND ')}`;
   query += ' ORDER BY vr.created_at DESC LIMIT 1000';
   const { rows } = await pool.query(query, params);
   res.json(rows);
@@ -786,10 +891,9 @@ adminRouter.get('/voucher-redemptions', async (req: Request, res: Response) => {
 // ── Active Sessions / Real-time Usage (any role) ──
 
 adminRouter.get('/active-sessions', async (req: Request, res: Response) => {
-  const isStaff = req.adminUser!.role === 'Staff';
-  const staffId = req.adminUser!.id;
-
   // Active users with voucher + package details
+  const userParams: any[] = [];
+  const userScope = scopeUserVoucherCodeCondition(req, userParams, 'u');
   const { rows: activeUsers } = await pool.query(`
     SELECT u.id, u.full_name, u.phone, u.voucher_code, u.mac_address, u.ip_address,
            u.session_expires_at, u.created_at,
@@ -801,21 +905,25 @@ adminRouter.get('/active-sessions', async (req: Request, res: Response) => {
     LEFT JOIN vouchers v ON UPPER(u.voucher_code) = v.code
     LEFT JOIN wispr_profiles wp ON wp.user_id = u.id
     WHERE u.session_expires_at > NOW()
-    ${isStaff ? 'AND UPPER(u.voucher_code) IN (SELECT UPPER(code) FROM vouchers WHERE sold_by = $1)' : ''}
+    ${userScope ? 'AND ' + userScope : ''}
     ORDER BY u.created_at DESC
-  `, isStaff ? [staffId] : []);
+  `, userParams);
   // Count connected users per voucher code
+  const perVoucherParams: any[] = [];
+  const perVoucherScope = scopeUserVoucherCodeCondition(req, perVoucherParams, 'users');
   const { rows: perVoucher } = await pool.query(`
     SELECT voucher_code, COUNT(*)::int AS connected_users
     FROM users WHERE session_expires_at > NOW()
-    ${isStaff ? 'AND voucher_code IN (SELECT code FROM vouchers WHERE sold_by = $1)' : ''}
+    ${perVoucherScope ? 'AND ' + perVoucherScope : ''}
     GROUP BY voucher_code ORDER BY connected_users DESC
-  `, isStaff ? [staffId] : []);
+  `, perVoucherParams);
   // Total active users
+  const totalActiveParams: any[] = [];
+  const totalActiveScope = scopeUserVoucherCodeCondition(req, totalActiveParams, 'users');
   const { rows: totalActive } = await pool.query(`
     SELECT COUNT(*)::int AS count FROM users WHERE session_expires_at > NOW()
-    ${isStaff ? 'AND voucher_code IN (SELECT code FROM vouchers WHERE sold_by = $1)' : ''}
-  `, isStaff ? [staffId] : []);
+    ${totalActiveScope ? 'AND ' + totalActiveScope : ''}
+  `, totalActiveParams);
   // Total vouchers redeemed
   const { rows: totalRedeemed } = await pool.query(`
     SELECT COUNT(*)::int AS count FROM voucher_redemptions
@@ -850,19 +958,19 @@ adminRouter.get('/active-sessions', async (req: Request, res: Response) => {
 
 // ── Manager Management (CEO only) ──
 
-adminRouter.get('/managers', requireRole('CEO'), async (_req: Request, res: Response) => {
+adminRouter.get('/managers', requirePermission(PERMISSIONS.SYSTEM_DEVELOPER), async (_req: Request, res: Response) => {
   const { rows } = await pool.query(
     `SELECT id, full_name, email, phone, role, approved, created_at
-     FROM admin_users WHERE role = 'Manager' ORDER BY created_at DESC`
+     FROM admin_users WHERE role = 'Manager' AND deleted_at IS NULL ORDER BY created_at DESC`
   );
   res.json(rows);
 });
 
-adminRouter.post('/manager-promote/:id', requireRole('CEO'), async (req: Request, res: Response) => {
+adminRouter.post('/manager-promote/:id', requirePermission(PERMISSIONS.SYSTEM_DEVELOPER), async (req: Request, res: Response) => {
   const { id } = req.params;
   // Check manager slot isn't taken (max 2)
   const { rows: existing } = await pool.query(
-    `SELECT COUNT(*)::int AS cnt FROM admin_users WHERE role = 'Manager'`
+    `SELECT COUNT(*)::int AS cnt FROM admin_users WHERE role = 'Manager' AND deleted_at IS NULL`
   );
   if (existing[0].cnt >= 2) {
     res.status(409).json({ error: 'Maximum 2 Manager accounts allowed. Demote an existing Manager first.' });
@@ -877,7 +985,7 @@ adminRouter.post('/manager-promote/:id', requireRole('CEO'), async (req: Request
   res.json({ message: 'Staff promoted to Manager', user: rows[0] });
 });
 
-adminRouter.post('/manager-demote/:id', requireRole('CEO'), async (req: Request, res: Response) => {
+adminRouter.post('/manager-demote/:id', requirePermission(PERMISSIONS.SYSTEM_DEVELOPER), async (req: Request, res: Response) => {
   const { id } = req.params;
   const { rows } = await pool.query(
     `UPDATE admin_users SET role = 'Staff', approved = TRUE WHERE id = $1 AND role = 'Manager' RETURNING id, full_name, email, role`,
@@ -888,7 +996,7 @@ adminRouter.post('/manager-demote/:id', requireRole('CEO'), async (req: Request,
   res.json({ message: 'Manager demoted to Staff', user: rows[0] });
 });
 
-adminRouter.post('/manager-remove/:id', requireRole('CEO'), async (req: Request, res: Response) => {
+adminRouter.post('/manager-remove/:id', requirePermission(PERMISSIONS.SYSTEM_DEVELOPER), async (req: Request, res: Response) => {
   const { id } = req.params;
   // Prevent CEO from removing themselves
   if (id === req.adminUser!.id) {
@@ -896,7 +1004,7 @@ adminRouter.post('/manager-remove/:id', requireRole('CEO'), async (req: Request,
     return;
   }
   const { rows } = await pool.query(
-    `DELETE FROM admin_users WHERE id = $1 AND role = 'Manager' RETURNING id, full_name`,
+    `UPDATE admin_users SET deleted_at = NOW(), status = 'inactive' WHERE id = $1 AND role = 'Manager' AND deleted_at IS NULL RETURNING id, full_name`,
     [id]
   );
   if (rows.length === 0) { res.status(404).json({ error: 'Manager account not found' }); return; }
@@ -906,14 +1014,14 @@ adminRouter.post('/manager-remove/:id', requireRole('CEO'), async (req: Request,
 
 // ── Settings (CEO only) ──
 
-adminRouter.get('/settings', requireRole('CEO'), async (_req: Request, res: Response) => {
+adminRouter.get('/settings', requirePermission(PERMISSIONS.SYSTEM_DEVELOPER), async (_req: Request, res: Response) => {
   const { rows } = await pool.query('SELECT key, value, updated_at FROM settings ORDER BY key');
   const settingsMap: Record<string, string> = {};
   rows.forEach((r: any) => { settingsMap[r.key] = r.value; });
   res.json(settingsMap);
 });
 
-adminRouter.put('/settings', requireRole('CEO'), async (req: Request, res: Response) => {
+adminRouter.put('/settings', requirePermission(PERMISSIONS.SYSTEM_DEVELOPER), async (req: Request, res: Response) => {
   const settings = req.body as Record<string, string>;
   const keys = Object.keys(settings);
   if (keys.length === 0) { res.status(422).json({ error: 'No settings provided' }); return; }
@@ -942,7 +1050,7 @@ adminRouter.put('/settings', requireRole('CEO'), async (req: Request, res: Respo
 
 // ── Admin Audit Log (CEO only) ──
 
-adminRouter.get('/audit-log', requireRole('CEO'), async (_req: Request, res: Response) => {
+adminRouter.get('/audit-log', requirePermission(PERMISSIONS.SYSTEM_DEVELOPER), async (_req: Request, res: Response) => {
   const { rows } = await pool.query(
     `SELECT id, admin_name, action, target_type, target_id, detail, created_at
      FROM admin_audit_log ORDER BY created_at DESC LIMIT 500`
@@ -952,7 +1060,7 @@ adminRouter.get('/audit-log', requireRole('CEO'), async (_req: Request, res: Res
 
 // ── CSV Revenue Export (CEO only) ──
 
-adminRouter.get('/revenue/export', requireRole('CEO'), async (_req: Request, res: Response) => {
+adminRouter.get('/revenue/export', requirePermission(PERMISSIONS.SYSTEM_DEVELOPER), async (_req: Request, res: Response) => {
   const { rows } = await pool.query(
     `SELECT t.id, t.package_tier, t.amount, t.currency, t.status, t.created_at, t.completed_at,
             u.full_name AS user_name, u.phone AS user_phone
@@ -972,7 +1080,7 @@ adminRouter.get('/revenue/export', requireRole('CEO'), async (_req: Request, res
   res.send(csv);
 });
 
-adminRouter.get('/charts', requireRole('CEO', 'Manager'), async (_req: Request, res: Response) => {
+adminRouter.get('/charts', requirePermission(PERMISSIONS.COMPANY_ADMIN), async (_req: Request, res: Response) => {
   // Daily user signups for last 7 days
   const { rows: dailySignups } = await pool.query(`
     SELECT DATE(created_at) AS day, COUNT(*)::int AS count
@@ -1015,14 +1123,14 @@ adminRouter.get('/charts', requireRole('CEO', 'Manager'), async (_req: Request, 
 // NEW: AP Health Dashboard
 // ═══════════════════════════════════════════════════════
 
-adminRouter.get('/ap-devices', async (_req: Request, res: Response) => {
+adminRouter.get('/ap-devices', requirePermission(PERMISSIONS.SYSTEM_DEVELOPER), async (_req: Request, res: Response) => {
   const { rows } = await pool.query(
     'SELECT * FROM ap_devices ORDER BY name ASC'
   );
   res.json(rows);
 });
 
-adminRouter.post('/ap-devices', async (req: Request, res: Response) => {
+adminRouter.post('/ap-devices', requirePermission(PERMISSIONS.SYSTEM_DEVELOPER), async (req: Request, res: Response) => {
   const { name, model, macAddress, ipAddress, location } = req.body as {
     name: string; model?: string; macAddress: string; ipAddress?: string; location?: string;
   };
@@ -1035,7 +1143,7 @@ adminRouter.post('/ap-devices', async (req: Request, res: Response) => {
   res.status(201).json(rows[0]);
 });
 
-adminRouter.put('/ap-devices/:id', async (req: Request, res: Response) => {
+adminRouter.put('/ap-devices/:id', requirePermission(PERMISSIONS.SYSTEM_DEVELOPER), async (req: Request, res: Response) => {
   const { id } = req.params;
   const { name, model, macAddress, ipAddress, location, status, firmwareVersion, clientsCount } = req.body as any;
   const { rows } = await pool.query(
@@ -1055,7 +1163,7 @@ adminRouter.put('/ap-devices/:id', async (req: Request, res: Response) => {
   res.json(rows[0]);
 });
 
-adminRouter.delete('/ap-devices/:id', async (req: Request, res: Response) => {
+adminRouter.delete('/ap-devices/:id', requirePermission(PERMISSIONS.SYSTEM_DEVELOPER), async (req: Request, res: Response) => {
   const { id } = req.params;
   const { rows } = await pool.query('DELETE FROM ap_devices WHERE id = $1 RETURNING id', [id]);
   if (rows.length === 0) { res.status(404).json({ error: 'AP device not found' }); return; }
@@ -1123,17 +1231,21 @@ adminRouter.get('/bandwidth', async (_req: Request, res: Response) => {
   });
 });
 
-adminRouter.get('/bandwidth/top-users', async (_req: Request, res: Response) => {
+adminRouter.get('/bandwidth/top-users', async (req: Request, res: Response) => {
+  const params: any[] = [];
+  const scope = scopeVoucherCondition(req, params);
   const { rows } = await pool.query(`
     SELECT u.id, u.full_name, u.mac_address, u.ip_address,
            wp.data_used_bytes, wp.data_quota_bytes, wp.bandwidth_up_kbps, wp.bandwidth_down_kbps,
            wp.session_start, wp.is_uncapped
     FROM wispr_profiles wp
     INNER JOIN users u ON u.id = wp.user_id
+    LEFT JOIN vouchers v ON UPPER(u.voucher_code) = v.code
     WHERE wp.session_end IS NULL
+    ${scope ? 'AND ' + scope : ''}
     ORDER BY wp.data_used_bytes DESC
     LIMIT 20
-  `);
+  `, params);
   res.json(rows);
 });
 
@@ -1141,7 +1253,7 @@ adminRouter.get('/bandwidth/top-users', async (_req: Request, res: Response) => 
 // NEW: Peak Hour / Usage Analytics
 // ═══════════════════════════════════════════════════════
 
-adminRouter.get('/peak-hours', requireRole('CEO', 'Manager'), async (_req: Request, res: Response) => {
+adminRouter.get('/peak-hours', requirePermission(PERMISSIONS.COMPANY_ADMIN), async (_req: Request, res: Response) => {
   // User signups grouped by hour for last 7 days
   const { rows: signupHours } = await pool.query(`
     SELECT EXTRACT(HOUR FROM created_at)::int AS hour, COUNT(*)::int AS count
@@ -1220,17 +1332,17 @@ adminRouter.post('/alerts/:id/acknowledge', async (req: Request, res: Response) 
 // NEW: MAC Blacklist / Whitelist Management
 // ═══════════════════════════════════════════════════════
 
-adminRouter.get('/blacklist', async (_req: Request, res: Response) => {
+adminRouter.get('/blacklist', requirePermission(PERMISSIONS.SYSTEM_DEVELOPER), async (_req: Request, res: Response) => {
   const { rows } = await pool.query(
     `SELECT b.*, a.full_name AS blocked_by_name
      FROM mac_blacklist b
-     LEFT JOIN admin_users a ON a.id = b.blocked_by
+     LEFT JOIN admin_users a ON a.id = b.blocked_by AND a.deleted_at IS NULL
      ORDER BY b.created_at DESC`
   );
   res.json(rows);
 });
 
-adminRouter.post('/blacklist', async (req: Request, res: Response) => {
+adminRouter.post('/blacklist', requirePermission(PERMISSIONS.SYSTEM_DEVELOPER), async (req: Request, res: Response) => {
   const { macAddress, reason } = req.body as { macAddress: string; reason?: string };
   if (!macAddress) { res.status(422).json({ error: 'macAddress required' }); return; }
   const mac = macAddress.toUpperCase();
@@ -1245,7 +1357,7 @@ adminRouter.post('/blacklist', async (req: Request, res: Response) => {
   res.status(201).json(rows[0]);
 });
 
-adminRouter.delete('/blacklist/:id', async (req: Request, res: Response) => {
+adminRouter.delete('/blacklist/:id', requirePermission(PERMISSIONS.SYSTEM_DEVELOPER), async (req: Request, res: Response) => {
   const { id } = req.params;
   const { rows } = await pool.query('DELETE FROM mac_blacklist WHERE id = $1 RETURNING mac_address', [id]);
   if (rows.length === 0) { res.status(404).json({ error: 'Blacklist entry not found' }); return; }
@@ -1253,17 +1365,17 @@ adminRouter.delete('/blacklist/:id', async (req: Request, res: Response) => {
   res.json({ message: 'MAC removed from blacklist' });
 });
 
-adminRouter.get('/whitelist', async (_req: Request, res: Response) => {
+adminRouter.get('/whitelist', requirePermission(PERMISSIONS.SYSTEM_DEVELOPER), async (_req: Request, res: Response) => {
   const { rows } = await pool.query(
     `SELECT w.*, a.full_name AS added_by_name
      FROM mac_whitelist w
-     LEFT JOIN admin_users a ON a.id = w.added_by
+     LEFT JOIN admin_users a ON a.id = w.added_by AND a.deleted_at IS NULL
      ORDER BY w.created_at DESC`
   );
   res.json(rows);
 });
 
-adminRouter.post('/whitelist', async (req: Request, res: Response) => {
+adminRouter.post('/whitelist', requirePermission(PERMISSIONS.SYSTEM_DEVELOPER), async (req: Request, res: Response) => {
   const { macAddress, label } = req.body as { macAddress: string; label?: string };
   if (!macAddress) { res.status(422).json({ error: 'macAddress required' }); return; }
   const mac = macAddress.toUpperCase();
@@ -1277,7 +1389,7 @@ adminRouter.post('/whitelist', async (req: Request, res: Response) => {
   res.status(201).json(rows[0]);
 });
 
-adminRouter.delete('/whitelist/:id', async (req: Request, res: Response) => {
+adminRouter.delete('/whitelist/:id', requirePermission(PERMISSIONS.SYSTEM_DEVELOPER), async (req: Request, res: Response) => {
   const { id } = req.params;
   const { rows } = await pool.query('DELETE FROM mac_whitelist WHERE id = $1 RETURNING mac_address', [id]);
   if (rows.length === 0) { res.status(404).json({ error: 'Whitelist entry not found' }); return; }
@@ -1290,9 +1402,13 @@ adminRouter.delete('/whitelist/:id', async (req: Request, res: Response) => {
 // ═══════════════════════════════════════════════════════
 
 adminRouter.post('/vouchers/bulk', async (req: Request, res: Response) => {
-  const { count = 10, packageTier, priceAmount, expiresAt } = req.body as {
+  const { count = 10, packageTier, priceAmount, expiresAt, paymentMethod, paymentReference } = req.body as {
     count?: number; packageTier?: string; priceAmount?: number; expiresAt?: string;
+    paymentMethod?: string; paymentReference?: string;
   };
+
+  const saleMethod = paymentMethod && paymentMethod.trim() ? paymentMethod.trim() : 'Cash';
+  const saleReference = paymentReference && paymentReference.trim() ? paymentReference.trim() : null;
 
   if (!packageTier) { res.status(422).json({ error: 'packageTier required' }); return; }
   if (count < 1 || count > 100) { res.status(422).json({ error: 'count must be between 1 and 100' }); return; }
@@ -1317,16 +1433,27 @@ adminRouter.post('/vouchers/bulk', async (req: Request, res: Response) => {
 
   // Lookup package
   const { rows: pkgs } = await pool.query(
-    `SELECT tier_name, duration_min, data_limit_gb, is_uncapped, bandwidth_mbps_up, bandwidth_mbps_down
-     FROM packages WHERE tier_name = $1`,
+    `SELECT tier_name, duration_min, data_limit_gb, is_uncapped, bandwidth_mbps_up, bandwidth_mbps_down, max_devices
+     FROM packages WHERE tier_name = $1 AND deleted_at IS NULL`,
     [packageTier]
   );
   if (pkgs.length === 0) { res.status(422).json({ error: 'Package not found' }); return; }
   const pkg = pkgs[0];
 
   const slug = packageTier.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+
+  // Ruijie Cloud: mint all codes up front (one API call each, quantity=1) so the
+  // HTTP work never happens inside the DB transaction.
+  let ruijieMints: StaffRuijieMint[] = [];
+  if (isRuijieCloudConfigured()) {
+    for (let i = 0; i < count; i++) {
+      const m = await staffRuijieMint(packageTier, `Bulk by ${req.adminUser!.fullName}`);
+      if (!m) break;
+      ruijieMints.push(m);
+    }
+  }
   const created: any[] = [];
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
   const client = await pool.connect();
   try {
@@ -1335,20 +1462,27 @@ adminRouter.post('/vouchers/bulk', async (req: Request, res: Response) => {
       const bytes = crypto.randomBytes(4);
       let rand = '';
       for (let j = 0; j < 4; j++) rand += chars[bytes[j] % chars.length];
-      const code = `${slug}-${rand}`;
+      const code = ruijieMints.length > i ? ruijieMints[i].code : `${slug}-${rand}`;
 
       const { rows } = await client.query(
-        `INSERT INTO vouchers (code, duration_min, max_uses, expires_at, data_limit_gb, is_uncapped, bandwidth_mbps_up, bandwidth_mbps_down, sold_by, price_amount, package_tier)
-         VALUES ($1, $2, 1, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
-        [code, pkg.duration_min, expiresAt || null, pkg.data_limit_gb, pkg.is_uncapped, pkg.bandwidth_mbps_up, pkg.bandwidth_mbps_down, req.adminUser!.id, priceAmount || null, packageTier]
+        `INSERT INTO vouchers (code, duration_min, max_uses, expires_at, data_limit_gb, is_uncapped, bandwidth_mbps_up, bandwidth_mbps_down, sold_by, price_amount, package_tier, max_devices)
+         VALUES ($1, $2, 1, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
+        [code, pkg.duration_min, expiresAt || null, pkg.data_limit_gb, pkg.is_uncapped, pkg.bandwidth_mbps_up, pkg.bandwidth_mbps_down, req.adminUser!.id, priceAmount || null, packageTier, pkg.max_devices]
       );
+
+      if (ruijieMints.length > i) {
+        await client.query(RUIJIE_VOUCHER_AUDIT_SQL, [
+          ruijieMints[i].code, packageTier, ruijieMints[i].userGroupId, ruijieMints[i].profile,
+          ruijieMints[i].expiryTime ?? null, null, 'staff', null,
+        ]);
+      }
 
       // Log sale if price set
       if (priceAmount && priceAmount > 0) {
         await client.query(
-          `INSERT INTO sales (voucher_id, voucher_code, sold_by, sold_by_name, amount, currency)
-           VALUES ($1, $2, $3, $4, $5, 'USD')`,
-          [rows[0].id, rows[0].code, req.adminUser!.id, req.adminUser!.fullName, priceAmount]
+          `INSERT INTO sales (voucher_id, voucher_code, sold_by, sold_by_name, amount, currency, payment_method, payment_reference)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+          [rows[0].id, rows[0].code, req.adminUser!.id, req.adminUser!.fullName, priceAmount, 'USD', saleMethod, saleReference]
         );
       }
       created.push(rows[0]);
@@ -1368,7 +1502,7 @@ adminRouter.post('/vouchers/bulk', async (req: Request, res: Response) => {
 // Voucher Approval Workflow (Staff → Manager/CEO)
 // ═══════════════════════════════════════════════════════
 
-const APPROVAL_TIERS = ['PreMAX', 'PreULTRA', 'PreEXECUTIVE'];
+const APPROVAL_TIERS = ['PreMax', 'PreUltra', 'PreExecutive'];
 
 async function insertAlert(type: string, severity: string, title: string, message: string, targetType: string, targetId: string, adminId?: string) {
   try {
@@ -1390,8 +1524,9 @@ async function requireClockedIn(adminId: string): Promise<boolean> {
 
 // Staff submits an approval request
 adminRouter.post('/vouchers/request-approval', async (req: Request, res: Response) => {
-  const { requestType, packageTier, priceAmount, count, code, maxUses } = req.body as {
+  const { requestType, packageTier, priceAmount, count, code, maxUses, paymentMethod, paymentReference } = req.body as {
     requestType: string; packageTier: string; priceAmount?: number; count?: number; code?: string; maxUses?: number;
+    paymentMethod?: string; paymentReference?: string;
   };
 
   if (!requestType || !packageTier) {
@@ -1402,7 +1537,7 @@ adminRouter.post('/vouchers/request-approval', async (req: Request, res: Respons
   }
 
   const { rows: pkgs } = await pool.query(
-    'SELECT tier_name FROM packages WHERE tier_name = $1', [packageTier]
+    'SELECT tier_name FROM packages WHERE tier_name = $1 AND deleted_at IS NULL', [packageTier]
   );
   if (pkgs.length === 0) { res.status(422).json({ error: 'Package not found' }); return; }
 
@@ -1415,7 +1550,7 @@ adminRouter.post('/vouchers/request-approval', async (req: Request, res: Respons
     `INSERT INTO voucher_approvals (requested_by, requested_by_name, request_type, package_tier, voucher_count, price_amount, max_uses, voucher_data)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
     [req.adminUser!.id, req.adminUser!.fullName, requestType, packageTier, count || 1, priceAmount || null, maxUses || 1,
-     JSON.stringify({ code: code || null })]
+     JSON.stringify({ code: code || null, paymentMethod: (paymentMethod && paymentMethod.trim()) ? paymentMethod.trim() : 'Cash', paymentReference: (paymentReference && paymentReference.trim()) ? paymentReference.trim() : null })]
   );
 
   await recordAuditLog(req.adminUser!.id, req.adminUser!.fullName, 'voucher_approval_request', 'voucher_approval', rows[0].id,
@@ -1433,7 +1568,7 @@ adminRouter.post('/vouchers/request-approval', async (req: Request, res: Respons
 });
 
 // Manager/CEO views pending approvals
-adminRouter.get('/vouchers/pending-approvals', requireRole('CEO', 'Manager'), async (_req: Request, res: Response) => {
+adminRouter.get('/vouchers/pending-approvals', requirePermission(PERMISSIONS.COMPANY_ADMIN), async (_req: Request, res: Response) => {
   const { rows } = await pool.query(
     `SELECT * FROM voucher_approvals WHERE status = 'pending' ORDER BY created_at DESC`
   );
@@ -1441,7 +1576,7 @@ adminRouter.get('/vouchers/pending-approvals', requireRole('CEO', 'Manager'), as
 });
 
 // Manager/CEO approves a request
-adminRouter.post('/vouchers/approvals/:id/approve', requireRole('CEO', 'Manager'), async (req: Request, res: Response) => {
+adminRouter.post('/vouchers/approvals/:id/approve', requirePermission(PERMISSIONS.COMPANY_ADMIN), async (req: Request, res: Response) => {
   const { id } = req.params;
 
   const { rows: existing } = await pool.query(
@@ -1452,16 +1587,26 @@ adminRouter.post('/vouchers/approvals/:id/approve', requireRole('CEO', 'Manager'
   if (approval.status !== 'pending') { res.status(400).json({ error: 'Request already ' + approval.status }); return; }
 
   const pkgRes = await pool.query(
-    `SELECT tier_name, duration_min, data_limit_gb, is_uncapped, bandwidth_mbps_up, bandwidth_mbps_down
-     FROM packages WHERE tier_name = $1`, [approval.package_tier]
+    `SELECT tier_name, duration_min, data_limit_gb, is_uncapped, bandwidth_mbps_up, bandwidth_mbps_down, max_devices
+     FROM packages WHERE tier_name = $1 AND deleted_at IS NULL`, [approval.package_tier]
   );
   if (pkgRes.rows.length === 0) { res.status(422).json({ error: 'Package not found' }); return; }
   const pkg = pkgRes.rows[0];
 
   const slug = approval.package_tier.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   const created: any[] = [];
   const count = approval.voucher_count || 1;
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+
+  // Ruijie Cloud: mint all codes up front so HTTP work happens before BEGIN.
+  let ruijieMints: StaffRuijieMint[] = [];
+  if (isRuijieCloudConfigured()) {
+    for (let i = 0; i < count; i++) {
+      const m = await staffRuijieMint(approval.package_tier, `Approval by ${req.adminUser!.fullName}`);
+      if (!m) break;
+      ruijieMints.push(m);
+    }
+  }
 
   const client = await pool.connect();
   try {
@@ -1471,22 +1616,32 @@ adminRouter.post('/vouchers/approvals/:id/approve', requireRole('CEO', 'Manager'
       const bytes = crypto.randomBytes(4);
       let rand = '';
       for (let j = 0; j < 4; j++) rand += chars[bytes[j] % chars.length];
-      const voucherCode = approval.request_type === 'single' && approval.voucher_data?.code
-        ? approval.voucher_data.code.toUpperCase()
-        : `${slug}-${rand}`;
+      const voucherCode = ruijieMints.length > i
+        ? ruijieMints[i].code
+        : (approval.request_type === 'single' && approval.voucher_data?.code
+          ? approval.voucher_data.code.toUpperCase()
+          : `${slug}-${rand}`);
 
       const { rows: vrows } = await client.query(
-        `INSERT INTO vouchers (code, duration_min, max_uses, expires_at, data_limit_gb, is_uncapped, bandwidth_mbps_up, bandwidth_mbps_down, sold_by, price_amount, package_tier)
-         VALUES ($1, $2, $3, NULL, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
+        `INSERT INTO vouchers (code, duration_min, max_uses, expires_at, data_limit_gb, is_uncapped, bandwidth_mbps_up, bandwidth_mbps_down, sold_by, price_amount, package_tier, max_devices)
+         VALUES ($1, $2, $3, NULL, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
          [voucherCode, pkg.duration_min, approval.max_uses || 1, pkg.data_limit_gb, pkg.is_uncapped, pkg.bandwidth_mbps_up, pkg.bandwidth_mbps_down,
-          approval.requested_by, approval.price_amount || null, approval.package_tier]
+          approval.requested_by, approval.price_amount || null, approval.package_tier, pkg.max_devices]
       );
+
+      if (ruijieMints.length > i) {
+        await client.query(RUIJIE_VOUCHER_AUDIT_SQL, [
+          ruijieMints[i].code, approval.package_tier, ruijieMints[i].userGroupId, ruijieMints[i].profile,
+          ruijieMints[i].expiryTime ?? null, null, 'staff', null,
+        ]);
+      }
 
       if (approval.price_amount && approval.price_amount > 0) {
         await client.query(
-          `INSERT INTO sales (voucher_id, voucher_code, sold_by, sold_by_name, amount, currency)
-           VALUES ($1, $2, $3, $4, $5, 'USD')`,
-          [vrows[0].id, vrows[0].code, approval.requested_by, approval.requested_by_name, approval.price_amount]
+          `INSERT INTO sales (voucher_id, voucher_code, sold_by, sold_by_name, amount, currency, payment_method, payment_reference)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+          [vrows[0].id, vrows[0].code, approval.requested_by, approval.requested_by_name, approval.price_amount, 'USD',
+           approval.voucher_data?.paymentMethod || 'Cash', approval.voucher_data?.paymentReference || null]
         );
       }
       created.push(vrows[0]);
@@ -1520,7 +1675,7 @@ adminRouter.post('/vouchers/approvals/:id/approve', requireRole('CEO', 'Manager'
 });
 
 // Manager/CEO rejects a request
-adminRouter.post('/vouchers/approvals/:id/reject', requireRole('CEO', 'Manager'), async (req: Request, res: Response) => {
+adminRouter.post('/vouchers/approvals/:id/reject', requirePermission(PERMISSIONS.COMPANY_ADMIN), async (req: Request, res: Response) => {
   const { id } = req.params;
   const { rows: existing } = await pool.query('SELECT * FROM voucher_approvals WHERE id = $1', [id]);
   if (existing.length === 0) { res.status(404).json({ error: 'Approval request not found' }); return; }
@@ -1600,6 +1755,7 @@ adminRouter.get('/cash-handovers/available-sales', async (req: Request, res: Res
      FROM sales s
      INNER JOIN vouchers v ON v.id = s.voucher_id
      WHERE s.sold_by = $1 AND (s.handover_status IS NULL OR s.handover_status = 'pending')
+       AND (s.payment_method IS NULL OR s.payment_method = 'Cash')
      ORDER BY s.sold_at DESC`,
     [req.adminUser!.id]
   );
@@ -1617,7 +1773,8 @@ adminRouter.post('/cash-handovers', async (req: Request, res: Response) => {
   // Verify all sales belong to this staff and are unhanded
   const { rows: sales } = await pool.query(
     `SELECT s.* FROM sales s
-     WHERE s.id = ANY($1::uuid[]) AND s.sold_by = $2 AND (s.handover_status IS NULL OR s.handover_status = 'pending')`,
+     WHERE s.id = ANY($1::uuid[]) AND s.sold_by = $2 AND (s.handover_status IS NULL OR s.handover_status = 'pending')
+       AND (s.payment_method IS NULL OR s.payment_method = 'Cash')`,
     [saleIds, req.adminUser!.id]
   );
 
@@ -1664,7 +1821,7 @@ adminRouter.post('/cash-handovers', async (req: Request, res: Response) => {
 });
 
 // Manager/CEO views pending handovers
-adminRouter.get('/cash-handovers/pending', requireRole('CEO', 'Manager'), async (_req: Request, res: Response) => {
+adminRouter.get('/cash-handovers/pending', requirePermission(PERMISSIONS.COMPANY_ADMIN), async (_req: Request, res: Response) => {
   const { rows } = await pool.query(
     `SELECT * FROM cash_handovers WHERE status = 'pending' ORDER BY created_at DESC`
   );
@@ -1684,7 +1841,7 @@ adminRouter.get('/cash-handovers/pending', requireRole('CEO', 'Manager'), async 
 });
 
 // Manager/CEO approves a handover
-adminRouter.post('/cash-handovers/:id/approve', requireRole('CEO', 'Manager'), async (req: Request, res: Response) => {
+adminRouter.post('/cash-handovers/:id/approve', requirePermission(PERMISSIONS.COMPANY_ADMIN), async (req: Request, res: Response) => {
   const { id } = req.params;
   const { rows: existing } = await pool.query('SELECT * FROM cash_handovers WHERE id = $1', [id]);
   if (existing.length === 0) { res.status(404).json({ error: 'Handover not found' }); return; }
@@ -1707,7 +1864,7 @@ adminRouter.post('/cash-handovers/:id/approve', requireRole('CEO', 'Manager'), a
 });
 
 // Manager/CEO rejects a handover
-adminRouter.post('/cash-handovers/:id/reject', requireRole('CEO', 'Manager'), async (req: Request, res: Response) => {
+adminRouter.post('/cash-handovers/:id/reject', requirePermission(PERMISSIONS.COMPANY_ADMIN), async (req: Request, res: Response) => {
   const { id } = req.params;
   const { rows: existing } = await pool.query('SELECT * FROM cash_handovers WHERE id = $1', [id]);
   if (existing.length === 0) { res.status(404).json({ error: 'Handover not found' }); return; }
@@ -1761,7 +1918,7 @@ adminRouter.get('/cash-handovers/my', async (req: Request, res: Response) => {
 // NEW: Customer Experience KPIs
 // ═══════════════════════════════════════════════════════
 
-adminRouter.get('/customer-kpis', requireRole('CEO', 'Manager'), async (_req: Request, res: Response) => {
+adminRouter.get('/customer-kpis', requirePermission(PERMISSIONS.COMPANY_ADMIN), async (_req: Request, res: Response) => {
   // Average session duration
   const { rows: avgSession } = await pool.query(`
     SELECT COALESCE(AVG(EXTRACT(EPOCH FROM (COALESCE(session_expires_at, NOW()) - created_at)) / 60), 0)::float AS avg_duration_min
@@ -1827,7 +1984,7 @@ adminRouter.get('/qos-view', async (_req: Request, res: Response) => {
     FROM wispr_profiles wp
     INNER JOIN users u ON u.id = wp.user_id
     LEFT JOIN vouchers v ON UPPER(u.voucher_code) = v.code
-    LEFT JOIN packages p ON v.data_limit_gb IS NOT DISTINCT FROM p.data_limit_gb
+    LEFT JOIN packages p ON v.data_limit_gb IS NOT DISTINCT FROM p.data_limit_gb AND p.deleted_at IS NULL
       AND v.bandwidth_mbps_up = p.bandwidth_mbps_up
       AND v.bandwidth_mbps_down = p.bandwidth_mbps_down
     WHERE wp.session_end IS NULL
@@ -1869,7 +2026,7 @@ adminRouter.get('/notifications/count', async (req: Request, res: Response) => {
       `SELECT COUNT(*)::int AS count FROM cash_handovers WHERE status = 'pending'`
     );
     const { rows: pendingStaff } = await pool.query(
-      `SELECT COUNT(*)::int AS count FROM admin_users WHERE role IN ('Staff', 'Manager') AND approved = FALSE`
+      `SELECT COUNT(*)::int AS count FROM admin_users WHERE role IN ('Staff', 'Manager') AND approved = FALSE AND deleted_at IS NULL`
     );
     result.pendingApprovals = pendingApprovals[0].count;
     result.pendingHandovers = pendingHandovers[0].count;
@@ -1923,31 +2080,31 @@ adminRouter.post('/bandwidth/snapshot', async (req: Request, res: Response) => {
 // CEO: Package Management (CRUD)
 // ═══════════════════════════════════════════════════════
 
-adminRouter.get('/packages/manage', requireRole('CEO'), async (_req: Request, res: Response) => {
-  const { rows } = await pool.query('SELECT * FROM packages ORDER BY price_amount ASC');
+adminRouter.get('/packages/manage', requirePermission(PERMISSIONS.SYSTEM_DEVELOPER), async (_req: Request, res: Response) => {
+  const { rows } = await pool.query('SELECT * FROM packages WHERE deleted_at IS NULL ORDER BY price_amount ASC');
   res.json(rows);
 });
 
-adminRouter.post('/packages', requireRole('CEO'), async (req: Request, res: Response) => {
-  const { tierName, displayName, priceAmount, priceCurrency, billingPeriod, durationMin, dataLimitGb, isUncapped, bandwidthUp, bandwidthDown } = req.body as any;
+adminRouter.post('/packages', requirePermission(PERMISSIONS.SYSTEM_DEVELOPER), async (req: Request, res: Response) => {
+  const { tierName, displayName, priceAmount, priceCurrency, billingPeriod, durationMin, dataLimitGb, isUncapped, bandwidthUp, bandwidthDown, maxDevices } = req.body as any;
   if (!tierName || !displayName || priceAmount === undefined) {
     res.status(422).json({ error: 'tierName, displayName, and priceAmount are required' }); return;
   }
   const { rows } = await pool.query(
-    `INSERT INTO packages (tier_name, display_name, price_amount, price_currency, billing_period, duration_min, data_limit_gb, is_uncapped, bandwidth_mbps_up, bandwidth_mbps_down)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
-    [tierName, displayName, priceAmount, priceCurrency || 'USD', billingPeriod || 'daily', durationMin || 1440, dataLimitGb ?? null, !!isUncapped, bandwidthUp || 2, bandwidthDown || 2]
+    `INSERT INTO packages (tier_name, display_name, price_amount, price_currency, billing_period, duration_min, data_limit_gb, is_uncapped, bandwidth_mbps_up, bandwidth_mbps_down, max_devices)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+    [tierName, displayName, priceAmount, priceCurrency || 'USD', billingPeriod || 'daily', durationMin || 1440, dataLimitGb ?? null, !!isUncapped, bandwidthUp || 2, bandwidthDown || 2, maxDevices ?? null]
   );
   await recordAuditLog(req.adminUser!.id, req.adminUser!.fullName, 'package_create', 'package', rows[0].id, `Created package ${tierName}`);
   res.status(201).json(rows[0]);
 });
 
-adminRouter.put('/packages/:id', requireRole('CEO'), async (req: Request, res: Response) => {
+adminRouter.put('/packages/:id', requirePermission(PERMISSIONS.SYSTEM_DEVELOPER), async (req: Request, res: Response) => {
   const { id } = req.params;
   const fields = req.body as any;
   const sets: string[] = []; const vals: any[] = []; let idx = 1;
   for (const [k, v] of Object.entries(fields)) {
-    const col = ({ tierName: 'tier_name', displayName: 'display_name', priceAmount: 'price_amount', priceCurrency: 'price_currency', billingPeriod: 'billing_period', durationMin: 'duration_min', dataLimitGb: 'data_limit_gb', isUncapped: 'is_uncapped', bandwidthUp: 'bandwidth_mbps_up', bandwidthDown: 'bandwidth_mbps_down' } as any)[k];
+    const col = ({ tierName: 'tier_name', displayName: 'display_name', priceAmount: 'price_amount', priceCurrency: 'price_currency', billingPeriod: 'billing_period', durationMin: 'duration_min', dataLimitGb: 'data_limit_gb', isUncapped: 'is_uncapped', bandwidthUp: 'bandwidth_mbps_up', bandwidthDown: 'bandwidth_mbps_down', maxDevices: 'max_devices' } as any)[k];
     if (col) { sets.push(`${col} = $${idx++}`); vals.push(v); }
   }
   if (sets.length === 0) { res.status(422).json({ error: 'No valid fields' }); return; }
@@ -1958,9 +2115,9 @@ adminRouter.put('/packages/:id', requireRole('CEO'), async (req: Request, res: R
   res.json(rows[0]);
 });
 
-adminRouter.delete('/packages/:id', requireRole('CEO'), async (req: Request, res: Response) => {
+adminRouter.delete('/packages/:id', requirePermission(PERMISSIONS.SYSTEM_DEVELOPER), async (req: Request, res: Response) => {
   const { id } = req.params;
-  const { rows } = await pool.query('DELETE FROM packages WHERE id = $1 RETURNING tier_name', [id]);
+  const { rows } = await pool.query('UPDATE packages SET deleted_at = NOW(), status = \'archived\' WHERE id = $1 AND deleted_at IS NULL RETURNING tier_name', [id]);
   if (rows.length === 0) { res.status(404).json({ error: 'Package not found' }); return; }
   await recordAuditLog(req.adminUser!.id, req.adminUser!.fullName, 'package_delete', 'package', id, `Deleted package ${rows[0].tier_name}`);
   res.json({ message: `Package ${rows[0].tier_name} deleted` });
@@ -1970,7 +2127,7 @@ adminRouter.delete('/packages/:id', requireRole('CEO'), async (req: Request, res
 // CEO: Maintenance Mode
 // ═══════════════════════════════════════════════════════
 
-adminRouter.get('/maintenance', requireRole('CEO'), async (_req: Request, res: Response) => {
+adminRouter.get('/maintenance', requirePermission(PERMISSIONS.SYSTEM_DEVELOPER), async (_req: Request, res: Response) => {
   const { rows } = await pool.query("SELECT value FROM settings WHERE key = 'maintenance_mode'");
   const { rows: msgRows } = await pool.query("SELECT value FROM settings WHERE key = 'maintenance_message'");
   res.json({
@@ -1979,7 +2136,7 @@ adminRouter.get('/maintenance', requireRole('CEO'), async (_req: Request, res: R
   });
 });
 
-adminRouter.put('/maintenance', requireRole('CEO'), async (req: Request, res: Response) => {
+adminRouter.put('/maintenance', requirePermission(PERMISSIONS.SYSTEM_DEVELOPER), async (req: Request, res: Response) => {
   const { enabled, message } = req.body as { enabled: boolean; message?: string };
   await pool.query(
     `INSERT INTO settings (key, value, updated_at, updated_by) VALUES ('maintenance_mode', $1, NOW(), $2)
@@ -2001,12 +2158,12 @@ adminRouter.put('/maintenance', requireRole('CEO'), async (req: Request, res: Re
 // CEO: Data Retention Policy
 // ═══════════════════════════════════════════════════════
 
-adminRouter.get('/retention', requireRole('CEO'), async (_req: Request, res: Response) => {
+adminRouter.get('/retention', requirePermission(PERMISSIONS.SYSTEM_DEVELOPER), async (_req: Request, res: Response) => {
   const { rows } = await pool.query('SELECT * FROM retention_policies LIMIT 1');
   res.json(rows[0] || { session_days: 90, access_log_days: 30, audit_log_days: 365 });
 });
 
-adminRouter.put('/retention', requireRole('CEO'), async (req: Request, res: Response) => {
+adminRouter.put('/retention', requirePermission(PERMISSIONS.SYSTEM_DEVELOPER), async (req: Request, res: Response) => {
   const { sessionDays, accessLogDays, auditLogDays } = req.body as any;
   const { rows } = await pool.query(
     `UPDATE retention_policies SET session_days = $1, access_log_days = $2, audit_log_days = $3, updated_by = $4, updated_at = NOW() RETURNING *`,
@@ -2020,17 +2177,17 @@ adminRouter.put('/retention', requireRole('CEO'), async (req: Request, res: Resp
 // CEO: Staff Commission Management
 // ═══════════════════════════════════════════════════════
 
-adminRouter.get('/commissions', requireRole('CEO'), async (_req: Request, res: Response) => {
+adminRouter.get('/commissions', requirePermission(PERMISSIONS.SYSTEM_DEVELOPER), async (_req: Request, res: Response) => {
   const { rows } = await pool.query(
     `SELECT sc.id, sc.staff_id, sc.commission_pct, sc.updated_at, au.full_name, au.email
      FROM staff_commissions sc
-     RIGHT JOIN admin_users au ON au.id = sc.staff_id AND au.role IN ('Staff', 'Manager')
+     RIGHT JOIN admin_users au ON au.id = sc.staff_id AND au.role IN ('Staff', 'Manager') AND au.deleted_at IS NULL
      ORDER BY au.full_name`
   );
   res.json(rows);
 });
 
-adminRouter.put('/commissions/:staffId', requireRole('CEO'), async (req: Request, res: Response) => {
+adminRouter.put('/commissions/:staffId', requirePermission(PERMISSIONS.SYSTEM_DEVELOPER), async (req: Request, res: Response) => {
   const { staffId } = req.params;
   const { commissionPct } = req.body as { commissionPct: number };
   if (commissionPct < 0 || commissionPct > 100) {
@@ -2043,7 +2200,7 @@ adminRouter.put('/commissions/:staffId', requireRole('CEO'), async (req: Request
      RETURNING *`,
     [staffId, commissionPct, req.adminUser!.id]
   );
-  const { rows: staff } = await pool.query('SELECT full_name FROM admin_users WHERE id = $1', [staffId]);
+  const { rows: staff } = await pool.query('SELECT full_name FROM admin_users WHERE id = $1 AND deleted_at IS NULL', [staffId]);
   await recordAuditLog(req.adminUser!.id, req.adminUser!.fullName, 'commission_set', 'staff_commission', staffId, `Set ${staff[0]?.full_name || staffId} commission to ${commissionPct}%`);
   res.json(rows[0]);
 });
@@ -2052,7 +2209,7 @@ adminRouter.put('/commissions/:staffId', requireRole('CEO'), async (req: Request
 // CEO: Broadcast to All Admins
 // ═══════════════════════════════════════════════════════
 
-adminRouter.post('/broadcast', requireRole('CEO'), async (req: Request, res: Response) => {
+adminRouter.post('/broadcast', requirePermission(PERMISSIONS.SYSTEM_DEVELOPER), async (req: Request, res: Response) => {
   const { title, message } = req.body as { title: string; message: string };
   if (!title || !message) { res.status(422).json({ error: 'title and message required' }); return; }
   const { rows } = await pool.query(
@@ -2105,7 +2262,7 @@ adminRouter.post('/broadcasts/read-all', async (req: Request, res: Response) => 
 // CEO: Kill Switch - force-disconnect all active sessions
 // ═══════════════════════════════════════════════════════
 
-adminRouter.post('/kill-sessions', requireRole('CEO'), async (req: Request, res: Response) => {
+adminRouter.post('/kill-sessions', requirePermission(PERMISSIONS.SYSTEM_DEVELOPER), async (req: Request, res: Response) => {
   const { rows } = await pool.query(
     `UPDATE users SET session_expires_at = NOW() WHERE session_expires_at > NOW() RETURNING id`
   );
@@ -2125,12 +2282,12 @@ adminRouter.post('/kill-sessions', requireRole('CEO'), async (req: Request, res:
 // CEO: White-Label Branding
 // ═══════════════════════════════════════════════════════
 
-adminRouter.get('/branding', requireRole('CEO'), async (_req: Request, res: Response) => {
+adminRouter.get('/branding', requirePermission(PERMISSIONS.SYSTEM_DEVELOPER), async (_req: Request, res: Response) => {
   const { rows } = await pool.query('SELECT * FROM branding LIMIT 1');
   res.json(rows[0] || { portal_title: 'Preyone WiFi', primary_color: '#ff00ff', accent_color: '#6a0dad' });
 });
 
-adminRouter.put('/branding', requireRole('CEO'), async (req: Request, res: Response) => {
+adminRouter.put('/branding', requirePermission(PERMISSIONS.SYSTEM_DEVELOPER), async (req: Request, res: Response) => {
   const { portalTitle, voucherHeader, voucherFooter, primaryColor, accentColor } = req.body as any;
   const { rows } = await pool.query(
     `UPDATE branding SET portal_title = COALESCE($1, portal_title), voucher_header = COALESCE($2, voucher_header), voucher_footer = COALESCE($3, voucher_footer), primary_color = COALESCE($4, primary_color), accent_color = COALESCE($5, accent_color), updated_by = $6, updated_at = NOW() RETURNING *`,
@@ -2144,7 +2301,7 @@ adminRouter.put('/branding', requireRole('CEO'), async (req: Request, res: Respo
 // CEO: Backup Manager
 // ═══════════════════════════════════════════════════════
 
-adminRouter.post('/backup', requireRole('CEO'), async (req: Request, res: Response) => {
+adminRouter.post('/backup', requirePermission(PERMISSIONS.SYSTEM_DEVELOPER), async (req: Request, res: Response) => {
   // Export key data as JSON snapshot (no pg_dump dependency)
   const dump: any = {};
   const tables = ['packages', 'users', 'vouchers', 'payments', 'admin_users', 'sales', 'settings', 'branding', 'retention_policies', 'staff_commissions', 'ap_devices', 'mac_blacklist', 'mac_whitelist'];
@@ -2152,6 +2309,17 @@ adminRouter.post('/backup', requireRole('CEO'), async (req: Request, res: Respon
     const { rows } = await pool.query(`SELECT * FROM ${table}`);
     dump[table] = rows;
   }
+
+  const REDACTED = '[REDACTED]';
+  const sensitiveCols = ['password_hash', 'reset_token', 'reset_password_token', 'reset_token_expires_at', 'reset_password_expires_at', 'email_verification_token', 'jwt_secret'];
+  for (const table of Object.keys(dump)) {
+    for (const row of dump[table]) {
+      for (const col of sensitiveCols) {
+        if (col in row) row[col] = row[col] ? REDACTED : null;
+      }
+    }
+  }
+
   const json = JSON.stringify(dump, null, 2);
   const fileName = `preyone-backup-${new Date().toISOString().slice(0, 10)}.json`;
   // Store backup metadata in DB
@@ -2166,7 +2334,7 @@ adminRouter.post('/backup', requireRole('CEO'), async (req: Request, res: Respon
   res.json({ backupId: logRow[0].id, fileName, fileSize: Buffer.byteLength(json, 'utf8'), data: JSON.parse(json) });
 });
 
-adminRouter.get('/backup/logs', requireRole('CEO'), async (_req: Request, res: Response) => {
+adminRouter.get('/backup/logs', requirePermission(PERMISSIONS.SYSTEM_DEVELOPER), async (_req: Request, res: Response) => {
   const { rows } = await pool.query('SELECT * FROM backup_logs ORDER BY created_at DESC LIMIT 50');
   res.json(rows);
 });
@@ -2175,12 +2343,12 @@ adminRouter.get('/backup/logs', requireRole('CEO'), async (_req: Request, res: R
 // CEO: Scheduled Reports
 // ═══════════════════════════════════════════════════════
 
-adminRouter.get('/report-schedules', requireRole('CEO'), async (_req: Request, res: Response) => {
+adminRouter.get('/report-schedules', requirePermission(PERMISSIONS.SYSTEM_DEVELOPER), async (_req: Request, res: Response) => {
   const { rows } = await pool.query('SELECT * FROM report_schedules ORDER BY created_at DESC');
   res.json(rows);
 });
 
-adminRouter.post('/report-schedules', requireRole('CEO'), async (req: Request, res: Response) => {
+adminRouter.post('/report-schedules', requirePermission(PERMISSIONS.SYSTEM_DEVELOPER), async (req: Request, res: Response) => {
   const { frequency, recipients, enabled } = req.body as { frequency: string; recipients: string[]; enabled: boolean };
   if (!['daily', 'weekly', 'monthly'].includes(frequency)) {
     res.status(422).json({ error: 'frequency must be daily, weekly, or monthly' }); return;
@@ -2194,7 +2362,7 @@ adminRouter.post('/report-schedules', requireRole('CEO'), async (req: Request, r
   res.status(201).json(rows[0]);
 });
 
-adminRouter.put('/report-schedules/:id', requireRole('CEO'), async (req: Request, res: Response) => {
+adminRouter.put('/report-schedules/:id', requirePermission(PERMISSIONS.SYSTEM_DEVELOPER), async (req: Request, res: Response) => {
   const { id } = req.params;
   const { frequency, recipients, enabled } = req.body as any;
   const sets: string[] = []; const vals: any[] = []; let idx = 1;
@@ -2209,9 +2377,133 @@ adminRouter.put('/report-schedules/:id', requireRole('CEO'), async (req: Request
   res.json(rows[0]);
 });
 
-adminRouter.delete('/report-schedules/:id', requireRole('CEO'), async (req: Request, res: Response) => {
+adminRouter.delete('/report-schedules/:id', requirePermission(PERMISSIONS.SYSTEM_DEVELOPER), async (req: Request, res: Response) => {
   const { id } = req.params;
   const { rows } = await pool.query('DELETE FROM report_schedules WHERE id = $1 RETURNING id', [id]);
   if (rows.length === 0) { res.status(404).json({ error: 'Schedule not found' }); return; }
   res.json({ message: 'Schedule deleted' });
+});
+
+// ═══════════════════════════════════════════════════════
+// POS: Company profile (single source of truth for receipts/invoices)
+// ═══════════════════════════════════════════════════════
+
+adminRouter.get('/company', requireRole('CEO'), async (_req: Request, res: Response) => {
+  const { rows } = await pool.query('SELECT * FROM companies ORDER BY created_at LIMIT 1');
+  res.json(rows[0] || { name: 'Preyone', currency: 'USD', tax_pct: 0 });
+});
+
+adminRouter.put('/company', requireRole('CEO'), async (req: Request, res: Response) => {
+  const {
+    name, tagline, address, email, supportPhone, website, logoPath,
+    currency, taxPct, invoicePrefix, quotePrefix, receiptFooter, termsText,
+  } = req.body as any;
+  const { rows } = await pool.query(
+    `UPDATE companies SET
+       name           = COALESCE($1,  name),
+       tagline        = COALESCE($2,  tagline),
+       address        = COALESCE($3,  address),
+       email          = COALESCE($4,  email),
+       support_phone  = COALESCE($5,  support_phone),
+       website        = COALESCE($6,  website),
+       logo_path      = COALESCE($7,  logo_path),
+       currency       = COALESCE($8,  currency),
+       tax_pct        = COALESCE($9,  tax_pct),
+       invoice_prefix = COALESCE($10, invoice_prefix),
+       quote_prefix   = COALESCE($11, quote_prefix),
+       receipt_footer = COALESCE($12, receipt_footer),
+       terms_text     = COALESCE($13, terms_text),
+       updated_by     = $14, updated_at = NOW()
+     RETURNING *`,
+    [name ?? null, tagline ?? null, address ?? null, email ?? null, supportPhone ?? null,
+     website ?? null, logoPath ?? null, currency ?? null, taxPct ?? null, invoicePrefix ?? null,
+     quotePrefix ?? null, receiptFooter ?? null, termsText ?? null, req.adminUser!.id]
+  );
+  await recordAuditLog(req.adminUser!.id, req.adminUser!.fullName, 'company_update', 'companies', rows[0]?.id, `Company profile updated`);
+  res.json(rows[0]);
+});
+
+// ═══════════════════════════════════════════════════════
+// POS: Devices & Endpoints (desktop / web / android)
+// ═══════════════════════════════════════════════════════
+
+adminRouter.get('/devices', requireRole('CEO', 'Manager'), async (req: Request, res: Response) => {
+  const type = typeof req.query.type === 'string' ? req.query.type : undefined;
+  const { rows } = await pool.query(
+    `SELECT d.*, c.name AS company_name
+       FROM pos_devices d
+       LEFT JOIN companies c ON c.id = d.company_id
+       ${type ? 'WHERE d.device_type = $1' : ''}
+       ORDER BY d.last_seen DESC NULLS LAST, d.created_at DESC`,
+    type ? [type] : []
+  );
+  res.json(rows);
+});
+
+adminRouter.post('/devices', requireRole('CEO', 'Manager'), async (req: Request, res: Response) => {
+  const { deviceId, deviceType, name, branch, appVersion, serverUrl, status, notes } = req.body as any;
+  if (!deviceId || !['desktop', 'web', 'android'].includes(deviceType)) {
+    res.status(422).json({ error: 'deviceId and deviceType (desktop|web|android) are required' }); return;
+  }
+  const { rows } = await pool.query(
+    `INSERT INTO pos_devices (device_id, device_type, name, branch, app_version, server_url, status, notes)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+     ON CONFLICT (device_id) DO UPDATE SET
+       device_type = EXCLUDED.device_type,
+       name = EXCLUDED.name,
+       branch = EXCLUDED.branch,
+       app_version = EXCLUDED.app_version,
+       server_url = EXCLUDED.server_url,
+       status = EXCLUDED.status,
+       notes = EXCLUDED.notes,
+       updated_at = NOW()
+     RETURNING *`,
+    [deviceId, deviceType, name || deviceId, branch ?? null, appVersion ?? null, serverUrl ?? null, status || 'registered', notes ?? null]
+  );
+  await recordAuditLog(req.adminUser!.id, req.adminUser!.fullName, 'pos_device_register', 'pos_device', rows[0].id, `Registered ${deviceType} device ${deviceId}`);
+  res.status(201).json(rows[0]);
+});
+
+adminRouter.put('/devices/:id', requireRole('CEO', 'Manager'), async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { deviceId, deviceType, name, branch, appVersion, serverUrl, status, notes } = req.body as any;
+  const sets: string[] = []; const vals: any[] = []; let idx = 1;
+  if (deviceId)          { sets.push(`device_id = $${idx++}`); vals.push(deviceId); }
+  if (deviceType)        { sets.push(`device_type = $${idx++}`); vals.push(deviceType); }
+  if (name !== undefined){ sets.push(`name = $${idx++}`); vals.push(name); }
+  if (branch !== undefined)  { sets.push(`branch = $${idx++}`); vals.push(branch); }
+  if (appVersion !== undefined){ sets.push(`app_version = $${idx++}`); vals.push(appVersion); }
+  if (serverUrl !== undefined){ sets.push(`server_url = $${idx++}`); vals.push(serverUrl); }
+  if (status)            { sets.push(`status = $${idx++}`); vals.push(status); }
+  if (notes !== undefined)   { sets.push(`notes = $${idx++}`); vals.push(notes); }
+  sets.push('updated_at = NOW()');
+  vals.push(id);
+  if (sets.length === 1) { res.status(422).json({ error: 'No fields to update' }); return; }
+  const { rows } = await pool.query(`UPDATE pos_devices SET ${sets.join(', ')} WHERE id = $${idx} RETURNING *`, vals);
+  if (rows.length === 0) { res.status(404).json({ error: 'Device not found' }); return; }
+  res.json(rows[0]);
+});
+
+adminRouter.post('/devices/:id/suspend', requireRole('CEO', 'Manager'), async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { rows } = await pool.query(`UPDATE pos_devices SET status = 'suspended', updated_at = NOW() WHERE id = $1 RETURNING *`, [id]);
+  if (rows.length === 0) { res.status(404).json({ error: 'Device not found' }); return; }
+  await recordAuditLog(req.adminUser!.id, req.adminUser!.fullName, 'pos_device_suspend', 'pos_device', id, `Suspended device ${rows[0].device_id}`);
+  res.json(rows[0]);
+});
+
+adminRouter.post('/devices/:id/activate', requireRole('CEO', 'Manager'), async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { rows } = await pool.query(`UPDATE pos_devices SET status = 'active', updated_at = NOW() WHERE id = $1 RETURNING *`, [id]);
+  if (rows.length === 0) { res.status(404).json({ error: 'Device not found' }); return; }
+  await recordAuditLog(req.adminUser!.id, req.adminUser!.fullName, 'pos_device_activate', 'pos_device', id, `Activated device ${rows[0].device_id}`);
+  res.json(rows[0]);
+});
+
+adminRouter.delete('/devices/:id', requireRole('CEO'), async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { rows } = await pool.query('DELETE FROM pos_devices WHERE id = $1 RETURNING id, device_id', [id]);
+  if (rows.length === 0) { res.status(404).json({ error: 'Device not found' }); return; }
+  await recordAuditLog(req.adminUser!.id, req.adminUser!.fullName, 'pos_device_delete', 'pos_device', id, `Removed device ${rows[0].device_id}`);
+  res.json({ message: 'Device removed' });
 });
