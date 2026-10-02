@@ -15,6 +15,7 @@ import { adminRouter } from './routes/admin';
 import { adminAuthRouter } from './routes/adminAuth';
 import { paymentsRouter } from './routes/payments';
 import { gatewayRouter } from './routes/gateway';
+import { posRouter } from './routes/pos';
 import { errorHandler } from './middleware/errorHandler';
 import { maintenanceCheck } from './middleware/maintenanceMode';
 import { scheduleSessionCleanup } from './services/sessionCleanup';
@@ -42,7 +43,26 @@ app.use(
     },
   })
 );
-app.use(cors());
+// CORS: reflect exact trusted origins with credentials (cross-subdomain cookie SSO).
+// Same-origin requests carry no Origin header and are untouched; the allowlist
+// stops credentials from being returned to arbitrary third-party origins.
+const corsOriginPatterns: RegExp[] =
+  process.env.NODE_ENV === 'production'
+    ? [/^https?:\/\/(([a-z0-9-]+)\.)*preyone\.com$/i]
+    : [/^http:\/\/localhost:\d+$/i, /^http:\/\/127\.0\.0\.1:\d+$/i];
+
+app.use(
+  cors({
+    origin(origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) {
+      if (!origin) return callback(null, false);
+      return callback(null, corsOriginPatterns.some((re) => re.test(origin)));
+    },
+    credentials: true,
+    methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+    maxAge: 86400,
+  })
+);
 app.use(compression());
 app.use(morgan('combined'));
 app.use(express.json());
@@ -114,6 +134,31 @@ app.use((req, res, next) => {
     return res.status(503).send('Admin build not found');
   }
 
+  // app.preyone.com → Universal tenant gateway (Approach B)
+  if (host === 'app.preyone.com') {
+    const appDist = path.join(__dirname, '..', 'app', 'dist');
+    if (fs.existsSync(appDist)) {
+      const appStatic = express.static(appDist);
+      return appStatic(req, res, () => {
+        // SPA fallback: serve index.html for all non-file paths
+        res.sendFile(path.join(appDist, 'index.html'));
+      });
+    }
+    return res.status(503).send('Gateway build not found');
+  }
+
+  // pos.preyone.com → POS terminal SPA
+  if (host === 'pos.preyone.com') {
+    const posDist = path.join(__dirname, '..', 'pos', 'dist');
+    if (fs.existsSync(posDist)) {
+      const posStatic = express.static(posDist);
+      return posStatic(req, res, () => {
+        res.sendFile(path.join(posDist, 'index.html'));
+      });
+    }
+    return res.status(503).send('POS build not found');
+  }
+
   // wifi.preyone.com → captive portal
   if (host === 'wifi.preyone.com') {
     // Tell OS this is a captive portal (triggers popup on iOS/Android/Windows)
@@ -150,6 +195,7 @@ app.use('/api/auth', authRouter);
 app.use('/api/admin/auth', adminAuthRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/payments', paymentsRouter);
+app.use('/api/pos', posRouter);
 
 // Standard route aliases
 app.get('/login', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'account-login.html')));

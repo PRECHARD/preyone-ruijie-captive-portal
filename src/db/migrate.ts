@@ -215,7 +215,7 @@ const SQL = `
   CREATE INDEX IF NOT EXISTS idx_staff_time_logs_user_id ON staff_time_logs (admin_user_id);
   CREATE INDEX IF NOT EXISTS idx_staff_time_logs_clock_in ON staff_time_logs (clock_in);
 
-  -- ── AP Devices (for Ruijie hardware monitoring) ──
+  -- ----- AP Devices (for Ruijie hardware monitoring) -----
   CREATE TABLE IF NOT EXISTS ap_devices (
     id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name              TEXT NOT NULL,
@@ -231,7 +231,7 @@ const SQL = `
     created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
 
-  -- ── Alerts / Notifications ──
+  -- ----- Alerts / Notifications -----
   CREATE TABLE IF NOT EXISTS alerts (
     id              BIGSERIAL PRIMARY KEY,
     type            TEXT NOT NULL,
@@ -251,7 +251,7 @@ const SQL = `
   CREATE INDEX IF NOT EXISTS idx_alerts_created_at ON alerts (created_at);
   CREATE INDEX IF NOT EXISTS idx_alerts_admin_id ON alerts (admin_id);
 
-  -- ── MAC Blacklist / Whitelist ──
+  -- ----- MAC Blacklist / Whitelist -----
   CREATE TABLE IF NOT EXISTS mac_blacklist (
     id          BIGSERIAL PRIMARY KEY,
     mac_address TEXT NOT NULL,
@@ -272,7 +272,7 @@ const SQL = `
 
   CREATE UNIQUE INDEX IF NOT EXISTS idx_mac_whitelist_mac ON mac_whitelist (mac_address);
 
-  -- ── AP Bandwidth Snapshots (for real-time bandwidth monitor) ──
+  -- ----- AP Bandwidth Snapshots (for real-time bandwidth monitor) -----
   CREATE TABLE IF NOT EXISTS ap_bandwidth_snapshots (
     id              BIGSERIAL PRIMARY KEY,
     ap_id           UUID REFERENCES ap_devices(id) ON DELETE CASCADE,
@@ -285,7 +285,7 @@ const SQL = `
   CREATE INDEX IF NOT EXISTS idx_ap_bw_snapshots_ap_id ON ap_bandwidth_snapshots (ap_id);
   CREATE INDEX IF NOT EXISTS idx_ap_bw_snapshots_recorded_at ON ap_bandwidth_snapshots (recorded_at);
 
-  -- ── Gateway Heartbeats (EG105G-P health check tracking) ──
+  -- ----- Gateway Heartbeats (EG105G-P health check tracking) -----
   CREATE TABLE IF NOT EXISTS gateway_heartbeats (
     id              BIGSERIAL PRIMARY KEY,
     gw_sn           TEXT UNIQUE NOT NULL,
@@ -301,7 +301,7 @@ const SQL = `
   -- Ensure package_tier column on vouchers
   ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS package_tier TEXT;
 
-  -- Voucher approval requests (Staff → Manager/CEO)
+  -- Voucher approval requests (Staff -> Manager/CEO)
   CREATE TABLE IF NOT EXISTS voucher_approvals (
     id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     requested_by      UUID NOT NULL REFERENCES admin_users(id),
@@ -323,7 +323,7 @@ const SQL = `
   CREATE INDEX IF NOT EXISTS idx_voucher_approvals_status ON voucher_approvals (status);
   CREATE INDEX IF NOT EXISTS idx_voucher_approvals_requested_by ON voucher_approvals (requested_by);
 
-  -- Cash handovers (Staff → Manager/CEO)
+  -- Cash handovers (Staff -> Manager/CEO)
   CREATE TABLE IF NOT EXISTS cash_handovers (
     id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     staff_id          UUID NOT NULL REFERENCES admin_users(id),
@@ -343,7 +343,7 @@ const SQL = `
   ALTER TABLE sales ADD COLUMN IF NOT EXISTS handover_id UUID REFERENCES cash_handovers(id);
   ALTER TABLE sales ADD COLUMN IF NOT EXISTS handover_status TEXT NOT NULL DEFAULT 'pending' CHECK (handover_status IN ('pending', 'handed_over'));
 
-  -- ── CEO-only features: Retention Policies ──
+  -- ----- CEO-only features: Retention Policies -----
   CREATE TABLE IF NOT EXISTS retention_policies (
     id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     session_days      INTEGER NOT NULL DEFAULT 90,
@@ -355,7 +355,7 @@ const SQL = `
   INSERT INTO retention_policies (session_days, access_log_days, audit_log_days)
   SELECT 90, 30, 365 WHERE NOT EXISTS (SELECT 1 FROM retention_policies);
 
-  -- ── CEO-only features: Staff Commissions ──
+  -- ----- CEO-only features: Staff Commissions -----
   CREATE TABLE IF NOT EXISTS staff_commissions (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     staff_id        UUID UNIQUE NOT NULL REFERENCES admin_users(id) ON DELETE CASCADE,
@@ -364,7 +364,7 @@ const SQL = `
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
 
-  -- ── CEO-only features: Broadcast Notifications ──
+  -- ----- CEO-only features: Broadcast Notifications -----
   CREATE TABLE IF NOT EXISTS broadcast_notifications (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     title           TEXT NOT NULL,
@@ -376,7 +376,7 @@ const SQL = `
   );
   ALTER TABLE broadcast_notifications ADD COLUMN IF NOT EXISTS read_by JSONB NOT NULL DEFAULT '[]';
 
-  -- ── CEO-only features: Branding ──
+  -- ----- CEO-only features: Branding -----
   CREATE TABLE IF NOT EXISTS branding (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     portal_title    TEXT NOT NULL DEFAULT 'Preyone WiFi',
@@ -391,7 +391,7 @@ const SQL = `
   );
   INSERT INTO branding (portal_title) SELECT 'Preyone WiFi' WHERE NOT EXISTS (SELECT 1 FROM branding);
 
-  -- ── CEO-only features: Backup Logs ──
+  -- ----- CEO-only features: Backup Logs -----
   CREATE TABLE IF NOT EXISTS backup_logs (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     file_name       TEXT NOT NULL,
@@ -401,7 +401,7 @@ const SQL = `
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
 
-  -- ── CEO-only features: Report Schedules ──
+  -- ----- CEO-only features: Report Schedules -----
   CREATE TABLE IF NOT EXISTS report_schedules (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     frequency       TEXT NOT NULL CHECK (frequency IN ('daily', 'weekly', 'monthly')),
@@ -412,6 +412,209 @@ const SQL = `
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
+
+  -- -----
+  --  PREYONE POS SYSTEM (pos.preyone.com)
+  --  Additive module: never touches portal/voucher/RADIUS tables.
+  -- -----
+
+  -- Allow Cashier role on admin users + PIN login support
+  ALTER TABLE admin_users DROP CONSTRAINT IF EXISTS admin_users_role_check;
+  ALTER TABLE admin_users ADD CONSTRAINT admin_users_role_check
+    CHECK (role IN ('CEO', 'Manager', 'Staff', 'Cashier'));
+  ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS pin_hash TEXT;
+
+  -- Product catalogue / stock
+  CREATE TABLE IF NOT EXISTS pos_products (
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name                TEXT NOT NULL,
+    sku                 TEXT,
+    barcode             TEXT,
+    category            TEXT,
+    price               NUMERIC(12,2) NOT NULL DEFAULT 0 CHECK (price >= 0),
+    cost_price          NUMERIC(12,2) NOT NULL DEFAULT 0 CHECK (cost_price >= 0),
+    stock_qty           NUMERIC(12,2) NOT NULL DEFAULT 0,
+    track_stock         BOOLEAN NOT NULL DEFAULT TRUE,
+    low_stock_threshold NUMERIC(12,2) NOT NULL DEFAULT 0,
+    active              BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_pos_products_sku     ON pos_products (sku)     WHERE sku IS NOT NULL;
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_pos_products_barcode ON pos_products (barcode) WHERE barcode IS NOT NULL;
+  CREATE INDEX IF NOT EXISTS idx_pos_products_name   ON pos_products (lower(name));
+  CREATE INDEX IF NOT EXISTS idx_pos_products_active ON pos_products (active);
+
+  -- Client book
+  CREATE TABLE IF NOT EXISTS pos_customers (
+    id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name       TEXT NOT NULL,
+    phone      TEXT,
+    email      TEXT,
+    address    TEXT,
+    notes      TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_pos_customers_name ON pos_customers (lower(name));
+
+  -- Till shifts (cash-up sessions)
+  CREATE TABLE IF NOT EXISTS pos_shifts (
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    cashier_id    UUID NOT NULL REFERENCES admin_users(id),
+    opening_float NUMERIC(12,2) NOT NULL DEFAULT 0,
+    opened_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    closed_at     TIMESTAMPTZ,
+    expected_cash NUMERIC(12,2),
+    counted_cash  NUMERIC(12,2),
+    variance      NUMERIC(12,2),
+    status        TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'closed')),
+    notes         TEXT
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_pos_shifts_cashier ON pos_shifts (cashier_id);
+  CREATE INDEX IF NOT EXISTS idx_pos_shifts_status  ON pos_shifts (status);
+  CREATE INDEX IF NOT EXISTS idx_pos_shifts_opened  ON pos_shifts (opened_at);
+
+  -- Documents: till receipts (sale), invoices, quotations
+  CREATE SEQUENCE IF NOT EXISTS pos_doc_number_seq;
+
+  CREATE TABLE IF NOT EXISTS pos_documents (
+    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    doc_number   TEXT UNIQUE NOT NULL,
+    doc_type     TEXT NOT NULL CHECK (doc_type IN ('sale', 'invoice', 'quotation')),
+    channel      TEXT NOT NULL DEFAULT 'till' CHECK (channel IN ('till', 'online', 'office')),
+    status       TEXT NOT NULL DEFAULT 'draft'
+                 CHECK (status IN ('draft', 'unpaid', 'partial', 'paid', 'sent', 'void')),
+    customer_id  UUID REFERENCES pos_customers(id) ON DELETE SET NULL,
+    cashier_id   UUID REFERENCES admin_users(id) ON DELETE SET NULL,
+    shift_id     UUID REFERENCES pos_shifts(id) ON DELETE SET NULL,
+    issue_date   DATE NOT NULL DEFAULT CURRENT_DATE,
+    due_date     DATE,
+    subtotal     NUMERIC(12,2) NOT NULL DEFAULT 0,
+    discount_pct NUMERIC(5,2)  NOT NULL DEFAULT 0,
+    tax_pct      NUMERIC(5,2)  NOT NULL DEFAULT 0,
+    total        NUMERIC(12,2) NOT NULL DEFAULT 0,
+    amount_paid  NUMERIC(12,2) NOT NULL DEFAULT 0,
+    notes        TEXT,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_pos_documents_number   ON pos_documents (doc_number);
+  CREATE INDEX IF NOT EXISTS idx_pos_documents_customer ON pos_documents (customer_id);
+  CREATE INDEX IF NOT EXISTS idx_pos_documents_status   ON pos_documents (status);
+  CREATE INDEX IF NOT EXISTS idx_pos_documents_type     ON pos_documents (doc_type);
+  CREATE INDEX IF NOT EXISTS idx_pos_documents_shift    ON pos_documents (shift_id);
+  CREATE INDEX IF NOT EXISTS idx_pos_documents_created  ON pos_documents (created_at);
+
+  CREATE TABLE IF NOT EXISTS pos_document_items (
+    id            BIGSERIAL PRIMARY KEY,
+    document_id   UUID NOT NULL REFERENCES pos_documents(id) ON DELETE CASCADE,
+    product_id    UUID REFERENCES pos_products(id) ON DELETE SET NULL,
+    description   TEXT NOT NULL,
+    price         NUMERIC(12,2) NOT NULL DEFAULT 0,
+    qty           NUMERIC(12,2) NOT NULL DEFAULT 1,
+    line_total    NUMERIC(12,2) NOT NULL DEFAULT 0,
+    position      INTEGER NOT NULL DEFAULT 0
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_pos_doc_items_document ON pos_document_items (document_id);
+  CREATE INDEX IF NOT EXISTS idx_pos_doc_items_product  ON pos_document_items (product_id);
+
+  CREATE TABLE IF NOT EXISTS pos_document_payments (
+    id            BIGSERIAL PRIMARY KEY,
+    document_id   UUID NOT NULL REFERENCES pos_documents(id) ON DELETE CASCADE,
+    amount        NUMERIC(12,2) NOT NULL CHECK (amount > 0),
+    method        TEXT NOT NULL DEFAULT 'cash'
+                  CHECK (method IN ('cash', 'card', 'ecocash', 'bank', 'pesepay', 'other')),
+    reference     TEXT,
+    paid_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    recorded_by   UUID REFERENCES admin_users(id) ON DELETE SET NULL,
+    shift_id      UUID REFERENCES pos_shifts(id) ON DELETE SET NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_pos_doc_pay_document ON pos_document_payments (document_id);
+  CREATE INDEX IF NOT EXISTS idx_pos_doc_pay_method   ON pos_document_payments (method);
+  CREATE INDEX IF NOT EXISTS idx_pos_doc_pay_paid_at  ON pos_document_payments (paid_at);
+
+  -- ----- Phase A: Provisioned company profile (single source of truth for receipts/notifications) -----
+  CREATE TABLE IF NOT EXISTS companies (
+    id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name           TEXT NOT NULL DEFAULT 'Preyone',
+    tagline        TEXT,
+    address        TEXT,
+    email          TEXT,
+    support_phone  TEXT,
+    website        TEXT,
+    logo_path      TEXT,
+    currency       TEXT NOT NULL DEFAULT 'USD',
+    tax_pct        NUMERIC(5,2) NOT NULL DEFAULT 0,
+    invoice_prefix TEXT NOT NULL DEFAULT 'INV',
+    quote_prefix   TEXT NOT NULL DEFAULT 'QT',
+    receipt_footer TEXT,
+    terms_text     TEXT,
+    updated_by     UUID REFERENCES admin_users(id) ON DELETE SET NULL,
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+  ALTER TABLE companies ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+  INSERT INTO companies (name, tagline, email, support_phone, currency, tax_pct)
+  SELECT 'Preyone', 'Connecting People. Powering Business.', 'info@preyone.com', '+263771327202', 'USD', 0
+  WHERE NOT EXISTS (SELECT 1 FROM companies);
+
+  -- ----- Phase 2 (tenancy): staff + company module subscriptions -----
+  ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS company_id UUID REFERENCES companies(id) ON DELETE SET NULL;
+  CREATE INDEX IF NOT EXISTS idx_admin_users_company ON admin_users (company_id);
+
+  CREATE TABLE IF NOT EXISTS subscriptions (
+    id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    module     TEXT NOT NULL CHECK (module IN ('pos', 'invoice', 'wifi')),
+    plan_tier  TEXT,
+    status     TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'suspended')),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (company_id, module)
+  );
+  CREATE INDEX IF NOT EXISTS idx_subscriptions_company ON subscriptions (company_id);
+  -- Seed every existing company with all three modules (idempotent)
+  INSERT INTO subscriptions (company_id, module)
+  SELECT c.id, m.module
+  FROM companies c
+  CROSS JOIN (VALUES ('pos'), ('invoice'), ('wifi')) AS m(module)
+  WHERE NOT EXISTS (SELECT 1 FROM subscriptions s WHERE s.company_id = c.id AND s.module = m.module);
+  UPDATE subscriptions SET plan_tier = 'enterprise' WHERE plan_tier IS NULL;
+
+  -- ----- Phase A: POS devices & endpoints (desktop / web / android) -----
+  CREATE TABLE IF NOT EXISTS pos_devices (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    device_id   TEXT UNIQUE NOT NULL,
+    device_type TEXT NOT NULL DEFAULT 'android' CHECK (device_type IN ('desktop', 'web', 'android')),
+    name        TEXT NOT NULL,
+    branch      TEXT,
+    company_id  UUID REFERENCES companies(id) ON DELETE SET NULL,
+    app_version TEXT,
+    server_url  TEXT,
+    status      TEXT NOT NULL DEFAULT 'registered' CHECK (status IN ('registered', 'active', 'suspended')),
+    last_seen   TIMESTAMPTZ,
+    notes       TEXT,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+  CREATE INDEX IF NOT EXISTS idx_pos_devices_type     ON pos_devices (device_type);
+  CREATE INDEX IF NOT EXISTS idx_pos_devices_status   ON pos_devices (status);
+  CREATE INDEX IF NOT EXISTS idx_pos_devices_last_seen ON pos_devices (last_seen);
+
+  -- Demo devices so the Devices & Endpoints console has data to show
+  INSERT INTO pos_devices (device_id, device_type, name, branch, app_version, status, last_seen)
+  SELECT 'demo-desktop-01', 'desktop', 'Front Desk Desktop', 'Head Office', '1.0.0', 'active', NOW() - INTERVAL '5 minutes'
+  WHERE NOT EXISTS (SELECT 1 FROM pos_devices WHERE device_id = 'demo-desktop-01');
+  INSERT INTO pos_devices (device_id, device_type, name, branch, app_version, status, last_seen)
+  SELECT 'demo-android-01', 'android', 'Till Tablet (Hall)', 'Hall', '2.4.3', 'active', NOW() - INTERVAL '2 minutes'
+  WHERE NOT EXISTS (SELECT 1 FROM pos_devices WHERE device_id = 'demo-android-01');
 `;
 
 (async () => {
@@ -419,7 +622,7 @@ const SQL = `
   try {
     await client.query(SQL);
     
-    // Seed packages table (idempotent — skips existing tiers)
+    // Seed packages table (idempotent - skips existing tiers)
     const packages = [
       ['PreLITE', 'Basic', 0.99, 'USD', 'daily', 1440, 2, false, 2, 2],
       ['PreLITE PLUS', 'Power', 1.99, 'USD', 'daily', 1440, 5, false, 3, 3],

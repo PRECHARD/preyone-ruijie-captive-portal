@@ -17,6 +17,7 @@ export interface AdminUser {
   email: string;
   role: string;
   fullName: string;
+  company_id?: string | null;
 }
 
 declare global {

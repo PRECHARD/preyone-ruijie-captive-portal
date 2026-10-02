@@ -76,6 +76,7 @@ credentials/
 *.rdb
 dump.sql
 *.sql.bak
+.pgdata-dev/
 
 # Runtime files
 .env.json

@@ -151,6 +151,11 @@ const RD = 'FFB91C1C';     // red (total row bg)
 const NV = 'FF000080';     // navy blue (title)
 const WH = 'FFFFFFFF';     // white
 
+async function loadCompany(): Promise<any | null> {
+  const { rows } = await pool.query('SELECT * FROM companies ORDER BY created_at LIMIT 1');
+  return rows[0] || null;
+}
+
 async function sendStyledSalesExcel(
   res: Response,
   rows: any[],
@@ -165,9 +170,11 @@ async function sendStyledSalesExcel(
   const { sheetName, columns, subtitle, mapRow, fileName } = opts;
   const colCount = columns.length;
   const lastCol = String.fromCharCode(64 + colCount);
+  const company = (await loadCompany()) || {};
+  const brandName = (company?.name as string) || 'Preyone';
 
   const wb = new ExcelJS.Workbook();
-  wb.creator = 'Preyone Network';
+  wb.creator = company?.name || 'Preyone Network';
   const ws = wb.addWorksheet(sheetName);
   ws.columns = columns;
 
@@ -182,7 +189,12 @@ async function sendStyledSalesExcel(
   }
 
   // Logo — left edge, 16:9 ratio preserved
-  const logoPath = path.join(__dirname, '..', '..', 'public', 'images', 'staff-excel-preyonelogo.png');
+  let logoFile = 'staff-excel-preyonelogo.png';
+  if (company?.logo_path && !/^https?:/.test(company.logo_path)) {
+    const cand = path.join(__dirname, '..', '..', 'public', 'images', company.logo_path);
+    if (fs.existsSync(cand)) logoFile = company.logo_path;
+  }
+  const logoPath = path.join(__dirname, '..', '..', 'public', 'images', logoFile);
   if (fs.existsSync(logoPath)) {
     const logoImg = wb.addImage({ filename: logoPath, extension: 'png' });
     ws.addImage(logoImg, { tl: { col: 0, row: 0 }, ext: { width: 320, height: 180 } });
@@ -196,25 +208,39 @@ async function sendStyledSalesExcel(
 
   // Title — Copperplate Gothic, navy blue
   ws.mergeCells(`A8:${lastCol}8`);
-  ws.getCell('A8').value = 'Preyone Ultranet Wi-Fi Sales Report';
+ws.getCell('A8').value = brandName;
   ws.getCell('A8').font = { name: 'Copperplate Gothic', size: 18, bold: true, color: { argb: NV } };
 
-  // Subtitle
   let r = 9;
-  if (subtitle) {
+  const sub = subtitle || (company?.tagline as string) || null;
+  if (sub) {
     ws.mergeCells(`A${r}:${lastCol}${r}`);
-    ws.getCell(`A${r}`).value = subtitle;
+    ws.getCell(`A${r}`).value = sub;
     ws.getCell(`A${r}`).font = { name: 'Calibri', size: 12, color: { argb: DPB } };
     r++;
   }
 
-  // Date
   ws.mergeCells(`A${r}:${lastCol}${r}`);
   ws.getCell(`A${r}`).value = `Generated: ${new Date().toLocaleString()}`;
   ws.getCell(`A${r}`).font = { name: 'Calibri', size: 10, italic: true, color: { argb: DPB } };
+  r++;
 
-  // Header row — big titles
-  const hrRow = r + 2;
+  const contact = [company?.support_phone, company?.website, company?.email].filter(Boolean).join('  ·  ');
+  if (contact) {
+    ws.mergeCells(`A${r}:${lastCol}${r}`);
+    ws.getCell(`A${r}`).value = contact;
+    ws.getCell(`A${r}`).font = { name: 'Calibri', size: 9, italic: true, color: { argb: NP } };
+    r++;
+  }
+  if (company?.address) {
+    ws.mergeCells(`A${r}:${lastCol}${r}`);
+    ws.getCell(`A${r}`).value = company.address;
+    ws.getCell(`A${r}`).font = { name: 'Calibri', size: 9, italic: true, color: { argb: NP } };
+    r++;
+  }
+
+  const hrRow = r + 1;
+  ws.views = [{ state: 'frozen', ySplit: hrRow }];
   const hr = ws.getRow(hrRow);
   hr.values = columns.map(c => c.header);
   hr.height = 38;
@@ -227,7 +253,8 @@ async function sendStyledSalesExcel(
   }
 
   // Data rows
-  const priceIdx = columns.findIndex(c => c.header === 'Price (USD)') + 1;
+  const priceIdx = columns.findIndex(c => c.header.startsWith('Price (')) + 1;
+  if (priceIdx > 0) hr.getCell(priceIdx).value = `Price (${(company?.currency as string) || 'USD'})`;
   let rowNum = hrRow + 1;
   for (const r of rows) {
     const dRow = ws.getRow(rowNum);
@@ -271,7 +298,9 @@ async function sendStyledSalesExcel(
   if (priceIdx > 0) totalRow.getCell(priceIdx).font = { name: 'Calibri', size: 14, bold: true, color: { argb: WH } };
 
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-  res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+  const brandFile = brandName.replace(/[^A-Za-z0-9 _-]/g, '').replace(/\s+/g, '_') || 'Preyone';
+  const finalName = (fileName as string).replace(/^Preyone/, brandFile);
+  res.setHeader('Content-Disposition', `attachment; filename="${finalName}"`);
   await wb.xlsx.write(res);
   res.end();
 }
@@ -2214,4 +2243,129 @@ adminRouter.delete('/report-schedules/:id', requireRole('CEO'), async (req: Requ
   const { rows } = await pool.query('DELETE FROM report_schedules WHERE id = $1 RETURNING id', [id]);
   if (rows.length === 0) { res.status(404).json({ error: 'Schedule not found' }); return; }
   res.json({ message: 'Schedule deleted' });
+});
+
+// ═══════════════════════════════════════════════════════
+// Phase A: Company Profile (CEO) — single source of truth for
+// receipts, invoices, and notifications across desktop/web/APK.
+// ═══════════════════════════════════════════════════════
+
+adminRouter.get('/company', requireRole('CEO'), async (_req: Request, res: Response) => {
+  const { rows } = await pool.query('SELECT * FROM companies ORDER BY created_at LIMIT 1');
+  res.json(rows[0] || { name: 'Preyone', currency: 'USD', tax_pct: 0 });
+});
+
+adminRouter.put('/company', requireRole('CEO'), async (req: Request, res: Response) => {
+  const {
+    name, tagline, address, email, supportPhone, website, logoPath,
+    currency, taxPct, invoicePrefix, quotePrefix, receiptFooter, termsText,
+  } = req.body as any;
+  const { rows } = await pool.query(
+    `UPDATE companies SET
+       name           = COALESCE($1,  name),
+       tagline        = COALESCE($2,  tagline),
+       address        = COALESCE($3,  address),
+       email          = COALESCE($4,  email),
+       support_phone  = COALESCE($5,  support_phone),
+       website        = COALESCE($6,  website),
+       logo_path      = COALESCE($7,  logo_path),
+       currency       = COALESCE($8,  currency),
+       tax_pct        = COALESCE($9,  tax_pct),
+       invoice_prefix = COALESCE($10, invoice_prefix),
+       quote_prefix   = COALESCE($11, quote_prefix),
+       receipt_footer = COALESCE($12, receipt_footer),
+       terms_text     = COALESCE($13, terms_text),
+       updated_by     = $14, updated_at = NOW()
+     RETURNING *`,
+    [name ?? null, tagline ?? null, address ?? null, email ?? null, supportPhone ?? null,
+     website ?? null, logoPath ?? null, currency ?? null, taxPct ?? null, invoicePrefix ?? null,
+     quotePrefix ?? null, receiptFooter ?? null, termsText ?? null, req.adminUser!.id]
+  );
+  await recordAuditLog(req.adminUser!.id, req.adminUser!.fullName, 'company_update', 'companies', rows[0]?.id, `Company profile updated`);
+  res.json(rows[0]);
+});
+
+// ═══════════════════════════════════════════════════════
+// Phase A: POS Devices & Endpoints (desktop / web / android)
+// ═══════════════════════════════════════════════════════
+
+adminRouter.get('/devices', requireRole('CEO', 'Manager'), async (req: Request, res: Response) => {
+  const type = typeof req.query.type === 'string' ? req.query.type : undefined;
+  const { rows } = await pool.query(
+    `SELECT d.*, c.name AS company_name
+       FROM pos_devices d
+       LEFT JOIN companies c ON c.id = d.company_id
+       ${type ? 'WHERE d.device_type = $1' : ''}
+       ORDER BY d.last_seen DESC NULLS LAST, d.created_at DESC`,
+    type ? [type] : []
+  );
+  res.json(rows);
+});
+
+adminRouter.post('/devices', requireRole('CEO', 'Manager'), async (req: Request, res: Response) => {
+  const { deviceId, deviceType, name, branch, appVersion, serverUrl, status, notes } = req.body as any;
+  if (!deviceId || !['desktop', 'web', 'android'].includes(deviceType)) {
+    res.status(422).json({ error: 'deviceId and deviceType (desktop|web|android) are required' }); return;
+  }
+  const { rows } = await pool.query(
+    `INSERT INTO pos_devices (device_id, device_type, name, branch, app_version, server_url, status, notes)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+     ON CONFLICT (device_id) DO UPDATE SET
+       device_type = EXCLUDED.device_type,
+       name = EXCLUDED.name,
+       branch = EXCLUDED.branch,
+       app_version = EXCLUDED.app_version,
+       server_url = EXCLUDED.server_url,
+       status = EXCLUDED.status,
+       notes = EXCLUDED.notes,
+       updated_at = NOW()
+     RETURNING *`,
+    [deviceId, deviceType, name || deviceId, branch ?? null, appVersion ?? null, serverUrl ?? null, status || 'registered', notes ?? null]
+  );
+  await recordAuditLog(req.adminUser!.id, req.adminUser!.fullName, 'pos_device_register', 'pos_device', rows[0].id, `Registered ${deviceType} device ${deviceId}`);
+  res.status(201).json(rows[0]);
+});
+
+adminRouter.put('/devices/:id', requireRole('CEO', 'Manager'), async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { deviceId, deviceType, name, branch, appVersion, serverUrl, status, notes } = req.body as any;
+  const sets: string[] = []; const vals: any[] = []; let idx = 1;
+  if (deviceId)          { sets.push(`device_id = $${idx++}`); vals.push(deviceId); }
+  if (deviceType)        { sets.push(`device_type = $${idx++}`); vals.push(deviceType); }
+  if (name !== undefined){ sets.push(`name = $${idx++}`); vals.push(name); }
+  if (branch !== undefined)  { sets.push(`branch = $${idx++}`); vals.push(branch); }
+  if (appVersion !== undefined){ sets.push(`app_version = $${idx++}`); vals.push(appVersion); }
+  if (serverUrl !== undefined){ sets.push(`server_url = $${idx++}`); vals.push(serverUrl); }
+  if (status)            { sets.push(`status = $${idx++}`); vals.push(status); }
+  if (notes !== undefined)   { sets.push(`notes = $${idx++}`); vals.push(notes); }
+  sets.push('updated_at = NOW()');
+  vals.push(id);
+  if (sets.length === 1) { res.status(422).json({ error: 'No fields to update' }); return; }
+  const { rows } = await pool.query(`UPDATE pos_devices SET ${sets.join(', ')} WHERE id = $${idx} RETURNING *`, vals);
+  if (rows.length === 0) { res.status(404).json({ error: 'Device not found' }); return; }
+  res.json(rows[0]);
+});
+
+adminRouter.post('/devices/:id/suspend', requireRole('CEO', 'Manager'), async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { rows } = await pool.query(`UPDATE pos_devices SET status = 'suspended', updated_at = NOW() WHERE id = $1 RETURNING *`, [id]);
+  if (rows.length === 0) { res.status(404).json({ error: 'Device not found' }); return; }
+  await recordAuditLog(req.adminUser!.id, req.adminUser!.fullName, 'pos_device_suspend', 'pos_device', id, `Suspended device ${rows[0].device_id}`);
+  res.json(rows[0]);
+});
+
+adminRouter.post('/devices/:id/activate', requireRole('CEO', 'Manager'), async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { rows } = await pool.query(`UPDATE pos_devices SET status = 'active', updated_at = NOW() WHERE id = $1 RETURNING *`, [id]);
+  if (rows.length === 0) { res.status(404).json({ error: 'Device not found' }); return; }
+  await recordAuditLog(req.adminUser!.id, req.adminUser!.fullName, 'pos_device_activate', 'pos_device', id, `Activated device ${rows[0].device_id}`);
+  res.json(rows[0]);
+});
+
+adminRouter.delete('/devices/:id', requireRole('CEO'), async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { rows } = await pool.query('DELETE FROM pos_devices WHERE id = $1 RETURNING id, device_id', [id]);
+  if (rows.length === 0) { res.status(404).json({ error: 'Device not found' }); return; }
+  await recordAuditLog(req.adminUser!.id, req.adminUser!.fullName, 'pos_device_delete', 'pos_device', id, `Removed device ${rows[0].device_id}`);
+  res.json({ message: 'Device removed' });
 });

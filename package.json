@@ -37,6 +37,7 @@
     "uuid": "^10.0.0"
   },
   "devDependencies": {
+    "@embedded-postgres/windows-x64": "^18.4.0-beta.17",
     "@types/bcryptjs": "^2.4.6",
     "@types/compression": "^1.7.5",
     "@types/cookie-parser": "^1.4.7",
@@ -50,6 +51,7 @@
     "@types/pg": "^8.11.6",
     "@types/supertest": "^2.0.13",
     "@types/uuid": "^10.0.0",
+    "embedded-postgres": "^18.4.0-beta.17",
     "jsdom": "^29.1.1",
     "supertest": "^7.0.0",
     "typescript": "^5.5.3",

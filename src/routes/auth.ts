@@ -9,6 +9,7 @@ import { pool } from '../db/pool';
 import { buildRuijieSuccessUrl, WISPrSessionConfig } from '../utils/redirect';
 import { transformToWISPrProfile } from '../utils/wisprTransformer';
 import { sendPortalAccountCreated, sendPortalSignupConfirmation, sendPortalEmailVerification, sendPortalForgotPassword } from '../services/notificationService';
+import { setPreyoneCookie } from '../utils/ssoCookie';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'preyone-jwt-secret-change-in-production';
 function getJwtSecret(): string {
@@ -363,6 +364,10 @@ authRouter.post('/portal-login', loginLimiter, async (req: Request, res: Respons
       getJwtSecret(),
       { expiresIn: '7d' }
     );
+
+    // Cross-subdomain SSO cookie (httpOnly). Portal tokens are distinct from
+    // admin tokens — enterprise /me will 401 them, which is the intended scope.
+    setPreyoneCookie(res, portalToken);
 
     res.json({
       token: portalToken,
