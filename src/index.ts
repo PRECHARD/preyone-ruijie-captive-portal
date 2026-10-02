@@ -17,6 +17,7 @@ import { paymentsRouter } from './routes/payments';
 import { gatewayRouter } from './routes/gateway';
 import { posRouter } from './routes/pos';
 import { errorHandler } from './middleware/errorHandler';
+import { resolveTenant } from './middleware/subdomain';
 import { maintenanceCheck } from './middleware/maintenanceMode';
 import { scheduleSessionCleanup } from './services/sessionCleanup';
 import { scheduleAccessLogCleanup } from './services/accessLogCleanup';
@@ -71,6 +72,10 @@ app.use(cookieParser());
 
 // ── Gateway routes (work on any host, registered before subdomain routing) ──
 app.use(gatewayRouter);
+
+// Resolve dynamic <slug>.preyone.com hosts into req.tenant (static app
+// subdomains and unknown slugs are left untouched).
+app.use(resolveTenant);
 
 // WISPr XML helper — tells Apple/iOS that this is a captive portal
 function wisprXml(loginUrl: string): string {

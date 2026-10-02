@@ -565,6 +565,11 @@ const SQL = `
   SELECT 'Preyone', 'Connecting People. Powering Business.', 'info@preyone.com', '+263771327202', 'USD', 0
   WHERE NOT EXISTS (SELECT 1 FROM companies);
 
+  -- Tenant slug for <slug>.preyone.com subdomain routing
+  ALTER TABLE companies ADD COLUMN IF NOT EXISTS slug TEXT;
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_companies_slug ON companies (slug) WHERE slug IS NOT NULL;
+  UPDATE companies SET slug = lower(name) WHERE slug IS NULL;
+
   -- ----- Phase 2 (tenancy): staff + company module subscriptions -----
   ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS company_id UUID REFERENCES companies(id) ON DELETE SET NULL;
   CREATE INDEX IF NOT EXISTS idx_admin_users_company ON admin_users (company_id);

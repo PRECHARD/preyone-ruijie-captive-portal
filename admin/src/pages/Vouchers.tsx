@@ -178,10 +178,8 @@ export default function Vouchers() {
     return () => clearInterval(interval);
   }, [packages]);
 
-  const generateCode = useCallback((tier: string) => {
-    const prefix = tier.slice(0, 4).toUpperCase();
-    const rand = Math.random().toString(36).substring(2, 8).toUpperCase();
-    return prefix + '-' + rand;
+  const generateCode = useCallback((_tier: string) => {
+    return Math.random().toString(36).substring(2, 8).toUpperCase();
   }, []);
 
   const selectPackage = useCallback((tier: string) => {
@@ -351,7 +349,7 @@ export default function Vouchers() {
   };
 
   const drawVoucherCanvas = async (c: HTMLCanvasElement, data: any, issuedByName: string) => {
-    const code = data.code || 'PREYONE-XXXX';
+    const code = (data.code || 'PREYONE-XXXX').toUpperCase();
     const tierText = data.package_tier || 'Custom';
     const priceText = data.price_amount ? '$' + parseFloat(data.price_amount).toFixed(2) : '';
     const durShort = fmtDurShort(data.duration_min);
@@ -421,10 +419,10 @@ export default function Vouchers() {
     ctx.fillStyle = '#0f172a'; ctx.font = '600 10px Montserrat, sans-serif'; ctx.textAlign = 'center';
     ctx.fillText('ACCESS VOUCHER PIN', cpX + cpW / 2, codeBoxY + 14);
     ctx.fillStyle = '#0f172a';
-    ctx.font = '42px "Bebas Neue", sans-serif';
+    ctx.font = 'small-caps 42px "Bebas Neue", sans-serif';
     ctx.textAlign = 'center';
     var cfSize = 42;
-    while (ctx.measureText(code).width > cpW - 24 && cfSize > 22) { cfSize -= 2; ctx.font = cfSize + 'px "Bebas Neue", sans-serif'; }
+    while (ctx.measureText(code).width > cpW - 24 && cfSize > 22) { cfSize -= 2; ctx.font = 'small-caps ' + cfSize + 'px "Bebas Neue", sans-serif'; }
     ctx.shadowColor = 'rgba(15,23,42,0.1)'; ctx.shadowBlur = 3;
     ctx.fillText(code, cpX + cpW / 2, codeBoxY + codeBoxH / 2 + cfSize / 3 + 2);
     ctx.shadowBlur = 0;
