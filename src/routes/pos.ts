@@ -153,6 +153,12 @@ function requireStaff(req: Request, res: Response, next: NextFunction): void {
 }
 router.use(requireAdminAuth, requireStaff, requireCompany);
 
+// ── Payment methods accepted on documents ──────────────────────────
+// Mirrors the pos_document_payments_method_check constraint.
+const PAYMENT_METHODS = [
+  'cash', 'card', 'ecocash', 'innbucks', 'zimswitch', 'visa', 'mastercard', 'bank', 'pesepay', 'other',
+];
+
 // ── Company profile (read-only for staff clients) ───────────────────
 // Single source of truth for receipts / invoices / support phone.
 router.get('/company', async (_req, res) => {
@@ -762,7 +768,7 @@ router.post('/checkout', async (req, res) => {
     for (const p of rawPayments) {
       const amount = round2(num(p?.amount));
       if (amount <= 0) continue;
-      const method = ['cash', 'card', 'ecocash', 'bank', 'pesepay', 'other'].includes(str(p?.method))
+      const method = PAYMENT_METHODS.includes(str(p?.method))
         ? str(p.method)
         : 'cash';
       await client.query(
@@ -799,7 +805,7 @@ router.post('/documents/:id/payments', async (req, res) => {
     res.status(400).json({ error: 'Payment amount must be positive' });
     return;
   }
-  const method = ['cash', 'card', 'ecocash', 'bank', 'pesepay', 'other'].includes(str(req.body?.method))
+  const method = PAYMENT_METHODS.includes(str(req.body?.method))
     ? str(req.body.method)
     : 'cash';
   const reference = str(req.body?.reference) || null;

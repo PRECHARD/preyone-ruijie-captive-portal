@@ -2,7 +2,15 @@ import crypto from 'crypto';
 import { Router, Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { pool } from '../db/pool';
-import { initiateEcoCashPayment, decryptResponse, verifyPaymentStatus } from '../services/pesepayService';
+import {
+  initiateEcoCashPayment,
+  initiatePesepayPayment,
+  decryptResponse,
+  verifyPaymentStatus,
+  isPesepayCurrency,
+  isPesepayRail,
+} from '../services/pesepayService';
+import type { PesepayCurrency, PesepayRail } from '../services/pesepayService';
 import { transformToWISPrProfile } from '../utils/wisprTransformer';
 import { bypassRuijieFirewall } from '../services/ruijieService';
 import { buildRuijieSuccessUrl } from '../utils/redirect';
@@ -494,5 +502,449 @@ paymentsRouter.get('/status/:paymentId', async (req: Request, res: Response) => 
     });
   } catch (err) {
     res.status(500).json({ error: 'Status lookup failed' });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Pesepay gateway: invoices, POS shifts and company subscriptions
+// ---------------------------------------------------------------------------
+
+const PESEPAY_TARGET_TYPES = ['invoice', 'shift', 'subscription'] as const;
+const SUBSCRIPTION_MODULES = ['pos', 'invoice', 'wifi'] as const;
+
+type PesepayTargetType = (typeof PESEPAY_TARGET_TYPES)[number];
+
+interface PesepayInitiateRequest {
+  amount: number;
+  currencyCode: string;
+  reasonForPayment: string;
+  tenant_id: string;
+  paymentMethod?: string;
+  targetType?: string;
+  targetId?: string;
+  documentId?: string;
+  shiftId?: string;
+  subscriptionModule?: string;
+  planTier?: string;
+  phone?: string;
+  email?: string;
+  fullName?: string;
+}
+
+interface PesepayIntentRow {
+  id: string;
+  reference: string;
+  tenant_id: string;
+  amount: number;
+  currency: string;
+  payment_method: PesepayRail;
+  target_type: PesepayTargetType;
+  target_id: string | null;
+  shift_id: string | null;
+  subscription_module: string | null;
+  plan_tier: string | null;
+  status: string;
+}
+
+class HttpError extends Error {
+  statusCode: number;
+  constructor(statusCode: number, message: string) {
+    super(message);
+    this.statusCode = statusCode;
+  }
+}
+
+function safeEqual(a: string, b: string): boolean {
+  const bufA = Buffer.from(a, 'utf8');
+  const bufB = Buffer.from(b, 'utf8');
+  if (bufA.length !== bufB.length) return false;
+  return crypto.timingSafeEqual(bufA, bufB);
+}
+
+function asUuid(value: unknown): string | null {
+  return typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value.trim())
+    ? value.trim()
+    : null;
+}
+
+async function applyDocumentPayment(
+  client: any,
+  intent: PesepayIntentRow,
+  reference: string
+): Promise<Record<string, unknown>> {
+  if (!intent.target_id) {
+    throw new HttpError(400, 'No document recorded for this payment intent');
+  }
+
+  const { rows } = await client.query(
+    `SELECT id, doc_number, total, amount_paid, shift_id FROM pos_documents WHERE id = $1 FOR UPDATE`,
+    [intent.target_id]
+  );
+
+  if (rows.length === 0) {
+    throw new HttpError(404, 'Document not found');
+  }
+
+  const doc = rows[0];
+  const balance = Number(doc.total) - Number(doc.amount_paid);
+
+  if (Number(intent.amount) - balance > 0.01) {
+    throw new HttpError(400, 'Amount exceeds outstanding document balance');
+  }
+
+  if (intent.target_type === 'shift' && intent.shift_id && doc.shift_id !== intent.shift_id) {
+    throw new HttpError(400, 'Document does not belong to the recorded shift');
+  }
+
+  await client.query(
+    `INSERT INTO pos_document_payments (document_id, amount, method, reference, shift_id)
+     VALUES ($1, $2, $3, $4, $5)`,
+    [doc.id, intent.amount, intent.payment_method, reference, intent.shift_id || doc.shift_id]
+  );
+
+  const { rows: updated } = await client.query(
+    `UPDATE pos_documents
+        SET amount_paid = LEAST(total, amount_paid + $2),
+            status = CASE WHEN amount_paid + $2 >= total THEN 'paid' ELSE 'partial' END,
+            updated_at = NOW()
+      WHERE id = $1
+      RETURNING status`,
+    [doc.id, intent.amount]
+  );
+
+  return {
+    documentId: doc.id,
+    documentNumber: doc.doc_number,
+    status: updated.length > 0 ? updated[0].status : 'paid',
+  };
+}
+
+async function applySubscriptionPayment(
+  client: any,
+  intent: PesepayIntentRow
+): Promise<Record<string, unknown>> {
+  if (!intent.subscription_module) {
+    throw new HttpError(400, 'No subscription module recorded for this payment intent');
+  }
+
+  const { rows } = await client.query(
+    `UPDATE subscriptions
+        SET plan_tier = COALESCE($2, plan_tier),
+            status = 'active',
+            updated_at = NOW()
+      WHERE company_id = $1 AND module = $3
+      RETURNING id, plan_tier, status`,
+    [intent.tenant_id, intent.plan_tier, intent.subscription_module]
+  );
+
+  if (rows.length === 0) {
+    throw new HttpError(404, 'Subscription not found');
+  }
+
+  return {
+    subscriptionId: rows[0].id,
+    module: intent.subscription_module,
+    planTier: rows[0].plan_tier,
+    status: rows[0].status,
+  };
+}
+
+paymentsRouter.post('/pesepay/initiate', async (req: Request, res: Response) => {
+  const body = req.body as PesepayInitiateRequest;
+
+  const amount = Number(body.amount);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    res.status(400).json({ error: 'Invalid amount' });
+    return;
+  }
+
+  if (!isPesepayCurrency(body.currencyCode)) {
+    res.status(400).json({ error: 'currencyCode must be USD or ZWG' });
+    return;
+  }
+  const currencyCode = body.currencyCode.toUpperCase() as PesepayCurrency;
+
+  const reasonForPayment = typeof body.reasonForPayment === 'string' ? body.reasonForPayment.trim() : '';
+  if (!reasonForPayment) {
+    res.status(400).json({ error: 'reasonForPayment is required' });
+    return;
+  }
+
+  const tenantId = asUuid(body.tenant_id);
+  if (!tenantId) {
+    res.status(400).json({ error: 'tenant_id must be a valid UUID' });
+    return;
+  }
+
+  const paymentMethod: PesepayRail = body.paymentMethod ? body.paymentMethod.toLowerCase() as PesepayRail : 'ecocash';
+  if (!isPesepayRail(paymentMethod)) {
+    res.status(400).json({ error: 'Unsupported Pesepay payment method' });
+    return;
+  }
+
+  const targetType = (body.targetType || 'invoice') as PesepayTargetType;
+  if (!PESEPAY_TARGET_TYPES.includes(targetType)) {
+    res.status(400).json({ error: 'targetType must be invoice, shift or subscription' });
+    return;
+  }
+
+  const targetId = asUuid(body.targetId || body.documentId);
+  const shiftId = asUuid(body.shiftId);
+
+  if ((targetType === 'invoice' || targetType === 'shift') && !targetId) {
+    res.status(400).json({ error: 'targetId (document) is required for invoice and shift payments' });
+    return;
+  }
+
+  let subscriptionModule: string | null = null;
+  if (targetType === 'subscription') {
+    subscriptionModule = typeof body.subscriptionModule === 'string' ? body.subscriptionModule.trim().toLowerCase() : '';
+    if (!SUBSCRIPTION_MODULES.includes(subscriptionModule as (typeof SUBSCRIPTION_MODULES)[number])) {
+      res.status(400).json({ error: 'subscriptionModule must be pos, invoice or wifi' });
+      return;
+    }
+  }
+
+  try {
+    const { rows: tenantRows } = await pool.query('SELECT id FROM companies WHERE id = $1', [tenantId]);
+    if (tenantRows.length === 0) {
+      res.status(404).json({ error: 'Unknown tenant' });
+      return;
+    }
+
+    if (targetType === 'subscription') {
+      const { rows: subRows } = await pool.query(
+        'SELECT id FROM subscriptions WHERE company_id = $1 AND module = $2',
+        [tenantId, subscriptionModule]
+      );
+      if (subRows.length === 0) {
+        res.status(404).json({ error: 'Subscription not found' });
+        return;
+      }
+    } else {
+      const { rows: docRows } = await pool.query(
+        'SELECT id, total, amount_paid, shift_id FROM pos_documents WHERE id = $1',
+        [targetId]
+      );
+      if (docRows.length === 0) {
+        res.status(404).json({ error: 'Document not found' });
+        return;
+      }
+      if (targetType === 'shift' && shiftId && docRows[0].shift_id !== shiftId) {
+        res.status(400).json({ error: 'Document does not belong to the supplied shift' });
+        return;
+      }
+      const balance = Number(docRows[0].total) - Number(docRows[0].amount_paid);
+      if (amount - balance > 0.01) {
+        res.status(400).json({ error: 'Amount exceeds outstanding document balance' });
+        return;
+      }
+    }
+
+    const reference = `PREYONE-${uuidv4().substring(0, 8).toUpperCase()}-${Date.now()}`;
+
+    await pool.query(
+      `INSERT INTO pesepay_intents
+         (reference, tenant_id, amount, currency, payment_method, purpose, reason_for_payment,
+          target_type, target_id, shift_id, subscription_module, plan_tier)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+      [
+        reference,
+        tenantId,
+        amount,
+        currencyCode,
+        paymentMethod,
+        reasonForPayment,
+        reasonForPayment,
+        targetType,
+        targetId,
+        shiftId,
+        subscriptionModule,
+        typeof body.planTier === 'string' && body.planTier.trim() ? body.planTier.trim() : null,
+      ]
+    );
+
+    const pesepayResponse = await initiatePesepayPayment({
+      amount,
+      currencyCode,
+      paymentMethod,
+      reasonForPayment,
+      reference,
+      phone: body.phone,
+      email: body.email,
+      fullName: body.fullName,
+    });
+
+    if (!pesepayResponse.success) {
+      await pool.query(
+        `UPDATE pesepay_intents SET status = 'failed' WHERE reference = $1`,
+        [reference]
+      );
+      res.status(400).json({ error: pesepayResponse.error || 'Failed to initiate payment', referenceNumber: reference });
+      return;
+    }
+
+    await pool.query(
+      `UPDATE pesepay_intents
+          SET provider_reference = $2, redirect_url = $3, poll_url = $4
+        WHERE reference = $1`,
+      [reference, pesepayResponse.referenceNumber || null, pesepayResponse.redirectUrl || null, pesepayResponse.pollUrl || null]
+    );
+
+    res.json({
+      success: true,
+      referenceNumber: reference,
+      pesepayReference: pesepayResponse.referenceNumber || reference,
+      redirectUrl: pesepayResponse.redirectUrl,
+      pollUrl: pesepayResponse.pollUrl,
+      instructions: pesepayResponse.instructions,
+      amount,
+      currencyCode,
+      paymentMethod,
+      tenantId,
+      targetType,
+      targetId,
+    });
+  } catch (error) {
+    console.error('Pesepay initiation error:', error);
+    res.status(500).json({ error: 'Payment initiation failed' });
+  }
+});
+
+paymentsRouter.post('/pesepay/callback', async (req: Request, res: Response) => {
+  const integrationKey = process.env.PESEPAY_INTEGRATION_KEY || '';
+  const providedKey = req.header('authorization') || '';
+
+  if (!integrationKey || !safeEqual(providedKey, integrationKey)) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
+  }
+
+  try {
+    const payload = req.body?.payload
+      ? decryptResponse(req.body.payload, process.env.PESEPAY_ENCRYPTION_KEY || '')
+      : req.body;
+
+    if (!payload || typeof payload !== 'object') {
+      res.status(400).json({ error: 'Invalid payload' });
+      return;
+    }
+
+    const reference =
+      payload.referenceNumber ||
+      payload.merchantReference ||
+      payload.merchant_reference ||
+      payload.reference;
+
+    if (!reference) {
+      res.status(400).json({ error: 'Missing reference in payload' });
+      return;
+    }
+
+    const candidates = [
+      payload.merchantReference,
+      payload.merchant_reference,
+      payload.referenceNumber,
+      payload.reference,
+    ].filter((value): value is string => typeof value === 'string' && value.length > 0);
+
+    const transactionStatus = String(
+      payload.transactionStatus || payload.transaction_status || payload.status || ''
+    ).toUpperCase();
+
+    if (transactionStatus !== 'SUCCESS') {
+      res.status(200).json({
+        success: true,
+        referenceNumber: reference,
+        status: transactionStatus || 'UNKNOWN',
+        applied: false,
+        message: 'Ignored non-success status',
+      });
+      return;
+    }
+
+    const receivedAmount = payload.amountDetails?.amount ?? payload.amount;
+    if (receivedAmount !== undefined && receivedAmount !== null && receivedAmount !== '') {
+      const parsed = Number(receivedAmount);
+      if (!Number.isFinite(parsed)) {
+        res.status(400).json({ error: 'Invalid amount in payload' });
+        return;
+      }
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      const { rows } = await client.query(
+        `SELECT id, reference, tenant_id, amount, currency, payment_method, target_type,
+                target_id, shift_id, subscription_module, plan_tier, status
+           FROM pesepay_intents
+          WHERE reference = ANY($1::text[]) OR provider_reference = ANY($1::text[])
+          FOR UPDATE`,
+        [candidates]
+      );
+
+      if (rows.length === 0) {
+        await client.query('ROLLBACK');
+        res.status(404).json({ error: 'Payment intent not found' });
+        return;
+      }
+
+      const intent = rows[0] as PesepayIntentRow;
+
+      if (intent.status === 'completed') {
+        await client.query('COMMIT');
+        res.status(200).json({
+          success: true,
+          referenceNumber: reference,
+          status: 'completed',
+          applied: false,
+          message: 'Already processed',
+        });
+        return;
+      }
+
+      if (receivedAmount !== undefined && receivedAmount !== null && receivedAmount !== '') {
+        if (Math.abs(Number(intent.amount) - Number(receivedAmount)) > 0.01) {
+          await client.query('ROLLBACK');
+          res.status(400).json({ error: 'Amount mismatch' });
+          return;
+        }
+      }
+
+      const applied =
+        intent.target_type === 'subscription'
+          ? await applySubscriptionPayment(client, intent)
+          : await applyDocumentPayment(client, intent, reference);
+
+      await client.query(
+        `UPDATE pesepay_intents
+            SET status = 'completed', completed_at = NOW(), provider_reference = COALESCE($2, provider_reference)
+          WHERE id = $1`,
+        [intent.id, payload.referenceNumber || null]
+      );
+
+      await client.query('COMMIT');
+
+      res.json({
+        success: true,
+        referenceNumber: reference,
+        status: 'completed',
+        applied: true,
+        targetType: intent.target_type,
+        ...applied,
+      });
+    } catch (err) {
+      await client.query('ROLLBACK');
+      const statusCode = err instanceof HttpError ? err.statusCode : 500;
+      if (statusCode === 500) console.error('Pesepay callback error:', err);
+      res.status(statusCode).json({ error: err instanceof Error ? err.message : 'Callback processing failed' });
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    console.error('Pesepay callback error:', err);
+    res.status(500).json({ error: 'Callback processing failed' });
   }
 });

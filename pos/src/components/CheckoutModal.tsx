@@ -6,7 +6,18 @@ interface PaymentPart {
   reference?: string;
 }
 
-const METHODS = ['cash', 'card', 'ecocash', 'bank', 'pesepay'] as const;
+const PESEPAY_RAILS = [
+  { key: 'ecocash', label: 'EcoCash', customerField: 'EcoCash number', prefix: '*151#' },
+  { key: 'innbucks', label: 'InnBucks', customerField: 'InnBucks number', prefix: '*242#' },
+  { key: 'zimswitch', label: 'Zimswitch', customerField: 'Card last 4 digits', prefix: '' },
+  { key: 'visa', label: 'Visa', customerField: 'Card last 4 digits', prefix: '' },
+  { key: 'mastercard', label: 'Mastercard', customerField: 'Card last 4 digits', prefix: '' },
+];
+
+const METHOD_LABELS: Record<string, string> = {
+  cash: 'Cash',
+  ...Object.fromEntries(PESEPAY_RAILS.map((r) => [r.key, r.label])),
+};
 
 const money = (n: number): string => `$${(Number(n) || 0).toFixed(2)}`;
 
@@ -24,15 +35,13 @@ export default function CheckoutModal({
   const [method, setMethod] = useState<string>('cash');
   const [tendered, setTendered] = useState('');
   const [reference, setReference] = useState('');
+  const [customerAccount, setCustomerAccount] = useState('');
   const [parts, setParts] = useState<PaymentPart[]>([]);
   const [busy, setBusy] = useState(false);
   const [customerName, setCustomerName] = useState('');
-  const [ussdPhone, setUssdPhone] = useState('');
-  const [ussdPin, setUssdPin] = useState('');
-  const [ussdActive, setUssdActive] = useState(false);
-  const [ussdErr, setUssdErr] = useState('');
 
-  const MERCHANT_ECOCASH = '+263771327202';
+  const rail = PESEPAY_RAILS.find((r) => r.key === method);
+  const methods = ['cash', ...PESEPAY_RAILS.map((r) => r.key)];
 
   const partsSum = useMemo(() => parts.reduce((s, p) => s + p.amount, 0), [parts]);
   const remaining = Math.max(0, Math.round((total - partsSum) * 100) / 100);
@@ -48,6 +57,15 @@ export default function CheckoutModal({
     return [...set].filter((v) => v > 0 && v !== Infinity).sort((a, b) => a - b).slice(0, 4);
   }, [remaining]);
 
+  const buildReference = (): string | undefined => {
+    const approval = reference.trim();
+    const account = customerAccount.trim();
+    if (!rail) return approval || undefined;
+    if (account && approval) return `${rail.label} ${account} · ${approval}`;
+    if (account) return `${rail.label} ${account}`;
+    return approval || undefined;
+  };
+
   const addPart = () => {
     const amount = Number(tendered);
     if (!amount || amount <= 0) return;
@@ -55,37 +73,11 @@ export default function CheckoutModal({
     if (capped <= 0) return;
     setParts((p) => [
       ...p,
-      { amount: Math.round(capped * 100) / 100, method, reference: reference.trim() || undefined },
+      { amount: Math.round(capped * 100) / 100, method, reference: buildReference() },
     ]);
     setTendered('');
     setReference('');
-  };
-
-  const openUssd = () => {
-    const phone = ussdPhone.replace(/[^\d+]/g, '');
-    if (phone.length < 9) {
-      setUssdErr('Enter the customer\u2019s EcoCash number (e.g. +263 77 123 4567).');
-      return;
-    }
-    setUssdErr('');
-    setUssdPin('');
-    setUssdActive(true);
-  };
-
-  const confirmUssd = () => {
-    if (ussdPin.trim().length < 4) {
-      setUssdErr('Customer must approve with their 4-digit EcoCash PIN.');
-      return;
-    }
-    const amount = Math.round(remaining * 100) / 100;
-    if (amount <= 0) return;
-    setParts((p) => [
-      ...p,
-      { amount, method: 'ecocash', reference: `USSD ${ussdPhone.trim()} PIN✔` },
-    ]);
-    setUssdActive(false);
-    setUssdPin('');
-    setUssdPhone('');
+    setCustomerAccount('');
   };
 
   const canConfirm =
@@ -124,7 +116,7 @@ export default function CheckoutModal({
           <>
             {parts.map((p, i) => (
               <div className="x-report-row" key={i}>
-                <span className="receipt-muted">{p.method}{p.reference ? ` · ${p.reference}` : ''}</span>
+                <span className="receipt-muted">{METHOD_LABELS[p.method] || p.method}{p.reference ? ` · ${p.reference}` : ''}</span>
                 <span>
                   <strong>{money(p.amount)}</strong>{' '}
                   <button className="remove-btn" onClick={() => setParts((arr) => arr.filter((_, j) => j !== i))}>✕</button>
@@ -141,15 +133,15 @@ export default function CheckoutModal({
         {remaining > 0 && (
           <>
             <div className="method-tabs">
-              {METHODS.map((m) => (
+              {methods.map((m) => (
                 <button key={m} className={method === m ? 'on' : ''} onClick={() => setMethod(m)}>
-                  {m === 'ecocash' ? 'EcoCash' : m}
+                  {METHOD_LABELS[m] || m}
                 </button>
               ))}
             </div>
 
             <label className="field-label">
-              {method === 'cash' ? 'Cash tendered ($)' : `${method} amount ($)`}
+              {method === 'cash' ? 'Cash tendered ($)' : `${METHOD_LABELS[method]} amount ($)`}
               <input
                 type="number"
                 min="0"
@@ -174,26 +166,32 @@ export default function CheckoutModal({
                   ))}
                 </div>
               </>
-            ) : method === 'ecocash' ? (
+            ) : (
               <>
+                {rail && rail.prefix && (
+                  <p style={{ fontSize: '0.75rem', color: 'var(--muted)', margin: '0 0 0.5rem' }}>
+                    Customer approves on their phone: {rail.label} {rail.prefix}
+                  </p>
+                )}
+                {rail && (
+                  <label className="field-label">
+                    {rail.customerField}
+                    <input
+                      value={customerAccount}
+                      placeholder={rail.key === 'ecocash' || rail.key === 'innbucks' ? '+263 77 123 4567' : '4242'}
+                      onChange={(e) => setCustomerAccount(e.target.value)}
+                    />
+                  </label>
+                )}
                 <label className="field-label">
-                  Customer’s EcoCash number (they approve on their phone)
+                  Pesepay reference / approval code
                   <input
-                    value={ussdPhone}
-                    placeholder="+263 77 123 4567"
-                    onChange={(e) => { setUssdPhone(e.target.value); setUssdErr(''); }}
+                    value={reference}
+                    placeholder="e.g. 8H3K2M"
+                    onChange={(e) => setReference(e.target.value)}
                   />
                 </label>
-                {ussdErr && <div className="err-msg">{ussdErr}</div>}
-                <button className="secondary-btn" style={{ marginTop: '0.5rem' }} onClick={openUssd}>
-                  Send USSD payment request · {money(remaining)}
-                </button>
               </>
-            ) : (
-              <label className="field-label">
-                Reference (tx ref / approval code)
-                <input value={reference} onChange={(e) => setReference(e.target.value)} />
-              </label>
             )}
 
             {(Number(tendered) || 0) > 0 && (
@@ -208,46 +206,6 @@ export default function CheckoutModal({
           {busy ? 'Processing…' : remaining > 0.005 ? 'Record as unpaid balance' : `Complete sale · ${money(total)}`}
         </button>
         <button className="secondary-btn" onClick={onCancel}>Cancel</button>
-
-        {ussdActive && (
-          <div className="ussd-overlay" onClick={(e) => { e.stopPropagation(); setUssdActive(false); }}>
-            <div className="ussd-phone">
-              <div className="ussd-bar">
-                <span>Econet</span>
-                <span>USSD · *151#</span>
-              </div>
-              <div className="ussd-screen">
-                <div className="ussd-header">Preyone Enterprise</div>
-                <p className="ussd-body">
-                  Payment request
-                  <br />
-                  <strong>{money(remaining)}</strong>
-                  <br />
-                  <span className="ussd-muted">from {ussdPhone.replace(/[^\d+]/g, '')}</span>
-                  <br />
-                  <span className="ussd-muted">to {MERCHANT_ECOCASH}</span>
-                </p>
-                <p className="ussd-question">Enter your EcoCash PIN to approve</p>
-                <input
-                  className="ussd-pin"
-                  type="password"
-                  inputMode="numeric"
-                  maxLength={4}
-                  placeholder="••••"
-                  value={ussdPin}
-                  autoFocus
-                  onChange={(e) => { setUssdPin(e.target.value.replace(/\D/g, '')); setUssdErr(''); }}
-                />
-                {ussdErr && <div className="ussd-err">{ussdErr}</div>}
-                <div className="ussd-actions">
-                  <button className="ussd-btn" onClick={confirmUssd}>1 Approve</button>
-                  <button className="ussd-btn" onClick={() => setUssdActive(false)}>2 Cancel</button>
-                </div>
-                <p className="ussd-foot">Reply U to cancel</p>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );

@@ -269,9 +269,9 @@ input:focus, select:focus, button:focus-visible {
   font-size: 0.8rem; margin-bottom: 0.7rem;
 }
 
-.method-tabs { display: flex; gap: 0.4rem; margin-bottom: 0.9rem; }
+.method-tabs { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.9rem; }
 .method-tabs button {
-  flex: 1; padding: 0.5rem; font-size: 0.76rem; font-weight: 600;
+  flex: 1 1 auto; min-width: 5.2rem; padding: 0.5rem; font-size: 0.76rem; font-weight: 600;
   text-transform: capitalize;
 }
 .method-tabs button.on { background-image: var(--grad-brand); color: #fff; border-color: transparent; }

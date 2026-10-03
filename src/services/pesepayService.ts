@@ -25,7 +25,61 @@ interface PesepayPaymentResponse {
   transactionId?: string;
 }
 
+export type PesepayCurrency = 'USD' | 'ZWG';
+
+export type PesepayRail = 'ecocash' | 'innbucks' | 'zimswitch' | 'visa' | 'mastercard';
+
+const PESEPAY_RAIL_CODES: Record<PesepayRail, string> = {
+  ecocash: 'ECOCASH',
+  innbucks: 'INNBUCKS',
+  zimswitch: 'ZIMSWITCH',
+  visa: 'VISA',
+  mastercard: 'MASTERCARD',
+};
+
+const PESEPAY_CURRENCIES: PesepayCurrency[] = ['USD', 'ZWG'];
+
+interface PesepayGatewayRequest {
+  amount: number;
+  currencyCode: PesepayCurrency;
+  paymentMethod: PesepayRail;
+  reasonForPayment: string;
+  reference: string;
+  phone?: string;
+  email?: string;
+  fullName?: string;
+}
+
+interface PesepayGatewayResponse {
+  success: boolean;
+  referenceNumber?: string;
+  redirectUrl?: string;
+  pollUrl?: string;
+  instructions?: string;
+  error?: string;
+}
+
 const PESEPAY_V2_URL = 'https://api.pesepay.com/api/payments-engine/v2/payments/make-payment';
+
+function getPesepayResultUrl(): string {
+  if (process.env.PESEPAY_RESULT_URL) return process.env.PESEPAY_RESULT_URL;
+  const base = process.env.BASE_URL || 'https://portal.preyone.com';
+  return `${base.replace(/\/$/, '')}/api/payments/pesepay/callback`;
+}
+
+function getPesepayReturnUrl(): string {
+  if (process.env.PESEPAY_RETURN_URL) return process.env.PESEPAY_RETURN_URL;
+  const base = process.env.BASE_URL || 'https://portal.preyone.com';
+  return `${base.replace(/\/$/, '')}/payment-status`;
+}
+
+export function isPesepayCurrency(value: unknown): value is PesepayCurrency {
+  return typeof value === 'string' && PESEPAY_CURRENCIES.includes(value.toUpperCase() as PesepayCurrency);
+}
+
+export function isPesepayRail(value: unknown): value is PesepayRail {
+  return typeof value === 'string' && Object.prototype.hasOwnProperty.call(PESEPAY_RAIL_CODES, value.toLowerCase());
+}
 
 function getPesepayConfig(): PesepayConfig {
   return {
@@ -91,6 +145,52 @@ function getRequestBody(paymentRequest: InitiatePaymentRequest) {
   };
 }
 
+function describePesepayError(error: unknown): string {
+  if (error instanceof Error && 'isAxiosError' in error && (error as any).isAxiosError) {
+    const axiosErr = error as any;
+    if (axiosErr.response) {
+      const msg = axiosErr.response.data?.message || axiosErr.response.data?.error || `HTTP ${axiosErr.response.status}`;
+      return 'Payment service error: ' + msg;
+    }
+  }
+  const msg = error instanceof Error ? error.message : 'Unknown error';
+  return 'Payment service error: ' + msg;
+}
+
+async function postEncryptedPayload(
+  requestBody: any,
+  config: PesepayConfig
+): Promise<{ decrypted: any | null; data: any; error?: string }> {
+  const encryptedPayload = encryptPayload(requestBody, config.encryptionKey);
+
+  const response = await axios.post(config.baseUrl, { payload: encryptedPayload }, {
+    headers: { authorization: config.integrationKey },
+    timeout: 30000,
+    validateStatus: () => true,
+  });
+
+  const data = response.data;
+
+  if (response.status >= 400) {
+    console.error('Pesepay API error:', data);
+    return {
+      decrypted: null,
+      data,
+      error: data?.message || data?.error || 'Payment initiation failed',
+    };
+  }
+
+  if (data?.payload) {
+    const decrypted = decryptResponse(data.payload, config.encryptionKey);
+    if (!decrypted) {
+      return { decrypted: null, data, error: 'Failed to decrypt Pesepay response' };
+    }
+    return { decrypted, data };
+  }
+
+  return { decrypted: null, data };
+}
+
 export async function initiateEcoCashPayment(
   paymentRequest: InitiatePaymentRequest
 ): Promise<PesepayPaymentResponse> {
@@ -105,27 +205,13 @@ export async function initiateEcoCashPayment(
     }
 
     const requestBody = getRequestBody(paymentRequest);
-    const encryptedPayload = encryptPayload(requestBody, config.encryptionKey);
+    const { decrypted, data, error } = await postEncryptedPayload(requestBody, config);
 
-    const response = await axios.post(config.baseUrl, { payload: encryptedPayload }, {
-      headers: { authorization: config.integrationKey },
-      timeout: 30000,
-      validateStatus: () => true,
-    });
-
-    const status = response.status;
-    const data = response.data;
-
-    if (status >= 400) {
-      console.error('Pesepay API error:', data);
-      return { success: false, error: data.message || data.error || 'Payment initiation failed' };
+    if (error) {
+      return { success: false, error };
     }
 
-    if (data.payload) {
-      const decrypted = decryptResponse(data.payload, config.encryptionKey);
-      if (!decrypted) {
-        return { success: false, error: 'Failed to decrypt Pesepay response' };
-      }
+    if (decrypted) {
       return {
         success: true,
         pollUrl: decrypted.pollUrl || decrypted.redirectUrl,
@@ -133,7 +219,7 @@ export async function initiateEcoCashPayment(
       };
     }
 
-    if (data.pollUrl || data.redirectUrl) {
+    if (data?.pollUrl || data?.redirectUrl) {
       return {
         success: true,
         pollUrl: data.pollUrl || data.redirectUrl,
@@ -144,15 +230,64 @@ export async function initiateEcoCashPayment(
     return { success: false, error: 'No poll URL received from payment provider' };
   } catch (error: unknown) {
     console.error('Pesepay integration error:', error);
-    if (error instanceof Error && 'isAxiosError' in error && (error as any).isAxiosError) {
-      const axiosErr = error as any;
-      if (axiosErr.response) {
-        const msg = axiosErr.response.data?.message || axiosErr.response.data?.error || `HTTP ${axiosErr.response.status}`;
-        return { success: false, error: 'Payment service error: ' + msg };
+    return { success: false, error: describePesepayError(error) };
+  }
+}
+
+export async function initiatePesepayPayment(
+  paymentRequest: PesepayGatewayRequest
+): Promise<PesepayGatewayResponse> {
+  try {
+    const config = getPesepayConfig();
+    if (!config.integrationKey || !config.encryptionKey) {
+      if (process.env.NODE_ENV === 'production') {
+        throw new Error('Pesepay credentials not configured in production');
       }
+      console.warn('Pesepay configuration incomplete. Using mock response.');
+      return generateMockGatewayResponse(paymentRequest);
     }
-    const msg = error instanceof Error ? error.message : 'Unknown error';
-    return { success: false, error: 'Payment service error: ' + msg };
+
+    const requestBody = {
+      currencyCode: paymentRequest.currencyCode,
+      paymentMethodCode: PESEPAY_RAIL_CODES[paymentRequest.paymentMethod],
+      customer: {
+        email: paymentRequest.email || 'customer@preyone.com',
+        ...(paymentRequest.phone ? { phone: formatPhoneNumber(paymentRequest.phone) } : {}),
+        name: paymentRequest.fullName || 'Preyone Customer',
+      },
+      amountDetails: {
+        amount: paymentRequest.amount,
+        currencyCode: paymentRequest.currencyCode,
+      },
+      reasonForPayment: paymentRequest.reasonForPayment,
+      returnUrl: getPesepayReturnUrl(),
+      resultUrl: getPesepayResultUrl(),
+      merchantReference: paymentRequest.reference,
+    };
+
+    const { decrypted, data, error } = await postEncryptedPayload(requestBody, config);
+
+    if (error) {
+      return { success: false, error };
+    }
+
+    const source = decrypted || data || {};
+    const redirectUrl = source.redirectUrl || source.pollUrl || data?.redirectUrl || data?.pollUrl;
+
+    if (!redirectUrl) {
+      return { success: false, error: 'No redirect URL received from Pesepay' };
+    }
+
+    return {
+      success: true,
+      referenceNumber: source.referenceNumber || source.reference || paymentRequest.reference,
+      redirectUrl,
+      pollUrl: source.pollUrl || source.redirectUrl,
+      instructions: source.instructions || source.ussdString || source.paymentInstructions,
+    };
+  } catch (error: unknown) {
+    console.error('Pesepay gateway error:', error);
+    return { success: false, error: describePesepayError(error) };
   }
 }
 
@@ -211,5 +346,16 @@ function generateMockResponse(paymentRequest: InitiatePaymentRequest): PesepayPa
     success: true,
     pollUrl: mockPollUrl,
     transactionId: mockTransactionId,
+  };
+}
+
+function generateMockGatewayResponse(paymentRequest: PesepayGatewayRequest): PesepayGatewayResponse {
+  console.info('Using mock Pesepay response for development.');
+  return {
+    success: true,
+    referenceNumber: `PSE-${Date.now()}`,
+    redirectUrl: `https://payments.pesepay.com/poll?ref=${paymentRequest.reference}`,
+    pollUrl: `https://payments.pesepay.com/poll?ref=${paymentRequest.reference}`,
+    instructions: `Approve ${paymentRequest.currencyCode} ${paymentRequest.amount} in your ${paymentRequest.paymentMethod} wallet.`,
   };
 }

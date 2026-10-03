@@ -17,11 +17,16 @@ vi.mock('../src/db/pool', () => {
   };
 });
 
-vi.mock('../src/services/pesepayService', () => ({
-  initiateEcoCashPayment: vi.fn(),
-  decryptResponse: vi.fn(),
-  verifyPaymentStatus: vi.fn(),
-}));
+vi.mock('../src/services/pesepayService', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/services/pesepayService')>();
+  return {
+    ...actual,
+    initiateEcoCashPayment: vi.fn(),
+    initiatePesepayPayment: vi.fn(),
+    decryptResponse: vi.fn(),
+    verifyPaymentStatus: vi.fn(),
+  };
+});
 
 vi.mock('../src/services/ruijieService', () => ({
   bypassRuijieFirewall: vi.fn().mockResolvedValue(true),
@@ -42,6 +47,7 @@ import { pool } from '../src/db/pool';
 import { paymentsRouter } from '../src/routes/payments';
 import {
   initiateEcoCashPayment,
+  initiatePesepayPayment,
   decryptResponse,
   verifyPaymentStatus,
 } from '../src/services/pesepayService';
@@ -246,6 +252,378 @@ describe('Payments routes', () => {
       const res = await request(createApp()).get('/api/payments/status/unknown');
 
       expect(res.status).toBe(404);
+    });
+  });
+
+  const TENANT = '11111111-1111-4111-8111-111111111111';
+  const DOC = '22222222-2222-4222-8222-222222222222';
+  const SHIFT = '33333333-3333-4333-8333-333333333333';
+  const INTEGRATION_KEY = 'test-integration-key';
+
+  describe('POST /api/payments/pesepay/initiate', () => {
+    const validBody = {
+      amount: 25.5,
+      currencyCode: 'ZWG',
+      reasonForPayment: 'Invoice INV-001 settlement',
+      tenant_id: TENANT,
+      paymentMethod: 'innbucks',
+      targetType: 'invoice',
+      targetId: DOC,
+      phone: '+263771327202',
+      fullName: 'John Doe',
+    };
+
+    beforeEach(() => {
+      (pool.query as any).mockImplementation(async (sql: string) => {
+        if (/FROM companies/.test(sql)) return { rows: [{ id: TENANT }], rowCount: 1 };
+        if (/FROM pos_documents/.test(sql)) {
+          return { rows: [{ id: DOC, total: 100, amount_paid: 0, shift_id: SHIFT }], rowCount: 1 };
+        }
+        if (/FROM subscriptions/.test(sql)) return { rows: [{ id: 'sub-1' }], rowCount: 1 };
+        return { rows: [], rowCount: 1 };
+      });
+      (initiatePesepayPayment as any).mockResolvedValue({
+        success: true,
+        referenceNumber: 'PSE-1',
+        redirectUrl: 'https://payments.pesepay.com/poll?ref=abc',
+        pollUrl: 'https://payments.pesepay.com/poll?ref=abc',
+        instructions: 'Approve ZWG 25.5',
+      });
+    });
+
+    it('rejects a non-positive amount', async () => {
+      const res = await request(createApp())
+        .post('/api/payments/pesepay/initiate')
+        .send({ ...validBody, amount: 0 });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain('amount');
+    });
+
+    it('rejects an unsupported currency', async () => {
+      const res = await request(createApp())
+        .post('/api/payments/pesepay/initiate')
+        .send({ ...validBody, currencyCode: 'GBP' });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain('USD or ZWG');
+    });
+
+    it('requires reasonForPayment', async () => {
+      const res = await request(createApp())
+        .post('/api/payments/pesepay/initiate')
+        .send({ ...validBody, reasonForPayment: '  ' });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain('reasonForPayment');
+    });
+
+    it('requires a valid tenant_id', async () => {
+      const res = await request(createApp())
+        .post('/api/payments/pesepay/initiate')
+        .send({ ...validBody, tenant_id: 'not-a-uuid' });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain('tenant_id');
+    });
+
+    it('rejects an unsupported payment rail', async () => {
+      const res = await request(createApp())
+        .post('/api/payments/pesepay/initiate')
+        .send({ ...validBody, paymentMethod: 'bitcoin' });
+
+      expect(res.status).toBe(400);
+    });
+
+    it('requires a document for invoice payments', async () => {
+      const res = await request(createApp())
+        .post('/api/payments/pesepay/initiate')
+        .send({ ...validBody, targetId: undefined });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain('targetId');
+    });
+
+    it('returns 404 for an unknown tenant', async () => {
+      (pool.query as any).mockImplementation(async (sql: string) => {
+        if (/FROM companies/.test(sql)) return { rows: [], rowCount: 0 };
+        return { rows: [], rowCount: 0 };
+      });
+
+      const res = await request(createApp())
+        .post('/api/payments/pesepay/initiate')
+        .send(validBody);
+
+      expect(res.status).toBe(404);
+    });
+
+    it('rejects an amount larger than the outstanding balance', async () => {
+      const res = await request(createApp())
+        .post('/api/payments/pesepay/initiate')
+        .send({ ...validBody, amount: 500 });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain('balance');
+      expect(initiatePesepayPayment).not.toHaveBeenCalled();
+    });
+
+    it('returns a reference number and redirect URL for an invoice', async () => {
+      const res = await request(createApp())
+        .post('/api/payments/pesepay/initiate')
+        .send(validBody);
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.referenceNumber).toMatch(/^PREYONE-/);
+      expect(res.body.redirectUrl).toContain('pesepay.com');
+      expect(res.body.currencyCode).toBe('ZWG');
+      expect(res.body.paymentMethod).toBe('innbucks');
+
+      const call = (initiatePesepayPayment as any).mock.calls[0][0];
+      expect(call.currencyCode).toBe('ZWG');
+      expect(call.paymentMethod).toBe('innbucks');
+      expect(call.reference).toBe(res.body.referenceNumber);
+    });
+
+    it('initiates a subscription payment', async () => {
+      const res = await request(createApp())
+        .post('/api/payments/pesepay/initiate')
+        .send({
+          ...validBody,
+          targetType: 'subscription',
+          targetId: undefined,
+          subscriptionModule: 'pos',
+          planTier: 'enterprise',
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.body.targetType).toBe('subscription');
+    });
+
+    it('rejects an unknown subscription module', async () => {
+      const res = await request(createApp())
+        .post('/api/payments/pesepay/initiate')
+        .send({
+          ...validBody,
+          targetType: 'subscription',
+          targetId: undefined,
+          subscriptionModule: 'crm',
+        });
+
+      expect(res.status).toBe(400);
+    });
+
+    it('marks the intent failed when Pesepay rejects initiation', async () => {
+      (initiatePesepayPayment as any).mockResolvedValue({ success: false, error: 'Invalid API key' });
+
+      const res = await request(createApp())
+        .post('/api/payments/pesepay/initiate')
+        .send(validBody);
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain('Invalid API key');
+
+      const failedUpdate = (pool.query as any).mock.calls.some(
+        ([sql]: [string]) => typeof sql === 'string' && sql.includes("status = 'failed'")
+      );
+      expect(failedUpdate).toBe(true);
+    });
+  });
+
+  describe('POST /api/payments/pesepay/callback', () => {
+    const intent = {
+      id: 'intent-1',
+      reference: 'PREYONE-ABCD1234-1700000000000',
+      tenant_id: TENANT,
+      amount: 25.5,
+      currency: 'ZWG',
+      payment_method: 'innbucks',
+      target_type: 'invoice',
+      target_id: DOC,
+      shift_id: null,
+      subscription_module: null,
+      plan_tier: null,
+      status: 'pending',
+    };
+
+    const successBody = {
+      referenceNumber: intent.reference,
+      transactionStatus: 'SUCCESS',
+      amountDetails: { amount: 25.5, currencyCode: 'ZWG' },
+    };
+
+    beforeEach(async () => {
+      process.env.PESEPAY_INTEGRATION_KEY = INTEGRATION_KEY;
+      process.env.PESEPAY_ENCRYPTION_KEY = '0123456789abcdef0123456789abcdef';
+
+      const client = await (pool as any).connect();
+      client.query.mockReset();
+      client.query.mockImplementation(async (sql: string) => {
+        if (/BEGIN|COMMIT|ROLLBACK/.test(sql)) return { rows: [], rowCount: 0 };
+        if (/FROM pesepay_intents/.test(sql)) return { rows: [intent], rowCount: 1 };
+        if (/FROM pos_documents/.test(sql)) {
+          return { rows: [{ id: DOC, doc_number: 'INV-001', total: 100, amount_paid: 0, shift_id: SHIFT }], rowCount: 1 };
+        }
+        if (/UPDATE pos_documents/.test(sql)) return { rows: [{ status: 'paid' }], rowCount: 1 };
+        if (/UPDATE subscriptions/.test(sql)) {
+          return { rows: [{ id: 'sub-1', plan_tier: 'enterprise', status: 'active' }], rowCount: 1 };
+        }
+        return { rows: [], rowCount: 1 };
+      });
+    });
+
+    it('rejects a callback without an authorization header', async () => {
+      const res = await request(createApp())
+        .post('/api/payments/pesepay/callback')
+        .send(successBody);
+
+      expect(res.status).toBe(401);
+    });
+
+    it('rejects a callback with the wrong integration key', async () => {
+      const res = await request(createApp())
+        .post('/api/payments/pesepay/callback')
+        .set('authorization', 'wrong-key')
+        .send(successBody);
+
+      expect(res.status).toBe(401);
+    });
+
+    it('rejects a payload without a reference', async () => {
+      const res = await request(createApp())
+        .post('/api/payments/pesepay/callback')
+        .set('authorization', INTEGRATION_KEY)
+        .send({ transactionStatus: 'SUCCESS' });
+
+      expect(res.status).toBe(400);
+    });
+
+    it('ignores non-success statuses', async () => {
+      const res = await request(createApp())
+        .post('/api/payments/pesepay/callback')
+        .set('authorization', INTEGRATION_KEY)
+        .send({ ...successBody, transactionStatus: 'FAILED' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.applied).toBe(false);
+      expect(res.body.status).toBe('FAILED');
+    });
+
+    it('rejects an amount mismatch', async () => {
+      const res = await request(createApp())
+        .post('/api/payments/pesepay/callback')
+        .set('authorization', INTEGRATION_KEY)
+        .send({ ...successBody, amountDetails: { amount: 99 } });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain('mismatch');
+    });
+
+    it('returns 404 for an unknown reference', async () => {
+      const client = await (pool as any).connect();
+      client.query.mockImplementation(async (sql: string) => {
+        if (/BEGIN|COMMIT|ROLLBACK/.test(sql)) return { rows: [], rowCount: 0 };
+        if (/FROM pesepay_intents/.test(sql)) return { rows: [], rowCount: 0 };
+        return { rows: [], rowCount: 0 };
+      });
+
+      const res = await request(createApp())
+        .post('/api/payments/pesepay/callback')
+        .set('authorization', INTEGRATION_KEY)
+        .send(successBody);
+
+      expect(res.status).toBe(404);
+    });
+
+    it('applies a successful payment to the invoice', async () => {
+      const res = await request(createApp())
+        .post('/api/payments/pesepay/callback')
+        .set('authorization', INTEGRATION_KEY)
+        .send(successBody);
+
+      expect(res.status).toBe(200);
+      expect(res.body.applied).toBe(true);
+      expect(res.body.documentId).toBe(DOC);
+      expect(res.body.documentNumber).toBe('INV-001');
+      expect(res.body.status).toBe('paid');
+
+      const client = await (pool as any).connect();
+      const inserted = client.query.mock.calls.find(
+        ([sql]: [string]) => typeof sql === 'string' && sql.includes('INSERT INTO pos_document_payments')
+      );
+      expect(inserted).toBeTruthy();
+      expect(inserted[1]).toEqual([DOC, 25.5, 'innbucks', intent.reference, SHIFT]);
+
+      const updated = client.query.mock.calls.find(
+        ([sql]: [string]) => typeof sql === 'string' && sql.includes('UPDATE pos_documents')
+      );
+      expect(updated[1]).toEqual([DOC, 25.5]);
+    });
+
+    it('is idempotent for an already completed intent', async () => {
+      const client = await (pool as any).connect();
+      client.query.mockImplementation(async (sql: string) => {
+        if (/BEGIN|COMMIT|ROLLBACK/.test(sql)) return { rows: [], rowCount: 0 };
+        if (/FROM pesepay_intents/.test(sql)) return { rows: [{ ...intent, status: 'completed' }], rowCount: 1 };
+        return { rows: [], rowCount: 0 };
+      });
+
+      const res = await request(createApp())
+        .post('/api/payments/pesepay/callback')
+        .set('authorization', INTEGRATION_KEY)
+        .send(successBody);
+
+      expect(res.status).toBe(200);
+      expect(res.body.applied).toBe(false);
+      expect(res.body.message).toContain('Already processed');
+    });
+
+    it('activates a subscription on success', async () => {
+      const client = await (pool as any).connect();
+      client.query.mockImplementation(async (sql: string) => {
+        if (/BEGIN|COMMIT|ROLLBACK/.test(sql)) return { rows: [], rowCount: 0 };
+        if (/FROM pesepay_intents/.test(sql)) {
+          return {
+            rows: [
+              {
+                ...intent,
+                target_type: 'subscription',
+                target_id: null,
+                subscription_module: 'pos',
+                plan_tier: 'enterprise',
+              },
+            ],
+            rowCount: 1,
+          };
+        }
+        if (/UPDATE subscriptions/.test(sql)) {
+          return { rows: [{ id: 'sub-1', plan_tier: 'enterprise', status: 'active' }], rowCount: 1 };
+        }
+        return { rows: [], rowCount: 0 };
+      });
+
+      const res = await request(createApp())
+        .post('/api/payments/pesepay/callback')
+        .set('authorization', INTEGRATION_KEY)
+        .send(successBody);
+
+      expect(res.status).toBe(200);
+      expect(res.body.targetType).toBe('subscription');
+      expect(res.body.module).toBe('pos');
+      expect(res.body.planTier).toBe('enterprise');
+    });
+
+    it('decrypts an encrypted result payload', async () => {
+      (decryptResponse as any).mockReturnValue(successBody);
+
+      const res = await request(createApp())
+        .post('/api/payments/pesepay/callback')
+        .set('authorization', INTEGRATION_KEY)
+        .send({ payload: 'encrypted-blob' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.applied).toBe(true);
+      expect(decryptResponse).toHaveBeenCalled();
     });
   });
 });

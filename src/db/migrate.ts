@@ -540,6 +540,11 @@ const SQL = `
   CREATE INDEX IF NOT EXISTS idx_pos_doc_pay_method   ON pos_document_payments (method);
   CREATE INDEX IF NOT EXISTS idx_pos_doc_pay_paid_at  ON pos_document_payments (paid_at);
 
+  -- Pesepay rails are recorded individually so "By Payment Method" reports stay meaningful.
+  ALTER TABLE pos_document_payments DROP CONSTRAINT IF EXISTS pos_document_payments_method_check;
+  ALTER TABLE pos_document_payments ADD CONSTRAINT pos_document_payments_method_check
+    CHECK (method IN ('cash', 'card', 'ecocash', 'innbucks', 'zimswitch', 'visa', 'mastercard', 'bank', 'pesepay', 'other'));
+
   -- ----- Phase A: Provisioned company profile (single source of truth for receipts/notifications) -----
   CREATE TABLE IF NOT EXISTS companies (
     id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -592,6 +597,39 @@ const SQL = `
   CROSS JOIN (VALUES ('pos'), ('invoice'), ('wifi')) AS m(module)
   WHERE NOT EXISTS (SELECT 1 FROM subscriptions s WHERE s.company_id = c.id AND s.module = m.module);
   UPDATE subscriptions SET plan_tier = 'enterprise' WHERE plan_tier IS NULL;
+
+  -- ----- Pesepay gateway intents (invoices, POS shifts, subscriptions) -----
+  -- Every Pesepay initiation is recorded here so the result-URL callback can apply
+  -- the money to the correct record exactly once, keyed by our own reference.
+  CREATE TABLE IF NOT EXISTS pesepay_intents (
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    reference           TEXT UNIQUE NOT NULL,
+    provider_reference  TEXT,
+    tenant_id           UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    amount              NUMERIC(12,2) NOT NULL CHECK (amount > 0),
+    currency            TEXT NOT NULL CHECK (currency IN ('USD', 'ZWG')),
+    payment_method      TEXT NOT NULL DEFAULT 'ecocash'
+                        CHECK (payment_method IN ('ecocash', 'innbucks', 'zimswitch', 'visa', 'mastercard')),
+    purpose             TEXT NOT NULL,
+    reason_for_payment  TEXT NOT NULL,
+    target_type         TEXT NOT NULL
+                        CHECK (target_type IN ('invoice', 'shift', 'subscription')),
+    target_id           UUID,
+    shift_id            UUID REFERENCES pos_shifts(id) ON DELETE SET NULL,
+    subscription_module TEXT CHECK (subscription_module IN ('pos', 'invoice', 'wifi')),
+    plan_tier           TEXT,
+    redirect_url        TEXT,
+    poll_url            TEXT,
+    status              TEXT NOT NULL DEFAULT 'pending'
+                        CHECK (status IN ('pending', 'completed', 'failed')),
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    completed_at        TIMESTAMPTZ
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_pesepay_intents_ref     ON pesepay_intents (reference);
+  CREATE INDEX IF NOT EXISTS idx_pesepay_intents_tenant  ON pesepay_intents (tenant_id);
+  CREATE INDEX IF NOT EXISTS idx_pesepay_intents_status  ON pesepay_intents (status);
+  CREATE INDEX IF NOT EXISTS idx_pesepay_intents_target  ON pesepay_intents (target_type, target_id);
 
   -- ----- Phase A: POS devices & endpoints (desktop / web / android) -----
   CREATE TABLE IF NOT EXISTS pos_devices (
