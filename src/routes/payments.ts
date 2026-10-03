@@ -9,6 +9,7 @@ import {
   verifyPaymentStatus,
   isPesepayCurrency,
   isPesepayRail,
+  normalizeGatewayCurrency,
 } from '../services/pesepayService';
 import type { PesepayCurrency, PesepayRail } from '../services/pesepayService';
 import { transformToWISPrProfile } from '../utils/wisprTransformer';
@@ -659,10 +660,11 @@ paymentsRouter.post('/pesepay/initiate', async (req: Request, res: Response) => 
   }
 
   if (!isPesepayCurrency(body.currencyCode)) {
-    res.status(400).json({ error: 'currencyCode must be USD or ZWG' });
+    res.status(400).json({ error: 'currencyCode must be USD or ZiG' });
     return;
   }
-  const currencyCode = body.currencyCode.toUpperCase() as PesepayCurrency;
+  // Pesepay's own code is "ZiG"; callers may send "ZWG"/"ZWD".
+  const currencyCode = normalizeGatewayCurrency(body.currencyCode) as PesepayCurrency;
 
   const reasonForPayment = typeof body.reasonForPayment === 'string' ? body.reasonForPayment.trim() : '';
   if (!reasonForPayment) {

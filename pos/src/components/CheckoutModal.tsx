@@ -6,12 +6,15 @@ interface PaymentPart {
   reference?: string;
 }
 
+// Only rails Pesepay actually enables for this merchant (verified against
+// /v1/payment-methods/for-currency on 2026-10-03). Zimswitch, Visa and
+// Mastercard are rejected by the gateway, so they are not offered at the till.
+// `phone: true` marks rails that need the payer's MSISDN on the payment prompt.
 const PESEPAY_RAILS = [
-  { key: 'ecocash', label: 'EcoCash', customerField: 'EcoCash number', prefix: '*151#' },
-  { key: 'innbucks', label: 'InnBucks', customerField: 'InnBucks number', prefix: '*242#' },
-  { key: 'zimswitch', label: 'Zimswitch', customerField: 'Card last 4 digits', prefix: '' },
-  { key: 'visa', label: 'Visa', customerField: 'Card last 4 digits', prefix: '' },
-  { key: 'mastercard', label: 'Mastercard', customerField: 'Card last 4 digits', prefix: '' },
+  { key: 'ecocash', label: 'EcoCash', customerField: 'EcoCash number', prefix: '*151#', phone: true },
+  { key: 'innbucks', label: 'InnBucks', customerField: 'InnBucks number', prefix: '*242#', phone: false },
+  { key: 'paygo', label: 'PayGo', customerField: 'PayGo number', prefix: '*888#', phone: false },
+  { key: 'omari', label: 'Omari', customerField: 'Omari number', prefix: '*100#', phone: true },
 ];
 
 const METHOD_LABELS: Record<string, string> = {
@@ -178,7 +181,7 @@ export default function CheckoutModal({
                     {rail.customerField}
                     <input
                       value={customerAccount}
-                      placeholder={rail.key === 'ecocash' || rail.key === 'innbucks' ? '+263 77 123 4567' : '4242'}
+                      placeholder={rail.phone ? '+263 77 123 4567' : 'Mobile money number'}
                       onChange={(e) => setCustomerAccount(e.target.value)}
                     />
                   </label>

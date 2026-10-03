@@ -155,8 +155,12 @@ router.use(requireAdminAuth, requireStaff, requireCompany);
 
 // ── Payment methods accepted on documents ──────────────────────────
 // Mirrors the pos_document_payments_method_check constraint.
+// Mobile-money rails are the ones Pesepay actually enables for this merchant
+// (verified against /v1/payment-methods/for-currency). Zimswitch, Visa and
+// Mastercard are NOT listed: Pesepay rejects them for this merchant, and
+// offering an unusable rail at the till is worse than not offering it.
 const PAYMENT_METHODS = [
-  'cash', 'card', 'ecocash', 'innbucks', 'zimswitch', 'visa', 'mastercard', 'bank', 'pesepay', 'other',
+  'cash', 'card', 'ecocash', 'innbucks', 'paygo', 'omari', 'bank', 'pesepay', 'other',
 ];
 
 // ── Company profile (read-only for staff clients) ───────────────────

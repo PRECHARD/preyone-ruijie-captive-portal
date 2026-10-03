@@ -306,7 +306,7 @@ describe('Payments routes', () => {
         .send({ ...validBody, currencyCode: 'GBP' });
 
       expect(res.status).toBe(400);
-      expect(res.body.error).toContain('USD or ZWG');
+      expect(res.body.error).toContain('USD or ZiG');
     });
 
     it('requires reasonForPayment', async () => {
@@ -376,11 +376,13 @@ describe('Payments routes', () => {
       expect(res.body.success).toBe(true);
       expect(res.body.referenceNumber).toMatch(/^PREYONE-/);
       expect(res.body.redirectUrl).toContain('pesepay.com');
-      expect(res.body.currencyCode).toBe('ZWG');
+      // The caller sends "ZWG", but Pesepay's own code is "ZiG". Sending ZWG
+      // through untranslated is rejected with "Currency record was not found".
+      expect(res.body.currencyCode).toBe('ZiG');
       expect(res.body.paymentMethod).toBe('innbucks');
 
       const call = (initiatePesepayPayment as any).mock.calls[0][0];
-      expect(call.currencyCode).toBe('ZWG');
+      expect(call.currencyCode).toBe('ZiG');
       expect(call.paymentMethod).toBe('innbucks');
       expect(call.reference).toBe(res.body.referenceNumber);
     });

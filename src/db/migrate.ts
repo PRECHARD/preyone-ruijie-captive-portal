@@ -541,9 +541,11 @@ const SQL = `
   CREATE INDEX IF NOT EXISTS idx_pos_doc_pay_paid_at  ON pos_document_payments (paid_at);
 
   -- Pesepay rails are recorded individually so "By Payment Method" reports stay meaningful.
+  -- Only rails Pesepay actually enables for this merchant are allowed; Zimswitch,
+  -- Visa and Mastercard are rejected by the gateway for this account.
   ALTER TABLE pos_document_payments DROP CONSTRAINT IF EXISTS pos_document_payments_method_check;
   ALTER TABLE pos_document_payments ADD CONSTRAINT pos_document_payments_method_check
-    CHECK (method IN ('cash', 'card', 'ecocash', 'innbucks', 'zimswitch', 'visa', 'mastercard', 'bank', 'pesepay', 'other'));
+    CHECK (method IN ('cash', 'card', 'ecocash', 'innbucks', 'paygo', 'omari', 'bank', 'pesepay', 'other'));
 
   -- ----- Phase A: Provisioned company profile (single source of truth for receipts/notifications) -----
   CREATE TABLE IF NOT EXISTS companies (
@@ -607,9 +609,9 @@ const SQL = `
     provider_reference  TEXT,
     tenant_id           UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
     amount              NUMERIC(12,2) NOT NULL CHECK (amount > 0),
-    currency            TEXT NOT NULL CHECK (currency IN ('USD', 'ZWG')),
+    currency            TEXT NOT NULL CHECK (currency IN ('USD', 'ZiG')),
     payment_method      TEXT NOT NULL DEFAULT 'ecocash'
-                        CHECK (payment_method IN ('ecocash', 'innbucks', 'zimswitch', 'visa', 'mastercard')),
+                        CHECK (payment_method IN ('ecocash', 'innbucks', 'paygo', 'omari')),
     purpose             TEXT NOT NULL,
     reason_for_payment  TEXT NOT NULL,
     target_type         TEXT NOT NULL
