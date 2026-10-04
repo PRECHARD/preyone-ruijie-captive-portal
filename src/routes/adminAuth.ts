@@ -122,12 +122,22 @@ adminAuthRouter.post('/signup', authLimiter, async (req: Request, res: Response)
     // Staff accounts require approval; CEO/Manager are auto-approved
     const approved = normalizedRole !== 'Staff';
 
+    // Bind the new account to a tenant server-side. This is deliberately NOT
+    // read from req.body: letting a signup request choose its own company_id
+    // would let anyone self-assign into an arbitrary tenant's data. The same
+    // rule as requireCompany applies -- only an unambiguous singleton is used,
+    // otherwise the account stays unassigned until an existing admin assigns it.
+    const { rows: companyRows } = await client.query(
+      'SELECT id FROM companies ORDER BY created_at ASC LIMIT 2'
+    );
+    const companyId = companyRows.length === 1 ? companyRows[0].id : null;
+
     const passwordHash = await bcrypt.hash(password, 12);
     const emailVerificationToken = crypto.randomBytes(32).toString('hex');
     const { rows } = await client.query(
-      `INSERT INTO admin_users (full_name, email, phone, role, password_hash, approved, email_verification_token)
-       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, full_name, email, role, approved`,
-      [fullName, email, phone, normalizedRole, passwordHash, approved, emailVerificationToken]
+      `INSERT INTO admin_users (full_name, email, phone, role, password_hash, approved, email_verification_token, company_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id, full_name, email, role, approved`,
+      [fullName, email, phone, normalizedRole, passwordHash, approved, emailVerificationToken, companyId]
     );
 
     await client.query('COMMIT');
