@@ -9,7 +9,7 @@ async function request<T = any>(path: string, options: RequestInit = {}): Promis
     ...(options.headers as Record<string, string>),
   };
   if (token) headers['Authorization'] = `Bearer ${token}`;
-  const res = await fetch(`${BASE}${path}`, { credentials: 'include', ...options, headers });
+  const res = await fetch(`${BASE}${path}`, { ...options, headers });
   const json = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(json.error || `Request failed (${res.status})`);
   return json as T;

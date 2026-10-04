@@ -57,7 +57,7 @@ interface ClockStatus {
   log: { clock_in: string } | null;
 }
 
-const APPROVAL_TIERS = ['PreMAX', 'PreULTRA', 'PreEXECUTIVE'];
+const APPROVAL_TIERS = ['PreMax', 'PreUltra', 'PreExecutive'];
 
 function fmtDur(m: number): string {
   if (!m) return '—';
@@ -71,6 +71,9 @@ function fmtDate(d: string): string {
   try { return new Date(d).toLocaleString(); } catch { return d || '—'; }
 }
 
+const PAYMENT_METHODS = ['Cash', 'EcoCash', 'OneMoney', 'Omari', 'InnBucks'];
+const IS_MOBILE_MONEY = (m: string) => m !== 'Cash';
+
 export default function Vouchers() {
   const { user } = useAuth();
   const role = user?.role || 'Staff';
@@ -83,6 +86,8 @@ export default function Vouchers() {
   const [vCode, setVCode] = useState('');
   const [vPrice, setVPrice] = useState('');
   const [vUses, setVUses] = useState(1);
+  const [vPayMethod, setVPayMethod] = useState('Cash');
+  const [vPayRef, setVPayRef] = useState('');
   const [vouchers, setVouchers] = useState<Voucher[]>([]);
   const [vStatus, setVStatus] = useState<{ type: string; msg: string } | null>(null);
   const [creating, setCreating] = useState(false);
@@ -90,6 +95,8 @@ export default function Vouchers() {
   const [bulkTier, setBulkTier] = useState('');
   const [bulkCount, setBulkCount] = useState(10);
   const [bulkPrice, setBulkPrice] = useState('');
+  const [bulkPayMethod, setBulkPayMethod] = useState('Cash');
+  const [bulkPayRef, setBulkPayRef] = useState('');
   const [bulkStatus, setBulkStatus] = useState<{ type: string; msg: string } | null>(null);
   const [bulkCreating, setBulkCreating] = useState(false);
   const [bulkResults, setBulkResults] = useState<any>(null);
@@ -178,8 +185,10 @@ export default function Vouchers() {
     return () => clearInterval(interval);
   }, [packages]);
 
-  const generateCode = useCallback((_tier: string) => {
-    return Math.random().toString(36).substring(2, 8).toUpperCase();
+  const generateCode = useCallback((tier: string) => {
+    const prefix = tier.slice(0, 4).toUpperCase();
+    const rand = Math.random().toString(36).substring(2, 8).toUpperCase();
+    return prefix + '-' + rand;
   }, []);
 
   const selectPackage = useCallback((tier: string) => {
@@ -188,7 +197,7 @@ export default function Vouchers() {
     if (pkg) {
       setVCode(generateCode(pkg.tier_name));
       setVPrice(pkg.price_amount);
-      if (!['PreBIZ', 'PreMAX', 'PreULTRA', 'PreEXECUTIVE'].includes(pkg.tier_name)) setVUses(1);
+      if (!['PreCore', 'PreBizPlus', 'PreFam', 'PreBizPro', 'PreMax', 'PreUltra', 'PreExecutive'].includes(pkg.tier_name)) setVUses(1);
     }
   }, [packages, generateCode]);
 
@@ -230,6 +239,8 @@ export default function Vouchers() {
         maxUses: vUses,
         packageTier: selectedPkg.tier_name,
         priceAmount: parseFloat(vPrice),
+        paymentMethod: vPayMethod,
+        paymentReference: IS_MOBILE_MONEY(vPayMethod) ? vPayRef.trim() : undefined,
       });
       setVStatus({ type: 'success', msg: `Voucher "${data.code}" created successfully.` });
       setVoucherCardData(data);
@@ -237,6 +248,8 @@ export default function Vouchers() {
       setVCode('');
       setVPrice('');
       setVUses(1);
+      setVPayMethod('Cash');
+      setVPayRef('');
       api.get<Voucher[]>('/vouchers').then(setVouchers).catch(() => {});
       showToast({ title: 'Voucher Created', message: `"${data.code}" created successfully`, type: 'success' });
       playVoucherSound();
@@ -260,6 +273,8 @@ export default function Vouchers() {
         priceAmount: vPrice ? parseFloat(vPrice) : undefined,
         code: vCode,
         maxUses: vUses,
+        paymentMethod: vPayMethod,
+        paymentReference: IS_MOBILE_MONEY(vPayMethod) ? vPayRef.trim() : undefined,
       });
       setVStatus({ type: 'success', msg: '✓ ' + data.message });
       api.get<ApprovalRequest[]>('/vouchers/my-approvals').then(setMyApprovals).catch(() => {});
@@ -281,6 +296,8 @@ export default function Vouchers() {
         count: bulkCount,
         packageTier: bulkTier,
         priceAmount: bulkPrice ? parseFloat(bulkPrice) : undefined,
+        paymentMethod: bulkPayMethod,
+        paymentReference: IS_MOBILE_MONEY(bulkPayMethod) ? bulkPayRef.trim() : undefined,
       });
       setBulkStatus({ type: 'success', msg: data.message });
       setBulkResults(data.vouchers);
@@ -305,6 +322,8 @@ export default function Vouchers() {
         packageTier: bulkTier,
         priceAmount: bulkPrice ? parseFloat(bulkPrice) : undefined,
         count: bulkCount,
+        paymentMethod: bulkPayMethod,
+        paymentReference: IS_MOBILE_MONEY(bulkPayMethod) ? bulkPayRef.trim() : undefined,
       });
       setBulkStatus({ type: 'success', msg: '✓ ' + data.message });
       api.get<ApprovalRequest[]>('/vouchers/my-approvals').then(setMyApprovals).catch(() => {});
@@ -349,7 +368,7 @@ export default function Vouchers() {
   };
 
   const drawVoucherCanvas = async (c: HTMLCanvasElement, data: any, issuedByName: string) => {
-    const code = (data.code || 'PREYONE-XXXX').toUpperCase();
+    const code = data.code || 'PREYONE-XXXX';
     const tierText = data.package_tier || 'Custom';
     const priceText = data.price_amount ? '$' + parseFloat(data.price_amount).toFixed(2) : '';
     const durShort = fmtDurShort(data.duration_min);
@@ -419,10 +438,10 @@ export default function Vouchers() {
     ctx.fillStyle = '#0f172a'; ctx.font = '600 10px Montserrat, sans-serif'; ctx.textAlign = 'center';
     ctx.fillText('ACCESS VOUCHER PIN', cpX + cpW / 2, codeBoxY + 14);
     ctx.fillStyle = '#0f172a';
-    ctx.font = 'small-caps 42px "Bebas Neue", sans-serif';
+    ctx.font = '42px "Bebas Neue", sans-serif';
     ctx.textAlign = 'center';
     var cfSize = 42;
-    while (ctx.measureText(code).width > cpW - 24 && cfSize > 22) { cfSize -= 2; ctx.font = 'small-caps ' + cfSize + 'px "Bebas Neue", sans-serif'; }
+    while (ctx.measureText(code).width > cpW - 24 && cfSize > 22) { cfSize -= 2; ctx.font = cfSize + 'px "Bebas Neue", sans-serif'; }
     ctx.shadowColor = 'rgba(15,23,42,0.1)'; ctx.shadowBlur = 3;
     ctx.fillText(code, cpX + cpW / 2, codeBoxY + codeBoxH / 2 + cfSize / 3 + 2);
     ctx.shadowBlur = 0;
@@ -718,14 +737,26 @@ export default function Vouchers() {
               <label>Max Users</label>
               <div className="stepper">
                 <button type="button" className="stepper-btn" onClick={() => setVUses(u => Math.max(1, u - 1))}
-                  disabled={!!(selectedPkg && !['PreBIZ', 'PreMAX', 'PreULTRA', 'PreEXECUTIVE'].includes(selectedPkg.tier_name))}>&minus;</button>
+                  disabled={!!(selectedPkg && !['PreCore', 'PreBizPlus', 'PreFam', 'PreBizPro', 'PreMax', 'PreUltra', 'PreExecutive'].includes(selectedPkg.tier_name))}>&minus;</button>
                 <input type="number" className="stepper-input" value={vUses} min="1" max="100"
                   onChange={e => { const n = parseInt(e.target.value); if (!isNaN(n)) setVUses(Math.max(1, Math.min(100, n))); }}
-                  disabled={!!(selectedPkg && !['PreBIZ', 'PreMAX', 'PreULTRA', 'PreEXECUTIVE'].includes(selectedPkg.tier_name))} />
+                  disabled={!!(selectedPkg && !['PreCore', 'PreBizPlus', 'PreFam', 'PreBizPro', 'PreMax', 'PreUltra', 'PreExecutive'].includes(selectedPkg.tier_name))} />
                 <button type="button" className="stepper-btn" onClick={() => setVUses(u => Math.min(100, u + 1))}
-                  disabled={!!(selectedPkg && !['PreBIZ', 'PreMAX', 'PreULTRA', 'PreEXECUTIVE'].includes(selectedPkg.tier_name))} >+</button>
+                  disabled={!!(selectedPkg && !['PreCore', 'PreBizPlus', 'PreFam', 'PreBizPro', 'PreMax', 'PreUltra', 'PreExecutive'].includes(selectedPkg.tier_name))} >+</button>
               </div>
             </div>
+            <div className="vcb-meta">
+              <label>Payment Method</label>
+              <select className="form-select" style={{ height: '2.3rem', padding: '0 0.6rem' }} value={vPayMethod} onChange={e => { setVPayMethod(e.target.value); if (e.target.value === 'Cash') setVPayRef(''); }} disabled={createDisabled || !selectedPkg}>
+                {PAYMENT_METHODS.map(m => <option key={m} value={m}>{m}</option>)}
+              </select>
+            </div>
+            {IS_MOBILE_MONEY(vPayMethod) && (
+              <div className="vcb-meta" style={{ minWidth: 150 }}>
+                <label>Pesepay Reference</label>
+                <input type="text" className="stepper-input" value={vPayRef} placeholder="e.g. MP2609... or txn id" onChange={e => setVPayRef(e.target.value)} />
+              </div>
+            )}
             <button type="submit" className="btn-primary" disabled={createDisabled}>
               {creating ? 'Creating...' : 'Create'}
             </button>
@@ -842,6 +873,18 @@ export default function Vouchers() {
                 <button type="button" className="stepper-btn" onClick={() => setBulkCount(c => Math.min(100, c + 5))} disabled={bulkCreating}>+</button>
               </div>
             </div>
+            <div className="form-field" style={{ maxWidth: 190 }}>
+              <label>Payment Method</label>
+              <select className="form-select" value={bulkPayMethod} onChange={e => { setBulkPayMethod(e.target.value); if (e.target.value === 'Cash') setBulkPayRef(''); }} disabled={bulkCreating}>
+                {PAYMENT_METHODS.map(m => <option key={m} value={m}>{m}</option>)}
+              </select>
+            </div>
+            {IS_MOBILE_MONEY(bulkPayMethod) && (
+              <div className="form-field" style={{ maxWidth: 200 }}>
+                <label>Pesepay Reference</label>
+                <input type="text" className="stepper-input" value={bulkPayRef} placeholder="e.g. MP2609... or txn id" onChange={e => setBulkPayRef(e.target.value)} />
+              </div>
+            )}
             <button type="submit" className="btn-primary" disabled={bulkCreating || (needsClockIn && !isClockedIn && !bulkTier)} style={{ flexShrink: 0, height: '2.3rem' }}>
               {bulkCreating ? 'Generating...' : 'Generate Bulk'}
             </button>

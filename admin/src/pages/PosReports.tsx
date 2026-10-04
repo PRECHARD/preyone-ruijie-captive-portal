@@ -224,33 +224,33 @@ export default function PosReports() {
             </div>
           )}
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 20 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 20 }}>
             <section>
               <h3 style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', marginBottom: 8 }}>By Payment Method</h3>
-              <table className="data-table"><thead><tr><th>METHOD</th><th>COUNT</th><th style={{ textAlign: 'right' }}>TOTAL</th></tr></thead><tbody>
+              <div className="card-table"><table className="data-table"><thead><tr><th>METHOD</th><th>COUNT</th><th style={{ textAlign: 'right' }}>TOTAL</th></tr></thead><tbody>
                 {(data.byMethod as any[]).map((r: any) => (
                   <tr key={r.method}><td style={{ textTransform: 'capitalize' }}>{r.method}</td><td>{r.count}</td><td style={{ textAlign: 'right' }}><strong>{money(r.total)}</strong></td></tr>
                 ))}
                 {data.byMethod.length === 0 && <tr><td colSpan={3} style={{ color: 'var(--text-muted)' }}>No payments in range</td></tr>}
-              </tbody></table>
+              </tbody></table></div>
 
               <h3 style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', marginTop: 18, marginBottom: 8 }}>Staff Performance</h3>
-              <table className="data-table"><thead><tr><th>CASHIER</th><th>DOCS</th><th style={{ textAlign: 'right' }}>REVENUE</th><th style={{ textAlign: 'right' }}>COLLECTED</th></tr></thead><tbody>
+              <div className="card-table"><table className="data-table"><thead><tr><th>CASHIER</th><th>DOCS</th><th style={{ textAlign: 'right' }}>REVENUE</th><th style={{ textAlign: 'right' }}>COLLECTED</th></tr></thead><tbody>
                 {(data.byCashier as any[]).map((r: any, i: number) => (
                   <tr key={i}><td>{r.cashier}</td><td>{r.docs}</td><td style={{ textAlign: 'right' }}>{money(r.revenue)}</td><td style={{ textAlign: 'right' }}>{money(r.collected)}</td></tr>
                 ))}
                 {data.byCashier.length === 0 && <tr><td colSpan={4} style={{ color: 'var(--text-muted)' }}>No sales in range</td></tr>}
-              </tbody></table>
+              </tbody></table></div>
             </section>
 
             <section>
               <h3 style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', marginBottom: 8 }}>Best Sellers</h3>
-              <table className="data-table"><thead><tr><th>ITEM</th><th>QTY</th><th style={{ textAlign: 'right' }}>REVENUE</th><th style={{ textAlign: 'right' }}>PROFIT</th></tr></thead><tbody>
+              <div className="card-table"><table className="data-table"><thead><tr><th>ITEM</th><th>QTY</th><th style={{ textAlign: 'right' }}>REVENUE</th><th style={{ textAlign: 'right' }}>PROFIT</th></tr></thead><tbody>
                 {(data.bestSellers as any[]).map((r: any, i: number) => (
                   <tr key={i}><td>{r.description}</td><td>{Number(r.qty_sold)}</td><td style={{ textAlign: 'right' }}>{money(r.revenue)}</td><td style={{ textAlign: 'right' }}>{money(r.profit)}</td></tr>
                 ))}
                 {data.bestSellers.length === 0 && <tr><td colSpan={4} style={{ color: 'var(--text-muted)' }}>No items sold in range</td></tr>}
-              </tbody></table>
+              </tbody></table></div>
 
               <h3 style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', marginTop: 18, marginBottom: 8 }}>Daily Revenue</h3>
               <div className="bar-chart" style={{ marginBottom: 8 }}>
@@ -265,12 +265,12 @@ export default function PosReports() {
                   );
                 })}
               </div>
-              <table className="data-table"><thead><tr><th>DAY</th><th>DOCS</th><th style={{ textAlign: 'right' }}>REVENUE</th></tr></thead><tbody>
+              <div className="card-table"><table className="data-table"><thead><tr><th>DAY</th><th>DOCS</th><th style={{ textAlign: 'right' }}>REVENUE</th></tr></thead><tbody>
                 {(data.byDay as any[]).slice(-14).reverse().map((r: any, i: number) => (
                   <tr key={i}><td>{new Date(r.day).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}</td><td>{r.docs}</td><td style={{ textAlign: 'right' }}>{money(r.revenue)}</td></tr>
                 ))}
                 {data.byDay.length === 0 && <tr><td colSpan={3} style={{ color: 'var(--text-muted)' }}>Nothing yet</td></tr>}
-              </tbody></table>
+              </tbody></table></div>
             </section>
           </div>
 

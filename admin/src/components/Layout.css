@@ -2,6 +2,7 @@
   display: flex;
   flex-direction: column;
   height: 100vh;
+  height: 100dvh;
   background: var(--bg);
 }
 
@@ -50,31 +51,101 @@
   grid-template-columns: var(--sidebar-width) 1fr auto;
   align-items: center;
   width: 100%;
+  height: 100%;
 }
 
 .admin-nav-brand {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 0.75rem;
-  padding-left: 14px;
+  justify-content: center;
+  gap: 2px;
+  height: 100%;
+  padding: 0 10px;
+  border-right: 1px solid rgba(148, 163, 184, 0.12);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent);
+}
+
+.admin-brand-label {
+  font-family: var(--font-body);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: transparent;
+  -webkit-background-clip: text;
+  background-clip: text;
+  background-image: linear-gradient(92deg, #7be0ff 0%, #00d4ff 28%, #ff5fa4 62%, #ff00ff 100%);
+  filter: drop-shadow(0 0 5px rgba(0, 212, 255, 0.35)) drop-shadow(0 0 10px rgba(255, 0, 255, 0.2));
+  line-height: 1;
+  white-space: nowrap;
+  position: relative;
+  top: -3px;
 }
 
 .admin-logo {
-  height: 64px;
+  height: 58px;
   width: auto;
-  filter: drop-shadow(0 0 10px rgba(0, 229, 255, 0.22)) drop-shadow(0 0 26px rgba(168, 85, 247, 0.3));
-  transition: filter 0.3s;
+  filter: drop-shadow(0 0 8px rgba(0, 229, 255, 0.3)) drop-shadow(0 0 22px rgba(168, 85, 247, 0.4));
+  animation: logoGlow 3.4s ease-in-out infinite;
+  transition: transform 0.3s ease;
 }
 .admin-logo:hover {
-  filter: drop-shadow(0 0 14px rgba(0, 229, 255, 0.42)) drop-shadow(0 0 36px rgba(168, 85, 247, 0.55));
+  transform: scale(1.04);
+  filter: drop-shadow(0 0 12px rgba(0, 229, 255, 0.55)) drop-shadow(0 0 32px rgba(255, 0, 255, 0.65));
+  animation-play-state: paused;
+}
+
+@keyframes logoGlow {
+  0%, 100% {
+    filter: drop-shadow(0 0 6px rgba(0, 229, 255, 0.28)) drop-shadow(0 0 16px rgba(168, 85, 247, 0.35));
+  }
+  50% {
+    filter: drop-shadow(0 0 14px rgba(0, 229, 255, 0.6)) drop-shadow(0 0 34px rgba(255, 0, 255, 0.55));
+  }
+}
+
+.admin-nav-title {
+  font-family: var(--font-display);
+  font-size: 1.6rem;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: transparent;
+  -webkit-background-clip: text;
+  background-clip: text;
+  background-image: linear-gradient(92deg, #7be0ff 0%, #00d4ff 28%, #ff5fa4 62%, #ff00ff 100%);
+  filter: drop-shadow(0 0 8px rgba(0, 212, 255, 0.35)) drop-shadow(0 0 22px rgba(255, 0, 255, 0.18));
+  text-shadow: none;
+}
+
+.admin-nav-title-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #00d4ff, #ff00ff);
+  box-shadow: 0 0 10px rgba(0, 212, 255, 0.8), 0 0 20px rgba(255, 0, 255, 0.5);
+  animation: nav-dot-pulse 2.2s ease-in-out infinite;
+  flex: 0 0 auto;
+}
+
+@keyframes nav-dot-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.55; transform: scale(0.82); }
 }
 
 .admin-nav-center {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 18px;
   min-width: 0;
-  padding-left: 26px;
+  height: 100%;
+  padding: 0 20px;
+  border-right: 1px solid rgba(148, 163, 184, 0.12);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.015), transparent);
 }
 
 /* ── Futuristic workspace switcher ── */
@@ -90,14 +161,15 @@
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
 }
+
 .ws-btn {
   display: flex;
   align-items: center;
   gap: 7px;
   padding: 7px 14px;
+  background: transparent;
   border: none;
   border-radius: 8px;
-  background: transparent;
   color: var(--text-muted);
   font-family: var(--font-body);
   font-size: 12.5px;
@@ -114,7 +186,6 @@
 }
 .ws-btn.active {
   color: #fff;
-  background: linear-gradient(135deg, rgba(122, 14, 87, 0.62), rgba(0, 229, 255, 0.16));
   box-shadow:
     inset 0 0 0 1px rgba(0, 229, 255, 0.35),
     0 0 18px rgba(122, 14, 87, 0.55),
@@ -126,6 +197,15 @@
 .ws-btn.active .ws-label {
   text-shadow: 0 0 12px rgba(113, 255, 47, 0.35);
 }
+.ws-btn.active[data-ws='ultranet'] {
+  background: linear-gradient(135deg, rgba(0, 229, 255, 0.3), rgba(106, 13, 173, 0.65));
+}
+.ws-btn.active[data-ws='transit'] {
+  background: linear-gradient(135deg, rgba(255, 215, 0, 0.45), rgba(255, 0, 127, 0.4));
+}
+.ws-btn.active[data-ws='pos'] {
+  background: linear-gradient(135deg, rgba(122, 14, 87, 0.62), rgba(0, 229, 255, 0.16));
+}
 .ws-icon {
   display: inline-flex;
   align-items: center;
@@ -135,36 +215,16 @@
   height: 22px;
   line-height: 1;
 }
-.ws-icon svg {
-  display: block;
-}
 .ws-logo {
   display: block;
   width: 100%;
   height: 100%;
   max-width: 100%;
   max-height: 100%;
+  aspect-ratio: 1 / 1;
   object-fit: contain;
   object-position: center;
-  aspect-ratio: 1;
 }
-.ws-logo--ultranet {
-  filter: brightness(0) invert(1) drop-shadow(0 0 5px rgba(113, 255, 47, 0.5));
-}
-.ws-logo--wide {
-  width: auto;
-  height: 22px;
-  max-width: 100%;
-  aspect-ratio: auto;
-}
-.ws-btn:hover .ws-logo--ultranet {
-  filter: brightness(0) invert(1) drop-shadow(0 0 7px rgba(113, 255, 47, 0.75));
-}
-.ws-btn.active .ws-logo--ultranet {
-  filter: brightness(0) invert(1) drop-shadow(0 0 9px rgba(113, 255, 47, 0.95));
-}
-
-/* Favicon mark in the UltraNet WiFi workspace button — glow + blend like preyone.com */
 .ws-logo--favicon {
   display: block;
   width: 22px;
@@ -178,8 +238,7 @@
   animation: faviconGlow 3.4s ease-in-out infinite;
 }
 @keyframes faviconGlow {
-  0%,
-  100% {
+  0%, 100% {
     filter: drop-shadow(0 0 4px rgba(0, 229, 255, 0.45)) drop-shadow(0 0 12px rgba(168, 85, 247, 0.45));
   }
   50% {
@@ -194,62 +253,45 @@
   filter: drop-shadow(0 0 8px rgba(0, 229, 255, 0.95)) drop-shadow(0 0 24px rgba(168, 85, 247, 0.85));
 }
 
-/* ── Top-right user bar ── */
-.nav-user {
-  display: flex;
+/* ── Hamburger (mobile sidebar toggle) ── */
+.nav-hamburger {
+  display: none;
   align-items: center;
-  gap: 12px;
-  padding-right: 8px;
-}
-
-.nav-user-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: var(--green);
-  box-shadow: 0 0 8px rgba(0, 230, 118, 0.6);
-  animation: dotPulse 2s ease-in-out infinite;
-  flex-shrink: 0;
-}
-
-@keyframes dotPulse {
-  0%,
-  100% {
-    box-shadow: 0 0 6px rgba(0, 230, 118, 0.4);
-  }
-  50% {
-    box-shadow: 0 0 14px rgba(0, 230, 118, 0.8);
-  }
-}
-
-.nav-user-name {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text);
-}
-
-.nav-signout-btn {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 14px;
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  margin-right: 4px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.03);
   color: var(--text-muted);
-  font-family: var(--font-body);
-  font-size: 12px;
-  font-weight: 600;
   cursor: pointer;
-  transition: all 0.2s;
+  font-size: 19px;
+  flex-shrink: 0;
+  transition: all 0.18s;
 }
-.nav-signout-btn:hover {
-  border-color: var(--red);
-  color: var(--red);
-  background: rgba(255, 23, 68, 0.06);
+.nav-hamburger:hover {
+  color: var(--cyan);
+  border-color: rgba(0, 229, 255, 0.4);
 }
-.nav-signout-btn svg {
-  font-size: 16px;
+
+/* ── Mobile sidebar overlay ── */
+.sidebar-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.25s ease, visibility 0.25s ease;
+}
+.sidebar-overlay.visible {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
 }
 
 /* ── Main Layout ── */
@@ -273,7 +315,6 @@
   background-size: auto, auto, 46px 46px, 46px 46px, auto;
 }
 
-/* ── Sidebar (no user info, just links) ── */
 /* ── Sidebar (futuristic) ── */
 .sidebar {
   width: var(--sidebar-width);
@@ -309,6 +350,13 @@
   flex-direction: column;
   gap: 3px;
   margin-bottom: 6px;
+}
+
+/* Global "System" cluster pinned at the bottom of every workspace view. */
+.sidebar-group--system {
+  border-top: 1px solid rgba(122, 14, 87, 0.4);
+  margin-top: 12px;
+  padding-top: 6px;
 }
 
 .sidebar-group-label {
@@ -500,36 +548,6 @@
   display: none;
 }
 
-/* ── Role badge in nav ── */
-.nav-role-badge {
-  font-size: 9.5px;
-  font-weight: 800;
-  text-transform: uppercase;
-  padding: 4px 10px;
-  border-radius: 999px;
-  letter-spacing: 0.7px;
-  border: 1px solid rgba(122, 14, 87, 0.45);
-  background: rgba(255, 255, 255, 0.03);
-}
-.nav-role-badge.staff {
-  background: rgba(0, 229, 255, 0.12);
-  border-color: rgba(0, 229, 255, 0.45);
-  color: var(--cyan);
-  box-shadow: 0 0 10px rgba(0, 229, 255, 0.18);
-}
-.nav-role-badge.manager {
-  background: rgba(255, 0, 127, 0.12);
-  border-color: rgba(255, 0, 127, 0.45);
-  color: var(--pink);
-  box-shadow: 0 0 10px rgba(255, 0, 127, 0.18);
-}
-.nav-role-badge.ceo {
-  background: rgba(255, 215, 0, 0.1);
-  border-color: rgba(255, 215, 0, 0.5);
-  color: var(--gold);
-  box-shadow: 0 0 14px rgba(255, 215, 0, 0.22);
-}
-
 /* ── iOS Toast Notifications ── */
 .toast-container {
   position: fixed;
@@ -667,4 +685,142 @@
   50% { opacity: 0.5; }
 }
 
-/* ── End ── */
+/* ── Responsive header / switcher ── */
+@media (max-width: 1280px) {
+  .admin-nav-title {
+    display: none;
+  }
+  .admin-nav-center {
+    gap: 12px;
+    padding-left: 16px;
+  }
+}
+
+@media (max-width: 1024px) {
+  .nav-hamburger {
+    display: flex;
+    margin-left: 12px;
+  }
+  .admin-nav-inner {
+    grid-template-columns: auto 1fr auto;
+  }
+  .admin-nav-brand {
+    flex-direction: column;
+    padding: 0 10px;
+    border-right: none;
+  }
+  .admin-logo {
+    height: 46px;
+  }
+  .admin-brand-label {
+    font-size: 8.5px;
+    letter-spacing: 2px;
+    top: 0;
+  }
+  .admin-nav-center {
+    gap: 10px;
+    padding: 0 12px;
+    border-right: none;
+  }
+  .admin-nav-title {
+    display: none;
+  }
+  .sidebar,
+  .sidebar.sidebar--collapsed {
+    position: fixed;
+    top: var(--nav-height);
+    left: 0;
+    bottom: 0;
+    z-index: 95;
+    width: min(var(--sidebar-width), 84vw) !important;
+    max-width: 84vw;
+    transform: translateX(-100%);
+    transition: transform 0.28s ease;
+    box-shadow: none;
+  }
+  .nav-open .sidebar,
+  .nav-open .sidebar.sidebar--collapsed {
+    transform: translateX(0);
+    box-shadow: 24px 0 60px rgba(0, 0, 0, 0.55);
+  }
+  .sidebar-collapse-btn {
+    display: none;
+  }
+  .admin-main {
+    padding: 22px;
+  }
+  .ap-warning-banner {
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 768px) {
+  :root {
+    --nav-height: 64px;
+  }
+  .admin-logo {
+    height: 36px;
+  }
+  .admin-brand-label {
+    font-size: 7.5px;
+    letter-spacing: 1.5px;
+  }
+  .nav-hamburger {
+    width: 38px;
+    height: 38px;
+    margin-left: 10px;
+    font-size: 17px;
+  }
+  .admin-nav-center {
+    gap: 6px;
+    padding: 0 8px;
+  }
+  .admin-nav-brand {
+    padding: 0 8px;
+  }
+  .admin-main {
+    padding: 14px;
+  }
+  .sidebar {
+    top: var(--nav-height);
+  }
+  .workspace-switch {
+    gap: 0;
+  }
+  .ws-btn {
+    padding: 6px 9px;
+    font-size: 11.5px;
+  }
+  .ws-btn .ws-label {
+    display: none;
+  }
+  .app-warning-banner {
+    padding: 8px 12px;
+  }
+}
+
+@media (max-width: 480px) {
+  .admin-logo {
+    height: 32px;
+  }
+  .admin-brand-label {
+    display: none;
+  }
+  .admin-nav-brand {
+    padding: 0 6px;
+  }
+  .nav-hamburger {
+    width: 34px;
+    height: 34px;
+  }
+  .admin-nav-center {
+    padding: 0 6px;
+  }
+  .admin-main {
+    padding: 12px;
+  }
+  .ap-warning-banner {
+    padding: 8px 12px;
+    gap: 8px;
+  }
+}

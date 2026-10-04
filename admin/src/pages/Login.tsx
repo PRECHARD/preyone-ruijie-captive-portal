@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { FiAlertOctagon } from 'react-icons/fi';
 import './Login.css';
+import '../styles/transit.css';
 
-type View = 'login' | 'signup' | 'forgot' | 'reset';
+type View = 'login' | 'signup' | 'forgot' | 'reset' | 'gate';
 
 export default function Login() {
   const { login, signup } = useAuth();
@@ -45,6 +47,11 @@ export default function Login() {
     try {
       await login(email, password);
     } catch (err: any) {
+      // Field staff (DRIVER / CONDUCTOR) are blocked with a high-visibility gate.
+      if (err?.message && /field staff/i.test(err.message)) {
+        setView('gate');
+        return;
+      }
       setError(err.message);
     }
   };
@@ -124,7 +131,16 @@ export default function Login() {
           </div>
         </div>
         <div className="auth-body">
-          {view !== 'forgot' && view !== 'reset' && (
+          {view === 'gate' && (
+            <div className="tx-gate" style={{ margin: '6vh auto 0' }}>
+              <div className="tx-gate-icon"><FiAlertOctagon /></div>
+              <div className="tx-gate-title">Access Denied</div>
+              <p className="tx-gate-desc">Drivers and Conductors must use the Preyone Transit Mobile App.</p>
+              <button className="tx-gate-btn" onClick={() => switchView('login')}>Back to Sign In</button>
+            </div>
+          )}
+
+          {view !== 'forgot' && view !== 'reset' && view !== 'gate' && (
             <div className="auth-tabs">
               <button className={'auth-tab' + (view === 'login' ? ' active' : '')} onClick={() => { switchView('login'); setSignedUp(null); }}>Sign In</button>
               <button className={'auth-tab' + (view === 'signup' ? ' active' : '')} onClick={() => { switchView('signup'); setSignedUp(null); }}>Sign Up</button>

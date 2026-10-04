@@ -14,8 +14,8 @@ export default function Packages() {
 
   const [form, setForm] = useState({
     tierName: '', displayName: '', priceAmount: '', priceCurrency: 'USD',
-    durationMin: '', dataLimitGb: '', isUncapped: false,
-    bandwidthUp: '', bandwidthDown: '',
+    billingPeriod: 'daily', durationMin: '', dataLimitGb: '', isUncapped: false,
+    bandwidthUp: '', bandwidthDown: '', maxDevices: '',
   });
 
   const fetch = useCallback(async () => {
@@ -27,7 +27,7 @@ export default function Packages() {
 
   const openNew = () => {
     setEditing(null);
-    setForm({ tierName: '', displayName: '', priceAmount: '', priceCurrency: 'USD', durationMin: '', dataLimitGb: '', isUncapped: false, bandwidthUp: '', bandwidthDown: '' });
+    setForm({ tierName: '', displayName: '', priceAmount: '', priceCurrency: 'USD', billingPeriod: 'daily', durationMin: '', dataLimitGb: '', isUncapped: false, bandwidthUp: '', bandwidthDown: '', maxDevices: '' });
     setShowForm(true);
   };
 
@@ -35,9 +35,10 @@ export default function Packages() {
     setEditing(p);
     setForm({
       tierName: p.tier_name, displayName: p.display_name, priceAmount: String(p.price_amount || ''),
-      priceCurrency: p.price_currency || 'USD', durationMin: String(p.duration_min || ''),
+      priceCurrency: p.price_currency || 'USD', billingPeriod: p.billing_period || 'daily', durationMin: String(p.duration_min || ''),
       dataLimitGb: String(p.data_limit_gb || ''), isUncapped: !!p.is_uncapped,
       bandwidthUp: String(p.bandwidth_mbps_up || ''), bandwidthDown: String(p.bandwidth_mbps_down || ''),
+      maxDevices: String(p.max_devices || ''),
     });
     setShowForm(true);
   };
@@ -48,10 +49,12 @@ export default function Packages() {
       const body = {
         tierName: form.tierName, displayName: form.displayName,
         priceAmount: Number(form.priceAmount), priceCurrency: form.priceCurrency,
+        billingPeriod: form.billingPeriod || undefined,
         durationMin: form.durationMin ? Number(form.durationMin) : undefined,
         dataLimitGb: form.dataLimitGb ? Number(form.dataLimitGb) : undefined,
         isUncapped: form.isUncapped, bandwidthUp: form.bandwidthUp ? Number(form.bandwidthUp) : undefined,
         bandwidthDown: form.bandwidthDown ? Number(form.bandwidthDown) : undefined,
+        maxDevices: form.maxDevices ? Number(form.maxDevices) : undefined,
       };
       if (editing) {
         await api.put(`/packages/${editing.id}`, body);
@@ -98,8 +101,10 @@ export default function Packages() {
               { key: 'display_name', label: 'Display Name' },
               { key: 'price_amount', label: 'Price', width: '120px', render: (r: any) => <span className="money money--sm">${Number(r.price_amount).toFixed(2)} {r.price_currency || 'USD'}</span> },
               { key: 'duration_min', label: 'Duration', width: '90px', render: (r: any) => r.duration_min ? `${r.duration_min}m` : '—' },
+              { key: 'billing_period', label: 'Period', width: '80px', render: (r: any) => String(r.billing_period || '—') },
               { key: 'bandwidth', label: 'Speed', width: '120px', render: (r: any) => r.bandwidth_mbps_up || r.bandwidth_mbps_down ? `${r.bandwidth_mbps_up || '?'}/${r.bandwidth_mbps_down || '?'} Mbps` : '—' },
               { key: 'data_limit_gb', label: 'Data', width: '80px', render: (r: any) => r.is_uncapped ? '∞' : r.data_limit_gb ? `${r.data_limit_gb} GB` : '—' },
+              { key: 'max_devices', label: 'Devices', width: '80px', render: (r: any) => r.max_devices ? String(r.max_devices) : '—' },
               { key: 'actions', label: '', width: '100px', render: (r: any) => (
                 <div style={{ display: 'flex', gap: 4 }}>
                   <button className="btn-sm" onClick={() => openEdit(r)}>Edit</button>
@@ -122,7 +127,18 @@ export default function Packages() {
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
             <div className="auth-field"><label>Duration (min)</label><input type="number" value={form.durationMin} onChange={e => setForm({ ...form, durationMin: e.target.value })} /></div>
+            <div className="auth-field"><label>Billing Period</label>
+              <select value={form.billingPeriod} onChange={e => setForm({ ...form, billingPeriod: e.target.value })}>
+                <option value="daily">Daily</option>
+                <option value="2days">2 Days</option>
+                <option value="weekly">Weekly</option>
+                <option value="monthly">Monthly</option>
+              </select>
+            </div>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
             <div className="auth-field"><label>Data Limit (GB)</label><input type="number" value={form.dataLimitGb} onChange={e => setForm({ ...form, dataLimitGb: e.target.value })} /></div>
+            <div className="auth-field"><label>Max Devices</label><input type="number" value={form.maxDevices} onChange={e => setForm({ ...form, maxDevices: e.target.value })} placeholder="e.g. 2 for Family Pack" /></div>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
             <div className="auth-field"><label>Upload (Mbps)</label><input type="number" value={form.bandwidthUp} onChange={e => setForm({ ...form, bandwidthUp: e.target.value })} /></div>
