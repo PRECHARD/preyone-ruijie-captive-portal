@@ -43,15 +43,36 @@ export async function loadCompany(companyId: string | null | undefined, req: Req
  * Guard: requires the authenticated user to belong to a company.
  * Loads the company + active modules onto req.company.
  * Must run after requireAdminAuth.
+ *
+ * Unassigned accounts fall back to the singleton company rather than being
+ * rejected. This mirrors loadCompany() and the /me session payload, and exists
+ * because admin_users.company_id is nullable and signup does not populate it --
+ * hard-failing here locked the entire POS module (every route past this guard)
+ * behind a 403 for accounts that were otherwise valid and approved.
+ *
+ * The fallback only applies while there is exactly one company to fall back to.
+ * As soon as a second company exists, an unassigned account is denied instead of
+ * being silently granted the first company's data.
  */
 export async function requireCompany(req: Request, res: Response, next: NextFunction): Promise<void> {
   const companyId = (req.adminUser as { company_id?: string | null } | undefined)?.company_id;
-  if (!companyId) {
-    res.status(403).json({ error: 'No company assigned to this account' });
-    return;
-  }
   try {
-    const company = await loadCompany(companyId, req);
+    if (companyId) {
+      const company = await loadCompany(companyId, req);
+      if (!company) {
+        res.status(403).json({ error: 'Company not found' });
+        return;
+      }
+      next();
+      return;
+    }
+
+    const { rows } = await pool.query('SELECT id FROM companies ORDER BY created_at LIMIT 2');
+    if (rows.length !== 1) {
+      res.status(403).json({ error: 'No company assigned to this account' });
+      return;
+    }
+    const company = await loadCompany(rows[0].id, req);
     if (!company) {
       res.status(403).json({ error: 'Company not found' });
       return;

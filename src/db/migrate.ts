@@ -581,6 +581,35 @@ const SQL = `
   ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS company_id UUID REFERENCES companies(id) ON DELETE SET NULL;
   CREATE INDEX IF NOT EXISTS idx_admin_users_company ON admin_users (company_id);
 
+  -- Repair: an earlier migration created admin_users.company_id with a foreign
+  -- key to transit_companies(id) instead of companies(id). Because the column
+  -- is added with IF NOT EXISTS, the statement above is a permanent no-op once
+  -- the column exists, so the wrong constraint survived every later run.
+  --
+  -- The two ID spaces do not overlap, so any value stored under the transit FK
+  -- is meaningless to the portal (companies) tables. The column is nullable and
+  -- every account is unassigned, so it is safe to drop and re-point: no data is
+  -- discarded. company_permissions keeps its transit_companies FK on purpose --
+  -- it stores real transit permissions (e.g. route.templates.manage).
+  DO $$
+  DECLARE
+    targets text;
+  BEGIN
+    SELECT pg_get_constraintdef(oid) INTO targets
+      FROM pg_constraint
+     WHERE conrelid = 'admin_users'::regclass
+       AND contype = 'f'
+       AND conkey = ARRAY[(SELECT attnum FROM pg_attribute
+                            WHERE attrelid = 'admin_users'::regclass AND attname = 'company_id')];
+    IF targets IS NOT NULL AND targets LIKE '%transit_companies%' THEN
+      RAISE NOTICE 'Re-pointing admin_users.company_id from transit_companies to companies';
+      ALTER TABLE admin_users DROP CONSTRAINT admin_users_company_id_fkey;
+      ALTER TABLE admin_users
+        ADD CONSTRAINT admin_users_company_id_fkey
+        FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE SET NULL;
+    END IF;
+  END $$;
+
   CREATE TABLE IF NOT EXISTS subscriptions (
     id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
