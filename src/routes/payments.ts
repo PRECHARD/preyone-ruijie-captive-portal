@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 import jwt from 'jsonwebtoken';
 import { pool } from '../db/pool';
 import type { PoolClient } from 'pg';
+import { requireAdminAuth } from '../middleware/adminAuth';
 import {
   initiateEcoCashPayment,
   initiatePesepayPayment,
@@ -946,7 +947,7 @@ async function applySubscriptionPayment(
   };
 }
 
-paymentsRouter.post('/pesepay/initiate', async (req: Request, res: Response) => {
+paymentsRouter.post('/pesepay/initiate', requireAdminAuth, async (req: Request, res: Response) => {
   const body = req.body as PesepayInitiateRequest;
 
   const amount = Number(body.amount);
@@ -968,9 +969,40 @@ paymentsRouter.post('/pesepay/initiate', async (req: Request, res: Response) => 
     return;
   }
 
-  const tenantId = asUuid(body.tenant_id);
+  // The tenant is NEVER taken from the request body. It is derived from the
+  // authenticated account so a caller can only ever charge their own company.
+  //
+  // admin_users.company_id is nullable and historically points at
+  // transit_companies rather than companies, so it is only honoured when it
+  // actually resolves to a portal company; otherwise the singleton portal
+  // company is used. That mirrors loadCompany()'s existing backward-compatible
+  // fallback for unassigned accounts, and becomes strictly per-company the
+  // moment company_id is linked to `companies`.
+  const sessionCompanyId =
+    (req.adminUser as { company_id?: string | null } | undefined)?.company_id ?? null;
+  const { rows: companyRows } = await pool.query(
+    sessionCompanyId
+      ? 'SELECT id FROM companies WHERE id = $1'
+      : 'SELECT id FROM companies ORDER BY created_at LIMIT 1',
+    sessionCompanyId ? [sessionCompanyId] : []
+  );
+  let tenantId = companyRows[0]?.id ?? null;
   if (!tenantId) {
-    res.status(400).json({ error: 'tenant_id must be a valid UUID' });
+    // Session names a company that does not exist in the portal company table.
+    const { rows: fallbackRows } = await pool.query(
+      'SELECT id FROM companies ORDER BY created_at LIMIT 1'
+    );
+    tenantId = fallbackRows[0]?.id ?? null;
+  }
+  if (!tenantId) {
+    res.status(403).json({ error: 'No company is configured for online payments' });
+    return;
+  }
+  // A body tenant_id is accepted only when it agrees with the session, so a
+  // cross-tenant request fails loudly instead of quietly charging someone else.
+  const requestedTenantId = asUuid(body.tenant_id);
+  if (requestedTenantId && requestedTenantId !== tenantId) {
+    res.status(403).json({ error: 'tenant_id does not match the authenticated account' });
     return;
   }
 

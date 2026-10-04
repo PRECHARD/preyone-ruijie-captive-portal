@@ -42,6 +42,29 @@ vi.mock('../src/services/ruijieService', () => ({
   bypassRuijieFirewall: vi.fn().mockResolvedValue(true),
 }));
 
+// /pesepay/initiate must reject unauthenticated callers, so the auth guard is
+// stubbed: the stub still 401s when no Bearer header is present, which keeps the
+// "requires authentication" assertions honest.
+vi.mock('../src/middleware/adminAuth', () => ({
+  requireAdminAuth: (req: any, res: any, next: any) => {
+    const auth = req.headers.authorization;
+    if (!auth || !auth.startsWith('Bearer ')) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+    req.adminUser = {
+      id: 'admin-1',
+      email: 'admin@preyone.com',
+      role: 'CEO',
+      fullName: 'Admin',
+      company_id: authState.companyId,
+    };
+    next();
+  },
+}));
+
+const authState = vi.hoisted(() => ({ companyId: null as string | null }));
+
 vi.mock('../src/utils/wisprTransformer', () => ({
   transformToWISPrProfile: vi.fn().mockReturnValue({
     macAddress: 'AA:BB:CC:DD:EE:FF',
@@ -542,6 +565,7 @@ describe('Payments routes', () => {
     };
 
     beforeEach(() => {
+      authState.companyId = null;
       (pool.query as any).mockImplementation(async (sql: string) => {
         if (/FROM companies/.test(sql)) return { rows: [{ id: TENANT }], rowCount: 1 };
         if (/FROM pos_documents/.test(sql)) {
@@ -562,6 +586,7 @@ describe('Payments routes', () => {
     it('rejects a non-positive amount', async () => {
       const res = await request(createApp())
         .post('/api/payments/pesepay/initiate')
+        .set('Authorization', 'Bearer test-token')
         .send({ ...validBody, amount: 0 });
 
       expect(res.status).toBe(400);
@@ -571,6 +596,7 @@ describe('Payments routes', () => {
     it('rejects an unsupported currency', async () => {
       const res = await request(createApp())
         .post('/api/payments/pesepay/initiate')
+        .set('Authorization', 'Bearer test-token')
         .send({ ...validBody, currencyCode: 'GBP' });
 
       expect(res.status).toBe(400);
@@ -580,24 +606,56 @@ describe('Payments routes', () => {
     it('requires reasonForPayment', async () => {
       const res = await request(createApp())
         .post('/api/payments/pesepay/initiate')
+        .set('Authorization', 'Bearer test-token')
         .send({ ...validBody, reasonForPayment: '  ' });
 
       expect(res.status).toBe(400);
       expect(res.body.error).toContain('reasonForPayment');
     });
 
-    it('requires a valid tenant_id', async () => {
+    it('rejects an unauthenticated caller before touching the gateway', async () => {
       const res = await request(createApp())
         .post('/api/payments/pesepay/initiate')
-        .send({ ...validBody, tenant_id: 'not-a-uuid' });
+        .send(validBody);
 
-      expect(res.status).toBe(400);
-      expect(res.body.error).toContain('tenant_id');
+      expect(res.status).toBe(401);
+      expect(initiatePesepayPayment as any).not.toHaveBeenCalled();
+    });
+
+    it('ignores a body tenant_id that disagrees with the session', async () => {
+      const res = await request(createApp())
+        .post('/api/payments/pesepay/initiate')
+        .set('Authorization', 'Bearer test-token')
+        .send({ ...validBody, tenant_id: '99999999-9999-4999-8999-999999999999' });
+
+      expect(res.status).toBe(403);
+      expect(res.body.error).toMatch(/does not match/i);
+      expect(initiatePesepayPayment as any).not.toHaveBeenCalled();
+    });
+
+    it('derives the tenant from the session company when the body omits it', async () => {
+      authState.companyId = TENANT;
+      const { tenant_id, ...withoutTenant } = validBody;
+
+      const res = await request(createApp())
+        .post('/api/payments/pesepay/initiate')
+        .set('Authorization', 'Bearer test-token')
+        .send(withoutTenant);
+
+      expect(res.status).toBe(200);
+      expect(res.body.tenantId).toBe(TENANT);
+      const insert = (pool.query as any).mock.calls.find((c: any[]) =>
+        typeof c[0] === 'string' && c[0].includes('INTO pesepay_intents')
+      );
+      expect(insert).toBeTruthy();
+      // The intent must be written against the session's company, not the body.
+      expect(insert![1][1]).toBe(TENANT);
     });
 
     it('rejects an unsupported payment rail', async () => {
       const res = await request(createApp())
         .post('/api/payments/pesepay/initiate')
+        .set('Authorization', 'Bearer test-token')
         .send({ ...validBody, paymentMethod: 'bitcoin' });
 
       expect(res.status).toBe(400);
@@ -606,6 +664,7 @@ describe('Payments routes', () => {
     it('requires a document for invoice payments', async () => {
       const res = await request(createApp())
         .post('/api/payments/pesepay/initiate')
+        .set('Authorization', 'Bearer test-token')
         .send({ ...validBody, targetId: undefined });
 
       expect(res.status).toBe(400);
@@ -620,14 +679,20 @@ describe('Payments routes', () => {
 
       const res = await request(createApp())
         .post('/api/payments/pesepay/initiate')
+        .set('Authorization', 'Bearer test-token')
         .send(validBody);
 
-      expect(res.status).toBe(404);
+      // No portal company can be resolved, so there is no tenant to charge and
+      // the request is refused before the gateway is ever called.
+      expect(res.status).toBe(403);
+      expect(res.body.error).toMatch(/no company/i);
+      expect(initiatePesepayPayment as any).not.toHaveBeenCalled();
     });
 
     it('rejects an amount larger than the outstanding balance', async () => {
       const res = await request(createApp())
         .post('/api/payments/pesepay/initiate')
+        .set('Authorization', 'Bearer test-token')
         .send({ ...validBody, amount: 500 });
 
       expect(res.status).toBe(400);
@@ -638,6 +703,7 @@ describe('Payments routes', () => {
     it('returns a reference number and redirect URL for an invoice', async () => {
       const res = await request(createApp())
         .post('/api/payments/pesepay/initiate')
+        .set('Authorization', 'Bearer test-token')
         .send(validBody);
 
       expect(res.status).toBe(200);
@@ -658,6 +724,7 @@ describe('Payments routes', () => {
     it('initiates a subscription payment', async () => {
       const res = await request(createApp())
         .post('/api/payments/pesepay/initiate')
+        .set('Authorization', 'Bearer test-token')
         .send({
           ...validBody,
           targetType: 'subscription',
@@ -673,6 +740,7 @@ describe('Payments routes', () => {
     it('rejects an unknown subscription module', async () => {
       const res = await request(createApp())
         .post('/api/payments/pesepay/initiate')
+        .set('Authorization', 'Bearer test-token')
         .send({
           ...validBody,
           targetType: 'subscription',
@@ -688,6 +756,7 @@ describe('Payments routes', () => {
 
       const res = await request(createApp())
         .post('/api/payments/pesepay/initiate')
+        .set('Authorization', 'Bearer test-token')
         .send(validBody);
 
       expect(res.status).toBe(400);
