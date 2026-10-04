@@ -965,4 +965,128 @@ describe('Payments routes', () => {
       expect(decryptResponse).toHaveBeenCalled();
     });
   });
+
+  // ── Public customer status endpoint ──────────────────────────────
+  //
+  // GET /api/payments/pesepay/status/:intentId is reachable by an
+  // unauthenticated customer, so these tests focus on the two things that
+  // matter: it cannot be used to enumerate intents, and it never returns one
+  // customer's payment details to another.
+  describe('GET /api/payments/pesepay/status/:intentId', () => {
+    const INTENT = '11111111-1111-4111-8111-111111111111';
+    const OTHER_INTENT = '22222222-2222-4222-8222-222222222222';
+
+    const intentRow = {
+      id: INTENT,
+      reference: 'PREY-ABC123',
+      provider_reference: 'PSP-REF-1',
+      amount: '25.50',
+      currency: 'USD',
+      status: 'pending',
+      created_at: '2026-01-01T00:00:00.000Z',
+      completed_at: null,
+    };
+
+    function statusToken(intentId: string, type = 'pesepay-status') {
+      return jwt.sign({ intentId, type }, 'test-jwt-secret', { algorithm: 'HS256', expiresIn: '2h' });
+    }
+
+    beforeEach(() => {
+      (pool.query as any).mockImplementation(async (sql: string, params?: any[]) => {
+        if (/FROM pesepay_intents/.test(sql)) {
+          return params?.[0] === INTENT ? { rows: [intentRow], rowCount: 1 } : { rows: [], rowCount: 0 };
+        }
+        return { rows: [], rowCount: 1 };
+      });
+    });
+
+    it('returns the public status contract for a correctly signed token', async () => {
+      const res = await request(createApp())
+        .get(`/api/payments/pesepay/status/${INTENT}`)
+        .query({ token: statusToken(INTENT) });
+
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({
+        status: 'PENDING',
+        referenceNumber: 'PSP-REF-1',
+        amount: 25.5,
+      });
+    });
+
+    it('maps completed to SUCCESS and failed to FAILED', async () => {
+      for (const [dbStatus, expected] of [
+        ['completed', 'SUCCESS'],
+        ['failed', 'FAILED'],
+      ] as const) {
+        (pool.query as any).mockImplementation(async (sql: string) =>
+          /FROM pesepay_intents/.test(sql)
+            ? { rows: [{ ...intentRow, status: dbStatus }], rowCount: 1 }
+            : { rows: [], rowCount: 1 }
+        );
+        const res = await request(createApp())
+          .get(`/api/payments/pesepay/status/${INTENT}`)
+          .query({ token: statusToken(INTENT) });
+        expect(res.body.status).toBe(expected);
+      }
+    });
+
+    it('rejects a request with no token', async () => {
+      const res = await request(createApp()).get(`/api/payments/pesepay/status/${INTENT}`);
+      expect(res.status).toBe(401);
+    });
+
+    it('rejects a forged or tampered token', async () => {
+      const res = await request(createApp())
+        .get(`/api/payments/pesepay/status/${INTENT}`)
+        .query({ token: `${statusToken(INTENT)}tampered` });
+      expect(res.status).toBe(401);
+    });
+
+    it('refuses a valid token that was issued for a different intent', async () => {
+      const res = await request(createApp())
+        .get(`/api/payments/pesepay/status/${INTENT}`)
+        .query({ token: statusToken(OTHER_INTENT) });
+      expect(res.status).toBe(403);
+      expect(res.body.error).toMatch(/does not match/i);
+    });
+
+    it('does not let a legacy payment status token be replayed here', async () => {
+      const legacy = jwt.sign({ paymentId: INTENT, type: 'status' }, 'test-jwt-secret', {
+        algorithm: 'HS256',
+        expiresIn: '2h',
+      });
+      const res = await request(createApp())
+        .get(`/api/payments/pesepay/status/${INTENT}`)
+        .query({ token: legacy });
+      expect(res.status).toBe(401);
+    });
+
+    it('404s an unknown intent and never touches another tenant row', async () => {
+      const res = await request(createApp())
+        .get(`/api/payments/pesepay/status/${OTHER_INTENT}`)
+        .query({ token: statusToken(OTHER_INTENT) });
+
+      expect(res.status).toBe(404);
+      expect(res.body.error).toBe('Payment not found');
+      // The lookup must be by the token-bound id only, with no reference lookup
+      // that could match a different customer's payment.
+      const call = (pool.query as any).mock.calls.find((c: any[]) =>
+        typeof c[0] === 'string' && c[0].includes('FROM pesepay_intents')
+      );
+      expect(call![0]).toMatch(/WHERE id = \$1/);
+      expect(call![1][0]).toBe(OTHER_INTENT);
+    });
+
+    it('never leaks tenant or purpose fields in the public response', async () => {
+      const res = await request(createApp())
+        .get(`/api/payments/pesepay/status/${INTENT}`)
+        .query({ token: statusToken(INTENT) });
+
+      expect(res.status).toBe(200);
+      expect(res.body).not.toHaveProperty('tenant_id');
+      expect(res.body).not.toHaveProperty('purpose');
+      expect(res.body).not.toHaveProperty('reason_for_payment');
+      expect(res.body).not.toHaveProperty('target_id');
+    });
+  });
 });

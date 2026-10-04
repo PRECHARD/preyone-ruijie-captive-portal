@@ -687,8 +687,56 @@ const SQL = `
         pkg
       );
     }
-    
-    console.log('Migration complete. Packages seeded.');
+
+    // ----- Multi-tenant POS: scope shifts & documents to a company -----
+    //
+    // pos_shifts / pos_documents had no company linkage at all, so every POS
+    // query was global: an authenticated admin of any company could read,
+    // void or pay another company's documents by guessing a UUID (IDOR).
+    //
+    // companies.id is UUID, so company_id must be UUID too -- an INT column
+    // cannot reference a UUID primary key.
+    //
+    // Adding the column as nullable first, backfilling, then setting NOT NULL
+    // keeps this safe to run against a table that already holds rows.
+    await client.query(`ALTER TABLE pos_shifts ADD COLUMN IF NOT EXISTS company_id UUID REFERENCES companies(id)`);
+    await client.query(`ALTER TABLE pos_documents ADD COLUMN IF NOT EXISTS company_id UUID REFERENCES companies(id)`);
+
+    // Backfill: existing rows belong to the oldest company. Guarded so this is
+    // a no-op once every row is assigned.
+    const { rows: defaultCo } = await client.query(`SELECT id FROM companies ORDER BY created_at ASC LIMIT 1`);
+    if (defaultCo.length > 0) {
+      const defaultCompanyId = defaultCo[0].id;
+      await client.query(`UPDATE pos_shifts SET company_id = $1 WHERE company_id IS NULL`, [defaultCompanyId]);
+      await client.query(`UPDATE pos_documents SET company_id = $1 WHERE company_id IS NULL`, [defaultCompanyId]);
+      console.log(`Backfilled pos_shifts/pos_documents to default company ${defaultCompanyId}.`);
+    } else {
+      console.warn('No company row found; skipped POS company backfill (assign company_id before NOT NULL).');
+    }
+
+    // Only tighten to NOT NULL when nothing is left unassigned, so a fresh
+    // install with zero companies still migrates cleanly.
+    const { rows: orphanShifts } = await client.query(
+      `SELECT count(*)::int AS n FROM pos_shifts WHERE company_id IS NULL`
+    );
+    const { rows: orphanDocs } = await client.query(
+      `SELECT count(*)::int AS n FROM pos_documents WHERE company_id IS NULL`
+    );
+    if (orphanShifts[0].n === 0 && orphanDocs[0].n === 0) {
+      await client.query(`ALTER TABLE pos_shifts ALTER COLUMN company_id SET NOT NULL`);
+      await client.query(`ALTER TABLE pos_documents ALTER COLUMN company_id SET NOT NULL`);
+    } else {
+      console.warn(
+        `Leaving pos company_id nullable: ${orphanShifts[0].n} shift(s), ${orphanDocs[0].n} document(s) unassigned.`
+      );
+    }
+
+    // Every POS read is "documents of my company, by id", so the composite
+    // index is what keeps those lookups from degrading into table scans.
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_pos_shifts_company_id ON pos_shifts (company_id, id)`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_pos_documents_company_id ON pos_documents (company_id, id)`);
+
+    console.log('Migration complete. Packages seeded. POS tenant scoping applied.');
   } finally {
     client.release();
     await pool.end();

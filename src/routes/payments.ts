@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { randomBytes, timingSafeEqual } from 'crypto';
+import rateLimit from 'express-rate-limit';
 import { v4 as uuidv4 } from 'uuid';
 import jwt from 'jsonwebtoken';
 import { pool } from '../db/pool';
@@ -1138,6 +1139,102 @@ paymentsRouter.post('/pesepay/initiate', requireAdminAuth, async (req: Request, 
   } catch (error) {
     console.error('Pesepay initiation error:', error);
     res.status(500).json({ error: 'Payment initiation failed' });
+  }
+});
+
+/**
+ * Customer-facing status lookup for a Pesepay intent.
+ *
+ * This endpoint is deliberately PUBLIC -- the person paying is not logged in --
+ * so it must never trust the path or query alone. Access requires an HS256
+ * status token that is bound to this exact intent, and the row read is further
+ * constrained to that intent id. Without both, an attacker could enumerate
+ * intent ids and learn other customers' payment amounts and outcomes.
+ */
+const pesepayStatusLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 30,
+  message: { error: 'Too many status checks, please wait a moment' },
+});
+
+type PesepayPublicStatus = 'PENDING' | 'SUCCESS' | 'FAILED';
+
+// pesepay_intents.status is stored lowercase; the public contract is uppercase.
+const PESEDPAY_PUBLIC_STATUS: Record<string, PesepayPublicStatus> = {
+  pending: 'PENDING',
+  completed: 'SUCCESS',
+  failed: 'FAILED',
+};
+
+/**
+ * Mints the status token handed to the customer for a given intent. Callers
+ * embed it in the page URL; Pesepay appends its own query parameters to
+ * returnUrl, so the token is never placed there.
+ */
+export function signPesepayStatusToken(intentId: string, reference?: string): string {
+  return jwt.sign({ intentId, reference, type: 'pesepay-status' }, getJwtSecret(), {
+    algorithm: 'HS256',
+    expiresIn: '2h',
+  });
+}
+
+paymentsRouter.get('/pesepay/status/:intentId', pesepayStatusLimiter, async (req: Request, res: Response) => {
+  const intentId = req.params.intentId;
+  const queryToken = typeof req.query.token === 'string' ? req.query.token : null;
+  const authHeader = req.headers.authorization;
+  const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+  const token = bearerToken || queryToken;
+
+  if (!token) {
+    res.status(401).json({ error: 'A status token is required' });
+    return;
+  }
+
+  let decoded: { intentId?: string; reference?: string; type?: string };
+  try {
+    decoded = jwt.verify(token, getJwtSecret(), { algorithms: ['HS256'] }) as typeof decoded;
+  } catch {
+    res.status(401).json({ error: 'Invalid or expired status token' });
+    return;
+  }
+
+  // A legacy 'status' token must not be replayed here, and the token must be
+  // bound to this exact intent -- otherwise any valid token would unlock every
+  // intent in the system.
+  if (decoded.type !== 'pesepay-status' || !decoded.intentId) {
+    res.status(401).json({ error: 'Invalid status token' });
+    return;
+  }
+  if (decoded.intentId !== intentId) {
+    res.status(403).json({ error: 'Token does not match this payment' });
+    return;
+  }
+
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, reference, provider_reference, amount, currency, status, created_at, completed_at
+         FROM pesepay_intents
+        WHERE id = $1`,
+      [intentId]
+    );
+    if (rows.length === 0) {
+      // Same response as a wrong token so the endpoint cannot be used to test
+      // which intent ids exist.
+      res.status(404).json({ error: 'Payment not found' });
+      return;
+    }
+    const intent = rows[0];
+
+    res.json({
+      status: PESEDPAY_PUBLIC_STATUS[String(intent.status)] ?? 'PENDING',
+      referenceNumber: intent.provider_reference || intent.reference,
+      amount: Number(intent.amount),
+      currency: intent.currency,
+      createdAt: intent.created_at,
+      completedAt: intent.completed_at,
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Unable to read payment status' });
   }
 });
 
