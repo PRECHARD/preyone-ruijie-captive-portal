@@ -1,6 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import express from 'express';
 import request from 'supertest';
+import jwt from 'jsonwebtoken';
+
+// payments.ts copies JWT_SECRET into a module-level constant at import time, so
+// it must be seeded before the route module loads. PESEPAY_* is read per request
+// by isPesepayConfigured(), which /initiate gates on.
+vi.hoisted(() => {
+  process.env.JWT_SECRET = 'test-jwt-secret';
+  process.env.PESEPAY_INTEGRATION_KEY = 'test-integration-key';
+  process.env.PESEPAY_ENCRYPTION_KEY = '0123456789abcdef0123456789abcdef';
+});
 
 vi.mock('../src/db/pool', () => {
   const mockClientQuery = vi.fn();
@@ -81,24 +91,73 @@ describe('Payments routes', () => {
       ipAddress: '10.0.0.5',
     };
 
-    it('returns 400 when required fields are missing', async () => {
+    beforeEach(() => {
+      // Prod's /initiate drives everything through pool.query (no client
+      // transaction), so the once-queue has to start empty for every case.
+      (pool.query as any).mockReset();
+      process.env.PESEPAY_INTEGRATION_KEY = 'test-integration-key';
+      process.env.PESEPAY_ENCRYPTION_KEY = '0123456789abcdef0123456789abcdef';
+    });
+
+    const PKG = {
+      id: 'pkg-1',
+      tier_name: 'PreMAX',
+      price_amount: '34.99',
+      price_currency: 'USD',
+      duration_min: 43200,
+      data_limit_gb: 100,
+      is_uncapped: false,
+      bandwidth_mbps_up: 10,
+      bandwidth_mbps_down: 10,
+      max_devices: 1,
+    };
+
+    it('returns 422 when Pesepay is not configured', async () => {
+      delete process.env.PESEPAY_INTEGRATION_KEY;
+      delete process.env.PESEPAY_API_KEY;
+      delete process.env.PESEPAY_ENCRYPTION_KEY;
+
       const res = await request(createApp())
         .post('/api/payments/initiate')
-        .send({});
+        .send(validBody);
 
-      expect(res.status).toBe(400);
+      expect(res.status).toBe(422);
+      expect(res.body.error).toMatch(/not configured/i);
+      // Must not touch the DB before refusing the charge.
+      expect(pool.query as any).not.toHaveBeenCalled();
+    });
+
+    it('returns 422 for an invalid Zimbabwe phone number', async () => {
+      const res = await request(createApp())
+        .post('/api/payments/initiate')
+        .send({ ...validBody, phone: '12345' });
+
+      expect(res.status).toBe(422);
+      expect(res.body.error).toMatch(/valid Zimbabwe phone/i);
+      expect(pool.query as any).not.toHaveBeenCalled();
+    });
+
+    it('returns 422 for an unknown package tier', async () => {
+      (pool.query as any).mockResolvedValueOnce({ rows: [] });
+
+      const res = await request(createApp())
+        .post('/api/payments/initiate')
+        .send(validBody);
+
+      expect(res.status).toBe(422);
+      expect(res.body.error).toMatch(/Unknown package tier/i);
     });
 
     it('handles existing user by phone', async () => {
-      const client = await (pool as any).connect();
-      client.query
-        .mockResolvedValueOnce(undefined)
-        .mockResolvedValueOnce({ rows: [{ id: 'existing-user' }] })
-        .mockResolvedValueOnce({ rows: [{ id: 'pkg-1' }] })
-        .mockResolvedValueOnce({ rows: [{ id: 'pay-1' }] });
+      (pool.query as any)
+        .mockResolvedValueOnce({ rows: [PKG] })                                // 1: package lookup
+        .mockResolvedValueOnce({ rows: [{ id: 'existing-user' }] })            // 2: existing user
+        .mockResolvedValueOnce({ rows: [{ id: 'pay-1' }] })                    // 3: INSERT payments
+        .mockResolvedValueOnce(undefined);                                    // 4: UPDATE pesepay_reference
       (initiateEcoCashPayment as any).mockResolvedValue({
         success: true,
         pollUrl: 'https://pay.pesepay.com/poll',
+        transactionId: 'PSE-1',
       });
 
       const res = await request(createApp())
@@ -106,18 +165,25 @@ describe('Payments routes', () => {
         .send(validBody);
 
       expect(res.status).toBe(200);
-      expect(res.body.success).toBe(true);
-      expect(res.body.pesepayPollUrl).toBeDefined();
+      expect(res.body.status).toBe('pending');
+      expect(res.body.pesepayPollUrl).toBe('https://pay.pesepay.com/poll');
+      expect(res.body.reference).toMatch(/^PREY-[0-9A-F]{16}$/);
+      // The client needs this to poll /status, which refuses unauthenticated reads.
+      expect(res.body.statusToken).toBeTruthy();
+      expect(res.body.amount).toBe(34.99);
+      expect(res.body.phone).toBe('263771327202');
+      expect(initiateEcoCashPayment as any).toHaveBeenCalledWith(
+        expect.objectContaining({ currency: 'USD', phone: '263771327202' })
+      );
     });
 
     it('creates new user when phone not found', async () => {
-      const client = await (pool as any).connect();
-      client.query
-        .mockResolvedValueOnce(undefined)
-        .mockResolvedValueOnce({ rows: [] })
-        .mockResolvedValueOnce({ rows: [{ id: 'new-user' }] })
-        .mockResolvedValueOnce({ rows: [{ id: 'pkg-1' }] })
-        .mockResolvedValueOnce({ rows: [{ id: 'pay-2' }] });
+      (pool.query as any)
+        .mockResolvedValueOnce({ rows: [PKG] })                                // 1: package lookup
+        .mockResolvedValueOnce({ rows: [] })                                   // 2: no existing user
+        .mockResolvedValueOnce({ rows: [{ id: 'new-user' }] })                 // 3: INSERT users
+        .mockResolvedValueOnce({ rows: [{ id: 'pay-2' }] })                    // 4: INSERT payments
+        .mockResolvedValueOnce(undefined);                                    // 5: UPDATE pesepay_reference
       (initiateEcoCashPayment as any).mockResolvedValue({
         success: true,
         pollUrl: 'https://pay.pesepay.com/poll',
@@ -128,30 +194,15 @@ describe('Payments routes', () => {
         .send(validBody);
 
       expect(res.status).toBe(200);
-    });
-
-    it('returns 400 for invalid package tier', async () => {
-      const client = await (pool as any).connect();
-      client.query
-        .mockResolvedValueOnce(undefined)
-        .mockResolvedValueOnce({ rows: [{ id: 'user-1' }] })
-        .mockResolvedValueOnce({ rows: [] });
-
-      const res = await request(createApp())
-        .post('/api/payments/initiate')
-        .send(validBody);
-
-      expect(res.status).toBe(400);
+      expect(res.body.status).toBe('pending');
     });
 
     it('handles Pesepay failure gracefully', async () => {
-      const client = await (pool as any).connect();
-      client.query
-        .mockResolvedValueOnce(undefined)
-        .mockResolvedValueOnce({ rows: [{ id: 'user-1' }] })
-        .mockResolvedValueOnce({ rows: [{ id: 'pkg-1' }] })
-        .mockResolvedValueOnce({ rows: [{ id: 'pay-3' }] });
-      (pool.query as any).mockResolvedValueOnce(undefined);
+      (pool.query as any)
+        .mockResolvedValueOnce({ rows: [PKG] })                                // 1: package lookup
+        .mockResolvedValueOnce({ rows: [{ id: 'user-1' }] })                   // 2: existing user
+        .mockResolvedValueOnce({ rows: [{ id: 'pay-3' }] })                    // 3: INSERT payments
+        .mockResolvedValueOnce(undefined);                                    // 4: UPDATE status=failed
       (initiateEcoCashPayment as any).mockResolvedValue({
         success: false,
         error: 'Insufficient funds',
@@ -161,11 +212,21 @@ describe('Payments routes', () => {
         .post('/api/payments/initiate')
         .send(validBody);
 
-      expect(res.status).toBe(400);
+      expect(res.status).toBe(502);
+      expect(res.body.status).toBe('failed');
+      expect(res.body.error).toBe('Insufficient funds');
     });
   });
 
   describe('POST /api/payments/webhook', () => {
+    beforeEach(async () => {
+      // Both mocks are module-level singletons, so queued once-values would
+      // otherwise leak between tests and silently satisfy the wrong query.
+      (pool.query as any).mockReset();
+      const client = await (pool as any).connect();
+      client.query.mockReset();
+    });
+
     it('returns 400 when payload is missing', async () => {
       const res = await request(createApp())
         .post('/api/payments/webhook')
@@ -183,75 +244,282 @@ describe('Payments routes', () => {
         .send({ payload: 'encrypted-string' });
 
       expect(res.status).toBe(400);
-      expect(res.text).toContain('Invalid payload');
+      expect(res.text).toContain('Invalid or undecryptable payload');
+      // An undecryptable payload is not from Pesepay: never touch the DB.
+      expect(pool.query as any).not.toHaveBeenCalled();
+    });
+
+    it('returns 404 when the merchant reference is unknown', async () => {
+      (decryptResponse as any).mockReturnValue({
+        merchantReference: 'REF-NOPE',
+        transactionStatus: 'SUCCESS',
+      });
+      (pool.query as any).mockResolvedValueOnce({ rows: [] });
+
+      const res = await request(createApp())
+        .post('/api/payments/webhook')
+        .send({ payload: 'encrypted-string' });
+
+      expect(res.status).toBe(404);
+    });
+
+    it('rejects a mismatched callback token without completing the payment', async () => {
+      (decryptResponse as any).mockReturnValue({
+        merchantReference: 'REF-003',
+        transactionStatus: 'SUCCESS',
+      });
+      (pool.query as any).mockResolvedValueOnce({
+        rows: [{ id: 'pay-3', status: 'pending', voucher_code: null, amount: 10, webhook_token: 'a'.repeat(64) }],
+      });
+
+      const res = await request(createApp())
+        .post('/api/payments/webhook?token=' + 'b'.repeat(64))
+        .send({ payload: 'encrypted-string' });
+
+      expect(res.status).toBe(404);
     });
 
     it('processes successful payment webhook', async () => {
       (decryptResponse as any).mockReturnValue({
         merchantReference: 'REF-001',
         transactionStatus: 'SUCCESS',
+        amount: 10,
+      });
+
+      (pool.query as any).mockResolvedValueOnce({
+        rows: [{ id: 'pay-1', status: 'pending', voucher_code: null, amount: 10, webhook_token: null }],
       });
 
       const client = await (pool as any).connect();
       client.query
-        .mockResolvedValueOnce(undefined)                                                                         // 1: BEGIN
-        .mockResolvedValueOnce({ rows: [{ id: 'pay-1', user_id: 'user-1', phone_number: '123', amount: 10, package_id: 'pkg-1', status: 'pending', ruijie_auth_url: null }] })  // 2: SELECT payment
-        .mockResolvedValueOnce(undefined)                                                                         // 3: UPDATE payment status
-        .mockResolvedValueOnce({ rows: [{ mac_address: 'AA:BB:CC:DD:EE:FF' }] })                                  // 4: SELECT user
-        .mockResolvedValueOnce({ rows: [{ tier_name: 'PreLITE', data_limit_gb: 100, is_uncapped: false, bandwidth_mbps_up: 10, bandwidth_mbps_down: 10, duration_min: 1440 }] })  // 5: SELECT package
-        .mockResolvedValueOnce(undefined)                                                                         // 6: INSERT INTO transactions
-        .mockResolvedValueOnce({ rows: [] })                                                                      // 7: SELECT CEO
-        .mockResolvedValueOnce({ rows: [{ id: 'v-1' }] })                                                        // 8: INSERT INTO vouchers
-        .mockResolvedValueOnce(undefined)                                                                         // 9: UPDATE users (session_token + session_expires_at + voucher_code)
-        .mockResolvedValueOnce(undefined)                                                                         //10: INSERT INTO wispr_profiles
-        .mockResolvedValueOnce(undefined);                                                                        //11: COMMIT
+        .mockResolvedValueOnce(undefined)                                    // 1: BEGIN
+        .mockResolvedValueOnce({
+          rows: [
+            {
+              id: 'pay-1',
+              user_id: 'user-1',
+              tier_name: 'PreLITE',
+              amount: 10,
+              currency: 'USD',
+              payment_method: 'EcoCash (Pesepay)',
+              status: 'pending',
+              duration_min: 1440,
+              data_limit_gb: 100,
+              is_uncapped: false,
+              bandwidth_mbps_up: 10,
+              bandwidth_mbps_down: 10,
+              max_devices: 1,
+            },
+          ],
+        })                                                                   // 2: SELECT payment FOR UPDATE
+        .mockResolvedValueOnce(undefined)                                    // 3: SAVEPOINT mint_voucher
+        .mockResolvedValueOnce({ rows: [{ id: 'v-1', code: 'CT-TESTCODE1' }] }) // 4: INSERT INTO vouchers
+        .mockResolvedValueOnce(undefined)                                    // 5: RELEASE SAVEPOINT
+        .mockResolvedValueOnce(undefined)                                    // 6: UPDATE payments completed
+        .mockResolvedValueOnce(undefined)                                    // 7: INSERT INTO transactions
+        .mockResolvedValueOnce(undefined);                                   // 8: COMMIT
 
       const res = await request(createApp())
         .post('/api/payments/webhook')
         .send({ payload: 'encrypted-string' });
 
       expect(res.status).toBe(200);
+      expect(res.body.state).toBe('completed');
+      expect(res.body.voucherCode).toBe('CT-TESTCODE1');
     });
 
-    it('ignores non-success statuses', async () => {
+    it('marks a gateway failure as failed without minting a voucher', async () => {
       (decryptResponse as any).mockReturnValue({
         merchantReference: 'REF-002',
         transactionStatus: 'FAILED',
       });
 
-      const client = await (pool as any).connect();
-      client.query
-        .mockResolvedValueOnce(undefined)
-        .mockResolvedValueOnce({ rows: [{ id: 'pay-2', user_id: 'user-2', phone_number: '456', amount: 20, package_id: 'pkg-2', status: 'pending', ruijie_auth_url: null }] })
-        .mockResolvedValueOnce(undefined);
+      (pool.query as any)
+        .mockResolvedValueOnce({
+          rows: [{ id: 'pay-2', status: 'pending', voucher_code: null, amount: 20, webhook_token: null }],
+        })
+        .mockResolvedValueOnce(undefined);                                  // UPDATE status = failed
 
       const res = await request(createApp())
         .post('/api/payments/webhook')
         .send({ payload: 'encrypted-string' });
 
       expect(res.status).toBe(200);
-      expect(res.text).toContain('Ignored');
+      expect(res.body.state).toBe('failed');
+      expect(res.body.voucherCode).toBeUndefined();
+      const updateCall = (pool.query as any).mock.calls.find(
+        (c: any[]) => typeof c[0] === 'string' && c[0].includes("SET status = 'failed'")
+      );
+      expect(updateCall).toBeTruthy();
+      expect(updateCall![1]).toEqual(['pay-2', 'Payment FAILED', 'pending']);
+    });
+
+    it('does not mint again when the payment is already completed', async () => {
+      (decryptResponse as any).mockReturnValue({
+        merchantReference: 'REF-004',
+        transactionStatus: 'SUCCESS',
+      });
+
+      (pool.query as any).mockResolvedValueOnce({
+        rows: [{ id: 'pay-4', status: 'completed', voucher_code: 'CT-ALREADY1', amount: 10, webhook_token: null }],
+      });
+
+      // Clear the bookkeeping call the beforeEach makes to reach the client,
+      // then assert no transaction was opened at all.
+      const client = await (pool as any).connect();
+      client.query.mockClear();
+
+      const res = await request(createApp())
+        .post('/api/payments/webhook')
+        .send({ payload: 'encrypted-string' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.state).toBe('completed');
+      expect(res.body.voucherCode).toBeUndefined();
+      expect(client.query).not.toHaveBeenCalled();
     });
   });
 
   describe('GET /api/payments/status/:paymentId', () => {
-    it('returns payment status', { timeout: 10000 }, async () => {
-      (pool.query as any).mockResolvedValue({
-        rows: [{ id: 'pay-1', status: 'completed', pesepay_reference: 'REF-1', amount: 34.99, completed_at: new Date().toISOString() }],
+    const statusToken = (paymentId: string) =>
+      jwt.sign({ paymentId, type: 'status' }, process.env.JWT_SECRET as string, {
+        algorithm: 'HS256',
       });
 
+    beforeEach(() => {
+      (pool.query as any).mockReset();
+    });
+
+    it('requires authentication so payment IDs cannot be enumerated', async () => {
       const res = await request(createApp()).get('/api/payments/status/pay-1');
+
+      expect(res.status).toBe(401);
+      expect(pool.query as any).not.toHaveBeenCalled();
+    });
+
+    it('returns 401 for an invalid token', async () => {
+      const res = await request(createApp()).get('/api/payments/status/pay-1?token=not-a-jwt');
+
+      expect(res.status).toBe(401);
+    });
+
+    it('returns 403 when the token was minted for a different payment', async () => {
+      const res = await request(createApp()).get(
+        `/api/payments/status/pay-1?token=${encodeURIComponent(statusToken('pay-2'))}`
+      );
+
+      expect(res.status).toBe(403);
+    });
+
+    it('returns payment status', async () => {
+      (pool.query as any).mockResolvedValue({
+        rows: [
+          {
+            id: 'pay-1',
+            status: 'completed',
+            pesepay_reference: 'REF-1',
+            amount: 34.99,
+            completed_at: new Date().toISOString(),
+            voucher_code: 'CT-ABCD2345',
+            tier_name: 'PreMAX',
+            error_message: null,
+          },
+        ],
+      });
+
+      const res = await request(createApp()).get(
+        `/api/payments/status/pay-1?token=${encodeURIComponent(statusToken('pay-1'))}`
+      );
 
       expect(res.status).toBe(200);
       expect(res.body.status).toBe('completed');
+      expect(res.body.voucherCode).toBe('CT-ABCD2345');
+      expect(res.body.reference).toBe('REF-1');
+      expect(res.body.supportRequired).toBe(false);
     });
 
-    it('returns 404 for unknown payment', { timeout: 10000 }, async () => {
+    it('returns 404 for unknown payment', async () => {
       (pool.query as any).mockResolvedValue({ rows: [] });
 
-      const res = await request(createApp()).get('/api/payments/status/unknown');
+      const res = await request(createApp()).get(
+        `/api/payments/status/unknown?token=${encodeURIComponent(statusToken('unknown'))}`
+      );
 
       expect(res.status).toBe(404);
+    });
+
+    it('reconciles a pending payment against the gateway on poll', async () => {
+      (pool.query as any)
+        .mockResolvedValueOnce({
+          rows: [
+            {
+              id: 'pay-recon-1',
+              status: 'pending',
+              pesepay_reference: 'REF-R1',
+              amount: 34.99,
+              completed_at: null,
+              voucher_code: null,
+              tier_name: 'PreMAX',
+              error_message: null,
+            },
+          ],
+        })
+        .mockResolvedValueOnce({ rows: [] });
+      (verifyPaymentStatus as any).mockResolvedValue({ found: true, status: 'PENDING' });
+
+      const res = await request(createApp()).get(
+        `/api/payments/status/pay-recon-1?token=${encodeURIComponent(statusToken('pay-recon-1'))}`
+      );
+
+      expect(verifyPaymentStatus as any).toHaveBeenCalledWith('REF-R1');
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe('pending');
+    });
+
+    it('marks a pending payment failed when the gateway reports failure', async () => {
+      (pool.query as any)
+        .mockResolvedValueOnce({
+          rows: [
+            {
+              id: 'pay-recon-2',
+              status: 'pending',
+              pesepay_reference: 'REF-R2',
+              amount: 34.99,
+              completed_at: null,
+              voucher_code: null,
+              tier_name: 'PreMAX',
+              error_message: null,
+            },
+          ],
+        })
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce({
+          rows: [
+            {
+              status: 'failed',
+              completed_at: null,
+              voucher_code: null,
+              error_message: 'Gateway reported FAILED (status check)',
+            },
+          ],
+        });
+      (verifyPaymentStatus as any).mockResolvedValue({ found: true, status: 'FAILED' });
+
+      const res = await request(createApp()).get(
+        `/api/payments/status/pay-recon-2?token=${encodeURIComponent(statusToken('pay-recon-2'))}`
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe('failed');
+      const updateCall = (pool.query as any).mock.calls.find(
+        (c: any[]) => typeof c[0] === 'string' && c[0].includes('SET status = $2')
+      );
+      expect(updateCall).toBeTruthy();
+      expect(updateCall![1]).toEqual([
+        'pay-recon-2',
+        'failed',
+        'Gateway reported FAILED (status check)',
+      ]);
     });
   });
 
