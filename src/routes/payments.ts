@@ -1354,6 +1354,22 @@ paymentsRouter.post('/pesepay/callback', async (req: Request, res: Response) => 
         [intent.id, payload.referenceNumber || null]
       );
 
+      // Keep the website checkout ledger in step with the document it settled.
+      // applyDocumentPayment() credits pos_documents, but nothing else writes
+      // site_invoices.status, so every paid website invoice would stay
+      // 'pending' forever -- and the replay guard then hands a buyer the wrong
+      // state for an invoice they have already paid. A partial settlement
+      // deliberately leaves it 'pending': it is not yet paid in full.
+      if (intent.target_type === 'invoice') {
+        await client.query(
+          `UPDATE site_invoices
+              SET status = CASE WHEN $2 = 'paid' THEN 'success' ELSE status END,
+                  updated_at = NOW()
+            WHERE intent_id = $1`,
+          [intent.id, String(applied.status ?? '')]
+        );
+      }
+
       await client.query('COMMIT');
 
       res.json({

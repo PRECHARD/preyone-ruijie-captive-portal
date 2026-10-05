@@ -282,24 +282,52 @@ siteInvoicesRouter.post('/invoices', createLimiter, async (req: Request, res: Re
   }
 
   // Replay guard: an existing key returns the stored invoice untouched.
+  //
+  // The envelope below MUST match the fresh-creation response exactly. This
+  // branch is the recovery path for the one failure the client cannot see: the
+  // gateway was called and a real push was sent to the buyer's handset, but the
+  // HTTP response was lost. The client retries with the same idempotency key
+  // and expects a usable intentId + statusToken back; returning a summary that
+  // omits them makes the client throw and strands a buyer who is mid-approval
+  // on an invoice the server has already raised.
   const prior = await pool.query(
-    `SELECT s.document_id, d.doc_number, s.status, s.amount
+    `SELECT s.document_id, d.doc_number, s.status, s.amount, s.intent_id,
+            s.plan_id, s.plan_label, s.account_ref, s.rail,
+            i.reference, i.redirect_url
        FROM site_invoices s
        JOIN pos_documents d ON d.id = s.document_id
+       LEFT JOIN pesepay_intents i ON i.id = s.intent_id
       WHERE s.idempotency_key = $1`,
     [idempotencyKey]
   );
   if (prior.rows.length > 0) {
     const row = prior.rows[0];
+    const storedRef = (row.reference as string | null) ?? null;
     res.json({
       success: true,
       replayed: true,
       invoiceId: row.document_id,
       invoiceNumber: row.doc_number,
-      status: row.status,
+      referenceNumber: storedRef,
+      // Re-minting is safe and necessary: the token is derived from the stored
+      // reference, so the retry gets a working token for the original intent.
+      statusToken:
+        row.intent_id && storedRef ? signPesepayStatusToken(row.intent_id, storedRef) : null,
+      intentId: row.intent_id,
+      mode: row.redirect_url ? 'redirect' : 'seamless',
+      redirectUrl: row.redirect_url || null,
+      // Pesepay is called once at creation and its instructions are not
+      // persisted, so a replay cannot repeat them. The phone prompt is derived
+      // from the rail, so the awaiting screen still renders correctly.
+      instructions: null,
       amount: Number(row.amount),
       currency: WEB_CURRENCY,
-      accountRef,
+      // Taken from the stored row, never echoed from this request: a replay
+      // must not be able to restate the plan or reference it was created with.
+      planId: row.plan_id,
+      planLabel: row.plan_label,
+      paymentMethod: row.rail,
+      accountRef: row.account_ref,
     });
     return;
   }
