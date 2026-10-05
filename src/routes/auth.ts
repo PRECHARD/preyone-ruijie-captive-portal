@@ -10,6 +10,7 @@ import { buildRuijieSuccessUrl, WISPrSessionConfig } from '../utils/redirect';
 import { transformToWISPrProfile } from '../utils/wisprTransformer';
 import { sendPortalAccountCreated, sendPortalSignupConfirmation, sendPortalEmailVerification, sendPortalForgotPassword } from '../services/notificationService';
 import { listDevices, unbindDevice, getDeviceLimit, normalizeMac } from '../services/deviceBinding';
+import { setPreyoneCookie } from '../utils/ssoCookie';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'preyone-jwt-secret-change-in-production';
 function getJwtSecret(): string {
@@ -421,6 +422,9 @@ authRouter.post('/portal-login', loginLimiter, async (req: Request, res: Respons
       getJwtSecret(),
       { expiresIn: '7d' }
     );
+
+    // Cross-subdomain SSO: share the portal session via the `.preyone.com` cookie.
+    setPreyoneCookie(res, portalToken);
 
     res.json({
       token: portalToken,

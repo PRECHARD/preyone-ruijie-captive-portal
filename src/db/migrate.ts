@@ -772,6 +772,30 @@ const SQL = `
   -- Level 1 company admins belong to a transit company; NULL (Level 0) means platform ops
   ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS company_id UUID REFERENCES transit_companies(id);
   CREATE INDEX IF NOT EXISTS idx_admin_users_company ON admin_users (company_id);
+  -- Two-realm split: company_id is transit-owned; the portal realm (POS/invoice/WiFi)
+  -- gets its own FK. Both are nullable; NULL means "unassigned" and is resolved
+  -- by the existing singleton fallbacks in middleware/company.ts and /me.
+  ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS portal_company_id UUID REFERENCES companies(id) ON DELETE SET NULL;
+  CREATE INDEX IF NOT EXISTS idx_admin_users_portal_company ON admin_users (portal_company_id);
+
+  -- Repair: if an earlier release pointed company_id at the portal companies table,
+  -- move it back to transit_companies. Idempotent.
+  DO $$
+  DECLARE current_def text;
+  BEGIN
+    SELECT pg_get_constraintdef(oid) INTO current_def FROM pg_constraint
+     WHERE conrelid = 'admin_users'::regclass AND contype = 'f'
+       AND conkey = ARRAY[(SELECT attnum FROM pg_attribute
+                            WHERE attrelid = 'admin_users'::regclass
+                              AND attname = 'company_id')];
+    IF current_def IS NOT NULL
+       AND current_def LIKE '%companies(id)%'
+       AND current_def NOT LIKE '%transit_companies%' THEN
+      ALTER TABLE admin_users DROP CONSTRAINT admin_users_company_id_fkey;
+      ALTER TABLE admin_users ADD CONSTRAINT admin_users_company_id_fkey
+        FOREIGN KEY (company_id) REFERENCES transit_companies(id);
+    END IF;
+  END $$;
 
   -- ════════════════ Soft Delete Engine ════════════════
   ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
@@ -1224,6 +1248,82 @@ const SQL = `
   WHERE u.mac_address IS NOT NULL
     AND REPLACE(REPLACE(UPPER(u.mac_address), ':', ''), '-', '') ~ '^[0-9A-F]{12}$'
   ON CONFLICT (voucher_id, mac_norm) DO NOTHING;
+
+  -- ════════════════ Voucher Lifecycle: Activation, Disable, Soft Delete ════════════════
+  -- The admin console needs to show and manage a voucher's lifecycle, but a stored
+  -- status column would be a second copy of facts we can already derive
+  -- (used_count, max_uses, expires_at) and would drift the moment RADIUS accounting
+  -- ran. So only genuinely new facts are stored here; status itself is the derived
+  -- view below.
+  --
+  -- activated_at: when this code was FIRST redeemed. Distinct from expires_at,
+  -- which is the staff-set shelf life of the code itself and is frequently NULL
+  -- (never expires). Session lifetime is duration_min applied to
+  -- users.session_expires_at — three different clocks, deliberately not merged.
+  ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS activated_at TIMESTAMPTZ;
+
+  -- is_disabled: manual kill switch. Deliberately separate from deleted_at so a
+  -- disabled voucher stays visible and can be re-enabled, whereas a soft delete
+  -- removes it from working views.
+  ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS is_disabled BOOLEAN NOT NULL DEFAULT FALSE;
+
+  -- Soft delete. Hard DELETE would cascade through voucher_redemptions and
+  -- voucher_devices and destroy the redemption audit trail, so removal is a
+  -- tombstone instead.
+  ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+
+  -- Subscriber name parts. users.full_name is the single field the signup flow
+  -- already writes and must keep writing; these are an optional split of it for
+  -- display, and full_name remains the source of truth.
+  ALTER TABLE users ADD COLUMN IF NOT EXISTS first_name TEXT;
+  ALTER TABLE users ADD COLUMN IF NOT EXISTS last_name  TEXT;
+  ALTER TABLE users ADD COLUMN IF NOT EXISTS alias       TEXT;
+
+  -- Backfill first/last name from the existing full_name so the admin table is
+  -- populated immediately. Only for names that actually contain a space, and only
+  -- where the new columns are still empty (never overwrite a real split).
+  UPDATE users u
+  SET first_name = COALESCE(u.first_name, btrim(split_part(u.full_name, ' ', 1))),
+      last_name  = COALESCE(u.last_name, NULLIF(btrim(substr(u.full_name, strpos(u.full_name, ' ') + 1)), ''))
+  WHERE u.full_name IS NOT NULL
+    AND btrim(u.full_name) <> ''
+    AND strpos(u.full_name, ' ') > 0;
+
+  -- Backfill activated_at from the earliest redemption of each voucher, so codes
+  -- redeemed before this column existed do not all read as "never activated".
+  UPDATE vouchers v
+  SET activated_at = r.first_redemption
+  FROM (
+    SELECT voucher_id, MIN(created_at) AS first_redemption
+    FROM voucher_redemptions
+    GROUP BY voucher_id
+  ) r
+  WHERE v.activated_at IS NULL
+    AND r.voucher_id = v.id;
+
+  -- vouchers had NO indexes at all apart from the implicit code UNIQUE. The admin
+  -- list table now filters and sorts on these columns server-side.
+  CREATE INDEX IF NOT EXISTS idx_vouchers_code_lower     ON vouchers (lower(code));
+  CREATE INDEX IF NOT EXISTS idx_vouchers_created_at    ON vouchers (created_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_vouchers_package_tier  ON vouchers (package_tier);
+  CREATE INDEX IF NOT EXISTS idx_vouchers_activated_at  ON vouchers (activated_at);
+  CREATE INDEX IF NOT EXISTS idx_vouchers_lifecycle     ON vouchers (is_disabled, deleted_at);
+
+  -- Derived status. Recomputed by Postgres on every read, so it can never disagree
+  -- with used_count/expires_at. Precedence: a disabled or deleted code is Disabled
+  -- regardless of how it was used; then expiry; then whether it has been redeemed.
+  -- Note this deliberately has no "exhausted" state — a fully-redeemed code reads
+  -- as Active, since the requested enum is Unused/Active/Expired/Disabled.
+  CREATE OR REPLACE VIEW voucher_status AS
+  SELECT
+    v.id,
+    CASE
+      WHEN v.is_disabled OR v.deleted_at IS NOT NULL              THEN 'Disabled'
+      WHEN v.expires_at IS NOT NULL AND v.expires_at <= NOW()    THEN 'Expired'
+      WHEN v.used_count > 0                                       THEN 'Active'
+      ELSE 'Unused'
+    END AS status
+  FROM vouchers v;
 `;
 
 (async () => {

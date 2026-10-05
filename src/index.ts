@@ -46,7 +46,23 @@ app.use(
     },
   })
 );
-app.use(cors());
+// Cross-subdomain CORS: reflect only Preyone origins so the SSO cookie can be
+// sent (credentials) without opening the API up to third-party sites.
+const PREYONE_ORIGIN_RE = /^https:\/\/(?:[a-z0-9-]+\.)*preyone\.com(\/|$)/i;
+const isDevOrigin = (origin: string) => /^https?:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?(\/|$)/.test(origin);
+app.use(
+  cors({
+    origin(origin, callback) {
+      if (!origin) return callback(null, false);
+      if (PREYONE_ORIGIN_RE.test(origin) || isDevOrigin(origin)) return callback(null, origin);
+      return callback(null, false);
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+    maxAge: 86400,
+  })
+);
 app.use(compression());
 app.use(morgan('combined'));
 app.use(
@@ -245,6 +261,19 @@ app.use((req, res, next) => {
       });
     }
     return res.status(503).send('POS build not found. Run `cd pos && npm run build`.');
+  }
+
+  // app.preyone.com → enterprise gateway (single-login module launcher)
+  if (host === 'app.preyone.com') {
+    const appDist = path.join(__dirname, '..', 'app', 'dist');
+    if (fs.existsSync(appDist)) {
+      delete req.headers['range'];
+      delete req.headers['if-range'];
+      return express.static(appDist)(req, res, () => {
+        res.sendFile(path.join(appDist, 'index.html'));
+      });
+    }
+    return res.status(503).send('Gateway build not found. Run `cd app && npm run build`.');
   }
 
   // Any IP or unknown host → captive portal (with proper static file serving)

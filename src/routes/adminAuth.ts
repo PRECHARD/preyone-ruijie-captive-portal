@@ -3,7 +3,9 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import rateLimit from 'express-rate-limit';
 import { pool } from '../db/pool';
+import { loadPermissions } from '../middleware/rbac';
 import { sendAdminSignupConfirmation, sendAdminSignupNotification, sendPasswordResetEmail } from '../services/notificationService';
+import { setPreyoneCookie, clearPreyoneCookie, resolveAuthToken } from '../utils/ssoCookie';
 import crypto from 'crypto';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'preyone-jwt-secret-change-in-production';
@@ -121,12 +123,24 @@ adminAuthRouter.post('/signup', authLimiter, async (req: Request, res: Response)
     // Staff accounts require approval; CEO/Manager are auto-approved
     const approved = normalizedRole !== 'Staff';
 
+    // Bind the new account to a tenant server-side. This is deliberately NOT
+    // read from req.body: letting a signup request choose its own company_id
+    // would let anyone self-assign into an arbitrary tenant's data. The same
+    // rule as requireCompany applies -- only an unambiguous singleton is used,
+    // otherwise the account stays unassigned until an existing admin assigns it.
+    const { rows: companyRows } = await client.query(
+      'SELECT id FROM companies ORDER BY created_at ASC LIMIT 2'
+    );
+    // Portal realm only. Written to portal_company_id, never to company_id,
+    // which is a transit_companies FK and would reject a portal UUID.
+    const companyId = companyRows.length === 1 ? companyRows[0].id : null;
+
     const passwordHash = await bcrypt.hash(password, 12);
     const emailVerificationToken = crypto.randomBytes(32).toString('hex');
     const { rows } = await client.query(
-      `INSERT INTO admin_users (full_name, email, phone, role, password_hash, approved, email_verification_token)
-       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, full_name, email, role, approved`,
-      [fullName, email, phone, normalizedRole, passwordHash, approved, emailVerificationToken]
+      `INSERT INTO admin_users (full_name, email, phone, role, password_hash, approved, email_verification_token, portal_company_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id, full_name, email, role, approved`,
+      [fullName, email, phone, normalizedRole, passwordHash, approved, emailVerificationToken, companyId]
     );
 
     await client.query('COMMIT');
@@ -167,7 +181,7 @@ adminAuthRouter.post('/login', authLimiter, async (req: Request, res: Response) 
   }
 
   const { rows } = await pool.query(
-    'SELECT id, full_name, email, phone, role, approved, password_hash FROM admin_users WHERE email = $1',
+    'SELECT id, full_name, email, phone, role, approved, password_hash, company_id, portal_company_id FROM admin_users WHERE email = $1',
     [email.toLowerCase().trim()]
   );
 
@@ -193,35 +207,70 @@ adminAuthRouter.post('/login', authLimiter, async (req: Request, res: Response) 
   await recordAuditLog(user.id, user.full_name, 'login', 'admin_user', user.id);
 
   const token = jwt.sign(
-    { id: user.id, email: user.email, role: user.role, fullName: user.full_name },
+    { id: user.id, email: user.email, role: user.role, fullName: user.full_name, company_id: user.company_id ?? null },
     getJwtSecret(),
-    { expiresIn: '24h' }
+    { expiresIn: '7d' }
   );
+
+  // Cross-subdomain SSO: expose the session to every *.preyone.com app via a
+  // wildcard HTTP-Only cookie (read by /me, never by client JS).
+  setPreyoneCookie(res, token);
 
   res.json({
     token,
-    user: { id: user.id, fullName: user.full_name, email: user.email, phone: user.phone, role: user.role },
+    user: { id: user.id, fullName: user.full_name, email: user.email, phone: user.phone, role: user.role, company_id: user.company_id ?? null },
   });
 });
 
+// ── Logout ───────────────────────────────────────────────────────────
+// Clears the wildcard SSO cookie. JWT is stateless so this only drops the cookie.
+adminAuthRouter.post('/logout', (_req: Request, res: Response) => {
+  clearPreyoneCookie(res);
+  res.json({ message: 'Signed out' });
+});
+
 adminAuthRouter.get('/me', async (req: Request, res: Response) => {
-  const auth = req.headers.authorization;
-  if (!auth?.startsWith('Bearer ')) {
+  const token = resolveAuthToken(req);
+  if (!token) {
     res.status(401).json({ error: 'Unauthorized' });
     return;
   }
 
   try {
-    const decoded = jwt.verify(auth.slice(7), getJwtSecret()) as any;
+    const decoded = jwt.verify(token, getJwtSecret()) as any;
     const { rows } = await pool.query(
-      'SELECT id, full_name, email, phone, role, created_at, email_verified FROM admin_users WHERE id = $1',
+      'SELECT id, full_name, email, phone, role, company_id, portal_company_id, created_at, email_verified FROM admin_users WHERE id = $1',
       [decoded.id]
     );
     if (rows.length === 0) {
       res.status(401).json({ error: 'User not found' });
       return;
     }
-    res.json(rows[0]);
+    const user = rows[0];
+
+    // Tenant + subscribed modules (SSO session payload)
+    // Company is either the user's assigned company or the singleton profile company.
+    let tenantId: string | null = user.portal_company_id ?? null; // portal realm
+    const companyId = user.portal_company_id ?? null;
+    if (!companyId) {
+      const { rows: companyRows } = await pool.query('SELECT id FROM companies ORDER BY created_at LIMIT 1');
+      tenantId = companyRows[0]?.id ?? null;
+    }
+    const { rows: moduleRows } = await pool.query(
+      `SELECT module FROM subscriptions WHERE company_id = $1 AND status = 'active' ORDER BY module`,
+      [companyId ?? tenantId]
+    );
+    const subscribed_modules = moduleRows.map((r) => r.module);
+
+    // The admin console gates navigation on this array, so it must be the SAME
+// effective set requireAdminAuth builds (role_permissions + user_permissions
+// + company_permissions), keyed by company_id -- the transit company, which is
+// what company_permissions is scoped to. Omitting it left the browser with an
+// empty list, and its gate then hid every page except Overview for any admin
+// whose companyId was set.
+const permissions = await loadPermissions(user.role, user.id, user.company_id ?? null);
+
+res.json({ ...user, tenant_id: tenantId, subscribed_modules, permissions });
   } catch {
     res.status(401).json({ error: 'Invalid token' });
   }

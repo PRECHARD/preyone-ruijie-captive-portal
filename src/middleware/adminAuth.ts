@@ -18,8 +18,10 @@ export interface AdminUser {
   email: string;
   role: string;
   fullName: string;
-  /** Set for Level 1 company admins; null (Level 0) for platform operators. */
+  /** Transit company for the Transit Operations realm; null (Level 0) sees all. */
   companyId?: string | null;
+  /** Portal company for the POS/invoice/WiFi realm; null when unassigned. */
+  portalCompanyId?: string | null;
   /** Effective permission codes resolved from role_permissions + user_permissions. */
   permissions?: string[];
 }
@@ -43,7 +45,7 @@ export async function requireAdminAuth(req: Request, res: Response, next: NextFu
     const decoded = jwt.verify(auth.slice(7), getJwtSecret(), { algorithms: ['HS256'] }) as AdminUser;
     // Check if user still exists and is approved (revoke deactivated users)
     const { rows } = await pool.query(
-      'SELECT id, approved, role, company_id FROM admin_users WHERE id = $1',
+      'SELECT id, approved, role, company_id, portal_company_id FROM admin_users WHERE id = $1',
       [decoded.id]
     );
     if (rows.length === 0 || !rows[0].approved) {
@@ -64,6 +66,7 @@ export async function requireAdminAuth(req: Request, res: Response, next: NextFu
       ...decoded,
       role: rows[0].role,
       companyId: rows[0].company_id ?? null,
+      portalCompanyId: rows[0].portal_company_id ?? null,
       permissions,
     };
     next();

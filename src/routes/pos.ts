@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import rateLimit from 'express-rate-limit';
 import { pool } from '../db/pool';
 import { requireAdminAuth, requireRole } from '../middleware/adminAuth';
+import { requireCompany } from '../middleware/company';
 
 /**
  * Preyone POS module — additive only.
@@ -22,6 +23,7 @@ interface StaffUser {
   email: string;
   role: string;
   fullName: string;
+  company_id?: string | null;
 }
 
 const round2 = (n: number): number => Math.round((Number(n) || 0) * 100) / 100;
@@ -33,7 +35,7 @@ const str = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
 
 function signToken(user: StaffUser): string {
   return jwt.sign(
-    { id: user.id, email: user.email, role: user.role, fullName: user.fullName },
+    { id: user.id, email: user.email, role: user.role, fullName: user.fullName, company_id: user.company_id ?? null },
     JWT_SECRET,
     { expiresIn: '12h' }
   );
@@ -60,7 +62,7 @@ const operatorLimiter = rateLimit({
 
 router.get('/auth/operators', operatorLimiter, async (_req, res) => {
   const { rows } = await pool.query(
-    `SELECT id, full_name, email, role
+    `SELECT id, full_name, email, role, company_id
        FROM admin_users
       WHERE pin_hash IS NOT NULL AND approved = TRUE
       ORDER BY full_name`
@@ -80,7 +82,7 @@ router.post('/auth/pin', pinLimiter, async (req, res) => {
     return;
   }
   const { rows } = await pool.query(
-    `SELECT id, email, full_name, role, pin_hash
+    `SELECT id, email, full_name, role, pin_hash, company_id
        FROM admin_users
       WHERE id = $1 AND pin_hash IS NOT NULL AND approved = TRUE`,
     [userId]
@@ -92,6 +94,7 @@ router.post('/auth/pin', pinLimiter, async (req, res) => {
       email: row.email,
       role: row.role,
       fullName: row.full_name,
+      company_id: row.company_id ?? null,
     };
     res.json({ token: signToken(user), user });
     return;
@@ -148,13 +151,46 @@ function requireStaff(req: Request, res: Response, next: NextFunction): void {
   }
   next();
 }
-router.use(requireAdminAuth, requireStaff);
+router.use(requireAdminAuth, requireStaff, requireCompany);
+
+// ── Tenant scoping ─────────────────────────────────────────────────
+//
+// requireCompany has populated req.company, and it is the ONLY trustworthy
+// source of the tenant: req.adminUser.company_id is nullable and its foreign
+// key points at transit_companies rather than companies, so it must never be
+// used to filter POS rows.
+//
+// Every shift/document query below is constrained with company_id = this value,
+// which is what closes the cross-tenant IDOR: an admin of another company now
+// gets 404 for a document that exists but is not theirs.
+function tenantId(req: Request): string {
+  return req.company!.id;
+}
+
+// ── Payment methods accepted on documents ──────────────────────────
+// Mirrors the pos_document_payments_method_check constraint.
+// Mobile-money rails are the ones Pesepay actually enables for this merchant
+// (verified against /v1/payment-methods/for-currency). Zimswitch, Visa and
+// Mastercard are NOT listed: Pesepay rejects them for this merchant, and
+// offering an unusable rail at the till is worse than not offering it.
+const PAYMENT_METHODS = [
+  'cash', 'card', 'ecocash', 'innbucks', 'paygo', 'omari', 'bank', 'pesepay', 'other',
+];
 
 // ── Company profile (read-only for staff clients) ───────────────────
 // Single source of truth for receipts / invoices / support phone.
 router.get('/company', async (_req, res) => {
   const { rows } = await pool.query('SELECT * FROM companies ORDER BY created_at LIMIT 1');
   res.json(rows[0] || { name: 'Preyone', currency: 'USD', tax_pct: 0, support_phone: '' });
+});
+
+// ── Company subscriptions (tenancy) — which modules this company owns ─
+router.get('/company/subscriptions', (req, res) => {
+  res.json({
+    company: { id: req.company!.id, name: req.company!.name },
+    plan_tier: req.company!.plan_tier ?? null,
+    modules: req.company!.modules,
+  });
 });
 
 // ── Device self-register / heartbeat (desktop, web, android) ────────
@@ -177,18 +213,19 @@ router.post('/devices/register', async (req, res) => {
     res.status(403).json({ error: 'This device has been suspended. Contact your administrator.' }); return;
   }
   const { rows } = await pool.query(
-    `INSERT INTO pos_devices (device_id, device_type, name, branch, app_version, server_url, status, last_seen)
-     VALUES ($1,$2,$3,$4,$5,$6,'active',NOW())
+    `INSERT INTO pos_devices (device_id, device_type, name, branch, app_version, server_url, status, last_seen, company_id)
+     VALUES ($1,$2,$3,$4,$5,$6,'active',NOW(),$7)
      ON CONFLICT (device_id) DO UPDATE SET
        device_type = EXCLUDED.device_type,
        name = EXCLUDED.name,
        branch = EXCLUDED.branch,
        app_version = EXCLUDED.app_version,
        server_url = EXCLUDED.server_url,
+       company_id = COALESCE(pos_devices.company_id, EXCLUDED.company_id),
        last_seen = NOW(),
        updated_at = NOW()
      RETURNING *`,
-    [deviceId, deviceType, name, branch, appVersion, serverUrl]
+    [deviceId, deviceType, name, branch, appVersion, serverUrl, (req.adminUser as { company_id?: string | null })?.company_id ?? null]
   );
   res.json({ ok: true, device: rows[0] });
 });
@@ -424,17 +461,17 @@ router.get('/customers/:id/statement', async (req, res) => {
     `SELECT id, doc_number, doc_type, status, issue_date, due_date, total, amount_paid,
             ROUND(total - amount_paid, 2) AS balance, created_at
        FROM pos_documents
-      WHERE customer_id = $1
+      WHERE company_id = $2 AND customer_id = $1
       ORDER BY created_at DESC`,
-    [req.params.id]
+    [req.params.id, tenantId(req)]
   );
   const payments = await pool.query(
     `SELECT p.paid_at, p.amount, p.method, p.reference, d.doc_number
        FROM pos_document_payments p
        JOIN pos_documents d ON d.id = p.document_id
-      WHERE d.customer_id = $1 AND p.paid_at IS NOT NULL
+      WHERE d.company_id = $2 AND d.customer_id = $1 AND p.paid_at IS NOT NULL
       ORDER BY p.paid_at DESC LIMIT 200`,
-    [req.params.id]
+    [req.params.id, tenantId(req)]
   );
   const totalBalance = docs.rows
     .filter((r) => r.status !== 'void')
@@ -449,16 +486,16 @@ router.get('/customers/:id/statement', async (req, res) => {
 
 // ── Shifts ──────────────────────────────────────────────────────────
 
-async function getOpenShift(cashierId: string) {
+async function getOpenShift(cashierId: string, companyId: string) {
   const { rows } = await pool.query(
-    `SELECT * FROM pos_shifts WHERE cashier_id = $1 AND status = 'open' ORDER BY opened_at DESC LIMIT 1`,
-    [cashierId]
+    `SELECT * FROM pos_shifts WHERE company_id = $2 AND cashier_id = $1 AND status = 'open' ORDER BY opened_at DESC LIMIT 1`,
+    [cashierId, companyId]
   );
   return rows[0] || null;
 }
 
 router.get('/shifts/current', async (req, res) => {
-  const shift = await getOpenShift(req.adminUser!.id);
+  const shift = await getOpenShift(req.adminUser!.id, tenantId(req));
   if (!shift) {
     res.json(null);
     return;
@@ -474,20 +511,20 @@ router.get('/shifts/current', async (req, res) => {
 });
 
 router.post('/shifts/open', async (req, res) => {
-  const existing = await getOpenShift(req.adminUser!.id);
+  const existing = await getOpenShift(req.adminUser!.id, tenantId(req));
   if (existing) {
     res.status(409).json({ error: 'You already have an open shift', shift: existing });
     return;
   }
   const { rows } = await pool.query(
-    `INSERT INTO pos_shifts (cashier_id, opening_float) VALUES ($1,$2) RETURNING *`,
-    [req.adminUser!.id, round2(num(req.body?.openingFloat))]
+    `INSERT INTO pos_shifts (cashier_id, opening_float, company_id) VALUES ($1,$2,$3) RETURNING *`,
+    [req.adminUser!.id, round2(num(req.body?.openingFloat)), tenantId(req)]
   );
   res.status(201).json(rows[0]);
 });
 
 router.post('/shifts/close', async (req, res) => {
-  const shift = await getOpenShift(req.adminUser!.id);
+  const shift = await getOpenShift(req.adminUser!.id, tenantId(req));
   if (!shift) {
     res.status(400).json({ error: 'No open shift to close' });
     return;
@@ -507,22 +544,24 @@ router.post('/shifts/close', async (req, res) => {
   const { rows } = await pool.query(
     `UPDATE pos_shifts
         SET closed_at = NOW(), status = 'closed',
-            expected_cash = $2, counted_cash = $3, variance = $4, notes = $5
-      WHERE id = $1
+            expected_cash = $3, counted_cash = $4, variance = $5, notes = $6
+      WHERE id = $1 AND company_id = $2
       RETURNING *`,
-    [shift.id, expectedCash, counted, variance, notes]
+    [shift.id, tenantId(req), expectedCash, counted, variance, notes]
   );
   res.json({ shift: rows[0], totalsByMethod: sums.rows });
 });
 
 router.get('/shifts', async (req, res) => {
   const all = str(req.query.all) === '1' && MANAGER_ROLES.includes(req.adminUser!.role);
+  // Managers still only see their own company's shifts: "all" widens from
+  // this cashier to every cashier, never to another tenant.
   const { rows } = await pool.query(
     `SELECT s.*, u.full_name AS cashier_name
        FROM pos_shifts s LEFT JOIN admin_users u ON u.id = s.cashier_id
-      ${all ? '' : 'WHERE s.cashier_id = $1'}
+      WHERE s.company_id = $1 ${all ? '' : 'AND s.cashier_id = $2'}
       ORDER BY s.opened_at DESC LIMIT 100`,
-    all ? [] : [req.adminUser!.id]
+    all ? [tenantId(req)] : [tenantId(req), req.adminUser!.id]
   );
   res.json(rows);
 });
@@ -563,6 +602,10 @@ export function statusForPaid(docType: string, total: number, paid: number): str
 router.get('/documents', async (req, res) => {
   const params: unknown[] = [];
   const where: string[] = [];
+  // Tenant predicate is always the first condition, so it cannot be dropped by
+  // any of the optional filters below.
+  params.push(tenantId(req));
+  where.push(`d.company_id = $${params.length}`);
   const type = str(req.query.type);
   const status = str(req.query.status);
   const q = str(req.query.q);
@@ -610,7 +653,13 @@ router.get('/documents', async (req, res) => {
 });
 
 router.get('/documents/:id', async (req, res) => {
-  const doc = await pool.query(`SELECT * FROM pos_documents WHERE id = $1`, [req.params.id]);
+  // Scoped by company: a document belonging to another tenant is reported as
+  // missing rather than forbidden, so the endpoint cannot be used to probe
+  // which document UUIDs exist.
+  const doc = await pool.query(
+    `SELECT * FROM pos_documents WHERE id = $1 AND company_id = $2`,
+    [req.params.id, tenantId(req)]
+  );
   if (doc.rows.length === 0) {
     res.status(404).json({ error: 'Document not found' });
     return;
@@ -685,15 +734,15 @@ router.post('/checkout', async (req, res) => {
     if (channel === 'till') {
       if (!shiftId) {
         const open = await client.query(
-          `SELECT id FROM pos_shifts WHERE cashier_id = $1 AND status = 'open' LIMIT 1`,
-          [me.id]
+          `SELECT id FROM pos_shifts WHERE company_id = $2 AND cashier_id = $1 AND status = 'open' LIMIT 1`,
+          [me.id, tenantId(req)]
         );
         if (open.rows.length > 0) {
           shiftId = open.rows[0].id;
         } else {
           const created = await client.query(
-            `INSERT INTO pos_shifts (cashier_id, opening_float) VALUES ($1, 0) RETURNING id`,
-            [me.id]
+            `INSERT INTO pos_shifts (cashier_id, opening_float, company_id) VALUES ($1, 0, $2) RETURNING id`,
+            [me.id, tenantId(req)]
           );
           shiftId = created.rows[0].id;
         }
@@ -707,8 +756,8 @@ router.post('/checkout', async (req, res) => {
     const docInsert = await client.query(
       `INSERT INTO pos_documents
          (doc_number, doc_type, channel, status, customer_id, cashier_id, shift_id,
-          issue_date, due_date, subtotal, discount_pct, tax_pct, total, amount_paid, notes)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,CURRENT_DATE,$8,$9,$10,$11,$12,$13,$14)
+          issue_date, due_date, subtotal, discount_pct, tax_pct, total, amount_paid, notes, company_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,CURRENT_DATE,$8,$9,$10,$11,$12,$13,$14,$15)
        RETURNING *`,
       [
         docNumber,
@@ -725,6 +774,7 @@ router.post('/checkout', async (req, res) => {
         total,
         Math.min(paidTotal, total),
         str(b.notes) || null,
+        tenantId(req),
       ]
     );
     const doc = docInsert.rows[0];
@@ -749,7 +799,7 @@ router.post('/checkout', async (req, res) => {
     for (const p of rawPayments) {
       const amount = round2(num(p?.amount));
       if (amount <= 0) continue;
-      const method = ['cash', 'card', 'ecocash', 'bank', 'pesepay', 'other'].includes(str(p?.method))
+      const method = PAYMENT_METHODS.includes(str(p?.method))
         ? str(p.method)
         : 'cash';
       await client.query(
@@ -786,7 +836,7 @@ router.post('/documents/:id/payments', async (req, res) => {
     res.status(400).json({ error: 'Payment amount must be positive' });
     return;
   }
-  const method = ['cash', 'card', 'ecocash', 'bank', 'pesepay', 'other'].includes(str(req.body?.method))
+  const method = PAYMENT_METHODS.includes(str(req.body?.method))
     ? str(req.body.method)
     : 'cash';
   const reference = str(req.body?.reference) || null;
@@ -794,7 +844,10 @@ router.post('/documents/:id/payments', async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const docs = await client.query(`SELECT * FROM pos_documents WHERE id = $1 FOR UPDATE`, [req.params.id]);
+    const docs = await client.query(
+      `SELECT * FROM pos_documents WHERE id = $1 AND company_id = $2 FOR UPDATE`,
+      [req.params.id, tenantId(req)]
+    );
     if (docs.rows.length === 0) {
       await client.query('ROLLBACK');
       res.status(404).json({ error: 'Document not found' });
@@ -809,8 +862,8 @@ router.post('/documents/:id/payments', async (req, res) => {
     let shiftId: string | null = doc.shift_id;
     if (method === 'cash') {
       const open = await client.query(
-        `SELECT id FROM pos_shifts WHERE cashier_id = $1 AND status = 'open' LIMIT 1`,
-        [me.id]
+        `SELECT id FROM pos_shifts WHERE company_id = $2 AND cashier_id = $1 AND status = 'open' LIMIT 1`,
+        [me.id, tenantId(req)]
       );
       shiftId = open.rows.length > 0 ? open.rows[0].id : shiftId;
     }
@@ -826,9 +879,9 @@ router.post('/documents/:id/payments', async (req, res) => {
     const paid = round2(num(sums.rows[0].paid));
     const newStatus = doc.doc_type === 'void' ? doc.status : statusForPaid(doc.doc_type, num(doc.total), paid);
     const updated = await client.query(
-      `UPDATE pos_documents SET amount_paid = LEAST($2,total), status = $3, updated_at = NOW()
-        WHERE id = $1 RETURNING *`,
-      [doc.id, paid, newStatus]
+      `UPDATE pos_documents SET amount_paid = LEAST($3,total), status = $4, updated_at = NOW()
+        WHERE id = $1 AND company_id = $2 RETURNING *`,
+      [doc.id, tenantId(req), paid, newStatus]
     );
     await client.query('COMMIT');
     res.json({ ...updated.rows[0], balanceDue: round2(Math.max(num(updated.rows[0].total) - paid, 0)) });
@@ -845,7 +898,10 @@ router.post('/documents/:id/void', requireRole(...MANAGER_ROLES), async (req, re
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const docs = await client.query(`SELECT * FROM pos_documents WHERE id = $1 FOR UPDATE`, [req.params.id]);
+    const docs = await client.query(
+      `SELECT * FROM pos_documents WHERE id = $1 AND company_id = $2 FOR UPDATE`,
+      [req.params.id, tenantId(req)]
+    );
     if (docs.rows.length === 0) {
       await client.query('ROLLBACK');
       res.status(404).json({ error: 'Document not found' });
@@ -867,8 +923,9 @@ router.post('/documents/:id/void', requireRole(...MANAGER_ROLES), async (req, re
       );
     }
     const updated = await client.query(
-      `UPDATE pos_documents SET status = 'void', updated_at = NOW() WHERE id = $1 RETURNING *`,
-      [req.params.id]
+      `UPDATE pos_documents SET status = 'void', updated_at = NOW()
+        WHERE id = $1 AND company_id = $2 RETURNING *`,
+      [req.params.id, tenantId(req)]
     );
     await client.query(
       `INSERT INTO admin_audit_log (admin_id, admin_name, action, target_type, target_id, detail)
@@ -890,28 +947,31 @@ router.post('/documents/:id/void', requireRole(...MANAGER_ROLES), async (req, re
 router.get('/reports/summary', async (req, res) => {
   const from = str(req.query.from) || '1970-01-01';
   const to = str(req.query.to) || '2999-12-31';
+  const me2 = tenantId(req);
+  // Reports aggregate money, so they are tenant-scoped too: a shared "all
+  // companies" revenue figure would leak another tenant's takings.
   const byMethod = await pool.query(
     `SELECT p.method, COUNT(*) AS count, SUM(p.amount) AS total
        FROM pos_document_payments p
        JOIN pos_documents d ON d.id = p.document_id
-      WHERE d.status <> 'void' AND p.paid_at BETWEEN $1::date AND ($2::date + INTERVAL '1 day')
+      WHERE d.company_id = $3 AND d.status <> 'void' AND p.paid_at BETWEEN $1::date AND ($2::date + INTERVAL '1 day')
       GROUP BY p.method ORDER BY total DESC`,
-    [from, to]
+    [from, to, me2]
   );
   const daily = await pool.query(
     `SELECT DATE(d.created_at) AS day, COUNT(*) AS documents, SUM(d.total) AS gross
        FROM pos_documents d
-      WHERE d.status <> 'void' AND d.created_at BETWEEN $1::date AND ($2::date + INTERVAL '1 day')
+      WHERE d.company_id = $3 AND d.status <> 'void' AND d.created_at BETWEEN $1::date AND ($2::date + INTERVAL '1 day')
       GROUP BY DATE(d.created_at) ORDER BY day DESC LIMIT 90`,
-    [from, to]
+    [from, to, me2]
   );
   const bestSellers = await pool.query(
     `SELECT i.description, SUM(i.qty) AS qty_sold, SUM(i.line_total) AS revenue
        FROM pos_document_items i
        JOIN pos_documents d ON d.id = i.document_id
-      WHERE d.status <> 'void' AND d.created_at BETWEEN $1::date AND ($2::date + INTERVAL '1 day')
+      WHERE d.company_id = $3 AND d.status <> 'void' AND d.created_at BETWEEN $1::date AND ($2::date + INTERVAL '1 day')
       GROUP BY i.description ORDER BY revenue DESC LIMIT 10`,
-    [from, to]
+    [from, to, me2]
   );
   const lowStock = await pool.query(
     `SELECT id, name, stock_qty, low_stock_threshold
@@ -923,40 +983,40 @@ router.get('/reports/summary', async (req, res) => {
 });
 
 // Deep sales report: revenue/profit/VAT over a date range (admin console)
-async function salesReport(from: string, to: string) {
-  const range = 'd.created_at >= $1::date AND d.created_at < ($2::date + INTERVAL \'1 day\') AND d.status <> \'void\'';
+async function salesReport(from: string, to: string, companyId: string) {
+  const range = `d.company_id = $3 AND d.created_at >= $1::date AND d.created_at < ($2::date + INTERVAL '1 day') AND d.status <> 'void'`;
   const [totals, profitRow, byMethod, byDay, byCashier, bestSellers] = await Promise.all([
     pool.query(
       `SELECT COUNT(*) AS docs,
               COALESCE(SUM(d.total), 0) AS revenue,
               COALESCE(SUM(d.amount_paid), 0) AS collected,
               COALESCE(SUM((d.subtotal - d.subtotal * d.discount_pct / 100) * d.tax_pct / 100), 0) AS vat
-         FROM pos_documents d WHERE ${range}`, [from, to]),
+         FROM pos_documents d WHERE ${range}`, [from, to, companyId]),
     pool.query(
       `SELECT COALESCE(SUM(i.line_total - i.qty * COALESCE(p.cost_price, 0)), 0) AS profit
          FROM pos_document_items i JOIN pos_documents d ON d.id = i.document_id
-         LEFT JOIN pos_products p ON p.id = i.product_id WHERE ${range}`, [from, to]),
+         LEFT JOIN pos_products p ON p.id = i.product_id WHERE ${range}`, [from, to, companyId]),
     pool.query(
       `SELECT p.method, COUNT(*) AS count, SUM(p.amount) AS total
          FROM pos_document_payments p JOIN pos_documents d ON d.id = p.document_id
          WHERE ${range} AND p.paid_at IS NOT NULL
-         GROUP BY p.method ORDER BY total DESC`, [from, to]),
+         GROUP BY p.method ORDER BY total DESC`, [from, to, companyId]),
     pool.query(
       `SELECT DATE(d.created_at) AS day, COUNT(*) AS docs, SUM(d.total) AS revenue,
               SUM(d.amount_paid) AS collected
          FROM pos_documents d WHERE ${range}
-         GROUP BY DATE(d.created_at) ORDER BY day ASC`, [from, to]),
+         GROUP BY DATE(d.created_at) ORDER BY day ASC`, [from, to, companyId]),
     pool.query(
       `SELECT COALESCE(u.full_name, 'Unknown') AS cashier,
               COUNT(*) AS docs, SUM(d.total) AS revenue, SUM(d.amount_paid) AS collected
          FROM pos_documents d LEFT JOIN admin_users u ON u.id = d.cashier_id
-         WHERE ${range} GROUP BY u.full_name ORDER BY revenue DESC`, [from, to]),
+         WHERE ${range} GROUP BY u.full_name ORDER BY revenue DESC`, [from, to, companyId]),
     pool.query(
       `SELECT i.description, SUM(i.qty) AS qty_sold, SUM(i.line_total) AS revenue,
               SUM(i.line_total - i.qty * COALESCE(p.cost_price, 0)) AS profit
          FROM pos_document_items i JOIN pos_documents d ON d.id = i.document_id
          LEFT JOIN pos_products p ON p.id = i.product_id
-         WHERE ${range} GROUP BY i.description ORDER BY revenue DESC LIMIT 15`, [from, to]),
+         WHERE ${range} GROUP BY i.description ORDER BY revenue DESC LIMIT 15`, [from, to, companyId]),
   ]);
   const lowStock = await pool.query(
     `SELECT id, name, stock_qty, low_stock_threshold
@@ -978,14 +1038,15 @@ router.get('/reports/sales', async (req, res) => {
   const from = str(req.query.from) || new Date(Date.now() - 29 * 86_400_000).toISOString().slice(0, 10);
   const to = str(req.query.to) || new Date().toISOString().slice(0, 10);
 
-  const current = await salesReport(from, to);
+  const me3 = tenantId(req);
+  const current = await salesReport(from, to, me3);
 
   let prior: Awaited<ReturnType<typeof salesReport>> | undefined;
   if (req.query.compare === 'true') {
     const ms = new Date(to).getTime() - new Date(from).getTime() + 86_400_000;
     const priorTo = new Date(new Date(from).getTime() - 1).toISOString().slice(0, 10);
     const priorFrom = new Date(new Date(from).getTime() - ms).toISOString().slice(0, 10);
-    prior = await salesReport(priorFrom, priorTo);
+    prior = await salesReport(priorFrom, priorTo, me3);
   }
 
   res.json({ ...current, prior });

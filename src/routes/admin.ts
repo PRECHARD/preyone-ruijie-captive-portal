@@ -181,17 +181,276 @@ adminRouter.post('/vouchers', async (req: Request, res: Response) => {
   res.status(201).json({ ...rows[0], package_tier: resolvedPackageTier });
 });
 
+// ── Voucher list: server-side search / filter / sort / pagination ──
+//
+// Status is NOT selected from a stored column. It comes from the voucher_status
+// view, which derives it from used_count / expires_at / is_disabled at read time,
+// so the table can never claim a voucher is Active while RADIUS is rejecting it.
+//
+// The subscriber/usage columns are LATERAL lookups rather than plain joins: a
+// voucher can have many users, many bound devices and many past sessions, and
+// joining them together directly would multiply the row count and make the
+// traffic SUM wrong.
+const VOUCHER_SORT_COLUMNS: Record<string, string> = {
+  created_at: 'v.created_at',
+  code: 'v.code',
+  price: 'v.price_amount',
+  activated_at: 'v.activated_at',
+  expires_at: 'v.expires_at',
+  duration: 'v.duration_min',
+  used: 'v.used_count',
+  status: 'vs.status',
+};
+const VOUCHER_STATUS_VALUES = ['Unused', 'Active', 'Expired', 'Disabled'];
+
 adminRouter.get('/vouchers', async (req: Request, res: Response) => {
+  const params: any[] = [];
+  const where: string[] = ['v.deleted_at IS NULL'];
+
+  // Staff only ever see the codes they sold themselves.
   if (req.adminUser!.role === 'Staff') {
-    const { rows } = await pool.query(
-      'SELECT * FROM vouchers WHERE sold_by = $1 ORDER BY created_at DESC',
-      [req.adminUser!.id]
-    );
-    res.json(rows);
-  } else {
-    const { rows } = await pool.query('SELECT * FROM vouchers ORDER BY created_at DESC');
-    res.json(rows);
+    params.push(req.adminUser!.id);
+    where.push(`v.sold_by = $${params.length}`);
   }
+
+  const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+  if (search) {
+    params.push(`%${search.toLowerCase()}%`);
+    where.push(`lower(v.code) LIKE $${params.length}`);
+  }
+
+  const status = typeof req.query.status === 'string' ? req.query.status : '';
+  if (VOUCHER_STATUS_VALUES.includes(status)) {
+    params.push(status);
+    where.push(`vs.status = $${params.length}`);
+  }
+
+  const tier = typeof req.query.tier === 'string' ? req.query.tier : '';
+  if (tier) {
+    params.push(tier);
+    where.push(`v.package_tier = $${params.length}`);
+  }
+
+  const sortKey = typeof req.query.sort === 'string' && VOUCHER_SORT_COLUMNS[req.query.sort]
+    ? req.query.sort
+    : 'created_at';
+  const sortDir = req.query.dir === 'asc' ? 'ASC' : 'DESC';
+
+  const parsedSize = parseInt(String(req.query.pageSize ?? ''), 10);
+  const pageSize = Number.isFinite(parsedSize) ? Math.min(Math.max(parsedSize, 1), 200) : 25;
+  const parsedPage = parseInt(String(req.query.page ?? ''), 10);
+  const page = Number.isFinite(parsedPage) ? Math.max(parsedPage, 1) : 1;
+
+  const whereSql = where.join(' AND ');
+  // Deliberately excludes the LATERAL joins: counting must not depend on them.
+  const countFrom = `FROM vouchers v LEFT JOIN voucher_status vs ON vs.id = v.id WHERE ${whereSql}`;
+  // Snapshot the params: `params` is reused and mutated with LIMIT/OFFSET below,
+  // so handing the same array to both queries would let the count observe them.
+  const countRes = await pool.query(`SELECT count(*)::int AS n ${countFrom}`, [...params]);
+  const total: number = countRes.rows[0]?.n ?? 0;
+
+  const dataFrom = `
+    FROM vouchers v
+    LEFT JOIN voucher_status vs ON vs.id = v.id
+    LEFT JOIN LATERAL (
+      SELECT u.first_name, u.last_name, u.alias, u.phone, u.mac_address
+      FROM users u
+      WHERE u.voucher_code = v.code
+      ORDER BY u.created_at DESC
+      LIMIT 1
+    ) sub ON TRUE
+    LEFT JOIN LATERAL (
+      SELECT count(*)::int AS device_count,
+             array_agg(vd.mac_address ORDER BY vd.bound_at) FILTER (WHERE vd.is_active) AS bound_macs
+      FROM voucher_devices vd
+      WHERE vd.voucher_id = v.id
+    ) dev ON TRUE
+    LEFT JOIN LATERAL (
+      SELECT COALESCE(SUM(w.data_used_bytes), 0)::bigint AS used_bytes
+      FROM wispr_profiles w
+      JOIN users u2 ON u2.id = w.user_id
+      WHERE u2.voucher_code = v.code
+    ) traffic ON TRUE
+    WHERE ${whereSql}`;
+
+  const limitIdx = params.length + 1;
+  const offsetIdx = params.length + 2;
+  params.push(pageSize, (page - 1) * pageSize);
+
+  const { rows } = await pool.query(
+    `SELECT v.*,
+            vs.status,
+            sub.first_name, sub.last_name, sub.alias, sub.phone, sub.mac_address,
+            -- Prefer the stored column (backfilled, and staff-editable) but fall
+            -- back to the first redemption row. Deriving it here means codes
+            -- redeemed from now on get an activation time WITHOUT adding a write
+            -- to auth.ts, which AGENTS.md marks as protected.
+            COALESCE(
+              v.activated_at,
+              (SELECT MIN(vr.created_at) FROM voucher_redemptions vr WHERE vr.voucher_id = v.id)
+            ) AS first_redeemed_at,
+            COALESCE(dev.device_count, 0) AS device_count,
+            dev.bound_macs,
+            COALESCE(traffic.used_bytes, 0) AS traffic_used_bytes,
+            CASE WHEN v.is_uncapped OR v.data_limit_gb IS NULL THEN NULL
+                 ELSE (v.data_limit_gb * 1073741824)::bigint END AS traffic_total_bytes
+     ${dataFrom}
+     ORDER BY ${VOUCHER_SORT_COLUMNS[sortKey]} ${sortDir} NULLS LAST, v.id ASC
+     LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
+    params
+  );
+
+  res.json({ vouchers: rows, total, page, pageSize });
+});
+
+/**
+ * Load a voucher for mutation, enforcing the Staff scope so a staff account can
+ * never reach another seller's voucher by guessing its id.
+ */
+async function loadScopedVoucher(
+  adminUserId: string,
+  role: string,
+  voucherId: string
+): Promise<any | null> {
+  const params: any[] = [voucherId];
+  let sql = `SELECT id, code, package_tier, expires_at, is_disabled, deleted_at, used_count, max_uses
+             FROM vouchers v WHERE v.id = $1 AND v.deleted_at IS NULL`;
+  if (role === 'Staff') {
+    params.push(adminUserId);
+    sql += ` AND v.sold_by = $2`;
+  }
+  const { rows } = await pool.query(sql, params);
+  return rows[0] ?? null;
+}
+
+adminRouter.post('/vouchers/:id/disable', requirePermission(PERMISSIONS.COMPANY_ADMIN), async (req: Request, res: Response) => {
+  const voucher = await loadScopedVoucher(req.adminUser!.id, req.adminUser!.role, req.params.id);
+  if (!voucher) { res.status(404).json({ error: 'Voucher not found' }); return; }
+
+  // Default to disabling; an explicit `disabled: false` re-enables.
+  const disabled = req.body?.disabled !== false;
+  const { rows } = await pool.query(
+    `UPDATE vouchers SET is_disabled = $1 WHERE id = $2 RETURNING id, code, is_disabled`,
+    [disabled, voucher.id]
+  );
+  await recordAuditLog(
+    req.adminUser!.id,
+    req.adminUser!.fullName,
+    disabled ? 'voucher_disable' : 'voucher_enable',
+    'voucher',
+    voucher.id,
+    `${disabled ? 'Disabled' : 'Enabled'} voucher ${voucher.code}`
+  );
+  res.json(rows[0]);
+});
+
+adminRouter.post('/vouchers/:id/extend', requirePermission(PERMISSIONS.COMPANY_ADMIN), async (req: Request, res: Response) => {
+  const voucher = await loadScopedVoucher(req.adminUser!.id, req.adminUser!.role, req.params.id);
+  if (!voucher) { res.status(404).json({ error: 'Voucher not found' }); return; }
+
+  const minutes = parseInt(String(req.body?.minutes ?? ''), 10);
+  if (!Number.isFinite(minutes) || minutes <= 0) {
+    res.status(422).json({ error: 'minutes must be a positive integer' }); return;
+  }
+  // Cap a single call so a fat-fingered value cannot mint a decade of free access.
+  if (minutes > 60 * 24 * 365) {
+    res.status(422).json({ error: 'minutes cannot exceed 525600 (1 year)' }); return;
+  }
+
+  const extendSessions = req.body?.extendSessions === true;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // expires_at is the CODE's shelf life and is often NULL ("never expires").
+    // COALESCE anchors that extension to now instead of failing on the NULL.
+    const { rows } = await client.query(
+      `UPDATE vouchers
+       SET expires_at = COALESCE(expires_at, NOW()) + ($1::text || ' minutes')::interval
+       WHERE id = $2
+       RETURNING id, code, expires_at`,
+      [minutes, voucher.id]
+    );
+
+    let sessionsTouched = 0;
+    if (extendSessions) {
+      // Push live subscriber sessions out by the same amount. Separate from the
+      // shelf life because they are different clocks — see the activated_at
+      // comment in src/db/migrate.ts for why these three are not merged.
+      const sres = await client.query(
+        `UPDATE users
+         SET session_expires_at = COALESCE(session_expires_at, NOW()) + ($1::text || ' minutes')::interval
+         WHERE voucher_code = $2 AND session_expires_at IS NOT NULL
+         RETURNING id`,
+        [minutes, voucher.code]
+      );
+      sessionsTouched = sres.rowCount ?? 0;
+    }
+
+    await client.query('COMMIT');
+    await recordAuditLog(
+      req.adminUser!.id,
+      req.adminUser!.fullName,
+      'voucher_extend',
+      'voucher',
+      voucher.id,
+      `Extended voucher ${voucher.code} by ${minutes} min${extendSessions ? ` (+${sessionsTouched} live sessions)` : ''}`
+    );
+    res.json({ ...rows[0], sessions_extended: sessionsTouched });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    throw err;
+  } finally {
+    client.release();
+  }
+});
+
+adminRouter.post('/vouchers/:id/reset-mac', requirePermission(PERMISSIONS.COMPANY_ADMIN), async (req: Request, res: Response) => {
+  const voucher = await loadScopedVoucher(req.adminUser!.id, req.adminUser!.role, req.params.id);
+  if (!voucher) { res.status(404).json({ error: 'Voucher not found' }); return; }
+
+  // Deactivate rather than delete, matching unbindDevice(): the audit trail
+  // survives and re-binding the same MAC later stays idempotent.
+  const { rows } = await pool.query(
+    `UPDATE voucher_devices
+     SET is_active = FALSE, unbound_at = NOW()
+     WHERE voucher_id = $1 AND is_active
+     RETURNING mac_address`,
+    [voucher.id]
+  );
+  await recordAuditLog(
+    req.adminUser!.id,
+    req.adminUser!.fullName,
+    'voucher_reset_mac',
+    'voucher',
+    voucher.id,
+    `Released ${rows.length} device slot(s) on voucher ${voucher.code}`
+  );
+  res.json({ message: `Released ${rows.length} device slot(s)`, released: rows.length });
+});
+
+adminRouter.delete('/vouchers/:id', requirePermission(PERMISSIONS.COMPANY_ADMIN), async (req: Request, res: Response) => {
+  const voucher = await loadScopedVoucher(req.adminUser!.id, req.adminUser!.role, req.params.id);
+  if (!voucher) { res.status(404).json({ error: 'Voucher not found' }); return; }
+
+  // Soft delete only. A hard DELETE would cascade through voucher_redemptions and
+  // voucher_devices and erase the redemption history this table exists to show.
+  // is_disabled is set too so a still-referenced code cannot be redeemed.
+  const { rows } = await pool.query(
+    `UPDATE vouchers SET deleted_at = NOW(), is_disabled = TRUE
+     WHERE id = $1 AND deleted_at IS NULL
+     RETURNING code`,
+    [voucher.id]
+  );
+  await recordAuditLog(
+    req.adminUser!.id,
+    req.adminUser!.fullName,
+    'voucher_delete',
+    'voucher',
+    voucher.id,
+    `Deleted voucher ${voucher.code}`
+  );
+  res.json({ message: `Voucher ${rows[0].code} deleted`, code: rows[0].code });
 });
 
 // ── Staff Sales (any role — staff see own sales) ──

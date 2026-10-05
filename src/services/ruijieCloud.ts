@@ -1,5 +1,10 @@
 import axios from 'axios';
-import type { AxiosInstance } from 'axios';
+
+// Derived from axios.create() rather than importing the named `AxiosInstance`
+// type: under this project's commonjs/node10 resolution the named export
+// resolves to a namespace and cannot be used as a type. `axios.create()`
+// already returns AxiosInstance, so this is the same type with no cast.
+type AxiosInstance = ReturnType<typeof axios.create>;
 
 const RUIJIE_BASE_URL = 'https://cloud.ruijienetworks.com';
 const ACCESS_TOKEN_URL = '/service/api/oauth20/client/access_token';

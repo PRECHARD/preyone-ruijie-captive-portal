@@ -104,6 +104,8 @@ export function buildRuijieSuccessUrl(req: Request, config: WISPrSessionConfig):
     extLoginUrl.searchParams.set('password', config.voucherCode || config.macAddress);
     extLoginUrl.searchParams.set('url', originalUrl || 'http://preyone.com');
     extLoginUrl.searchParams.set('redirect', originalUrl || 'http://preyone.com');
+    // WISPr requires next_url so the gateway knows where to send the client after auth
+    extLoginUrl.searchParams.set('next_url', originalUrl || 'http://preyone.com');
     return extLoginUrl.toString();
   }
 

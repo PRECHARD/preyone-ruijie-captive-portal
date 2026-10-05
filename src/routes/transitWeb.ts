@@ -21,10 +21,10 @@ transitWebRouter.use(requireAdminAuth);
  * Appends a company scoping predicate (+ its params) for the given table alias.
  * Level 0 platform users (no companyId) see everything; Level 1+ only their company.
  */
-function companyWhere(alias: string, u: AdminUser, params: any[]): string {
+function companyWhere(alias: string, u: AdminUser, params: any[], column = 'company_id'): string {
   if (!u.companyId) return 'TRUE';
   params.push(u.companyId);
-  return `${alias}.company_id = $${params.length}`;
+  return `${alias}.${column} = $${params.length}`;
 }
 
 /** Pull an explicit company context from a Level 0 request (body / query / X-Company-Id header). */
@@ -1075,7 +1075,7 @@ transitWebRouter.get('/financials', requirePermission(PERMISSIONS.COMPANY_ADMIN,
   const params: any[] = [];
   const scope = companyWhere('t', u, params);
   const companyParams: any[] = [];
-  const companyScope = companyWhere('c', u, companyParams);
+  const companyScope = companyWhere('c', u, companyParams, 'id');
 
   const [summaryRows, byDateRows, byRouteRows, byStaffRows, companyRows] = await Promise.all([
     pool.query(

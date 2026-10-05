@@ -17,7 +17,15 @@ export function errorHandler(
   if (status >= 500) {
     console.error(err.stack);
   }
+  // Production must not leak internals, but anywhere else a 500 with a bare
+  // "Internal server error" is unactionable: a bad query in development or in
+  // the e2e suite should say what actually went wrong.
+  const isProduction = process.env.NODE_ENV === 'production';
   res
     .status(status)
-    .json(status >= 500 ? { error: 'Internal server error' } : { error: err.message || 'Request failed' });
+    .json(status >= 500
+      ? (isProduction
+        ? { error: 'Internal server error' }
+        : { error: err.message || 'Request failed' })
+      : { error: err.message || 'Request failed' });
 }

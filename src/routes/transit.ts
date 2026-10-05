@@ -6,7 +6,8 @@ import rateLimit from 'express-rate-limit';
 import { pool } from '../db/pool';
 import { transitAudit, transitSecurityEvent } from '../services/transitAudit';
 import { compareVersions, getTransitJwtSecret, requireTransitDevice, requireTransitRoles, requireTransitSession } from '../middleware/transitAuth';
-import { PERMISSIONS, requireTransitPermission } from '../middleware/rbac';
+import { PERMISSIONS, loadPermissions, requireTransitPermission } from '../middleware/rbac';
+import { formatZimPhone } from '../utils/phone';
 
 const UNIT_SEPARATOR = String.fromCharCode(0x1f);
 
@@ -31,7 +32,7 @@ const syncLimiter = rateLimit({
   message: { error: 'Too many sync requests. Pause and retry in a few minutes.' },
 });
 // Ceiling per sync request: a real trip sells < 200 tickets in a single push,
-// so anything larger is a malformed/replayed payload — split it into chunks.
+// so anything larger is a malformed/replayed payload â€” split it into chunks.
 const MAX_TICKETS_PER_SYNC = 200;
 
 export const transitRouter = Router();
@@ -45,7 +46,7 @@ const SESSION_TOKENS_IN = '12h';
 // parameters before they reach Postgres.
 const UUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$/;
 
-// ── Shared helpers ─────────────────────────────────────────────────────
+// â”€â”€ Shared helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /** Deterministic payload string the Android app signs for every sale. Must match the Dart side exactly. */
 export function buildCanonicalTicketPayload(t: {
@@ -166,7 +167,7 @@ function issueSessionToken(user: any): string {
   );
 }
 
-// ── Authentication ─────────────────────────────────────────────────────
+// â”€â”€ Authentication â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 transitRouter.post('/auth/login', authLimiter, async (req: Request, res: Response) => {
   const { username, password, deviceUuid, devicePublicKey, deviceModel, appVersion } = req.body as {
@@ -226,6 +227,21 @@ transitRouter.post('/auth/login', authLimiter, async (req: Request, res: Respons
 
   const company = await loadCompany(user.company_id);
 
+  // Effective permissions (role defaults + per-user + company-wide grants) so
+  // the app can gate UI the same way the API gates the write. The app must
+  // still fall back to role-based checks when this list is absent (older server
+  // or a session restored before this field existed) â€” never lock a conductor
+  // out of selling because a permission list is missing.
+  const permissions = await loadPermissions(user.role, user.id, user.company_id);
+  const publicUser = {
+    id: user.id,
+    username: user.username,
+    fullName: user.full_name,
+    role: user.role,
+    phone: user.phone || '',
+    permissions,
+  };
+
   const sessionToken = issueSessionToken(user);
   const appNeedsUpdate = !!(company?.min_app_version && appVersion && !compareVersions(appVersion, company.min_app_version));
 
@@ -241,7 +257,7 @@ transitRouter.post('/auth/login', authLimiter, async (req: Request, res: Respons
   if (!deviceUuid) {
     res.json({
       sessionToken,
-      user: { id: user.id, username: user.username, fullName: user.full_name, role: user.role, phone: user.phone || '' },
+      user: publicUser,
       company: company ? publicCompany(company) : null,
       device: existing ? { deviceUuid: existing.device_uuid, status: existing.status } : null,
       needsDeviceRegistration: !existing || existing.status !== 'ACTIVE',
@@ -272,7 +288,7 @@ transitRouter.post('/auth/login', authLimiter, async (req: Request, res: Respons
     res.json({
       sessionToken,
       deviceToken,
-      user: { id: user.id, username: user.username, fullName: user.full_name, role: user.role, phone: user.phone || '' },
+      user: publicUser,
       company: publicCompany(company),
       device: { deviceUuid: existing.device_uuid, status: existing.status },
       needsDeviceRegistration: false,
@@ -286,7 +302,7 @@ transitRouter.post('/auth/login', authLimiter, async (req: Request, res: Respons
   // Different device already bound, or the bound device is disabled/revoked.
   res.json({
     sessionToken,
-    user: { id: user.id, username: user.username, fullName: user.full_name, role: user.role, phone: user.phone || '' },
+    user: publicUser,
     company: company ? publicCompany(company) : null,
     device: existing ? { deviceUuid: existing.device_uuid, status: existing.status } : null,
     needsDeviceRegistration: !existing || existing.status !== 'ACTIVE',
@@ -298,7 +314,7 @@ transitRouter.post('/auth/login', authLimiter, async (req: Request, res: Respons
   });
 });
 
-// ── Device registration (one account, one bound device) ────────────────
+// â”€â”€ Device registration (one account, one bound device) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 transitRouter.post('/devices/register', requireTransitSession, async (req: Request, res: Response) => {
   const session = req.transitSession?.session!;
@@ -433,7 +449,7 @@ transitRouter.post('/devices/register', requireTransitSession, async (req: Reque
   });
 });
 
-// ── Heartbeat / status check ───────────────────────────────────────────
+// â”€â”€ Heartbeat / status check â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 transitRouter.post('/devices/check', requireTransitDevice, async (req: Request, res: Response) => {
   const transit = req.transit!;
@@ -479,11 +495,14 @@ transitRouter.post('/devices/check', requireTransitDevice, async (req: Request, 
     deviceStatus: 'ACTIVE',
     licenseExpiresAt: expiry,
     minAppVersion: company.min_app_version,
+    // Re-delivered on every heartbeat so a capability granted (or revoked)
+    // mid-session reaches the app without forcing a re-login.
+    permissions: transit.user.permissions,
     serverTime: new Date().toISOString(),
   });
 });
 
-// ── Signed, idempotent sync ────────────────────────────────────────────
+// â”€â”€ Signed, idempotent sync â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 transitRouter.post('/sync', syncLimiter, requireTransitDevice, async (req: Request, res: Response) => {
   const transit = req.transit!;
@@ -505,7 +524,6 @@ transitRouter.post('/sync', syncLimiter, requireTransitDevice, async (req: Reque
   const duplicates: string[] = [];
   const rejected: { txId?: string; reason: string; code: string }[] = [];
   const conflicts: string[] = [];
-
   const seenSeats = new Set<string>();
 
   // Safe string coercion: NULL / missing / blank become the fallback so a
@@ -707,7 +725,9 @@ transitRouter.post('/sync', syncLimiter, requireTransitDevice, async (req: Reque
   });
 });
 
-// ── Idempotent offline ticket sync (ticket_id upsert) ──────────────────
+// ── Legacy /sync alias ────────────────────────────────────────────────────
+
+// â”€â”€ Idempotent offline ticket sync (ticket_id upsert) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /**
  * POST /api/transit/tickets/sync
@@ -731,6 +751,11 @@ transitRouter.post('/tickets/sync', syncLimiter, requireTransitDevice, async (re
   const duplicates: string[] = [];
   const rejected: { ticketId?: string; reason: string; code: string }[] = [];
   const conflicts: string[] = [];
+  // Tickets whose printed number is already used by another sale in this
+  // company — two handsets minted the same number, so two passengers hold paper
+  // with identical text. Kept apart from `conflicts` because this needs an
+  // operator to reconcile two real tickets, not a seat reassignment.
+  const duplicateReceipts: string[] = [];
   const seenSeats = new Set<string>();
   const tripIdsToRefresh = new Set<string>();
   const tripNosToRefresh = new Set<string>();
@@ -802,7 +827,6 @@ transitRouter.post('/tickets/sync', syncLimiter, requireTransitDevice, async (re
 
       // Resolve the trip_id (if supplied) against this company's trips so an
       // attacker can never attach a ticket to another company's trip.
-      let tripId: string | null = str(ticket.trip_id ?? ticket.tripId) || null;
       //
       // The device mints ids for its own on-the-go runs (TRIP-<device>-<epoch>),
       // which are NOT server uuids. transit_trips.id is a uuid column, so
@@ -812,6 +836,7 @@ transitRouter.post('/tickets/sync', syncLimiter, requireTransitDevice, async (re
       // trip can never exist server-side by definition, so it is simply not
       // resolvable: drop it and keep the ticket, exactly as an unknown id is
       // handled below.
+      let tripId: string | null = str(ticket.trip_id ?? ticket.tripId) || null;
       if (tripId && !UUID_RE.test(tripId)) {
         tripId = null;
       }
@@ -965,6 +990,24 @@ transitRouter.post('/tickets/sync', syncLimiter, requireTransitDevice, async (re
           });
           continue;
         }
+        // The same ticket number already exists in this company. Two different
+        // handsets minted it, which means two passengers are holding paper with
+        // the same number. We must NOT silently overwrite the earlier sale, and
+        // we must NOT retry forever either: the number is already printed and
+        // the clash is permanent, so it needs a human. Record it as a security
+        // event and leave the row out of `synced` so the client can surface it.
+        if (err.code === '23505' && err.constraint?.includes('receipt_unique')) {
+          await transitSecurityEvent({
+            companyId: transit.user.companyId,
+            userId: transit.user.id,
+            deviceId: transit.device.id,
+            event: 'DUPLICATE_RECEIPT_NO',
+            detail: `receiptNo=${clientReceiptNo} ticketId=${ticketId} (unique constraint)`,
+            ip,
+          });
+          duplicateReceipts.push(ticketId);
+          continue;
+        }
         throw err;
       }
 
@@ -1043,7 +1086,7 @@ transitRouter.post('/tickets/sync', syncLimiter, requireTransitDevice, async (re
     deviceId: transit.device.id,
     action: 'SYNC_COMPLETED',
     entity: 'transit_ticket',
-    metadata: { sync: 'tickets/sync', synced: synced.length, duplicates: duplicates.length, rejected: rejected.length, conflicts: conflicts.length },
+    metadata: { sync: 'tickets/sync', synced: synced.length, duplicates: duplicates.length, rejected: rejected.length, conflicts: conflicts.length, duplicateReceipts: duplicateReceipts.length },
   });
 
   res.json({
@@ -1054,11 +1097,18 @@ transitRouter.post('/tickets/sync', syncLimiter, requireTransitDevice, async (re
     duplicates: duplicates.length,
     rejected,
     conflicts: conflicts.length,
+    // Tickets refused because their printed number already belongs to another
+    // sale. The client must NOT retry these forever: the paper is already in a
+    // passenger's hand, so this is a reconciliation task, not a transient
+    // failure. Kept as a separate count so the app can tell the conductor
+    // instead of silently dropping the ticket.
+    duplicate_receipts: duplicateReceipts.length,
+    duplicate_receipt_ids: duplicateReceipts,
     device: { status: 'ACTIVE', licenseExpiresAt: expiry, minAppVersion: company.min_app_version, serverTime: new Date().toISOString() },
   });
 });
 
-// ── Ticket detail (hydration) ──────────────────────────────────────────
+// â”€â”€ Ticket detail (hydration) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /**
  * GET /api/transit/tickets/:ticketId
@@ -1273,7 +1323,7 @@ transitRouter.post('/trips', requireTransitDevice, requireTransitPermission(PERM
   res.status(201).json({ trip: publicTrip(rows[0]) });
 });
 
-/** Start a trip — field staff (driver/conductor) and admins can pull this to open the trip. */
+/** Start a trip â€” field staff (driver/conductor) and admins can pull this to open the trip. */
 transitRouter.post('/trips/:id/start', requireTransitDevice, async (req: Request, res: Response) => {
   const transit = req.transit!;
   const { rows } = await pool.query(
@@ -1291,7 +1341,7 @@ transitRouter.post('/trips/:id/start', requireTransitDevice, async (req: Request
   res.json({ trip: publicTrip(rows[0]) });
 });
 
-/** Complete a trip — closes it after the run so reports stop accumulating seats. */
+/** Complete a trip â€” closes it after the run so reports stop accumulating seats. */
 transitRouter.post('/trips/:id/complete', requireTransitDevice, async (req: Request, res: Response) => {
   const transit = req.transit!;
   const { rows } = await pool.query(
@@ -1341,7 +1391,7 @@ transitRouter.get('/trips/:id/manifest', requireTransitDevice, async (req: Reque
   res.json({ trip: publicTrip(trip), tickets, count: tickets.length });
 });
 
-// ── Company profile (device fetch for receipt branding) ──────────────
+// â”€â”€ Company profile (device fetch for receipt branding) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /** Pulls the company profile so the app can render branded receipts offline. */
 transitRouter.get('/company', requireTransitDevice, async (req: Request, res: Response) => {
@@ -1376,12 +1426,12 @@ transitRouter.get('/company', requireTransitDevice, async (req: Request, res: Re
   });
 });
 
-// ── Staff registry (device roster for pickers) ─────────────────────────
+// â”€â”€ Staff registry (device roster for pickers) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /**
  * Returns the DRIVER / CONDUCTOR roster for the company: the staff registry
  * (transit_staff) plus every ACTIVE DRIVER/CONDUCTOR login account
- * (transit_users — the profiles admins edit in the Fleet page, where conductor
+ * (transit_users â€” the profiles admins edit in the Fleet page, where conductor
  * phone numbers live). When a login account and a registry profile share a
  * full name, the registry row wins (it carries license_no etc.). The app
  * merges this into its local drivers/conductors tables so the shift-start
@@ -1430,7 +1480,7 @@ transitRouter.get('/staff', requireTransitDevice, async (req: Request, res: Resp
   });
 });
 
-// ── Driver shifts (offline sales attribution) ─────────────────────────
+// â”€â”€ Driver shifts (offline sales attribution) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const publicShift = (s: any) => ({
   id: s.id,
@@ -1438,6 +1488,9 @@ const publicShift = (s: any) => ({
   deviceId: s.device_id,
   driverId: s.driver_id,
   driverName: s.driver_name,
+  driverPhone: s.driver_phone ?? '',
+  conductorName: s.conductor_name ?? '',
+  conductorPhone: s.conductor_phone ?? '',
   vehicleReg: s.vehicle_reg,
   status: s.status,
   notes: s.notes,
@@ -1451,8 +1504,9 @@ const publicShift = (s: any) => ({
  *  shift UUID so tickets synced offline can reference it immediately. */
 transitRouter.post('/shifts/start', requireTransitDevice, async (req: Request, res: Response) => {
   const transit = req.transit!;
-  const { shiftId, driverId, driverName, vehicleReg, notes } = req.body as {
-    shiftId?: string; driverId?: string; driverName?: string; vehicleReg?: string; notes?: string;
+  const { shiftId, driverId, driverName, driverPhone, conductorName, conductorPhone, vehicleReg, notes } = req.body as {
+    shiftId?: string; driverId?: string; driverName?: string; driverPhone?: string;
+    conductorName?: string; conductorPhone?: string; vehicleReg?: string; notes?: string;
   };
   const id = String(shiftId || '').trim();
   if (id && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
@@ -1461,22 +1515,33 @@ transitRouter.post('/shifts/start', requireTransitDevice, async (req: Request, r
   }
   const driverIdent = String(driverId || '').trim();
   const driver = String(driverName || '').trim();
+  const driverPhoneNorm = formatZimPhone(driverPhone);
+  const conductor = String(conductorName || '').trim();
+  const conductorPhoneNorm = formatZimPhone(conductorPhone);
   const vehicle = String(vehicleReg || '').trim();
   const shiftNotes = String(notes || '').trim();
   try {
     const { rows } = await pool.query(
       `INSERT INTO transit_shifts
-         (id, company_id, user_id, device_id, driver_id, driver_name, vehicle_reg, status, notes)
-       VALUES (COALESCE($1::uuid, gen_random_uuid()), $2, $3, $4, $5, $6, $7, 'OPEN', $8)
+         (id, company_id, user_id, device_id, driver_id, driver_name, driver_phone,
+          conductor_name, conductor_phone, vehicle_reg, status, notes)
+       VALUES (COALESCE($1::uuid, gen_random_uuid()), $2, $3, $4, $5, $6, $7, $8, $9, $10, 'OPEN', $11)
        ON CONFLICT (id) DO UPDATE SET
          driver_id = EXCLUDED.driver_id,
          driver_name = EXCLUDED.driver_name,
+         driver_phone = EXCLUDED.driver_phone,
+         conductor_name = EXCLUDED.conductor_name,
+         conductor_phone = EXCLUDED.conductor_phone,
          vehicle_reg = EXCLUDED.vehicle_reg,
          notes = EXCLUDED.notes,
-         status = 'OPEN',
-         closed_at = NULL
+         -- A start that arrives for a shift the server has already closed is a
+         -- replay of an offline start/close pair, not a fresh duty. Reopening it
+         -- would resurrect a finished shift and stamp its close time as NULL.
+         status = CASE WHEN transit_shifts.status = 'CLOSED' THEN 'CLOSED' ELSE 'OPEN' END,
+         closed_at = CASE WHEN transit_shifts.status = 'CLOSED' THEN transit_shifts.closed_at ELSE NULL END
        RETURNING *`,
-      [id || null, transit.user.companyId, transit.user.id, transit.device.id, driverIdent, driver, vehicle, shiftNotes]
+      [id || null, transit.user.companyId, transit.user.id, transit.device.id, driverIdent, driver,
+       driverPhoneNorm, conductor, conductorPhoneNorm, vehicle, shiftNotes]
     );
     await transitAudit({ companyId: transit.user.companyId, userId: transit.user.id, deviceId: transit.device.id, action: 'SHIFT_STARTED', entity: 'transit_shift', entityId: rows[0].id, metadata: { driverName: driver, vehicleReg: vehicle, by: transit.user.username } });
     res.status(201).json({ shift: publicShift(rows[0]) });
@@ -1489,7 +1554,17 @@ transitRouter.post('/shifts/start', requireTransitDevice, async (req: Request, r
   }
 });
 
-/** Close the user's open shift. Accepts server-computed totals for bookkeeping. */
+/** Close the user's open shift. Accepts server-computed totals for bookkeeping.
+ *
+ *  A device that lost connectivity at end of shift replays the close later, and
+ *  sends the time the conductor actually finished in `closedAt`. Without this the
+ *  server would stamp the close at reconnection time and admin would see a
+ *  multi-hour shift for a bus that went off duty in the afternoon. An invalid or
+ *  unparseable timestamp is ignored in favour of NOW() rather than rejected, so a
+ *  bad clock on one handset can never block the close.
+ *
+ *  Re-sending an already-closed shift is a success, not a 404: replay must be
+ *  idempotent or a handset that got no response would retry forever. */
 transitRouter.post('/shifts/close', requireTransitDevice, async (req: Request, res: Response) => {
   const transit = req.transit!;
   const shiftId = String(req.body.shiftId || '').trim();
@@ -1497,15 +1572,62 @@ transitRouter.post('/shifts/close', requireTransitDevice, async (req: Request, r
     res.status(422).json({ error: 'shiftId is required' });
     return;
   }
+  const rawClosedAt = String(req.body.closedAt || '').trim();
+  const parsedClosedAt = rawClosedAt ? new Date(rawClosedAt) : null;
+  const useClosedAt = parsedClosedAt !== null && !Number.isNaN(parsedClosedAt.getTime());
+  // $11 keeps the timestamp out of the way of the column positions. The INSERT
+  // branch has no table to coalesce against (a bare column name in VALUES does
+  // not resolve), so only the DO UPDATE branch can preserve an earlier close.
+  const insertClosedAt = useClosedAt ? '$11::timestamptz' : 'NOW()';
+  // With no usable timestamp, fall back to the server clock — but only for a
+  // shift that has not been closed yet, so replaying an already-closed shift
+  // still keeps its original finish time.
+  const updateClosedAt = useClosedAt
+    ? 'COALESCE(transit_shifts.closed_at, $11::timestamptz)'
+    : 'COALESCE(transit_shifts.closed_at, NOW())';
   const { rows } = await pool.query(
-    `UPDATE transit_shifts
-     SET status = 'CLOSED', closed_at = COALESCE(closed_at, NOW())
-     WHERE id = $1 AND company_id = $2 AND status = 'OPEN'
+    `INSERT INTO transit_shifts
+       (id, company_id, user_id, device_id, driver_id, driver_name, driver_phone,
+        conductor_name, conductor_phone, vehicle_reg, status, closed_at)
+     VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'CLOSED', ${insertClosedAt})
+     ON CONFLICT (id) DO UPDATE SET
+       status = 'CLOSED',
+       closed_at = ${updateClosedAt},
+       -- Fill in crew details the server never received (shift started and ended
+       -- while the handset was offline) without overwriting what it already knows.
+       driver_id = COALESCE(NULLIF(transit_shifts.driver_id, ''), EXCLUDED.driver_id),
+       driver_name = COALESCE(NULLIF(transit_shifts.driver_name, ''), EXCLUDED.driver_name),
+       driver_phone = COALESCE(NULLIF(transit_shifts.driver_phone, ''), EXCLUDED.driver_phone),
+       conductor_name = COALESCE(NULLIF(transit_shifts.conductor_name, ''), EXCLUDED.conductor_name),
+       conductor_phone = COALESCE(NULLIF(transit_shifts.conductor_phone, ''), EXCLUDED.conductor_phone),
+       vehicle_reg = COALESCE(NULLIF(transit_shifts.vehicle_reg, ''), EXCLUDED.vehicle_reg)
+     -- Without this guard the upsert would happily close a shift id owned by a
+     -- DIFFERENT company: ON CONFLICT (id) matches on the primary key alone,
+     -- which would be a cross-tenant write. A mismatched row falls through
+     -- without being updated and is reported as 404 below.
+     WHERE transit_shifts.company_id = EXCLUDED.company_id
      RETURNING *`,
-    [shiftId, transit.user.companyId]
+    [
+      shiftId,
+      transit.user.companyId,
+      transit.user.id,
+      transit.device.id,
+      // These columns are NOT NULL in the schema (they default to ''), so an
+      // absent value must be sent as an empty string rather than NULL.
+      String(req.body.driverId || '').trim(),
+      String(req.body.driverName || '').trim(),
+      formatZimPhone(req.body.driverPhone),
+      String(req.body.conductorName || '').trim(),
+      formatZimPhone(req.body.conductorPhone),
+      String(req.body.vehicleReg || '').trim(),
+      // Postgres rejects a bind list longer than the placeholders the statement
+      // actually uses, so $11 is only supplied when the timestamp is referenced.
+      ...(useClosedAt ? [(parsedClosedAt as Date).toISOString()] : []),
+    ]
   );
   if (rows.length === 0) {
-    res.status(404).json({ error: 'Open shift not found' });
+    // The id belongs to another company. Never disclose that it exists.
+    res.status(404).json({ error: 'Shift not found' });
     return;
   }
   await transitAudit({ companyId: transit.user.companyId, userId: transit.user.id, deviceId: transit.device.id, action: 'SHIFT_CLOSED', entity: 'transit_shift', entityId: rows[0].id, metadata: { by: transit.user.username } });
@@ -1515,18 +1637,19 @@ transitRouter.post('/shifts/close', requireTransitDevice, async (req: Request, r
 /** Open shifts for the company (used by devices to reconcile their local shift). */
 transitRouter.get('/shifts/active', requireTransitDevice, async (req: Request, res: Response) => {
   const transit = req.transit!;
-  const { rows } = await pool.query(
-    `SELECT s.id, s.user_id, s.device_id, s.driver_id, s.driver_name, s.vehicle_reg,
-            s.status, s.notes, s.started_at, s.closed_at, s.ticket_count, s.total_cents
-     FROM transit_shifts s
-     WHERE s.company_id = $1 AND s.status = 'OPEN'
-     ORDER BY s.started_at DESC`,
-    [transit.user.companyId]
-  );
+    const { rows } = await pool.query(
+      `SELECT s.id, s.user_id, s.device_id, s.driver_id, s.driver_name, s.driver_phone,
+              s.conductor_name, s.conductor_phone, s.vehicle_reg,
+              s.status, s.notes, s.started_at, s.closed_at, s.ticket_count, s.total_cents
+      FROM transit_shifts s
+      WHERE s.company_id = $1 AND s.status = 'OPEN'
+      ORDER BY s.started_at DESC`,
+      [transit.user.companyId]
+    );
   res.json({ shifts: rows.map(publicShift) });
 });
 
-// ── Promotions module (admin-only mutation) ────────────────────────────
+// â”€â”€ Promotions module (admin-only mutation) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /** List promotions for the company (all roles may view, e.g. checkout discount lookup). */
 transitRouter.get('/promotions', requireTransitDevice, async (req: Request, res: Response) => {
@@ -1555,7 +1678,7 @@ transitRouter.get('/promotions', requireTransitDevice, async (req: Request, res:
   });
 });
 
-/** Create a promotion. STRICTLY SUPER_ADMIN / ADMIN — 403 for Conductor / Driver / Ticket Seller. */
+/** Create a promotion. STRICTLY SUPER_ADMIN / ADMIN â€” 403 for Conductor / Driver / Ticket Seller. */
 transitRouter.post('/promotions', requireTransitDevice, requireTransitRoles('SUPER_ADMIN', 'ADMIN'), async (req: Request, res: Response) => {
   const transit = req.transit!;
   const { code, description, type, value, minimumCents, maxValueCents, active } = req.body as {
@@ -1662,7 +1785,326 @@ transitRouter.put('/promotions/:id', requireTransitDevice, requireTransitRoles('
 }
 );
 
-// ── Admin: device management & oversight ───────────────────────────────
+// â”€â”€ Master route templates â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// A company-owned stage list + stage-to-stage fare matrix that a conductor uses
+// to open an UNSCHEDULED on-the-go run. Read is open to every device (all
+// conductors need them to sell offline); writes need
+// `route.templates.manage`, which a company can be granted outright so a
+// field-staff owner is not forced to become COMPANY_ADMIN.
+
+interface NormalizedTemplateStage {
+  seq: number;
+  name: string;
+}
+interface NormalizedTemplateFare {
+  fromSeq: number;
+  toSeq: number;
+  priceCents: number;
+}
+interface NormalizedTemplate {
+  name: string;
+  code: string;
+  description: string;
+  active: boolean;
+  stages: NormalizedTemplateStage[];
+  fares: NormalizedTemplateFare[];
+}
+
+/**
+ * Validate + normalise a template body. Mirrors the POS `saveRouteTemplate`
+ * rules exactly so a round-trip is stable: blank stage names are dropped and the
+ * survivors are renumbered 1..n, and degenerate (from == to) legs are skipped.
+ * Legs are stored in forward order (from < to) and de-duplicated, last wins.
+ */
+export function normalizeRouteTemplate(body: any): { ok: true; value: NormalizedTemplate } | { ok: false; error: string } {
+  const name = String(body?.name ?? '').trim();
+  if (!name) return { ok: false, error: 'name is required' };
+  if (name.length > 120) return { ok: false, error: 'name must be 120 characters or fewer' };
+
+  const rawCode = String(body?.code ?? '').trim().toUpperCase();
+  if (rawCode && !/^[A-Z0-9_-]{1,24}$/.test(rawCode)) {
+    return { ok: false, error: 'code must be 1-24 chars (letters, digits, _ or -)' };
+  }
+
+  const rawStages: any[] = Array.isArray(body?.stages) ? body.stages : [];
+  const stages: NormalizedTemplateStage[] = [];
+  for (const s of rawStages) {
+    const stageName = String(s?.name ?? '').trim();
+    if (!stageName) continue;
+    if (stageName.length > 120) return { ok: false, error: `stage name too long: ${stageName.slice(0, 40)}â€¦` };
+    stages.push({ seq: stages.length + 1, name: stageName });
+  }
+  if (stages.length < 2) {
+    return { ok: false, error: 'a template needs at least 2 named stages' };
+  }
+
+  const byLeg = new Map<string, NormalizedTemplateFare>();
+  for (const f of Array.isArray(body?.fares) ? body.fares : []) {
+    const fromSeq = Math.round(Number(f?.fromSeq));
+    const toSeq = Math.round(Number(f?.toSeq));
+    if (!Number.isFinite(fromSeq) || !Number.isFinite(toSeq)) continue;
+    if (fromSeq === toSeq) continue;
+    const lo = Math.min(fromSeq, toSeq);
+    const hi = Math.max(fromSeq, toSeq);
+    const priceCents = Math.max(0, Math.round(Number(f?.priceCents) || 0));
+    byLeg.set(`${lo}:${hi}`, { fromSeq: lo, toSeq: hi, priceCents });
+  }
+  const fares = [...byLeg.values()].sort((a, b) => a.fromSeq - b.fromSeq || a.toSeq - b.toSeq);
+
+  return {
+    ok: true,
+    value: {
+      name,
+      code: rawCode,
+      description: String(body?.description ?? '').trim().slice(0, 500),
+      active: body?.active !== false,
+      stages,
+      fares,
+    },
+  };
+}
+
+/** Replace a template's stage list + fare matrix wholesale (one transaction). */
+async function writeTemplateChildren(
+  client: any,
+  templateId: string,
+  stages: NormalizedTemplateStage[],
+  fares: NormalizedTemplateFare[],
+): Promise<void> {
+  await client.query('DELETE FROM transit_route_template_stages WHERE template_id = $1', [templateId]);
+  await client.query('DELETE FROM transit_route_template_fares WHERE template_id = $1', [templateId]);
+  for (const s of stages) {
+    await client.query(
+      'INSERT INTO transit_route_template_stages (template_id, seq, name) VALUES ($1, $2, $3)',
+      [templateId, s.seq, s.name],
+    );
+  }
+  for (const f of fares) {
+    await client.query(
+      `INSERT INTO transit_route_template_fares (template_id, from_seq, to_seq, price_cents)
+       VALUES ($1, $2, $3, $4)`,
+      [templateId, f.fromSeq, f.toSeq, f.priceCents],
+    );
+  }
+}
+
+/** Shape a template row + its children for the POS catalog mirror. */
+function publicRouteTemplate(
+  row: any,
+  stages: any[] = [],
+  fares: any[] = [],
+): Record<string, unknown> {
+  return {
+    id: row.id,
+    name: row.name,
+    code: row.code,
+    description: row.description,
+    active: row.active,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    stages: stages.map((s) => ({ id: s.id, seq: s.seq, name: s.name })),
+    fares: fares.map((f) => ({
+      id: f.id,
+      fromSeq: f.from_seq,
+      toSeq: f.to_seq,
+      priceCents: f.price_cents,
+    })),
+  };
+}
+
+/** All company templates with stages + matrix hydrated. Readable by every device. */
+transitRouter.get('/route-templates', requireTransitDevice, async (req: Request, res: Response) => {
+  const transit = req.transit!;
+  const { rows } = await pool.query(
+    `SELECT id, name, code, description, active, created_at, updated_at
+     FROM transit_route_templates
+     WHERE company_id = $1
+     ORDER BY active DESC, name ASC`,
+    [transit.user.companyId],
+  );
+  if (rows.length === 0) {
+    res.json({ routeTemplates: [] });
+    return;
+  }
+  const ids = rows.map((r: any) => r.id);
+  const [stageRes, fareRes] = await Promise.all([
+    pool.query(
+      `SELECT id, template_id, seq, name FROM transit_route_template_stages
+       WHERE template_id = ANY($1::uuid[]) ORDER BY template_id ASC, seq ASC`,
+      [ids],
+    ),
+    pool.query(
+      `SELECT id, template_id, from_seq, to_seq, price_cents FROM transit_route_template_fares
+       WHERE template_id = ANY($1::uuid[]) ORDER BY template_id ASC, from_seq ASC, to_seq ASC`,
+      [ids],
+    ),
+  ]);
+  const stagesBy = new Map<string, any[]>();
+  for (const s of stageRes.rows) {
+    const list = stagesBy.get(s.template_id) ?? [];
+    list.push(s);
+    stagesBy.set(s.template_id, list);
+  }
+  const faresBy = new Map<string, any[]>();
+  for (const f of fareRes.rows) {
+    const list = faresBy.get(f.template_id) ?? [];
+    list.push(f);
+    faresBy.set(f.template_id, list);
+  }
+  res.json({
+    routeTemplates: rows.map((r: any) =>
+      publicRouteTemplate(r, stagesBy.get(r.id) ?? [], faresBy.get(r.id) ?? []),
+    ),
+  });
+});
+
+/** Create a template. Requires `route.templates.manage`. */
+transitRouter.post(
+  '/route-templates',
+  requireTransitDevice,
+  requireTransitPermission(PERMISSIONS.ROUTE_TEMPLATES_MANAGE),
+  async (req: Request, res: Response) => {
+    const transit = req.transit!;
+    const parsed = normalizeRouteTemplate(req.body);
+    if (!parsed.ok) {
+      res.status(422).json({ error: parsed.error });
+      return;
+    }
+    const t = parsed.value;
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const { rows } = await client.query(
+        `INSERT INTO transit_route_templates
+           (company_id, name, code, description, active, created_by)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         RETURNING *`,
+        [transit.user.companyId, t.name, t.code, t.description, t.active, transit.user.id],
+      );
+      const created = rows[0];
+      await writeTemplateChildren(client, created.id, t.stages, t.fares);
+      await client.query('COMMIT');
+      await transitAudit({
+        companyId: transit.user.companyId,
+        userId: transit.user.id,
+        deviceId: transit.device.id,
+        action: 'ROUTE_TEMPLATE_CREATED',
+        entity: 'transit_route_template',
+        entityId: created.id,
+        metadata: { name: t.name, stages: t.stages.length, by: transit.user.username },
+      });
+      const [stageRes, fareRes] = await Promise.all([
+        pool.query(
+          'SELECT id, seq, name FROM transit_route_template_stages WHERE template_id = $1 ORDER BY seq ASC',
+          [created.id],
+        ),
+        pool.query(
+          'SELECT id, from_seq, to_seq, price_cents FROM transit_route_template_fares WHERE template_id = $1 ORDER BY from_seq ASC, to_seq ASC',
+          [created.id],
+        ),
+      ]);
+      res.status(201).json({ routeTemplate: publicRouteTemplate(created, stageRes.rows, fareRes.rows) });
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+  },
+);
+
+/** Update a template (stages + matrix replaced wholesale). Requires `route.templates.manage`. */
+transitRouter.put(
+  '/route-templates/:id',
+  requireTransitDevice,
+  requireTransitPermission(PERMISSIONS.ROUTE_TEMPLATES_MANAGE),
+  async (req: Request, res: Response) => {
+    const transit = req.transit!;
+    const parsed = normalizeRouteTemplate(req.body);
+    if (!parsed.ok) {
+      res.status(422).json({ error: parsed.error });
+      return;
+    }
+    const t = parsed.value;
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      // company_id in the WHERE is the tenant boundary: a template belonging to
+      // another company must 404, never be editable.
+      const { rows } = await client.query(
+        `UPDATE transit_route_templates
+         SET name = $1, code = $2, description = $3, active = $4, updated_at = NOW()
+         WHERE id = $5 AND company_id = $6
+         RETURNING *`,
+        [t.name, t.code, t.description, t.active, req.params.id, transit.user.companyId],
+      );
+      if (rows.length === 0) {
+        await client.query('ROLLBACK');
+        res.status(404).json({ error: 'Route template not found' });
+        return;
+      }
+      const updated = rows[0];
+      await writeTemplateChildren(client, updated.id, t.stages, t.fares);
+      await client.query('COMMIT');
+      await transitAudit({
+        companyId: transit.user.companyId,
+        userId: transit.user.id,
+        deviceId: transit.device.id,
+        action: 'ROUTE_TEMPLATE_UPDATED',
+        entity: 'transit_route_template',
+        entityId: updated.id,
+        metadata: { name: t.name, stages: t.stages.length, by: transit.user.username },
+      });
+      const [stageRes, fareRes] = await Promise.all([
+        pool.query(
+          'SELECT id, seq, name FROM transit_route_template_stages WHERE template_id = $1 ORDER BY seq ASC',
+          [updated.id],
+        ),
+        pool.query(
+          'SELECT id, from_seq, to_seq, price_cents FROM transit_route_template_fares WHERE template_id = $1 ORDER BY from_seq ASC, to_seq ASC',
+          [updated.id],
+        ),
+      ]);
+      res.json({ routeTemplate: publicRouteTemplate(updated, stageRes.rows, fareRes.rows) });
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+  },
+);
+
+/** Delete a template. Stages + matrix cascade. Past sales are unaffected â€”
+ *  they reference the trip, never the template. Requires `route.templates.manage`. */
+transitRouter.delete(
+  '/route-templates/:id',
+  requireTransitDevice,
+  requireTransitPermission(PERMISSIONS.ROUTE_TEMPLATES_MANAGE),
+  async (req: Request, res: Response) => {
+    const transit = req.transit!;
+    const { rowCount } = await pool.query(
+      'DELETE FROM transit_route_templates WHERE id = $1 AND company_id = $2',
+      [req.params.id, transit.user.companyId],
+    );
+    if (!rowCount) {
+      res.status(404).json({ error: 'Route template not found' });
+      return;
+    }
+    await transitAudit({
+      companyId: transit.user.companyId,
+      userId: transit.user.id,
+      deviceId: transit.device.id,
+      action: 'ROUTE_TEMPLATE_DELETED',
+      entity: 'transit_route_template',
+      entityId: req.params.id,
+      metadata: { by: transit.user.username },
+    });
+    res.json({ ok: true });
+  },
+);
+
+// â”€â”€ Admin: device management & oversight â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 transitRouter.get('/admin/devices', requireTransitDevice, requireTransitPermission(PERMISSIONS.COMPANY_ADMIN, PERMISSIONS.OPERATIONS_MANAGE), async (req: Request, res: Response) => {
   const transit = req.transit!;
