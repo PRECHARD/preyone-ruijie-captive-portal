@@ -16,6 +16,9 @@ import { adminAuthRouter } from './routes/adminAuth';
 import { paymentsRouter } from './routes/payments';
 import { gatewayRouter } from './routes/gateway';
 import { posRouter } from './routes/pos';
+import { transitRouter } from './routes/transit';
+import { transitWebRouter } from './routes/transitWeb';
+import { systemAdminRouter } from './routes/systemAdmin';
 import { errorHandler } from './middleware/errorHandler';
 import { resolveTenant } from './middleware/subdomain';
 import { maintenanceCheck } from './middleware/maintenanceMode';
@@ -199,7 +202,10 @@ app.use(maintenanceCheck);
 app.use('/api/auth', authRouter);
 app.use('/api/admin/auth', adminAuthRouter);
 app.use('/api/admin', adminRouter);
+app.use('/api/v1/admin', systemAdminRouter);
+app.use('/api/v1/transit', transitWebRouter);
 app.use('/api/payments', paymentsRouter);
+app.use('/api/transit', transitRouter);
 app.use('/api/pos', posRouter);
 
 // Standard route aliases

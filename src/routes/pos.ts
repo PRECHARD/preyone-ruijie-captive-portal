@@ -24,7 +24,7 @@ interface StaffUser {
   role: string;
   fullName: string;
   /** Portal company (companies). POS is the portal realm; company_id is transit-owned. */
-  portal_company_id?: string | null;
+  portalCompanyId?: string | null;
 }
 
 const round2 = (n: number): number => Math.round((Number(n) || 0) * 100) / 100;
@@ -36,7 +36,7 @@ const str = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
 
 function signToken(user: StaffUser): string {
   return jwt.sign(
-    { id: user.id, email: user.email, role: user.role, fullName: user.fullName, portal_company_id: user.portal_company_id ?? null },
+    { id: user.id, email: user.email, role: user.role, fullName: user.fullName, portalCompanyId: user.portalCompanyId ?? null },
     JWT_SECRET,
     { expiresIn: '12h' }
   );
@@ -95,7 +95,7 @@ router.post('/auth/pin', pinLimiter, async (req, res) => {
       email: row.email,
       role: row.role,
       fullName: row.full_name,
-      portal_company_id: row.portal_company_id ?? null,
+      portalCompanyId: row.portal_company_id ?? null,
     };
     res.json({ token: signToken(user), user });
     return;

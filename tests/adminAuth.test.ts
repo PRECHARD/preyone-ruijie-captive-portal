@@ -104,7 +104,7 @@ describe('requireAdminAuth middleware', () => {
     // whatever that role implied, and the company grant must be looked up
     // against the transit company (company_permissions is keyed by it).
     const token = jwt.sign(
-      { id: 'user-1', email: 'a@b', role: 'CEO', fullName: 'Test', company_id: 'stale-tenant' },
+      { id: 'user-1', email: 'a@b', role: 'CEO', fullName: 'Test', companyId: 'stale-tenant' },
       SECRET,
       { expiresIn: '1h' }
     );
@@ -118,7 +118,7 @@ describe('requireAdminAuth middleware', () => {
     await requireAdminAuth(req, makeRes() as any, vi.fn());
 
     expect(req.adminUser!.role).toBe('Staff');
-    expect(req.adminUser!.company_id).toBe('transit-9');
+    expect(req.adminUser!.companyId).toBe('transit-9');
     expect(req.adminUser!.permissions).toEqual(['transit.field_app']);
 
     const permCall = (pool.query as any).mock.calls[1];

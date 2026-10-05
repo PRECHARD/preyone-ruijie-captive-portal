@@ -18,10 +18,16 @@ export interface AdminUser {
   email: string;
   role: string;
   fullName: string;
+  /**
+   * Realm fields are camelCase in memory and snake_case in SQL. The DB columns
+   * are admin_users.company_id (transit_companies) and portal_company_id
+   * (companies); these carry the same values under the naming the rest of the
+   * codebase reads them by.
+   */
   /** Transit company (transit_companies). Scopes Transit Operations; NULL = platform ops. */
-  company_id?: string | null;
+  companyId?: string | null;
   /** Portal company (companies). Scopes POS/invoice/WiFi; NULL = resolved by fallback. */
-  portal_company_id?: string | null;
+  portalCompanyId?: string | null;
   /**
    * Effective capability set (role + user + company grants). The admin console
    * gates its entire navigation on this array, so it must be populated on every
@@ -70,8 +76,8 @@ export async function requireAdminAuth(req: Request, res: Response, next: NextFu
     req.adminUser = {
       ...decoded,
       role: rows[0].role,
-      company_id: rows[0].company_id ?? null,
-      portal_company_id: rows[0].portal_company_id ?? null,
+      companyId: rows[0].company_id ?? null,
+      portalCompanyId: rows[0].portal_company_id ?? null,
       permissions,
     };
     next();

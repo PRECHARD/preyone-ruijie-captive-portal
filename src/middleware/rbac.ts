@@ -90,8 +90,8 @@ export function scopeVoucherCondition(req: Request, params: unknown[]): string |
     params.push(u.id);
     return `v.sold_by = $${params.length}`;
   }
-  if (u.company_id) {
-    params.push(u.company_id);
+  if (u.companyId) {
+    params.push(u.companyId);
     return `v.sold_by IN (SELECT id FROM admin_users WHERE company_id = $${params.length} AND deleted_at IS NULL)`;
   }
   return null;
@@ -109,8 +109,8 @@ export function scopeUserVoucherCodeCondition(
     params.push(u.id);
     return `${alias}.voucher_code IN (SELECT code FROM vouchers WHERE sold_by = $${params.length})`;
   }
-  if (u.company_id) {
-    params.push(u.company_id);
+  if (u.companyId) {
+    params.push(u.companyId);
     return `${alias}.voucher_code IN (SELECT code FROM vouchers WHERE sold_by IN (SELECT id FROM admin_users WHERE company_id = $${params.length} AND deleted_at IS NULL))`;
   }
   return null;

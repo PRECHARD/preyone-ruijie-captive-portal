@@ -58,7 +58,7 @@ export async function requireCompany(req: Request, res: Response, next: NextFunc
   // The portal realm is keyed by admin_users.portal_company_id. company_id is a
   // transit_companies FK: resolving it against the companies table can never
   // match, which would 403 a valid account.
-  const portalCompanyId = (req.adminUser as { portal_company_id?: string | null } | undefined)?.portal_company_id ?? null;
+  const portalCompanyId = req.adminUser?.portalCompanyId ?? null;
   try {
     if (portalCompanyId) {
       const company = await loadCompany(portalCompanyId, req);

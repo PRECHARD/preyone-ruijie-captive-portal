@@ -977,8 +977,7 @@ paymentsRouter.post('/pesepay/initiate', requireAdminAuth, async (req: Request, 
   // transit_companies FK and can never resolve against the companies table, so
   // an unassigned account falls back to the singleton portal company -- the same
   // backward-compatible rule loadCompany() and requireCompany() apply.
-  const sessionCompanyId =
-    (req.adminUser as { portal_company_id?: string | null } | undefined)?.portal_company_id ?? null;
+  const sessionCompanyId = req.adminUser?.portalCompanyId ?? null;
   const { rows: companyRows } = await pool.query(
     sessionCompanyId
       ? 'SELECT id FROM companies WHERE id = $1'

@@ -29,7 +29,7 @@ describe('requireCompany tenant resolution', () => {
     b.use((req: any, _res: any, next: any) => {
       req.adminUser = {
         id: 'u1', email: 'a@b.c', role: 'CEO', fullName: 'A',
-        company_id: transitCompanyId, portal_company_id: portalCompanyId,
+        companyId: transitCompanyId, portalCompanyId,
       };
       next();
     });
