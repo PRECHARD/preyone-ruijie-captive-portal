@@ -218,3 +218,131 @@
 body.modal-open {
   overflow: hidden;
 }
+
+/* ── ContiPay purchase flow additions ── */
+.modal-form select.field-select {
+  width: 100%;
+  padding: 0.85rem 1rem;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+  font-size: 1rem;
+  font-family: 'Montserrat', sans-serif;
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
+  box-sizing: border-box;
+}
+
+.modal-form select.field-select option {
+  background: #1a1a2e;
+  color: #fff;
+}
+
+.modal-form select.field-select:hover { border-color: rgba(106, 13, 173, 0.4); }
+
+.modal-form select.field-select:focus {
+  outline: none;
+  border-color: var(--pink);
+  background: rgba(255, 0, 255, 0.04);
+  box-shadow: 0 0 0 2px rgba(255, 0, 255, 0.12), 0 0 20px rgba(255, 0, 255, 0.08);
+}
+
+#confirm-payment-btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.btn-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: btnSpinnerSpin 0.7s linear infinite;
+  vertical-align: middle;
+  margin-left: 0.5rem;
+  display: inline-block;
+}
+
+@keyframes btnSpinnerSpin {
+  to { transform: rotate(360deg); }
+}
+
+/* Payment failure state */
+.payment-fail {
+  text-align: center;
+  padding: 1.1rem 1rem 0.5rem;
+}
+
+.payment-fail-icon {
+  width: 54px;
+  height: 54px;
+  margin: 0 auto 0.7rem;
+  display: block;
+  animation: warnPulse 1.6s ease-in-out infinite;
+  filter: drop-shadow(0 0 14px rgba(239, 71, 111, 0.45));
+}
+
+@keyframes warnPulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.08); }
+}
+
+.payment-fail-title {
+  font-size: 1.02rem;
+  font-weight: 700;
+  color: #f5a7b8;
+  margin: 0 0 0.35rem;
+}
+
+.payment-fail-detail {
+  font-size: 0.78rem;
+  color: rgba(255, 255, 255, 0.55);
+  margin: 0 0 1.1rem;
+  line-height: 1.45;
+}
+
+.payment-fail-actions {
+  display: flex;
+  gap: 0.6rem;
+  justify-content: center;
+}
+
+.payment-btn {
+  flex: 1;
+  max-width: 150px;
+  padding: 0.6rem 0.9rem;
+  border-radius: 0.6rem;
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: 1px solid transparent;
+}
+
+.payment-btn--try {
+  background: linear-gradient(90deg, #ff00cc, #3333ff);
+  color: #fff;
+  box-shadow: 0 4px 18px rgba(255, 0, 204, 0.35);
+}
+
+.payment-btn--try:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 22px rgba(255, 0, 204, 0.45);
+}
+
+.payment-btn--close {
+  background: rgba(255, 255, 255, 0.06);
+  color: #cbd5e1;
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
+.payment-btn--close:hover {
+  background: rgba(255, 255, 255, 0.12);
+}

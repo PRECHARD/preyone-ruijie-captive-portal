@@ -59,6 +59,16 @@ body.portal-body {
   display: none !important;
 }
 
+::selection {
+  background: rgba(0, 212, 255, 0.35);
+  color: #fff;
+}
+
+::-moz-selection {
+  background: rgba(0, 212, 255, 0.35);
+  color: #fff;
+}
+
 /* ── Loading Overlay ── */
 .body-loading {
   position: fixed;

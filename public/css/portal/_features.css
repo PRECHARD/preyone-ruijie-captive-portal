@@ -32,10 +32,13 @@
   justify-content: center;
 }
 
-.icon-fast { background-image: url('/images/icon-fast.png'); }
-.icon-reliable { background-image: url('/images/icon-reliable.png'); }
-.icon-multi { background-image: url('/images/icon-multi.png'); }
-.icon-support { background-image: url('/images/icon-support.png'); }
+/* Icons were 1024x1024 PNGs (477-632 KB each, ~2.2 MB total) painted into a
+   fixed 80x80 circle. image-set() serves the 160px WebP/AVIF at 1-2x DPR and
+   falls back to the small PNG where WebP is unsupported. */
+.icon-fast { background-image: image-set(url('/images/icon-fast-160.webp') type('image/webp'), url('/images/icon-fast-160.png') type('image/png')); }
+.icon-reliable { background-image: image-set(url('/images/icon-reliable-160.webp') type('image/webp'), url('/images/icon-reliable-160.png') type('image/png')); }
+.icon-multi { background-image: image-set(url('/images/icon-multi-160.webp') type('image/webp'), url('/images/icon-multi-160.png') type('image/png')); }
+.icon-support { background-image: image-set(url('/images/icon-support-160.webp') type('image/webp'), url('/images/icon-support-160.png') type('image/png')); }
 
 .feature-label strong {
   display: block;

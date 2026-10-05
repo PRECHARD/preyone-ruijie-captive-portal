@@ -404,6 +404,70 @@
   // --- FORM HELPERS ---
   const voucherParams = new URLSearchParams(location.search);
 
+  // --- DATA EXHAUSTED PANEL ---
+  // When the gateway cuts a device off we land back here with the same gateway
+  // query string. If that device has burned its allowance, swap the voucher
+  // form for an explanation plus a top-up CTA — otherwise the customer just
+  // sees a form asking for a code they already used.
+  const dataFinishedCard = document.getElementById('data-finished-card');
+  const dataFinishedUsage = document.getElementById('data-finished-usage');
+  const dataFinishedUsageText = document.getElementById('data-finished-usage-text');
+  const dataFinishedCta = document.getElementById('data-finished-cta');
+  const dataFinishedRetry = document.getElementById('data-finished-retry');
+
+  function formatBytes(bytes) {
+    var gb = bytes / (1024 * 1024 * 1024);
+    if (gb >= 1) return gb.toFixed(gb >= 10 ? 0 : 1) + ' GB';
+    return (bytes / (1024 * 1024)).toFixed(0) + ' MB';
+  }
+
+  function showDataFinished(status) {
+    var connectCard = document.querySelector('#quick-form');
+    if (connectCard) {
+      var card = connectCard.closest('.hero-card');
+      if (card) card.hidden = true;
+    }
+    dataFinishedCard.hidden = false;
+
+    if (status.uncapped || !status.quotaBytes) return;
+
+    dataFinishedUsage.hidden = false;
+    dataFinishedUsageText.textContent =
+      formatBytes(status.usedBytes) + ' of ' + formatBytes(status.quotaBytes) + ' used';
+  }
+
+  if (dataFinishedCard) {
+    if (dataFinishedCta) {
+      dataFinishedCta.addEventListener('click', function () {
+        var target = document.getElementById('packages-heading');
+        if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+    }
+    if (dataFinishedRetry) {
+      dataFinishedRetry.addEventListener('click', function () {
+        location.reload();
+      });
+    }
+
+    var clientMac =
+      voucherParams.get('client_mac') || voucherParams.get('mac') || voucherParams.get('clientMac');
+
+    // Only meaningful for a device the gateway just identified; without a MAC
+    // there is nothing to look up and we leave the normal form in place.
+    if (clientMac) {
+      fetch('/api/gateway/quota?mac=' + encodeURIComponent(clientMac))
+        .then(function (r) {
+          return r.ok ? r.json() : null;
+        })
+        .then(function (status) {
+          if (status && status.found && status.exhausted) showDataFinished(status);
+        })
+        .catch(function () {
+          /* non-critical: fall back to the normal voucher form */
+        });
+    }
+  }
+
   function redirectToSuccess(json) {
     // Navigate directly to the ext_login URL (or success.html fallback) returned by the server.
     // Do NOT re-encode or add extra params — the server already built the correct URL.

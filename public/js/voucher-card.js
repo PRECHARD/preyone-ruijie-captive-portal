@@ -30,7 +30,7 @@
     var priceText = data.price_amount ? '$' + parseFloat(data.price_amount).toFixed(2) : '';
     var durShort = fmtDurShort(data.duration_min);
     var validUntil = calcValidUntil(data);
-    var dataVal = data.is_uncapped ? 'UNCAPPED DATA' : (data.data_limit_gb != null ? data.data_limit_gb + ' GB' : 'UNLIMITED');
+    var dataVal = data.is_uncapped ? 'UNLIMITED DATA' : (data.data_limit_gb != null ? data.data_limit_gb + ' GB' : 'UNLIMITED');
     var bwVal = data.bandwidth_mbps_up ? data.bandwidth_mbps_up + ' Mbps' : '—';
     var serial = voucherSerial(code);
 

@@ -80,3 +80,53 @@
 .stat-card--pink { border-color: var(--pink); }
 .stat-card--cyan { border-color: var(--cyan); }
 .stat-card--purple { border-color: var(--purple); }
+
+/* ── Data exhausted panel ────────────────────────────────────────────
+   Shown in place of the connect form when /api/gateway/quota reports the
+   device has used its whole allowance. */
+.data-finished-usage {
+  margin: 1.5rem 0;
+}
+
+.data-finished-bar {
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.data-finished-bar-fill {
+  display: block;
+  height: 100%;
+  width: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--pink), var(--purple));
+}
+
+.data-finished-usage-text {
+  margin: 0.6rem 0 0;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.data-finished-help {
+  margin: 1.25rem 0 0;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.data-finished-help a {
+  color: var(--cyan);
+}
+
+.link-button {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  font-size: 0.8rem;
+  color: var(--cyan);
+  text-decoration: underline;
+  cursor: pointer;
+}

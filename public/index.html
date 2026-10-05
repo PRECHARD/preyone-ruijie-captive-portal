@@ -8,9 +8,9 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="Preyone WiFi" />
   <meta name="format-detection" content="telephone=yes" />
-  <meta name="description" content="Preyone UltraNet Wi-Fi — High-speed satellite internet for Zimbabwe. Enter your voucher code to connect instantly." />
+  <meta name="description" content="Preyone UltraNet Wi-Fi â€” High-speed satellite internet for Zimbabwe. Enter your voucher code to connect instantly." />
   
-  <title>Preyone UltraNet Wi‑Fi</title>
+  <title>Preyone UltraNet WiFi</title>
   <style>
     .body-loading{position:fixed;inset:0;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#000;color:#fff;transition:opacity .4s ease,visibility .4s ease}
     .body-loading.is-hidden{opacity:0;visibility:hidden;pointer-events:none}
@@ -33,14 +33,31 @@
   <link
     href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Montserrat:wght@500;600;700;800&family=Satisfy&display=swap"
     rel="stylesheet">
-  <link rel="stylesheet" href="/css/portal.css" />
+  <link rel="stylesheet" href="/css/portal.css?v=28" />
+  <!-- Header logo is the largest paint on the portal. Preload the variant a
+       phone will actually pick so discovery does not wait on the parser. -->
+  <link
+    rel="preload" as="image" type="image/avif"
+    href="/images/preyonenoneglow-logo-400.avif"
+    imagesrcset="/images/preyonenoneglow-logo-400.avif 400w, /images/preyonenoneglow-logo-800.avif 800w"
+    imagesizes="(max-width: 800px) 100vw, 800px" fetchpriority="high" />
+  <link rel="preload" as="image" type="image/webp"
+    href="/images/preyonenoneglow-logo-400.webp"
+    imagesrcset="/images/preyonenoneglow-logo-400.webp 400w, /images/preyonenoneglow-logo-800.webp 800w"
+    imagesizes="(max-width: 800px) 100vw, 800px" fetchpriority="high" />
+  <link rel="preload" as="image" type="image/webp" href="/images/faviconloading-80.webp" />
 </head>
 
 <body class="portal-body">
   <div class="body-loading" id="bodyLoading">
     <div class="loading-spinner">
       <div class="loading-spinner-inner">
-        <img src="/images/faviconloading.svg" alt="Preyone" />
+        <picture>
+          <source srcset="/images/faviconloading-80.avif" type="image/avif" />
+          <source srcset="/images/faviconloading-80.webp" type="image/webp" />
+          <img src="/images/faviconloading-80.png" alt="Preyone" width="40" height="40"
+            decoding="async" fetchpriority="high" />
+        </picture>
       </div>
     </div>
     <div class="loading-text">Connecting to Preyone...</div>
@@ -49,9 +66,17 @@
     <header class="portal-header">
       <div class="brand-banner">
         <picture class="brand-logo-picture">
-          <source srcset="/images/preyonenoneglow-logo-zoom.png" media="(prefers-contrast: more)" />
-          <img src="/images/preyonenoneglow-logo-zoom.png" alt="Preyone" class="brand-logo-img" width="640" height="140"
-            loading="eager" decoding="async" fetchpriority="high" />
+          <source
+            type="image/avif"
+            srcset="/images/preyonenoneglow-logo-400.avif 400w, /images/preyonenoneglow-logo-800.avif 800w"
+            sizes="(max-width: 800px) 100vw, 800px" />
+          <source
+            type="image/webp"
+            srcset="/images/preyonenoneglow-logo-400.webp 400w, /images/preyonenoneglow-logo-800.webp 800w"
+            sizes="(max-width: 800px) 100vw, 800px" />
+          <source srcset="/images/preyonenoneglow-logo-800.png" media="(prefers-contrast: more)" />
+          <img src="/images/preyonenoneglow-logo-400.png" alt="Preyone" class="brand-logo-img" width="1200" height="600"
+            sizes="(max-width: 800px) 100vw, 800px" loading="eager" decoding="async" fetchpriority="high" />
         </picture>
       </div>
       <div class="brand-eyebrow brand-eyebrow--main">
@@ -61,7 +86,7 @@
 
     <section class="hero-section">
       <div class="hero-copy">
-        <p class="hero-eyebrow">Preyone UltraNet Wi‑Fi</p>
+        <p class="hero-eyebrow">Preyone UltraNet WiFi</p>
         <h1 class="hero-title">STAY CONNECTED. <span>STAY AHEAD.</span></h1>
         <p class="hero-text">High-speed internet for homes, businesses & everywhere in Zimbabwe. Choose the package that
           fits your day, week, or month and connect instantly with your voucher or phone number.</p>
@@ -91,13 +116,18 @@
             <h2>Connect Now</h2>
             <p class="subtitle">Enter your access code to connect instantly.</p>
           </div>
-          <form id="quick-form" novalidate>
+          <form id="quick-form" method="POST" novalidate>
+            <input type="hidden" name="fullName" value="Guest" />
+            <input type="hidden" name="phone" value="N/A" />
+            <input type="hidden" name="email" value="" />
+            <input type="hidden" name="acceptedTos" value="true" />
             <div class="field">
               <label for="accessCode">Access Code</label>
               <input id="accessCode" name="voucherCode" type="text" placeholder="e.g. PRELINK-XXXX"
                 autocomplete="off" required />
               <span class="field-error" id="err-accessCode"></span>
             </div>
+            <div id="server-error" class="field-error hidden"></div>
             <div id="form-error" class="field-error hidden"></div>
             <button type="submit" id="quick-submit-btn">
               <span id="quick-btn-text">Connect</span>
@@ -106,12 +136,43 @@
           </form>
         </div>
       </aside>
+
+      <!-- Shown INSTEAD of the connect form when this device has used up its
+           data allowance. Toggled by portal.js via /api/gateway/quota. -->
+      <aside class="hero-card" id="data-finished-card" hidden>
+        <div class="glass-card glass-card--hero">
+          <div class="brand">
+            <h2>Your data is finished</h2>
+            <p class="subtitle" id="data-finished-subtitle">
+              You have used all the data in your package, so we've paused your connection.
+            </p>
+          </div>
+
+          <div class="data-finished-usage" id="data-finished-usage" hidden>
+            <div class="data-finished-bar">
+              <span class="data-finished-bar-fill" id="data-finished-bar-fill"></span>
+            </div>
+            <p class="data-finished-usage-text" id="data-finished-usage-text"></p>
+          </div>
+
+          <div class="hero-btn-group">
+            <button type="button" class="hero-connect-btn" id="data-finished-cta">
+              Top up my data
+            </button>
+          </div>
+
+          <p class="data-finished-help">
+            Already topped up? <button type="button" class="link-button" id="data-finished-retry">Reconnect</button>
+            &middot; Need help? <a href="https://wa.me/263771327202">WhatsApp us</a>
+          </p>
+        </div>
+      </aside>
     </section>
 
     <section class="packages-section" aria-labelledby="packages-heading">
       <div class="section-heading">
         <div>
-          <p class="section-eyebrow">Choose Your Preyone Pre‑Suite package</p>
+          <p class="section-eyebrow">Choose Your Preyone PreSuite package</p>
           <h2 id="packages-heading">Packages for every need</h2>
         </div>
         <div class="section-note">Select the right plan and activate immediately with your voucher.
@@ -119,105 +180,160 @@
       </div>
       <div class="brand-eybrow--main">
         <article class="package-card package-card--orange">
-          <div class="pkg-priceband"><span class="amt">$0.99</span><span class="per">PER DAY</span></div>
+          <div class="pkg-priceband"><span class="amt">$1.00</span><span class="per">PER DAY</span></div>
           <div class="pkg-body">
-            <div class="pkg-name">Basic</div>
-            <div class="pkg-data">2GB DATA</div>
-            <div class="pkg-speed">2 Mbps</div>
-            <div class="pkg-tier">PreLITE</div>
-            <button type="button" class="pkg-action" data-tier="PreLITE" data-display-name="Basic" data-amount="0.99" data-currency="USD" data-period="daily" data-data-limit="2" data-bandwidth-up="2" data-bandwidth-down="2" data-is-uncapped="false">Buy now</button>
-            <div class="pkg-footer"><span>Pay with</span><span class="ecocash-badge">Eco<span
-                  class="ecocash-red">Cash</span></span></div>
+            <div class="pkg-name">Daily Basic</div>
+            <div class="pkg-data">5GB DATA</div>
+            <div class="pkg-speed">5 Mbps</div>
+            <div class="pkg-tier">PreLite</div>
+            <button type="button" class="pkg-action" data-tier="PreLite" data-display-name="Daily Basic" data-amount="1.00" data-currency="USD" data-period="daily" data-data-limit="5" data-bandwidth-up="5" data-bandwidth-down="5" data-is-uncapped="false">Buy now</button>
+            <div class="pkg-footer"><span class="secure-pay-label">Secure Payments</span><span class="pay-logos"><span class="pay-logo pay-logo--ecocash"><span class="ecocash-mark"><span class="ecocash-eco">Eco</span><span class="ecocash-cash">Cash</span></span></span></span></div>
           </div>
         </article>
         <article class="package-card package-card--orange">
-          <div class="pkg-priceband"><span class="amt">$1.99</span><span class="per">PER DAY</span></div>
+          <div class="pkg-priceband"><span class="amt">$1.99</span><span class="per">2 DAYS</span></div>
           <div class="pkg-body">
-            <div class="pkg-name">Power</div>
-            <div class="pkg-data">5GB DATA</div>
-            <div class="pkg-speed">3 Mbps</div>
-            <div class="pkg-tier">PreLITE PLUS</div>
-            <button type="button" class="pkg-action" data-tier="PreLITE PLUS" data-display-name="Power" data-amount="1.99" data-currency="USD" data-period="daily" data-data-limit="5" data-bandwidth-up="3" data-bandwidth-down="3" data-is-uncapped="false">Buy now</button>
-            <div class="pkg-footer"><span>Pay with</span><span class="ecocash-badge">Eco<span
-                  class="ecocash-red">Cash</span></span>
-            </div>
+            <div class="pkg-name">Starter</div>
+            <div class="pkg-data">10GB DATA</div>
+            <div class="pkg-speed">5 Mbps</div>
+            <div class="pkg-tier">PreLite Plus</div>
+            <button type="button" class="pkg-action" data-tier="PreLite Plus" data-display-name="Starter" data-amount="1.99" data-currency="USD" data-period="2days" data-data-limit="10" data-bandwidth-up="5" data-bandwidth-down="5" data-is-uncapped="false">Buy now</button>
+            <div class="pkg-footer"><span class="secure-pay-label">Secure Payments</span><span class="pay-logos"><span class="pay-logo pay-logo--ecocash"><span class="ecocash-mark"><span class="ecocash-eco">Eco</span><span class="ecocash-cash">Cash</span></span></span></span></div>
           </div>
         </article>
-        <article class="package-card package-card--cyan">
+        <article class="package-card package-card--orange">
           <div class="pkg-priceband"><span class="amt">$4.99</span><span class="per">PER WEEK</span></div>
           <div class="pkg-body">
-            <div class="pkg-name">Entry</div>
-            <div class="pkg-data">10GB DATA</div>
-            <div class="pkg-speed">3 Mbps</div>
-            <div class="pkg-tier">PreLINK</div>
-            <button type="button" class="pkg-action" data-tier="PreLINK" data-display-name="Entry" data-amount="4.99" data-currency="USD" data-period="weekly" data-data-limit="10" data-bandwidth-up="3" data-bandwidth-down="3" data-is-uncapped="false">Buy now</button>
-            <div class="pkg-footer"><span>Pay with</span><span class="ecocash-badge">Eco<span
-                  class="ecocash-red">Cash</span></span>
-            </div>
+            <div class="pkg-name">Weekly Standard</div>
+            <div class="pkg-data">20GB DATA</div>
+            <div class="pkg-speed">5 Mbps</div>
+            <div class="pkg-tier">PreLink</div>
+            <button type="button" class="pkg-action" data-tier="PreLink" data-display-name="Weekly Standard" data-amount="4.99" data-currency="USD" data-period="weekly" data-data-limit="20" data-bandwidth-up="5" data-bandwidth-down="5" data-is-uncapped="false">Buy now</button>
+            <div class="pkg-footer"><span class="secure-pay-label">Secure Payments</span><span class="pay-logos"><span class="pay-logo pay-logo--ecocash"><span class="ecocash-mark"><span class="ecocash-eco">Eco</span><span class="ecocash-cash">Cash</span></span></span></span></div>
           </div>
         </article>
         <article class="package-card package-card--cyan">
-          <div class="pkg-priceband"><span class="amt">$9.99</span><span class="per">PER WEEK</span></div>
+          <div class="pkg-priceband"><span class="amt">$7.99</span><span class="per">PER MONTH</span></div>
           <div class="pkg-body">
-            <div class="pkg-name">Power Pack</div>
-            <div class="pkg-data">20GB DATA</div>
+            <div class="pkg-name">PreGo</div>
+            <div class="pkg-data">30GB DATA</div>
             <div class="pkg-speed">5 Mbps</div>
-            <div class="pkg-tier">PreLINK PLUS</div>
-            <button type="button" class="pkg-action" data-tier="PreLINK PLUS" data-display-name="Power Pack" data-amount="9.99" data-currency="USD" data-period="weekly" data-data-limit="20" data-bandwidth-up="5" data-bandwidth-down="5" data-is-uncapped="false">Buy now</button>
-            <div class="pkg-footer"><span>Pay with</span><span class="ecocash-badge">Eco<span
-                  class="ecocash-red">Cash</span></span>
-            </div>
+            <div class="pkg-tier">PreGo</div>
+            <button type="button" class="pkg-action" data-tier="PreGo" data-display-name="PreGo" data-amount="7.99" data-currency="USD" data-period="monthly" data-data-limit="30" data-bandwidth-up="5" data-bandwidth-down="5" data-is-uncapped="false">Buy now</button>
+            <div class="pkg-footer"><span class="secure-pay-label">Secure Payments</span><span class="pay-logos"><span class="pay-logo pay-logo--ecocash"><span class="ecocash-mark"><span class="ecocash-eco">Eco</span><span class="ecocash-cash">Cash</span></span></span></span></div>
+          </div>
+        </article>
+        <article class="package-card package-card--cyan package-card--popular">
+          <div class="pkg-popular-badge">MOST POPULAR</div>
+          <div class="pkg-priceband"><span class="amt">$9.99</span><span class="per">PER MONTH</span></div>
+          <div class="pkg-body">
+            <div class="pkg-name">PreFlow</div>
+            <div class="pkg-data">40GB DATA</div>
+            <div class="pkg-speed">5 Mbps</div>
+            <div class="pkg-tier">PreFlow</div>
+            <button type="button" class="pkg-action" data-tier="PreFlow" data-display-name="PreFlow" data-amount="9.99" data-currency="USD" data-period="monthly" data-data-limit="40" data-bandwidth-up="5" data-bandwidth-down="5" data-is-uncapped="false">Buy now</button>
+            <div class="pkg-footer"><span class="secure-pay-label">Secure Payments</span><span class="pay-logos"><span class="pay-logo pay-logo--ecocash"><span class="ecocash-mark"><span class="ecocash-eco">Eco</span><span class="ecocash-cash">Cash</span></span></span></span></div>
+          </div>
+        </article>
+        <article class="package-card package-card--cyan package-card--popular">
+          <div class="pkg-popular-badge">MOST POPULAR</div>
+          <div class="pkg-priceband"><span class="amt">$14.99</span><span class="per">PER MONTH</span></div>
+          <div class="pkg-body">
+            <div class="pkg-name">PreCore</div>
+            <div class="pkg-data">Unlimited data</div>
+            <div class="pkg-speed">5 Mbps</div>
+            <div class="pkg-tier">PreCore</div>
+            <button type="button" class="pkg-action" data-tier="PreCore" data-display-name="PreCore" data-amount="14.99" data-currency="USD" data-period="monthly" data-data-limit="null" data-bandwidth-up="5" data-bandwidth-down="5" data-is-uncapped="true">Buy now</button>
+            <div class="pkg-footer"><span class="secure-pay-label">Secure Payments</span><span class="pay-logos"><span class="pay-logo pay-logo--ecocash"><span class="ecocash-mark"><span class="ecocash-eco">Eco</span><span class="ecocash-cash">Cash</span></span></span></span></div>
           </div>
         </article>
         <article class="package-card package-card--blue">
           <div class="pkg-priceband"><span class="amt">$19.99</span><span class="per">PER MONTH</span></div>
           <div class="pkg-body">
-            <div class="pkg-name">Standard</div>
-            <div class="pkg-data">45GB DATA</div>
-            <div class="pkg-speed">5 Mbps</div>
-            <div class="pkg-tier">PreBIZ</div>
-            <button type="button" class="pkg-action" data-tier="PreBIZ" data-display-name="Standard" data-amount="19.99" data-currency="USD" data-period="monthly" data-data-limit="45" data-bandwidth-up="5" data-bandwidth-down="5" data-is-uncapped="false">Buy now</button>
-            <div class="pkg-footer"><span>Pay with</span><span class="ecocash-badge">Eco<span
-                  class="ecocash-red">Cash</span></span>
+            <div class="pkg-name">Business</div>
+            <div class="pkg-data">Unlimited data</div>
+            <div class="pkg-speed">10 Mbps</div>
+            <div class="pkg-tier">PreBizPlus</div>
+            <button type="button" class="pkg-action" data-tier="PreBizPlus" data-display-name="Business" data-amount="19.99" data-currency="USD" data-period="monthly" data-data-limit="null" data-bandwidth-up="10" data-bandwidth-down="10" data-is-uncapped="true">Buy now</button>
+            <div class="pkg-footer"><span class="secure-pay-label">Secure Payments</span><span class="pay-logos"><span class="pay-logo pay-logo--ecocash"><span class="ecocash-mark"><span class="ecocash-eco">Eco</span><span class="ecocash-cash">Cash</span></span></span></span></div>
+          </div>
+        </article>
+        <article class="package-card package-card--blue package-card--popular">
+          <div class="pkg-popular-badge">MOST POPULAR</div>
+          <div class="pkg-priceband"><span class="amt">$24.99</span><span class="per">PER MONTH</span></div>
+          <div class="pkg-body">
+            <div class="pkg-name">Family Pack</div>
+            <div class="pkg-data">Unlimited data</div>
+            <div class="pkg-devices">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="20" height="14" x="2" y="3" rx="2"></rect><line x1="8" x2="16" y1="21" y2="21"></line><line x1="12" x2="12" y1="17" y2="21"></line></svg>
+              <span>2</span>
             </div>
+            <div class="pkg-speed">10 Mbps</div>
+            <div class="pkg-tier">PreFam</div>
+            <button type="button" class="pkg-action" data-tier="PreFam" data-display-name="Family Pack" data-amount="24.99" data-currency="USD" data-period="monthly" data-data-limit="null" data-bandwidth-up="10" data-bandwidth-down="10" data-is-uncapped="true">Buy now</button>
+            <div class="pkg-footer"><span class="secure-pay-label">Secure Payments</span><span class="pay-logos"><span class="pay-logo pay-logo--ecocash"><span class="ecocash-mark"><span class="ecocash-eco">Eco</span><span class="ecocash-cash">Cash</span></span></span></span></div>
           </div>
         </article>
         <article class="package-card package-card--blue">
+          <div class="pkg-priceband"><span class="amt">$29.99</span><span class="per">PER MONTH</span></div>
+          <div class="pkg-body">
+            <div class="pkg-name">Business Pro</div>
+            <div class="pkg-data">Unlimited data</div>
+            <div class="pkg-devices">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="20" height="14" x="2" y="3" rx="2"></rect><line x1="8" x2="16" y1="21" y2="21"></line><line x1="12" x2="12" y1="17" y2="21"></line></svg>
+              <span>3</span>
+            </div>
+            <div class="pkg-speed">10 Mbps</div>
+            <div class="pkg-tier">PreBizPro</div>
+            <button type="button" class="pkg-action" data-tier="PreBizPro" data-display-name="Business Pro" data-amount="29.99" data-currency="USD" data-period="monthly" data-data-limit="null" data-bandwidth-up="10" data-bandwidth-down="10" data-is-uncapped="true">Buy now</button>
+            <div class="pkg-footer"><span class="secure-pay-label">Secure Payments</span><span class="pay-logos"><span class="pay-logo pay-logo--ecocash"><span class="ecocash-mark"><span class="ecocash-eco">Eco</span><span class="ecocash-cash">Cash</span></span></span></span></div>
+          </div>
+        </article>
+        <article class="package-card package-card--purple package-card--popular">
+          <div class="pkg-popular-badge">MOST POPULAR</div>
           <div class="pkg-priceband"><span class="amt">$34.99</span><span class="per">PER MONTH</span></div>
           <div class="pkg-body">
-            <div class="pkg-name">Pro</div>
-            <div class="pkg-data">100GB DATA</div>
-            <div class="pkg-speed">10 Mbps</div>
-            <div class="pkg-tier">PreMAX</div>
-            <button type="button" class="pkg-action" data-tier="PreMAX" data-display-name="Pro" data-amount="34.99" data-currency="USD" data-period="monthly" data-data-limit="100" data-bandwidth-up="10" data-bandwidth-down="10" data-is-uncapped="false">Buy now</button>
-            <div class="pkg-footer"><span>Pay with</span><span class="ecocash-badge">Eco<span
-                  class="ecocash-red">Cash</span></span>
+            <div class="pkg-name">Monthly Pro</div>
+            <div class="pkg-data">Unlimited data</div>
+            <div class="pkg-devices">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="20" height="14" x="2" y="3" rx="2"></rect><line x1="8" x2="16" y1="21" y2="21"></line><line x1="12" x2="12" y1="17" y2="21"></line></svg>
+              <span>4</span>
             </div>
+            <div class="pkg-speed">15 Mbps</div>
+            <div class="pkg-tier">PreMax</div>
+            <button type="button" class="pkg-action" data-tier="PreMax" data-display-name="Monthly Pro" data-amount="34.99" data-currency="USD" data-period="monthly" data-data-limit="null" data-bandwidth-up="15" data-bandwidth-down="15" data-is-uncapped="true">Buy now</button>
+            <div class="pkg-footer"><span class="secure-pay-label">Secure Payments</span><span class="pay-logos"><span class="pay-logo pay-logo--ecocash"><span class="ecocash-mark"><span class="ecocash-eco">Eco</span><span class="ecocash-cash">Cash</span></span></span></span></div>
           </div>
         </article>
         <article class="package-card package-card--purple">
           <div class="pkg-priceband"><span class="amt">$44.99</span><span class="per">PER MONTH</span></div>
           <div class="pkg-body">
-            <div class="pkg-name">True Unlimited</div>
-            <div class="pkg-data">Uncapped data</div>
-            <div class="pkg-speed">15 Mbps</div>
-            <div class="pkg-tier">PreULTRA</div>
-            <button type="button" class="pkg-action" data-tier="PreULTRA" data-display-name="True Unlimited" data-amount="44.99" data-currency="USD" data-period="monthly" data-data-limit="null" data-bandwidth-up="15" data-bandwidth-down="15" data-is-uncapped="true">Buy now</button>
-            <div class="pkg-footer"><span>Pay with</span><span class="ecocash-badge">Eco<span
-                  class="ecocash-red">Cash</span></span>
+            <div class="pkg-name">Monthly Unlimited</div>
+            <div class="pkg-data">Unlimited data</div>
+            <div class="pkg-devices">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="20" height="14" x="2" y="3" rx="2"></rect><line x1="8" x2="16" y1="21" y2="21"></line><line x1="12" x2="12" y1="17" y2="21"></line></svg>
+              <span>5</span>
             </div>
+            <div class="pkg-speed">15 Mbps</div>
+            <div class="pkg-tier">PreUltra</div>
+            <button type="button" class="pkg-action" data-tier="PreUltra" data-display-name="Monthly Unlimited" data-amount="44.99" data-currency="USD" data-period="monthly" data-data-limit="null" data-bandwidth-up="15" data-bandwidth-down="15" data-is-uncapped="true">Buy now</button>
+            <div class="pkg-footer"><span class="secure-pay-label">Secure Payments</span><span class="pay-logos"><span class="pay-logo pay-logo--ecocash"><span class="ecocash-mark"><span class="ecocash-eco">Eco</span><span class="ecocash-cash">Cash</span></span></span></span></div>
           </div>
         </article>
         <article class="package-card package-card--purple">
           <div class="pkg-priceband"><span class="amt">$59.99</span><span class="per">PER MONTH</span></div>
           <div class="pkg-body">
-            <div class="pkg-name">VIP Unlimited</div>
-            <div class="pkg-data">Uncapped data</div>
+            <div class="pkg-name">VIP Tier</div>
+            <div class="pkg-data">Unlimited data</div>
+            <div class="pkg-devices">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="20" height="14" x="2" y="3" rx="2"></rect><line x1="8" x2="16" y1="21" y2="21"></line><line x1="12" x2="12" y1="17" y2="21"></line></svg>
+              <span>6+</span>
+            </div>
             <div class="pkg-speed">30 Mbps</div>
-            <div class="pkg-tier">PreEXECUTIVE</div>
-            <button type="button" class="pkg-action" data-tier="PreEXECUTIVE" data-display-name="VIP Unlimited" data-amount="59.99" data-currency="USD" data-period="monthly" data-data-limit="null" data-bandwidth-up="30" data-bandwidth-down="30" data-is-uncapped="true">Buy now</button>
-            <div class="pkg-footer"><span>Pay with</span><span class="ecocash-badge">Eco<span
-                  class="ecocash-red">Cash</span></span> </div>
+            <div class="pkg-tier">PreExecutive</div>
+            <button type="button" class="pkg-action" data-tier="PreExecutive" data-display-name="VIP Tier" data-amount="59.99" data-currency="USD" data-period="monthly" data-data-limit="null" data-bandwidth-up="30" data-bandwidth-down="30" data-is-uncapped="true">Buy now</button>
+            <div class="pkg-footer"><span class="secure-pay-label">Secure Payments</span><span class="pay-logos"><span class="pay-logo pay-logo--ecocash"><span class="ecocash-mark"><span class="ecocash-eco">Eco</span><span class="ecocash-cash">Cash</span></span></span></span></div>
+          </div>
         </article>
       </div>
     </section>
@@ -257,7 +373,11 @@
       <div class="footer-grid">
         <!-- Brand Column -->
         <div class="footer-col brand-col">
-          <img src="/images/preyone-logo-mainInverse.png" alt="Preyone" class="footer-brand-mark" />
+          <picture>
+            <source srcset="/images/preyone-logo-mainInverse-400.avif" type="image/avif" />
+            <source srcset="/images/preyone-logo-mainInverse-400.webp" type="image/webp" />
+            <img src="/images/preyone-logo-mainInverse-400.png" alt="Preyone" class="footer-brand-mark" width="1200" height="675" loading="lazy" decoding="async" />
+          </picture>
           <p class="footer-tagline">High-speed satellite connectivity across Zimbabwe. Powered by Starlink Business
             Priority
             infrastructure.</p>
@@ -321,8 +441,8 @@
         <div class="legal-row">
           <p>&copy; <span id="current-year"></span> Preyone Enterprises. All Rights Reserved.</p>
           <div class="payment-badges">
-            <span>Payment Verified:</span>
-            <span class="ecocash-badge">Eco<span class="ecocash-red">Cash</span></span>
+            <span class="secure-pay-label">Secure Payments</span>
+            <span class="pay-logos"><span class="pay-logo pay-logo--ecocash"><span class="ecocash-mark"><span class="ecocash-eco">Eco</span><span class="ecocash-cash">Cash</span></span></span></span>
           </div>
         </div>
       </div>
@@ -332,9 +452,19 @@
   <script>(function(){var e=document.getElementById('bodyLoading');if(!e)return;var h=function(){e.classList.add('is-hidden')};if(document.readyState==='complete')h();else window.addEventListener('load',h);setTimeout(h,8e3)})();</script>
   <script>
   (function() {
-    // Detect gateway redirect — if params like wlanuserip or nasip exist, user
-    // was redirected here by the EG105G-P. Auto-focus access code input.
     var params = new URLSearchParams(location.search);
+
+    // Show error from server redirect (form submission failure)
+    var errorMsg = params.get('error');
+    if (errorMsg) {
+      document.addEventListener('DOMContentLoaded', function() {
+        var el = document.getElementById('server-error');
+        if (el) { el.textContent = decodeURIComponent(errorMsg); el.classList.remove('hidden'); }
+      });
+    }
+
+    // Detect gateway redirect â€” if params like wlanuserip or nasip exist, user
+    // was redirected here by the EG105G-P. Auto-focus access code input.
     var fromGateway = params.has('wlanuserip') || params.has('nasip') || params.has('nas_ip') || params.has('client_mac');
     if (fromGateway) {
       document.addEventListener('DOMContentLoaded', function() {
@@ -350,7 +480,7 @@
     }
   })();
   </script>
-  <script src="/js/portal.js"></script>
+  <script src="/js/portal.js?v=8"></script>
 </body>
 
 </html>

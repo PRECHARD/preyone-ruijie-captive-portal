@@ -2455,8 +2455,8 @@
     $('vCode').value = generateCode(tier);
     $('vCodeErr').textContent = '';
 
-    // Only PreBIZ/PreMAX/PreULTRA/PreEXECUTIVE allow max uses selection
-    var allowed = ['PreBIZ', 'PreMAX', 'PreULTRA', 'PreEXECUTIVE'];
+    // Only multi-device tiers allow max uses selection
+    var allowed = ['PreCore', 'PreBizPlus', 'PreFam', 'PreBizPro', 'PreMax', 'PreUltra', 'PreExecutive'];
     var usesInput = $('vUses');
     if (allowed.indexOf(tier) !== -1) {
       usesInput.disabled = false;
