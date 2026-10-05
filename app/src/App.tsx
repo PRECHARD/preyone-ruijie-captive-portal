@@ -35,7 +35,7 @@ const MODULES: Module[] = [
     key: 'invoice',
     title: 'Invoice & Quotation',
     desc: 'Desktop suite — invoices, quotes and PDF documents.',
-    prodUrl: '//app.preyone.com/invoice',
+    prodUrl: '//invoice.preyone.com',
     devUrl: 'http://localhost:5173',
     phase: 'Desktop',
   },
