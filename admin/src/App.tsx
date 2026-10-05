@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAuth } from './context/AuthContext';
 import Layout from './components/Layout';
 import Login from './pages/Login';
@@ -45,6 +45,7 @@ import PosCompanyProfile from './pages/PosCompanyProfile';
 import type { AuthUser } from './context/AuthContext';
 import { FiAlertOctagon } from 'react-icons/fi';
 import { WORKSPACE_KEY, type Workspace, loadWorkspace, persistWorkspace, workspaceForSection } from './workspace';
+import { currentRoute, writeHash } from './routes';
 
 const sectionRoles: Record<string, string[]> = {
   overview: ['Staff', 'Manager', 'CEO'],
@@ -130,8 +131,12 @@ function FieldStaffGate({ onLogout }: { onLogout: () => void }) {
 
 export default function App() {
   const { user, loading, logout } = useAuth();
-  const [section, setSection] = useState('overview');
-  const [workspace, setWorkspace] = useState<Workspace>(loadWorkspace);
+  // A deep link wins over the persisted workspace: arriving at
+  // #/transit/tenants must land on Transit regardless of what this browser
+  // last used, otherwise the page stays unreachable by URL.
+  const initial = useMemo(currentRoute, []);
+  const [section, setSection] = useState(initial.section || 'overview');
+  const [workspace, setWorkspace] = useState<Workspace>(initial.workspace || loadWorkspace);
 
   // Brand each workspace's document title accordingly.
   useEffect(() => {
@@ -140,6 +145,13 @@ export default function App() {
       : workspace === 'pos' ? 'Preyone POS | Admin Console'
       : 'Preyone UltraNet WiFi | Admin Console';
   }, [workspace]);
+
+  // Normalise the URL once the route is known so a bare deep link
+  // (#/tenants) is rewritten to its canonical, shareable form (#/transit/tenants).
+  useEffect(() => {
+    if (!user) return;
+    writeHash(workspace, section, true);
+  }, [user, workspace, section]);
 
   // Company-bound admins only have Transit sections; default them there on
   // first login (afterwards their persisted choice is respected).
@@ -160,8 +172,26 @@ export default function App() {
     if (scope === 'ultranet' || scope === 'transit' || scope === 'pos') {
       persistWorkspace(scope);
       setWorkspace(scope);
+      writeHash(scope, target);
+      return;
     }
-  }, [user]);
+    writeHash(workspace, target);
+  }, [user, workspace]);
+
+  // Back/forward navigation. State is updated first and only when it actually
+  // differs, so the fragment written by go() does not bounce back as an event.
+  useEffect(() => {
+    const onHashChange = () => {
+      const next = currentRoute();
+      if (next.section && next.section !== section) setSection(next.section);
+      if (next.workspace && next.workspace !== workspace) {
+        persistWorkspace(next.workspace);
+        setWorkspace(next.workspace);
+      }
+    };
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, [section, workspace]);
 
   // Let pages (e.g. Tenants after provisioning) navigate to a section.
   useEffect(() => {
@@ -180,7 +210,10 @@ export default function App() {
     setWorkspace(next);
     if (currentScope !== 'both' && currentScope !== next) {
       setSection('overview');
+      writeHash(next, 'overview');
+      return;
     }
+    writeHash(next, section);
   };
 
   if (loading) return null;
