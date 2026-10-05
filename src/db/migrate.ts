@@ -1138,6 +1138,81 @@ const SQL = `
   SELECT 'Preyone', 'Connecting People. Powering Business.', 'info@preyone.com', '+263771327202', 'USD', 0
   WHERE NOT EXISTS (SELECT 1 FROM companies);
 
+  -- Company scoping for POS documents and shifts. pos.ts writes company_id on
+  -- every checkout, but the columns were originally added by hand, so they are
+  -- declared here to keep a fresh migrate() in step with the live database
+  -- (both are NOT NULL in production). The singleton company backfills any
+  -- rows created before this ran.
+  ALTER TABLE pos_documents ADD COLUMN IF NOT EXISTS company_id UUID REFERENCES companies(id) ON DELETE SET NULL;
+  ALTER TABLE pos_shifts    ADD COLUMN IF NOT EXISTS company_id UUID REFERENCES companies(id) ON DELETE SET NULL;
+  UPDATE pos_documents SET company_id = (SELECT id FROM companies ORDER BY created_at LIMIT 1) WHERE company_id IS NULL;
+  UPDATE pos_shifts    SET company_id = (SELECT id FROM companies ORDER BY created_at LIMIT 1) WHERE company_id IS NULL;
+  ALTER TABLE pos_documents ALTER COLUMN company_id SET NOT NULL;
+  ALTER TABLE pos_shifts    ALTER COLUMN company_id SET NOT NULL;
+  CREATE INDEX IF NOT EXISTS idx_pos_documents_company ON pos_documents (company_id);
+  CREATE INDEX IF NOT EXISTS idx_pos_shifts_company    ON pos_shifts (company_id);
+
+  -- Pesepay payment intents. Also originally added by hand; the payments
+  -- router writes every column below and the callback settles them.
+  CREATE TABLE IF NOT EXISTS pesepay_intents (
+    id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    reference            TEXT UNIQUE NOT NULL,
+    provider_reference   TEXT,
+    tenant_id            UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    amount               NUMERIC(12,2) NOT NULL CHECK (amount > 0),
+    currency             TEXT NOT NULL,
+    payment_method       TEXT NOT NULL DEFAULT 'ecocash',
+    purpose              TEXT NOT NULL,
+    reason_for_payment   TEXT NOT NULL,
+    target_type          TEXT NOT NULL CHECK (target_type IN ('invoice', 'shift', 'subscription')),
+    target_id            UUID,
+    shift_id             UUID REFERENCES pos_shifts(id) ON DELETE SET NULL,
+    subscription_module  TEXT,
+    plan_tier            TEXT,
+    redirect_url         TEXT,
+    poll_url             TEXT,
+    status               TEXT NOT NULL DEFAULT 'pending',
+    created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    completed_at         TIMESTAMPTZ
+  );
+  CREATE INDEX IF NOT EXISTS idx_pesepay_intents_ref     ON pesepay_intents (reference);
+  CREATE INDEX IF NOT EXISTS idx_pesepay_intents_tenant  ON pesepay_intents (tenant_id);
+  CREATE INDEX IF NOT EXISTS idx_pesepay_intents_status  ON pesepay_intents (status);
+  CREATE INDEX IF NOT EXISTS idx_pesepay_intents_target  ON pesepay_intents (target_type, target_id);
+
+  -- Website Starlink checkout. One row per customer attempt, which makes the
+  -- POST idempotent on idempotency_key and keeps the customer's own details
+  -- (plan, account reference, contact) next to the invoice they triggered.
+  -- The invoice itself lives in pos_documents, and the Pesepay intent points
+  -- back at it, so the gateway callback settles the same document.
+  CREATE TABLE IF NOT EXISTS site_invoices (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    idempotency_key TEXT UNIQUE NOT NULL,
+    company_id      UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    document_id     UUID NOT NULL REFERENCES pos_documents(id) ON DELETE CASCADE,
+    intent_id       UUID REFERENCES pesepay_intents(id) ON DELETE SET NULL,
+    account_ref     TEXT NOT NULL,
+    plan_id         TEXT NOT NULL,
+    plan_label      TEXT NOT NULL,
+    full_name       TEXT NOT NULL,
+    email           TEXT NOT NULL,
+    phone           TEXT,
+    amount          NUMERIC(12,2) NOT NULL CHECK (amount > 0),
+    currency        TEXT NOT NULL DEFAULT 'USD',
+    rail            TEXT NOT NULL,
+    status          TEXT NOT NULL DEFAULT 'pending'
+                    CHECK (status IN ('pending', 'success', 'failed')),
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    completed_at    TIMESTAMPTZ
+  );
+  CREATE INDEX IF NOT EXISTS idx_site_invoices_company  ON site_invoices (company_id);
+  CREATE INDEX IF NOT EXISTS idx_site_invoices_document ON site_invoices (document_id);
+  CREATE INDEX IF NOT EXISTS idx_site_invoices_status   ON site_invoices (status);
+  CREATE INDEX IF NOT EXISTS idx_site_invoices_created  ON site_invoices (created_at);
+  CREATE INDEX IF NOT EXISTS idx_site_invoices_account  ON site_invoices (lower(account_ref));
+  CREATE INDEX IF NOT EXISTS idx_site_invoices_email    ON site_invoices (lower(email));
+
   -- POS devices & endpoints (desktop / web / android)
   CREATE TABLE IF NOT EXISTS pos_devices (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),

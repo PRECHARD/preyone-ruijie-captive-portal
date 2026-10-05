@@ -498,6 +498,12 @@ export interface PesepayGatewayRequest {
   phone?: string;
   email?: string;
   fullName?: string;
+  /**
+   * Overrides the global getPesepayReturnUrl() for this payment only. Used by
+   * the website checkout so the customer lands back on the marketing site,
+   * while staff POS sales keep returning to the portal/payment-status page.
+   */
+  returnUrl?: string;
 }
 
 export interface PesepayGatewayResponse {
@@ -572,7 +578,7 @@ export async function initiatePesepayPayment(
       },
       amountDetails: { amount, currencyCode: currency },
       reasonForPayment: paymentRequest.reasonForPayment,
-      returnUrl: getPesepayReturnUrl(),
+      returnUrl: paymentRequest.returnUrl || getPesepayReturnUrl(),
       resultUrl: getPesepayResultUrl(),
       merchantReference: paymentRequest.reference,
     };

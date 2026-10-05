@@ -7,11 +7,12 @@ export async function maintenanceCheck(req: Request, res: Response, next: NextFu
     next();
     return;
   }
-  // The payment webhook MUST stay reachable during maintenance. Pesepay delivers
-  // callbacks for payments already in flight; if we 503 them the customer is
-  // charged but no voucher is ever minted. Only the webhook is exempt —
-  // /initiate stays closed so no new sales start while maintenance is on.
-  if (req.method === 'POST' && req.path === '/api/payments/webhook') {
+  // The payment webhooks MUST stay reachable during maintenance. Pesepay
+  // delivers callbacks for payments already in flight; if we 503 them the
+  // customer is charged but no voucher is ever minted and no invoice is ever
+  // settled. Only the callbacks are exempt -- /initiate and
+  // /api/site/invoices stay closed so no new sales start while maintenance is on.
+  if (req.method === 'POST' && (req.path === '/api/payments/webhook' || req.path === '/api/payments/pesepay/callback')) {
     next();
     return;
   }

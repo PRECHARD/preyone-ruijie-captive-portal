@@ -15,6 +15,7 @@ import { adminRouter } from './routes/admin';
 import { posRouter } from './routes/pos';
 import { adminAuthRouter } from './routes/adminAuth';
 import { paymentsRouter } from './routes/payments';
+import { siteInvoicesRouter } from './routes/siteInvoices';
 import { gatewayRouter } from './routes/gateway';
 import { transitRouter } from './routes/transit';
 import { transitWebRouter } from './routes/transitWeb';
@@ -114,6 +115,7 @@ const SITEMAP_URLS = [
   { loc: 'https://preyone.com/about', changefreq: 'monthly', priority: '0.8' },
   { loc: 'https://preyone.com/services', changefreq: 'monthly', priority: '0.8' },
   { loc: 'https://preyone.com/portfolio', changefreq: 'monthly', priority: '0.8' },
+  { loc: 'https://preyone.com/payment', changefreq: 'monthly', priority: '0.9' },
 ];
 
 app.get('/sitemap.xml', (_req, res) => {
@@ -297,6 +299,9 @@ app.use('/api/admin', adminRouter);
 app.use('/api/v1/admin', systemAdminRouter);
 app.use('/api/v1/transit', transitWebRouter);
 app.use('/api/payments', paymentsRouter);
+// Public Starlink checkout for the marketing site. No session: the invoice is
+// created from a server-side plan catalog and settled by the Pesepay callback.
+app.use('/api/site', siteInvoicesRouter);
 app.use('/api/transit', transitRouter);
 app.use('/api/pos', posRouter);
 
