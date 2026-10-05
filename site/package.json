@@ -1,0 +1,32 @@
+{
+  "name": "preyone-site",
+  "private": true,
+  "version": "2.0.0",
+  "type": "module",
+  "description": "Preyone — technology & connectivity company site (React SPA)",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "typecheck": "tsc -b --noEmit",
+    "preview": "vite preview",
+    "optimize": "node scripts/optimize-images.mjs"
+  },
+  "dependencies": {
+    "framer-motion": "^13.4.0",
+    "lucide-react": "^1.47.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "react-router-dom": "^7.15.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/node": "^24.12.3",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.1",
+    "sharp": "^0.34.4",
+    "tailwindcss": "^4.3.3",
+    "typescript": "~6.0.2",
+    "vite": "^8.0.12"
+  }
+}
