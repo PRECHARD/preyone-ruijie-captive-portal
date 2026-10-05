@@ -156,8 +156,8 @@ describe('portal.js — modal creation and flow', () => {
 
   it('creates modal overlay with correct structure', () => {
     const packageData = {
-      'data-tier': 'PreLITE',
-      'data-display-name': 'PreLITE WiFi',
+      'data-tier': 'PreLite',
+      'data-display-name': 'PreLite WiFi',
       'data-amount': '5.00',
       'data-period': 'daily',
       'data-data-limit': '5',

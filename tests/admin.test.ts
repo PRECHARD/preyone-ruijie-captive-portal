@@ -11,6 +11,15 @@ vi.mock('../src/middleware/adminAuth', () => ({
   requireRole: () => vi.fn((_req: any, _res: any, next: any) => next()),
 }));
 
+vi.mock('../src/middleware/rbac', () => ({
+  PERMISSIONS: { SYSTEM_DEVELOPER: 'system.developer', COMPANY_ADMIN: 'company.admin', OPERATIONS_MANAGE: 'operations.manage', FINANCE_VIEW: 'finance.view', TRANSIT_FIELD_APP: 'transit.field_app' },
+  requirePermission: () => vi.fn((_req: any, _res: any, next: any) => next()),
+  scopeVoucherCondition: vi.fn(() => null),
+  scopeUserVoucherCodeCondition: vi.fn(() => null),
+  loadPermissions: vi.fn(() => Promise.resolve([])),
+  FIELD_STAFF_ROLES: ['CONDUCTOR', 'DRIVER', 'TICKET_SELLER'],
+}));
+
 import { pool } from '../src/db/pool';
 import { adminRouter } from '../src/routes/admin';
 
@@ -26,6 +35,37 @@ describe('Admin routes', () => {
     vi.clearAllMocks();
   });
 
+  describe('POST /api/admin/backup', () => {
+    it('redacts password hashes, reset tokens, and verification tokens', async () => {
+      (pool.query as any)
+        .mockResolvedValueOnce({ rows: [{}] })            // packages
+        .mockResolvedValueOnce({ rows: [{ id: 'u1', password_hash: 'hash1', reset_password_token: 'rt1' }] }) // users
+        .mockResolvedValueOnce({ rows: [{}] })            // vouchers
+        .mockResolvedValueOnce({ rows: [{}] })            // payments
+        .mockResolvedValueOnce({ rows: [{ id: 'a1', password_hash: 'hash2', reset_token: 'rt2', email_verification_token: 'evt2' }] }) // admin_users
+        .mockResolvedValueOnce({ rows: [{}] })            // sales
+        .mockResolvedValueOnce({ rows: [{ key: 'JWT_SECRET', value: 'super-secret' }] }) // settings
+        .mockResolvedValueOnce({ rows: [{}] })            // branding
+        .mockResolvedValueOnce({ rows: [{}] })            // retention_policies
+        .mockResolvedValueOnce({ rows: [{}] })            // staff_commissions
+        .mockResolvedValueOnce({ rows: [{}] })            // ap_devices
+        .mockResolvedValueOnce({ rows: [{}] })            // mac_blacklist
+        .mockResolvedValueOnce({ rows: [{ id: 'b1' }] }) // mac_whitelist
+        .mockResolvedValueOnce({ rows: [{ id: 'bl-1' }] }); // backup_logs insert
+
+      const res = await request(createApp()).post('/api/admin/backup');
+
+      expect(res.status).toBe(200);
+      const users = res.body.data.users as any[];
+      expect(users[0].password_hash).toBe('[REDACTED]');
+      expect(users[0].reset_password_token).toBe('[REDACTED]');
+      const admins = res.body.data.admin_users as any[];
+      expect(admins[0].password_hash).toBe('[REDACTED]');
+      expect(admins[0].reset_token).toBe('[REDACTED]');
+      expect(admins[0].email_verification_token).toBe('[REDACTED]');
+    });
+  });
+
   describe('GET /api/admin/revenue', () => {
     it('returns revenue stats and transaction breakdown', async () => {
       (pool.query as any)
@@ -34,8 +74,8 @@ describe('Admin routes', () => {
         .mockResolvedValueOnce({ rows: [{ total_sales: 500 }] })
         .mockResolvedValueOnce({ rows: [{ total_pending: 0 }] })
         .mockResolvedValueOnce({ rows: [{ total_approved: 200 }] })
-        .mockResolvedValueOnce({ rows: [{ package_tier: 'PreMAX', count: 5, total: 500 }] })
-        .mockResolvedValueOnce({ rows: [{ id: 'tx-1', package_tier: 'PreMAX', amount: 34.99, currency: 'USD', status: 'completed', user_name: 'Alice' }] });
+        .mockResolvedValueOnce({ rows: [{ package_tier: 'PreMax', count: 5, total: 500 }] })
+        .mockResolvedValueOnce({ rows: [{ id: 'tx-1', package_tier: 'PreMax', amount: 34.99, currency: 'USD', status: 'completed', user_name: 'Alice' }] });
 
       const res = await request(createApp()).get('/api/admin/revenue');
 
@@ -133,6 +173,7 @@ describe('Admin routes', () => {
       expect(res.body).toEqual(fakeLog);
       expect(pool.query).toHaveBeenCalledWith(
         expect.stringContaining('LEFT JOIN users'),
+        [],
       );
     });
   });
@@ -150,7 +191,7 @@ describe('Admin routes', () => {
       expect(res.body).toEqual({ ...fakeVoucher, package_tier: null });
       expect(pool.query).toHaveBeenCalledWith(
         expect.stringContaining('INSERT INTO vouchers'),
-        ['TEST50', 60, 1, null, null, true, 2, 5, null, null, null]
+        ['TEST50', 60, 1, null, null, true, 2, 5, null, null, null, null]
       );
     });
 
@@ -165,17 +206,39 @@ describe('Admin routes', () => {
   });
 
   describe('GET /api/admin/vouchers', () => {
-    it('returns all vouchers', async () => {
+    it('returns the paginated envelope with derived status', async () => {
       const fakeVouchers = [
-        { id: 'v1', code: 'FREE60' },
-        { id: 'v2', code: 'PREMIUM' },
+        { id: 'v1', code: 'FREE60', status: 'Unused' },
+        { id: 'v2', code: 'PREMIUM', status: 'Active' },
       ];
-      (pool.query as any).mockResolvedValue({ rows: fakeVouchers });
+      // First call is the COUNT (needed for pagination), second is the page.
+      (pool.query as any)
+        .mockResolvedValueOnce({ rows: [{ n: 2 }] })
+        .mockResolvedValueOnce({ rows: fakeVouchers });
 
       const res = await request(createApp()).get('/api/admin/vouchers');
 
       expect(res.status).toBe(200);
-      expect(res.body).toEqual(fakeVouchers);
+      // Contract changed from a bare array to an envelope when server-side
+      // search/filter/sort/pagination was added.
+      expect(res.body).toEqual({
+        vouchers: fakeVouchers,
+        total: 2,
+        page: 1,
+        pageSize: 25,
+      });
+    });
+
+    it('honours page and pageSize in the response envelope', async () => {
+      (pool.query as any)
+        .mockResolvedValueOnce({ rows: [{ n: 120 }] })
+        .mockResolvedValueOnce({ rows: [] });
+
+      const res = await request(createApp()).get('/api/admin/vouchers?page=3&pageSize=10');
+
+      expect(res.body.page).toBe(3);
+      expect(res.body.pageSize).toBe(10);
+      expect(res.body.total).toBe(120);
     });
   });
 

@@ -321,15 +321,203 @@ describe('GET /api/radius/auth', () => {
     expect(pool.connect).not.toHaveBeenCalled();
   });
 
-  it('does not attempt to bind a device when the MAC is unusable', async () => {
+it('does not attempt to bind a device when the MAC is unusable', async () => {
     // The gateway sometimes sends a placeholder instead of a real MAC. Binding
     // must be skipped rather than writing a junk device row.
     stubRadius([], [VOUCHER_ROW]);
 
     const res = await request(createApp())
-      .get(`/api/radius/auth?mac=not-a-mac&username=${VOUCHER_CODE}`);
+      .get('/api/radius/auth?mac=not-a-mac&username=' + VOUCHER_CODE);
 
     expect(res.status).toBe(404);
     expect(pool.connect).not.toHaveBeenCalled();
+  });
+
+  // ───────────────────────────────────────────────────────────────────
+  // Data-quota enforcement. The gateway is told the cap via
+  // ChilliSpot-Max-Total-Octets, but if it ever ignores that attribute the
+  // client browses for free. The portal rejects as well so the cap holds
+  // regardless of gateway behaviour.
+  describe('data quota enforcement', () => {
+    const at = (used: number) => ({ ...SESSION_ROW, data_quota_bytes: 1024, data_used_bytes: used });
+
+    it('rejects a session that has burned through its allowance', async () => {
+      stubRadius([at(1024)]);
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      const res = await request(createApp())
+        .get('/api/radius/auth?mac=AA:BB:CC:DD:EE:FF&username=AA:BB:CC:DD:EE:FF');
+
+      // 403 => explicit reject, distinct from the 404 "no such session".
+      expect(res.status).toBe(403);
+      expect(res.body['control:Auth-Type']).toBe('Reject');
+    });
+
+    it('treats exactly reaching the quota as exhausted', async () => {
+      stubRadius([at(1024)]);
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      const res = await request(createApp())
+        .get('/api/radius/auth?mac=AA:BB:CC:DD:EE:FF&username=AA:BB:CC:DD:EE:FF');
+
+      expect(res.status).toBe(403);
+    });
+
+    it('still authorizes one byte under the quota', async () => {
+      stubRadius([at(1023)]);
+
+      const res = await request(createApp())
+        .get('/api/radius/auth?mac=AA:BB:CC:DD:EE:FF&username=AA:BB:CC:DD:EE:FF');
+
+      expect(res.status).toBe(200);
+      expect(res.body['control:Auth-Type']).toBe('Accept');
+    });
+
+    it('never rejects an uncapped session no matter how much it used', async () => {
+      stubRadius([{ ...at(999_999_999_999), is_uncapped: true }]);
+
+      const res = await request(createApp())
+        .get('/api/radius/auth?mac=AA:BB:CC:DD:EE:FF&username=AA:BB:CC:DD:EE:FF');
+
+      expect(res.status).toBe(200);
+      expect(res.body['control:Auth-Type']).toBe('Accept');
+      // Uncapped sessions must not advertise a cap to the gateway either.
+      expect(res.body['ChilliSpot-Max-Total-Octets']).toBeUndefined();
+    });
+
+    it('treats a zero quota as "no cap set", not "zero bytes allowed"', async () => {
+      stubRadius([{ ...at(5_000_000), data_quota_bytes: 0 }]);
+
+      const res = await request(createApp())
+        .get('/api/radius/auth?mac=AA:BB:CC:DD:EE:FF&username=AA:BB:CC:DD:EE:FF');
+
+      expect(res.status).toBe(200);
+    });
+
+it('rejects an over-quota device presenting its voucher code', async () => {
+      stubRadius([], [{ ...VOUCHER_ROW, data_used_bytes: 2048 }]);
+      stubBindingClient({ activeCount: 0, maxDevices: 2 });
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      const res = await request(createApp())
+        .get(`/api/radius/auth?mac=AA:BB:CC:DD:EE:0B&username=${VOUCHER_CODE}`);
+
+      expect(res.status).toBe(403);
+    });
+  });
+});
+
+describe('GET /api/gateway/quota', () => {
+  function stubQuota(rows: any[]) {
+    (pool.query as any).mockImplementation(async (sql: string) => {
+      if (String(sql).includes('voucher_devices') || String(sql).includes('WITH target AS')) {
+        return { rows };
+      }
+      throw new Error('unstubbed pool.query: ' + String(sql).slice(0, 70));
+    });
+  }
+
+  const row = (over: Partial<any> = {}) => ({
+    data_quota_bytes: 1024,
+    data_used_bytes: 0,
+    is_uncapped: false,
+    package_tier: 'PreLite',
+    ...over,
+  });
+
+  it('requires a mac', async () => {
+    const res = await request(createApp()).get('/api/gateway/quota');
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects a malformed mac without hitting the database', async () => {
+    const res = await request(createApp()).get('/api/gateway/quota?mac=not-a-mac');
+    expect(res.status).toBe(400);
+    expect(pool.query).not.toHaveBeenCalled();
+  });
+
+  it('reports found=false for a MAC with no session', async () => {
+    stubQuota([]);
+
+    const res = await request(createApp()).get('/api/gateway/quota?mac=AA:BB:CC:DD:EE:FF');
+
+    expect(res.status).toBe(200);
+    expect(res.body.found).toBe(false);
+    expect(res.body.exhausted).toBe(false);
+  });
+
+  it('reports exhausted=true once the allowance is used up', async () => {
+    stubQuota([row({ data_used_bytes: 1024 })]);
+
+    const res = await request(createApp()).get('/api/gateway/quota?mac=AA:BB:CC:DD:EE:FF');
+
+    expect(res.body.found).toBe(true);
+    expect(res.body.exhausted).toBe(true);
+    expect(res.body.usedBytes).toBe(1024);
+    expect(res.body.quotaBytes).toBe(1024);
+  });
+
+  it('reports exhausted=false while there is data left', async () => {
+    stubQuota([row({ data_used_bytes: 10 })]);
+
+    const res = await request(createApp()).get('/api/gateway/quota?mac=AA:BB:CC:DD:EE:FF');
+
+    expect(res.body.exhausted).toBe(false);
+  });
+
+  it('never marks an uncapped session exhausted', async () => {
+    stubQuota([row({ is_uncapped: true, data_quota_bytes: 0, data_used_bytes: 999_999 })]);
+
+    const res = await request(createApp()).get('/api/gateway/quota?mac=AA:BB:CC:DD:EE:FF');
+
+    expect(res.body.uncapped).toBe(true);
+    expect(res.body.exhausted).toBe(false);
+  });
+
+  it('accepts any common MAC spelling', async () => {
+    stubQuota([row()]);
+
+    for (const mac of ['AA:BB:CC:DD:EE:FF', 'aa-bb-cc-dd-ee-ff', 'aabbccddeeff']) {
+      const res = await request(createApp()).get('/api/gateway/quota?mac=' + mac);
+      expect(res.status).toBe(200);
+    }
+    const call = (pool.query as any).mock.calls[0];
+    expect(call[1][0]).toBe('AABBCCDDEEFF');
+  });
+
+  it('does not leak the voucher code to whoever knows the MAC', async () => {
+    stubQuota([row({ package_tier: 'PreLite' })]);
+
+    const res = await request(createApp()).get('/api/gateway/quota?mac=AA:BB:CC:DD:EE:FF');
+
+    // A voucher code is a bearer credential for the whole allowance, so it must
+    // never be echoed back by an endpoint reachable from the captive network.
+    expect(JSON.stringify(res.body)).not.toContain(VOUCHER_CODE);
+    expect(res.body.packageTier).toBe('PreLite');
+  });
+
+  it('resolves the redeeming device as well as later bound devices', async () => {
+    stubQuota([row()]);
+
+    await request(createApp()).get('/api/gateway/quota?mac=AA:BB:CC:DD:EE:FF');
+
+    const sql = String((pool.query as any).mock.calls[0][0]);
+    // The device that redeems is recorded on users.mac_address; a
+    // voucher_devices row only exists for devices bound later with the same
+    // code. Matching only voucher_devices reported found=false for the
+    // redeeming device -- i.e. the notice never reached the main customer.
+    expect(sql).toContain('UPPER(mac_address)');
+    expect(sql).toContain('voucher_devices');
+  });
+
+  it('ignores a device whose session has already expired', async () => {
+    stubQuota([row()]);
+
+    await request(createApp()).get('/api/gateway/quota?mac=AA:BB:CC:DD:EE:FF');
+
+    const sql = String((pool.query as any).mock.calls[0][0]);
+    // An expired session should fall back to the voucher form, not be told its
+    // data ran out.
+    expect(sql).toContain('session_expires_at > NOW()');
   });
 });
