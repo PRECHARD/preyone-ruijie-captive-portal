@@ -9,6 +9,7 @@ import { pool } from '../db/pool';
 import { buildRuijieSuccessUrl, WISPrSessionConfig } from '../utils/redirect';
 import { transformToWISPrProfile } from '../utils/wisprTransformer';
 import { sendPortalAccountCreated, sendPortalSignupConfirmation, sendPortalEmailVerification, sendPortalForgotPassword } from '../services/notificationService';
+import { listDevices, unbindDevice, getDeviceLimit, normalizeMac } from '../services/deviceBinding';
 import { setPreyoneCookie } from '../utils/ssoCookie';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'preyone-jwt-secret-change-in-production';
@@ -36,22 +37,41 @@ const signupValidators = [
   body('phone').trim().optional({ values: 'falsy' }),
   body('email').trim().optional({ values: 'falsy' }),
   body('voucherCode').trim().notEmpty().withMessage('Voucher code is required'),
-  body('acceptedTos').custom((value) => value === true).withMessage('You must accept the terms'),
+  body('acceptedTos').custom((value) => value === true || value === 'true').withMessage('You must accept the terms'),
   body('password').optional({ values: 'falsy' }).matches(STRONG_PASSWORD_RE).withMessage('Password must be at least 8 characters with uppercase, lowercase, number, and special character'),
 ];
 
 authRouter.post('/signup', signupLimiter, signupValidators, async (req: Request, res: Response) => {
+  const isForm = req.is('application/x-www-form-urlencoded') || req.is('multipart/form-data');
+
+  // Redirect back to the portal page preserving gateway params, with an error message
+  const formErrorRedirect = (msg: string) => {
+    const params = new URLSearchParams();
+    for (const [k, v] of Object.entries(req.query)) {
+      if (k !== 'error' && typeof v === 'string') params.set(k, v);
+    }
+    params.set('error', msg);
+    res.redirect(303, '/?' + params.toString());
+  };
+
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
-    res.status(422).json({ errors: errors.array() });
+    if (isForm) {
+      const msg = errors.array().map(e => e.msg).join('. ');
+      formErrorRedirect(msg);
+    } else {
+      res.status(422).json({ errors: errors.array() });
+    }
     return;
   }
 
-  const { fullName, phone, email, voucherCode, acceptedTos, password } = req.body as {
-    fullName: string; phone?: string; email?: string; voucherCode: string; acceptedTos: boolean; password?: string;
+  const { fullName, phone, email, voucherCode, password } = req.body as {
+    fullName: string; phone?: string; email?: string; voucherCode: string; password?: string;
   };
+  // Normalize acceptedTos — form submissions send string "true", JSON sends boolean true
+  const acceptedTos = req.body.acceptedTos === true || req.body.acceptedTos === 'true';
   const signupPhone = phone || 'N/A';
-  const signupEmail = email || '';
+  const signupEmail = email?.trim() || null;
   const macAddress = (req.query.client_mac as string) ?? (req.query.mac as string) ?? (req.query.clientMac as string) ?? (req.headers['x-client-mac'] as string) ?? null;
   const ipAddress  = (req.query.ip  as string) ?? req.ip ?? null;
   const nasip      = (req.query.nas_ip as string) ?? (req.query.nasip as string) ?? (req.query.wlanacname as string) ?? null;
@@ -66,24 +86,34 @@ authRouter.post('/signup', signupLimiter, signupValidators, async (req: Request,
     await client.query('BEGIN');
 
     const { rows } = await client.query<{
-      id: string; duration_min: number; max_uses: number; used_count: number; expires_at: string | null;
+      id: string; code: string; duration_min: number; max_uses: number; used_count: number; expires_at: string | null;
       data_limit_gb: number | null; is_uncapped: boolean; bandwidth_mbps_up: number; bandwidth_mbps_down: number;
       package_tier: string;
-    }>('SELECT id, duration_min, max_uses, used_count, expires_at, data_limit_gb, is_uncapped, bandwidth_mbps_up, bandwidth_mbps_down, package_tier FROM vouchers WHERE code = $1 FOR UPDATE', [voucherCode.toUpperCase()]);
+    // Match case-insensitively: Ruijie mints lowercase codes ('e7wj7w') while legacy
+    // Preyone codes are uppercase. The canonical stored casing is read back from
+    // the row and used downstream, because Ruijie's gateway must receive the exact
+    // code it issued.
+    }>('SELECT id, code, duration_min, max_uses, used_count, expires_at, data_limit_gb, is_uncapped, bandwidth_mbps_up, bandwidth_mbps_down, package_tier FROM vouchers WHERE UPPER(code) = $1 FOR UPDATE', [voucherCode.trim().toUpperCase()]);
 
     if (rows.length === 0) {
       await client.query('ROLLBACK');
+      if (isForm) { formErrorRedirect('Invalid Voucher code.'); return; }
       res.status(400).json({ error: 'Invalid Voucher code.' });
       return;
     }
     const v = rows[0];
+    // Authoritative, vendor-issued casing. Never re-case this before handing it
+    // to the Ruijie gateway.
+    const canonicalCode = v.code;
     if (v.used_count >= v.max_uses) {
       await client.query('ROLLBACK');
+      if (isForm) { formErrorRedirect('Voucher has already reached maximum allocations.'); return; }
       res.status(400).json({ error: 'Voucher has already reached maximum allocations.' });
       return;
     }
     if (v.expires_at && new Date(v.expires_at) < new Date()) {
       await client.query('ROLLBACK');
+      if (isForm) { formErrorRedirect('Voucher has expired.'); return; }
       res.status(400).json({ error: 'Voucher has expired.' });
       return;
     }
@@ -95,16 +125,25 @@ authRouter.post('/signup', signupLimiter, signupValidators, async (req: Request,
 
     const emailVerificationToken = password ? uuidv4() : null;
 
-    const { rows: userRows } = await client.query<{ id: string }>(
+    let { rows: userRows } = await client.query<{ id: string }>(
       `INSERT INTO users (full_name, phone, email, voucher_code, accepted_tos, mac_address, ip_address, session_token, session_expires_at, password_hash, email_verification_token)
        VALUES ($1, $2, $3, $4, $5, $6, $7::inet, $8, $9, $10, $11)
+       ON CONFLICT (email) WHERE email IS NOT NULL AND email != '' DO NOTHING
        RETURNING id`,
-      [fullName, signupPhone, signupEmail, voucherCode, acceptedTos, macAddress, ipAddress, sessionToken, sessionExpires, passwordHash, emailVerificationToken]
+      [fullName, signupPhone, signupEmail, canonicalCode, acceptedTos, macAddress, ipAddress, sessionToken, sessionExpires, passwordHash, emailVerificationToken]
     );
+    if (userRows.length === 0 && signupEmail) {
+      ({ rows: userRows } = await client.query<{ id: string }>(
+        `INSERT INTO users (full_name, phone, email, voucher_code, accepted_tos, mac_address, ip_address, session_token, session_expires_at, password_hash, email_verification_token)
+         VALUES ($1, $2, NULL, $3, $4, $5, $6::inet, $7, $8, $9, $10)
+         RETURNING id`,
+        [fullName, signupPhone, canonicalCode, acceptedTos, macAddress, ipAddress, sessionToken, sessionExpires, passwordHash, emailVerificationToken]
+      ));
+    }
 
     await client.query(
       `INSERT INTO voucher_redemptions (voucher_id, voucher_code, user_id, full_name, mac_address, ip_address) VALUES ($1, $2, $3, $4, $5, $6::inet)`,
-      [v.id, voucherCode.toUpperCase(), userRows[0].id, fullName, macAddress, ipAddress]
+      [v.id, canonicalCode, userRows[0].id, fullName, macAddress, ipAddress]
     );
 
     // Create WISPr profile for data tracking
@@ -136,7 +175,7 @@ authRouter.post('/signup', signupLimiter, signupValidators, async (req: Request,
 
     // Send confirmation email (non-blocking)
     if (signupEmail) {
-      sendPortalSignupConfirmation(signupEmail, fullName, voucherCode.toUpperCase());
+      sendPortalSignupConfirmation(signupEmail, fullName, canonicalCode);
     }
 
     // Send email verification if password was set (non-blocking)
@@ -152,7 +191,7 @@ authRouter.post('/signup', signupLimiter, signupValidators, async (req: Request,
       loginUrl: loginUrl || undefined,
       nasMac: nasMac || undefined,
       ssid: ssid || undefined,
-      voucherCode: voucherCode.toUpperCase(),
+      voucherCode: canonicalCode,
       packageData: {
         data_limit_gb: v.data_limit_gb,
         is_uncapped: v.is_uncapped,
@@ -162,28 +201,41 @@ authRouter.post('/signup', signupLimiter, signupValidators, async (req: Request,
       },
     };
 
+    // Direct gateway hand-off. The ext_login url/redirect must carry the
+    // ORIGINAL url the client was trying to reach (AGENTS.md gotcha #4), so
+    // buildRuijieSuccessUrl() owns this URL. Do not rebuild it by hand here and
+    // do not route it through success.html: that was tried, broke the captive
+    // portal, and was reverted (c826e8e -> 7657296).
     const ruijieSuccessUrl = buildRuijieSuccessUrl(req, redirectConfig);
-    res.json({
-      success: true,
-      sessionToken,
-      sessionExpiresAt: sessionExpires.toISOString(),
-      redirectUrl: ruijieSuccessUrl,
-      bandwidthMbpsUp: v.bandwidth_mbps_up,
-      bandwidthMbpsDown: v.bandwidth_mbps_down,
-      dataLimitGb: v.data_limit_gb,
-      isUncapped: v.is_uncapped,
-      durationMin: sessionDurationMin,
-      macAddress: macAddress,
-      ipAddress: ipAddress,
-      voucherCode: voucherCode.toUpperCase(),
-      packageTier: v.package_tier,
-      loginUrl: loginUrl,
-    });
+
+    // A plain form submission cannot read a JSON body, so it gets a 303. Both
+    // paths still land on the same ext_login URL.
+    if (isForm) {
+      res.redirect(303, ruijieSuccessUrl);
+    } else {
+      res.json({
+        success: true,
+        sessionToken,
+        sessionExpiresAt: sessionExpires.toISOString(),
+        redirectUrl: ruijieSuccessUrl,
+        bandwidthMbpsUp: v.bandwidth_mbps_up,
+        bandwidthMbpsDown: v.bandwidth_mbps_down,
+        dataLimitGb: v.data_limit_gb,
+        isUncapped: v.is_uncapped,
+        durationMin: sessionDurationMin,
+        macAddress: macAddress,
+        ipAddress: ipAddress,
+        voucherCode: canonicalCode,
+        packageTier: v.package_tier,
+        loginUrl: loginUrl,
+      });
+    }
   } catch (err) {
     if (client) {
       await client.query('ROLLBACK');
     }
     console.error('Signup error:', err);
+    if (isForm) { formErrorRedirect('Authentication failed.'); return; }
     res.status(500).json({ error: 'Authentication failed.' });
   } finally {
     if (client) {
@@ -302,11 +354,17 @@ authRouter.post('/register', signupLimiter, registerValidators, async (req: Requ
   const emailVerificationToken = uuidv4();
 
   try {
-    await pool.query(
+    const { rowCount } = await pool.query(
       `INSERT INTO users (full_name, phone, email, accepted_tos, password_hash, email_verification_token)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (email) WHERE email IS NOT NULL AND email != '' DO NOTHING`,
       [fullName, phone, email, true, passwordHash, emailVerificationToken]
     );
+
+    if (rowCount === 0) {
+      res.status(409).json({ error: 'An account with this email already exists. Please sign in instead.' });
+      return;
+    }
 
     // Send verification email (non-blocking)
     sendPortalAccountCreated(email, fullName, emailVerificationToken);
@@ -365,8 +423,7 @@ authRouter.post('/portal-login', loginLimiter, async (req: Request, res: Respons
       { expiresIn: '7d' }
     );
 
-    // Cross-subdomain SSO cookie (httpOnly). Portal tokens are distinct from
-    // admin tokens — enterprise /me will 401 them, which is the intended scope.
+    // Cross-subdomain SSO: share the portal session via the `.preyone.com` cookie.
     setPreyoneCookie(res, portalToken);
 
     res.json({
@@ -396,7 +453,7 @@ authRouter.get('/me', async (req: Request, res: Response) => {
     const token = authHeader.slice(7);
     let payload: any;
     try {
-      payload = jwt.verify(token, getJwtSecret());
+      payload = jwt.verify(token, getJwtSecret(), { algorithms: ['HS256'] });
     } catch {
       res.status(401).json({ error: 'Invalid or expired token.' });
       return;
@@ -428,7 +485,7 @@ authRouter.get('/portal-sessions', async (req: Request, res: Response) => {
     const token = authHeader.slice(7);
     let payload: any;
     try {
-      payload = jwt.verify(token, getJwtSecret());
+      payload = jwt.verify(token, getJwtSecret(), { algorithms: ['HS256'] });
     } catch {
       res.status(401).json({ error: 'Invalid or expired token.' });
       return;
@@ -439,7 +496,7 @@ authRouter.get('/portal-sessions', async (req: Request, res: Response) => {
               v.data_limit_gb, v.is_uncapped, v.bandwidth_mbps_up, v.bandwidth_mbps_down, v.package_tier,
               wp.data_used_bytes, wp.data_quota_bytes
        FROM users u
-       LEFT JOIN vouchers v ON UPPER(u.voucher_code) = v.code
+       LEFT JOIN vouchers v ON UPPER(u.voucher_code) = UPPER(v.code)
        LEFT JOIN wispr_profiles wp ON wp.user_id = u.id
        WHERE u.id = $1 AND u.session_expires_at > NOW()
        ORDER BY u.session_expires_at DESC`,
@@ -462,7 +519,7 @@ authRouter.get('/status', async (req: Request, res: Response) => {
               v.data_limit_gb, v.is_uncapped, p.tier_name AS package_tier
        FROM users u
        LEFT JOIN wispr_profiles wp ON wp.user_id = u.id
-       LEFT JOIN vouchers v ON UPPER(u.voucher_code) = v.code
+       LEFT JOIN vouchers v ON UPPER(u.voucher_code) = UPPER(v.code)
        LEFT JOIN packages p ON p.tier_name = v.package_tier
        WHERE u.session_token = $1`,
       [token]
@@ -495,7 +552,7 @@ authRouter.post('/send-verification', async (req: Request, res: Response) => {
     }
     const token = authHeader.slice(7);
     let payload: any;
-    try { payload = jwt.verify(token, getJwtSecret()); } catch { res.status(401).json({ error: 'Invalid token.' }); return; }
+    try { payload = jwt.verify(token, getJwtSecret(), { algorithms: ['HS256'] }); } catch { res.status(401).json({ error: 'Invalid token.' }); return; }
 
     const { rows } = await pool.query('SELECT id, full_name, email, email_verified FROM users WHERE id = $1', [payload.id]);
     if (rows.length === 0) { res.status(404).json({ error: 'User not found.' }); return; }
@@ -563,6 +620,57 @@ authRouter.post('/forgot-password', forgotLimiter, async (req: Request, res: Res
   }
 });
 
+// ── Request Password Reset (Brevo email, mobile + portal) ─────────────
+const requestResetLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  message: { error: 'Too many requests.' },
+});
+
+/**
+ * Request a password reset for a registered portal account. Accepts either an
+ * email or a phone number so the mobile login screen can offer the same link
+ * for both login identifiers. Sends the preyone.com-branded HTML reset email
+ * via Brevo SMTP. Always answers the same non-revealing message.
+ */
+authRouter.post('/request-password-reset', requestResetLimiter, async (req: Request, res: Response) => {
+  try {
+    const { email, phone } = req.body as { email?: string; phone?: string };
+    const identifier = (email || phone || '').trim();
+    if (!identifier) {
+      res.status(422).json({ error: 'Email or phone is required.' });
+      return;
+    }
+    const lookupField = email ? 'email' : 'phone';
+    const lookupValue = email ? email.trim() : phone!.trim();
+
+    const { rows } = await pool.query(
+      `SELECT id, full_name, email, password_hash FROM users WHERE ${lookupField} = $1`,
+      [lookupValue]
+    );
+    if (rows.length === 0 || !rows[0].password_hash) {
+      // Don't reveal whether the account exists
+      res.json({ message: 'If that account is registered, a reset link has been sent.' });
+      return;
+    }
+
+    const user = rows[0];
+    const resetToken = uuidv4();
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+
+    await pool.query(
+      'UPDATE users SET reset_password_token = $1, reset_password_expires_at = $2 WHERE id = $3',
+      [resetToken, expiresAt, user.id]
+    );
+
+    sendPortalForgotPassword(user.email, resetToken, user.full_name);
+    res.json({ message: 'If that account is registered, a reset link has been sent.' });
+  } catch (err) {
+    console.error('Request password reset error:', err);
+    res.status(500).json({ error: 'Failed to process request.' });
+  }
+});
+
 // ── Verify Reset Token ───────────────────────────────────────────────
 authRouter.get('/verify-reset-token', async (req: Request, res: Response) => {
   try {
@@ -622,7 +730,7 @@ authRouter.post('/change-password', async (req: Request, res: Response) => {
     const token = authHeader.slice(7);
     let payload: any;
     try {
-      payload = jwt.verify(token, getJwtSecret());
+      payload = jwt.verify(token, getJwtSecret(), { algorithms: ['HS256'] });
     } catch {
       res.status(401).json({ error: 'Invalid or expired token.' });
       return;
@@ -663,5 +771,98 @@ authRouter.post('/change-password', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('Change password error:', err);
     res.status(500).json({ error: 'Password change failed.' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// Device management for a redeemed voucher.
+//
+// One purchase can cover several devices. Devices attach themselves the first
+// time they authenticate with the code (see gatewayRouter /api/radius/auth), so
+// these endpoints are for *seeing* what is attached and freeing a slot when a
+// phone is lost or sold — without spending another max_uses allocation.
+//
+// Authenticated with the same opaque session token as /api/auth/status, never
+// with the voucher code: a code is shareable, a session token is not.
+async function resolveVoucherForSession(token: string) {
+  const { rows } = await pool.query(
+    `SELECT u.voucher_code, v.id AS voucher_id, v.package_tier, v.max_devices, v.expires_at
+     FROM users u
+     JOIN vouchers v ON UPPER(u.voucher_code) = UPPER(v.code)
+     WHERE u.session_token = $1`,
+    [token]
+  );
+  return rows[0] || null;
+}
+
+authRouter.get('/devices', async (req: Request, res: Response) => {
+  try {
+    const token = req.query.token as string;
+    if (!token) { res.status(400).json({ error: 'Missing token' }); return; }
+
+    const voucher = await resolveVoucherForSession(token);
+    if (!voucher) {
+      res.status(404).json({ error: 'No voucher found for this session.' });
+      return;
+    }
+
+    const devices = await listDevices(voucher.voucher_id);
+    const limit = await getDeviceLimit(voucher.package_tier, voucher.max_devices);
+    const active = devices.filter((d) => d.isActive);
+
+    res.json({
+      voucherCode: voucher.voucher_code,
+      deviceLimit: limit,
+      devicesActive: active.length,
+      slotsRemaining: Math.max(0, limit - active.length),
+      devices: devices.map((d) => ({
+        id: d.id,
+        macAddress: d.macAddress,
+        label: d.label,
+        isActive: d.isActive,
+        boundAt: d.boundAt,
+        lastSeenAt: d.lastSeenAt,
+      })),
+    });
+  } catch (err) {
+    console.error('Device list error:', err);
+    res.status(500).json({ error: 'Failed to fetch devices.' });
+  }
+});
+
+authRouter.delete('/devices', async (req: Request, res: Response) => {
+  try {
+    const token = req.query.token as string;
+    const mac = req.query.mac as string;
+    if (!token) { res.status(400).json({ error: 'Missing token' }); return; }
+    if (!normalizeMac(mac)) { res.status(400).json({ error: 'Invalid device address.' }); return; }
+
+    const voucher = await resolveVoucherForSession(token);
+    if (!voucher) {
+      res.status(404).json({ error: 'No voucher found for this session.' });
+      return;
+    }
+
+    // Scoped to the caller's own voucher, so one customer can never unbind
+    // another customer's device by guessing a MAC.
+    const removed = await unbindDevice(voucher.voucher_id, mac);
+    if (!removed) {
+      res.status(404).json({ error: 'Device not found on this voucher.' });
+      return;
+    }
+
+    const limit = await getDeviceLimit(voucher.package_tier, voucher.max_devices);
+    const remaining = await listDevices(voucher.voucher_id);
+    const active = remaining.filter((d) => d.isActive).length;
+
+    res.json({
+      removed: true,
+      deviceLimit: limit,
+      devicesActive: active,
+      slotsRemaining: Math.max(0, limit - active),
+    });
+  } catch (err) {
+    console.error('Device unbind error:', err);
+    res.status(500).json({ error: 'Failed to remove device.' });
   }
 });

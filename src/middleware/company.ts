@@ -46,27 +46,26 @@ export async function loadCompany(companyId: string | null | undefined, req: Req
  *
  * Unassigned accounts fall back to the singleton company rather than being
  * rejected. This mirrors loadCompany() and the /me session payload, and exists
- * because admin_users.portal_company_id is nullable and signup may not populate
- * it -- hard-failing here locked the entire POS module (every route past this
- * guard) behind a 403 for accounts that were otherwise valid and approved.
+ * because admin_users.portal_company_id is nullable and signup may not populate it --
+ * hard-failing here locked the entire POS module (every route past this guard)
+ * behind a 403 for accounts that were otherwise valid and approved.
  *
  * The fallback only applies while there is exactly one company to fall back to.
  * As soon as a second company exists, an unassigned account is denied instead of
  * being silently granted the first company's data.
  */
 export async function requireCompany(req: Request, res: Response, next: NextFunction): Promise<void> {
-  // The portal realm is keyed by admin_users.portal_company_id. company_id is a
-  // transit_companies FK: resolving it against the companies table can never
-  // match, which would 403 a valid account.
-  const portalCompanyId = req.adminUser?.portalCompanyId ?? null;
+  // The portal realm is keyed by admin_users.portal_company_id. company_id now
+  // points at transit_companies and must never be resolved against `companies`.
+  const portalCompanyId = (req.adminUser as { portalCompanyId?: string | null } | undefined)?.portalCompanyId ?? null;
   try {
     if (portalCompanyId) {
       const company = await loadCompany(portalCompanyId, req);
-      if (!company) {
-        res.status(403).json({ error: 'Company not found' });
+      if (company) {
+        next();
         return;
       }
-      next();
+      res.status(403).json({ error: 'Company not found' });
       return;
     }
 

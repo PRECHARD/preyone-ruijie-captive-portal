@@ -59,12 +59,12 @@ export function buildRuijieSuccessUrl(req: Request, config: WISPrSessionConfig):
     }
 
     u.searchParams.set('token', config.sessionToken);
-    u.searchParams.set('loginUrl', config.loginUrl || '');
-    u.searchParams.set('origUrl', config.originalUrl || '');
-    u.searchParams.set('nas_ip', config.nasip || '');
-    u.searchParams.set('nas_mac', config.nasMac || '');
-    u.searchParams.set('ssid', config.ssid || '');
-    u.searchParams.set('voucher', config.voucherCode || '');
+    if (config.loginUrl) u.searchParams.set('loginUrl', config.loginUrl);
+    if (config.originalUrl) u.searchParams.set('origUrl', config.originalUrl);
+    if (config.nasip) u.searchParams.set('nas_ip', config.nasip);
+    if (config.nasMac) u.searchParams.set('nas_mac', config.nasMac);
+    if (config.ssid) u.searchParams.set('ssid', config.ssid);
+    if (config.voucherCode) u.searchParams.set('voucher', config.voucherCode);
     if (config.macAddress) {
       u.searchParams.set('mac', config.macAddress);
       u.searchParams.set('client_mac', config.macAddress);
@@ -93,8 +93,6 @@ export function buildRuijieSuccessUrl(req: Request, config: WISPrSessionConfig):
   // Redirect directly to ext_login so MAC authorization happens on main navigation
   // (iOS CNA doesn't reliably execute JS-based background POSTs)
   // CSP formAction is now set to * so success.html's iframe POST also works.
-  // After ext_login auth, gateway redirects to success.html which shows session info
-  // and a "Start Browsing" button that goes to the original URL.
   if (config.loginUrl && config.macAddress) {
     const extLoginUrl = new URL(config.loginUrl);
     extLoginUrl.searchParams.set('client_mac', config.macAddress);
@@ -104,20 +102,10 @@ export function buildRuijieSuccessUrl(req: Request, config: WISPrSessionConfig):
     extLoginUrl.searchParams.set('ssid', config.ssid || '');
     extLoginUrl.searchParams.set('username', config.voucherCode || config.macAddress);
     extLoginUrl.searchParams.set('password', config.voucherCode || config.macAddress);
-
-    // Build the success.html URL with session params for post-auth landing
-    const successBase = new URL('/success.html', `${req.protocol}://${req.get('host')}`);
-    successBase.searchParams.set('token', config.sessionToken);
-    if (config.originalUrl) successBase.searchParams.set('origUrl', config.originalUrl);
-    if (config.nasip) successBase.searchParams.set('nas_ip', config.nasip);
-    if (config.nasMac) successBase.searchParams.set('nas_mac', config.nasMac);
-    if (config.ssid) successBase.searchParams.set('ssid', config.ssid);
-    if (config.voucherCode) successBase.searchParams.set('voucher', config.voucherCode);
-    successBase.searchParams.set('loginUrl', config.loginUrl);
-
-    // Gateway ext_login redirects to success.html after authorizing MAC
-    extLoginUrl.searchParams.set('url', successBase.toString());
-    extLoginUrl.searchParams.set('redirect', successBase.toString());
+    extLoginUrl.searchParams.set('url', originalUrl || 'http://preyone.com');
+    extLoginUrl.searchParams.set('redirect', originalUrl || 'http://preyone.com');
+    // WISPr requires next_url so the gateway knows where to send the client after auth
+    extLoginUrl.searchParams.set('next_url', originalUrl || 'http://preyone.com');
     return extLoginUrl.toString();
   }
 

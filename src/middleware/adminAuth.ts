@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { pool } from '../db/pool';
-import { loadPermissions } from './rbac';
+import { FIELD_STAFF_ROLES, loadPermissions } from './rbac';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'preyone-jwt-secret-change-in-production';
 let _jwtSecretWarned = false;
@@ -18,21 +18,11 @@ export interface AdminUser {
   email: string;
   role: string;
   fullName: string;
-  /**
-   * Realm fields are camelCase in memory and snake_case in SQL. The DB columns
-   * are admin_users.company_id (transit_companies) and portal_company_id
-   * (companies); these carry the same values under the naming the rest of the
-   * codebase reads them by.
-   */
-  /** Transit company (transit_companies). Scopes Transit Operations; NULL = platform ops. */
+  /** Transit company for the Transit Operations realm; null (Level 0) sees all. */
   companyId?: string | null;
-  /** Portal company (companies). Scopes POS/invoice/WiFi; NULL = resolved by fallback. */
+  /** Portal company for the POS/invoice/WiFi realm; null when unassigned. */
   portalCompanyId?: string | null;
-  /**
-   * Effective capability set (role + user + company grants). The admin console
-   * gates its entire navigation on this array, so it must be populated on every
-   * authenticated request, not only inside route handlers that guard themselves.
-   */
+  /** Effective permission codes resolved from role_permissions + user_permissions. */
   permissions?: string[];
 }
 
@@ -52,26 +42,25 @@ export async function requireAdminAuth(req: Request, res: Response, next: NextFu
   }
 
   try {
-    const decoded = jwt.verify(auth.slice(7), getJwtSecret()) as AdminUser;
-    // Re-read tenancy from the database on every request. Both realm columns are
-    // deliberately NOT taken from the token: a token minted before an
-    // assignment change (or before the two-realm split existed) would otherwise
-    // pin the account to a stale tenant for the whole 7-day lifetime.
-    // Permissions are resolved the same way -- from the current role and the
-    // transit company -- so a revoked grant takes effect immediately instead of
-    // persisting until the token expires.
+    const decoded = jwt.verify(auth.slice(7), getJwtSecret(), { algorithms: ['HS256'] }) as AdminUser;
+    // Check if user still exists and is approved (revoke deactivated users)
     const { rows } = await pool.query(
-      'SELECT id, role, approved, company_id, portal_company_id FROM admin_users WHERE id = $1',
+      'SELECT id, approved, role, company_id, portal_company_id FROM admin_users WHERE id = $1',
       [decoded.id]
     );
     if (rows.length === 0 || !rows[0].approved) {
       res.status(401).json({ error: 'Account deactivated or removed' });
       return;
     }
+    // Field staff must never use the web admin portal
+    if (FIELD_STAFF_ROLES.includes(rows[0].role)) {
+      res.status(403).json({ error: 'Field staff must use the Preyone Transit Mobile App.' });
+      return;
+    }
     const permissions = await loadPermissions(
       rows[0].role,
-      rows[0].id,
-      rows[0].company_id ?? null
+      decoded.id,
+      rows[0].company_id ?? null,
     );
     req.adminUser = {
       ...decoded,

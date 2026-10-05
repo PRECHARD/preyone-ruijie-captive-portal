@@ -27,9 +27,9 @@ export async function loadPermissions(
   userId?: string | null,
   companyId?: string | null,
 ): Promise<string[]> {
-  const params: unknown[] = [];
+  const params: any[] = [];
   const branches: string[] = [];
-  const push = (sql: (placeholder: string) => string, value: unknown): void => {
+  const push = (sql: (placeholder: string) => string, value: any): void => {
     if (value === undefined || value === null || value === '') return;
     params.push(value);
     branches.push(sql(`$${params.length}`));
@@ -42,7 +42,7 @@ export async function loadPermissions(
   );
   if (branches.length === 0) return [];
   const { rows } = await pool.query(branches.join(' UNION '), params);
-  return rows.map((r: { permission_code: string }) => r.permission_code);
+  return rows.map((r: any) => r.permission_code);
 }
 
 function hasAny(permissions: string[] | undefined, required: string[]): boolean {
@@ -68,8 +68,7 @@ export function requirePermission(...required: string[]) {
 /** Require ANY of the given permissions on a transit-API request (req.transit.user.permissions). */
 export function requireTransitPermission(...required: string[]) {
   return (req: Request, res: Response, next: NextFunction) => {
-    const perms = (req as unknown as { transit?: { user?: { permissions?: string[] } } }).transit?.user
-      ?.permissions;
+    const perms = (req as any).transit?.user?.permissions as string[] | undefined;
     if (!hasAny(perms, required)) {
       res.status(403).json({ error: 'Insufficient permissions' });
       return;
@@ -83,7 +82,7 @@ export function requireTransitPermission(...required: string[]) {
  * Returns the SQL fragment string to add to WHERE clauses, or null (no scope needed = Level 0).
  * Params are appended with correct $N indexing so callers can mix them freely.
  */
-export function scopeVoucherCondition(req: Request, params: unknown[]): string | null {
+export function scopeVoucherCondition(req: Request, params: any[]): string | null {
   const u = req.adminUser;
   if (!u) return null;
   if (u.role === 'Staff') {
@@ -98,11 +97,7 @@ export function scopeVoucherCondition(req: Request, params: unknown[]): string |
 }
 
 /** Same as scopeVoucherCondition but for queries on users that don't JOIN vouchers. */
-export function scopeUserVoucherCodeCondition(
-  req: Request,
-  params: unknown[],
-  alias: string,
-): string | null {
+export function scopeUserVoucherCodeCondition(req: Request, params: any[], alias: string): string | null {
   const u = req.adminUser;
   if (!u) return null;
   if (u.role === 'Staff') {

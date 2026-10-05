@@ -23,6 +23,34 @@ vi.mock('../src/middleware/adminAuth', () => ({
   requireRole: () => vi.fn((_req: any, _res: any, next: any) => next()),
 }));
 
+// Cash handover approval is gated by requirePermission(COMPANY_ADMIN). Left
+// unmocked it would run the real loader against the stub pool, find no granted
+// permissions and 403 every route before the handler is reached. Each test
+// declares the permissions its actor holds via mockPermissions.
+const { mockPermissions } = vi.hoisted(() => ({ mockPermissions: { current: [] as string[] } }));
+
+vi.mock('../src/middleware/rbac', () => ({
+  PERMISSIONS: new Proxy({}, { get: (_t, k) => String(k) }),
+  requirePermission: (...required: string[]) =>
+    vi.fn((_req: any, res: any, next: any) => {
+      if (required.length > 0 && !required.some((p) => mockPermissions.current.includes(p))) {
+        return res.status(403).json({ error: 'Insufficient permissions' });
+      }
+      next();
+    }),
+  requireTransitPermission: (...required: string[]) =>
+    vi.fn((_req: any, res: any, next: any) => {
+      if (required.length > 0 && !required.some((p) => mockPermissions.current.includes(p))) {
+        return res.status(403).json({ error: 'Insufficient permissions' });
+      }
+      next();
+    }),
+  loadPermissions: vi.fn(async () => mockPermissions.current),
+  scopeVoucherCondition: () => null,
+  scopeUserVoucherCodeCondition: () => null,
+  FIELD_STAFF_ROLES: [],
+}));
+
 import { pool } from '../src/db/pool';
 import { requireAdminAuth } from '../src/middleware/adminAuth';
 import { adminRouter } from '../src/routes/admin';
@@ -34,7 +62,10 @@ function createApp() {
   return app;
 }
 
-function mockAuth(user: { id: string; role: string; fullName: string; email?: string }) {
+function mockAuth(user: { id: string; role: string; fullName: string; email?: string }, permissions?: string[]) {
+  // Supervisors hold company.admin in production; Staff hold none. Tests can
+  // override the grant explicitly to exercise the 403 path.
+  mockPermissions.current = permissions ?? (user.role === 'Staff' ? [] : ['COMPANY_ADMIN']);
   (requireAdminAuth as any).mockImplementation((_req: any, _res: any, next: any) => {
     _req.adminUser = { id: user.id, email: user.email || `${user.role}@test`, role: user.role, fullName: user.fullName };
     next();
@@ -313,39 +344,42 @@ describe('Voucher approval routes', () => {
 
 describe('Restricted tier & bulk guards', () => {
   describe('POST /api/admin/vouchers — Staff + restricted tier', () => {
-    it('returns 403 with requiresApproval for PreMAX', async () => {
+    // Tier names are case-sensitive and must match packages.tier_name exactly
+    // ('PreMax', 'PreUltra', 'PreExecutive') or the restricted-tier guard below
+    // silently lets Staff sell them without approval.
+    it('returns 403 with requiresApproval for PreMax', async () => {
       mockAuth({ id: 'staff-1', role: 'Staff', fullName: 'Staff' });
       // Mock clock-in check - return a row so check passes
       mockPoolQuery.mockResolvedValueOnce({ rows: [{ id: 1 }] });
 
       const res = await request(createApp())
         .post('/api/admin/vouchers')
-        .send({ code: 'TEST123', packageTier: 'PreMAX', priceAmount: 34.99 });
+        .send({ code: 'TEST123', packageTier: 'PreMax', priceAmount: 34.99 });
 
       expect(res.status).toBe(403);
       expect(res.body.requiresApproval).toBe(true);
       expect(res.body.error).toContain('Restricted packages');
     });
 
-    it('returns 403 with requiresApproval for PreULTRA', async () => {
+    it('returns 403 with requiresApproval for PreUltra', async () => {
       mockAuth({ id: 'staff-1', role: 'Staff', fullName: 'Staff' });
       mockPoolQuery.mockResolvedValueOnce({ rows: [{ id: 1 }] });
 
       const res = await request(createApp())
         .post('/api/admin/vouchers')
-        .send({ code: 'TEST123', packageTier: 'PreULTRA' });
+        .send({ code: 'TEST123', packageTier: 'PreUltra' });
 
       expect(res.status).toBe(403);
       expect(res.body.requiresApproval).toBe(true);
     });
 
-    it('returns 403 with requiresApproval for PreEXECUTIVE', async () => {
+    it('returns 403 with requiresApproval for PreExecutive', async () => {
       mockAuth({ id: 'staff-1', role: 'Staff', fullName: 'Staff' });
       mockPoolQuery.mockResolvedValueOnce({ rows: [{ id: 1 }] });
 
       const res = await request(createApp())
         .post('/api/admin/vouchers')
-        .send({ code: 'TEST123', packageTier: 'PreEXECUTIVE' });
+        .send({ code: 'TEST123', packageTier: 'PreExecutive' });
 
       expect(res.status).toBe(403);
       expect(res.body.requiresApproval).toBe(true);

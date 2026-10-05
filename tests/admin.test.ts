@@ -11,7 +11,21 @@ vi.mock('../src/middleware/adminAuth', () => ({
   requireRole: () => vi.fn((_req: any, _res: any, next: any) => next()),
 }));
 
+// Most admin routes are gated by requirePermission(...). Unmocked, the real
+// loader queries the stub pool, grants nothing and 403s before the handler
+// runs. This suite's actor is a CEO, who holds every permission in production.
+vi.mock('../src/middleware/rbac', () => ({
+  PERMISSIONS: new Proxy({}, { get: (_t, k) => String(k) }),
+  requirePermission: () => vi.fn((_req: any, _res: any, next: any) => next()),
+  requireTransitPermission: () => vi.fn((_req: any, _res: any, next: any) => next()),
+  loadPermissions: vi.fn(async () => ['COMPANY_ADMIN', 'FINANCE_VIEW']),
+  scopeVoucherCondition: () => null,
+  scopeUserVoucherCodeCondition: () => null,
+  FIELD_STAFF_ROLES: [],
+}));
+
 import { pool } from '../src/db/pool';
+import { requireAdminAuth } from '../src/middleware/adminAuth';
 import { adminRouter } from '../src/routes/admin';
 
 function createApp() {
@@ -131,8 +145,11 @@ describe('Admin routes', () => {
 
       expect(res.status).toBe(200);
       expect(res.body).toEqual(fakeLog);
+      // The handler passes an explicit params array (populated by the voucher
+      // scope), so the assertion has to account for the second argument.
       expect(pool.query).toHaveBeenCalledWith(
         expect.stringContaining('LEFT JOIN users'),
+        expect.any(Array),
       );
     });
   });
@@ -148,10 +165,19 @@ describe('Admin routes', () => {
 
       expect(res.status).toBe(201);
       expect(res.body).toEqual({ ...fakeVoucher, package_tier: null });
-      expect(pool.query).toHaveBeenCalledWith(
-        expect.stringContaining('INSERT INTO vouchers'),
-        ['TEST50', 60, 1, null, null, true, 2, 5, null, null, null]
+      // The insert carries 12 columns: code, duration, max_uses, expires_at,
+      // data_limit, is_uncapped, bandwidth up/down, sold_by, price, tier,
+      // max_devices. Defaults come from the handler (60 min, uncapped, 2/5 Mbps).
+      // sold_by is null for a non-Staff sale with no price: the handler only
+      // attributes a seller when the voucher was actually paid for, which is
+      // what makes Staff's own-sales scoping sound.
+      const insertCall = (pool.query as any).mock.calls.find(
+        (c: any[]) => typeof c[0] === 'string' && c[0].includes('INSERT INTO vouchers')
       );
+      expect(insertCall).toBeDefined();
+      expect(insertCall[1]).toEqual([
+        'TEST50', 60, 1, null, null, true, 2, 5, null, null, null, null,
+      ]);
     });
 
     it('returns 422 when code is missing', async () => {
@@ -165,17 +191,43 @@ describe('Admin routes', () => {
   });
 
   describe('GET /api/admin/vouchers', () => {
-    it('returns all vouchers', async () => {
+    it('returns a paginated voucher list', async () => {
       const fakeVouchers = [
         { id: 'v1', code: 'FREE60' },
         { id: 'v2', code: 'PREMIUM' },
       ];
-      (pool.query as any).mockResolvedValue({ rows: fakeVouchers });
+      // First query is the total count (deliberately run without the LATERAL
+      // joins), second is the page of rows.
+      (pool.query as any)
+        .mockResolvedValueOnce({ rows: [{ n: 2 }] })
+        .mockResolvedValueOnce({ rows: fakeVouchers });
 
       const res = await request(createApp()).get('/api/admin/vouchers');
 
       expect(res.status).toBe(200);
-      expect(res.body).toEqual(fakeVouchers);
+      expect(res.body.vouchers).toEqual(fakeVouchers);
+      expect(res.body.total).toBe(2);
+      expect(res.body.page).toBe(1);
+      expect(res.body.pageSize).toBe(25);
+    });
+
+    it('narrows Staff to only the vouchers they sold', async () => {
+      (requireAdminAuth as any).mockImplementation((_req: any, _res: any, next: any) => {
+        _req.adminUser = { id: 'staff-1', email: 'staff@test', role: 'Staff', fullName: 'Staff' };
+        next();
+      });
+      (pool.query as any)
+        .mockResolvedValueOnce({ rows: [{ n: 0 }] })
+        .mockResolvedValueOnce({ rows: [] });
+
+      const res = await request(createApp()).get('/api/admin/vouchers');
+
+      expect(res.status).toBe(200);
+      const dataCall = (pool.query as any).mock.calls.find(
+        (c: any[]) => typeof c[0] === 'string' && c[0].includes('v.sold_by = $1')
+      );
+      expect(dataCall).toBeDefined();
+      expect(dataCall[1][0]).toBe('staff-1');
     });
   });
 

@@ -973,11 +973,16 @@ paymentsRouter.post('/pesepay/initiate', requireAdminAuth, async (req: Request, 
   // The tenant is NEVER taken from the request body. It is derived from the
   // authenticated account so a caller can only ever charge their own company.
   //
-  // The portal realm is keyed by admin_users.portal_company_id. company_id is a
-  // transit_companies FK and can never resolve against the companies table, so
-  // an unassigned account falls back to the singleton portal company -- the same
-  // backward-compatible rule loadCompany() and requireCompany() apply.
-  const sessionCompanyId = req.adminUser?.portalCompanyId ?? null;
+  // admin_users.company_id is nullable and historically points at
+  // transit_companies rather than companies, so it is only honoured when it
+  // actually resolves to a portal company; otherwise the singleton portal
+  // company is used. That mirrors loadCompany()'s existing backward-compatible
+  // fallback for unassigned accounts, and becomes strictly per-company the
+  // moment company_id is linked to `companies`.
+  const sessionCompanyId =
+    // Portal realm: keyed by admin_users.portal_company_id. company_id is a
+    // transit_companies FK and can never resolve against the companies table.
+    (req.adminUser as { portalCompanyId?: string | null } | undefined)?.portalCompanyId ?? null;
   const { rows: companyRows } = await pool.query(
     sessionCompanyId
       ? 'SELECT id FROM companies WHERE id = $1'

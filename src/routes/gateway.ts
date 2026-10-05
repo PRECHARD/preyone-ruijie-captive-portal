@@ -1,5 +1,55 @@
 import { Router, Request, Response } from 'express';
 import { pool } from '../db/pool';
+import { bindDevice, normalizeMac } from '../services/deviceBinding';
+
+/**
+ * Build the RADIUS reply attributes for an authorized session.
+ * Shared by the MAC branch (a device bound at redemption) and the voucher-code
+ * branch (a device binding itself with a code it already owns).
+ */
+function buildRadAttrs(row: any): Record<string, unknown> {
+  const now = Date.now();
+  const expiresAt = new Date(row.session_end || row.session_expires_at).getTime();
+  const sessionTimeout = Math.max(0, Math.floor((expiresAt - now) / 1000));
+
+  const radAttrs: Record<string, unknown> = {
+    'control:Auth-Type': 'Accept',
+    'Session-Timeout': String(sessionTimeout),
+    'Idle-Timeout': '1800',
+  };
+
+  if (row.bandwidth_up_kbps > 0) {
+    radAttrs['WISPr-Bandwidth-Max-Up'] = row.bandwidth_up_kbps;
+  }
+  if (row.bandwidth_down_kbps > 0) {
+    radAttrs['WISPr-Bandwidth-Max-Down'] = row.bandwidth_down_kbps;
+  }
+  if (!row.is_uncapped && row.data_quota_bytes > 0) {
+    radAttrs['ChilliSpot-Max-Total-Octets'] = row.data_quota_bytes;
+  }
+  return radAttrs;
+}
+
+/**
+ * Has this session burned through its data allowance?
+ *
+ * The gateway enforces the cap itself via ChilliSpot-Max-Total-Octets, but if
+ * it ever ignores that attribute the client browses for free. Rejecting here as
+ * well makes the cap authoritative regardless of gateway behaviour.
+ *
+ * `data_quota_bytes` is the total cap (it is what we hand the gateway as
+ * ChilliSpot-Max-Total-Octets), and `data_used_bytes` accumulates via RADIUS
+ * accounting, so exhaustion is `used >= quota`.
+ */
+function isOverQuota(row: any): boolean {
+  if (row.is_uncapped) return false;
+  const quota = Number(row.data_quota_bytes ?? 0);
+  const used = Number(row.data_used_bytes ?? 0);
+  // A quota of 0 means no cap was set, not a zero-byte allowance.
+  if (!Number.isFinite(quota) || quota <= 0) return false;
+  if (!Number.isFinite(used)) return false;
+  return used >= quota;
+}
 
 export const gatewayRouter = Router();
 
@@ -40,27 +90,93 @@ gatewayRouter.get('/api/radius/auth', async (req: Request, res: Response) => {
 
     if (rows.length > 0) {
       const row = rows[0];
-      const now = Date.now();
-      const expiresAt = new Date(row.session_end || row.session_expires_at).getTime();
-      const sessionTimeout = Math.max(0, Math.floor((expiresAt - now) / 1000));
 
-      const radAttrs: Record<string, unknown> = {
-        'control:Auth-Type': 'Accept',
-        'Session-Timeout': String(sessionTimeout),
-        'Idle-Timeout': '1800',
-      };
-
-      if (row.bandwidth_up_kbps > 0) {
-        radAttrs['WISPr-Bandwidth-Max-Up'] = row.bandwidth_up_kbps;
-      }
-      if (row.bandwidth_down_kbps > 0) {
-        radAttrs['WISPr-Bandwidth-Max-Down'] = row.bandwidth_down_kbps;
-      }
-      if (!row.is_uncapped && row.data_quota_bytes > 0) {
-        radAttrs['ChilliSpot-Max-Total-Octets'] = row.data_quota_bytes;
+      if (isOverQuota(row)) {
+        console.warn(
+          `RADIUS: rejected ${macClean} — data quota exhausted ` +
+          `(${row.data_used_bytes}/${row.data_quota_bytes} bytes)`
+        );
+        // 403 makes rlm_rest emit an explicit reject. 404 would mean "no such
+        // session" and would be indistinguishable from an unknown MAC.
+        return res.status(403).json({
+          error: 'data quota exhausted',
+          'control:Auth-Type': 'Reject',
+        });
       }
 
-      return res.json(radAttrs);
+      return res.json(buildRadAttrs(row));
+    }
+
+    // ── Voucher-code branch ──────────────────────────────────────────────
+    // The gateway sends User-Name = whatever the customer typed, and ext_login
+    // puts the voucher code there (see buildRuijieSuccessUrl). A MAC that has no
+    // session of its own can therefore present a code it already owns and bind
+    // itself, which is how one purchase covers a phone + laptop + TV without
+    // burning another max_uses allocation on a second redemption.
+    //
+    // Only codes that were genuinely redeemed and still have a live session are
+    // honoured, so this cannot mint access out of nothing.
+    // Match case-insensitively: Ruijie codes are lowercase, legacy Preyone
+    // codes uppercase. The stored v.code casing is what the gateway issued.
+    const rawCode = (rawUsername || '').trim().toUpperCase();
+    const deviceMac = normalizeMac(rawMac);
+    if (rawCode && deviceMac) {
+      const vres = await pool.query(
+        `SELECT v.id AS voucher_id, v.code, v.package_tier, v.max_devices,
+                u.id AS user_id, u.session_expires_at,
+                w.bandwidth_up_kbps, w.bandwidth_down_kbps, w.data_quota_bytes,
+                w.data_used_bytes, w.is_uncapped, w.session_end
+         FROM vouchers v
+         JOIN users u ON UPPER(u.voucher_code) = UPPER(v.code)
+         LEFT JOIN wispr_profiles w ON w.user_id = u.id
+         WHERE UPPER(v.code) = $1
+           AND (v.expires_at IS NULL OR v.expires_at > NOW())
+           AND u.session_expires_at > NOW()
+           AND u.session_token IS NOT NULL
+         ORDER BY u.created_at DESC
+         LIMIT 1`,
+        [rawCode]
+      );
+
+      if (vres.rows.length > 0) {
+        const v = vres.rows[0];
+        const outcome = await bindDevice({
+          voucherId: v.voucher_id,
+          voucherCode: v.code,
+          tierName: v.package_tier,
+          maxDevices: v.max_devices,
+          mac: deviceMac,
+          userId: v.user_id,
+        });
+
+        if (outcome.ok) {
+          if (isOverQuota(v)) {
+            console.warn(
+              `RADIUS: rejected ${deviceMac} for voucher ${v.code} — ` +
+              `data quota exhausted (${v.data_used_bytes}/${v.data_quota_bytes} bytes)`
+            );
+            return res.status(403).json({
+              error: 'data quota exhausted',
+              'control:Auth-Type': 'Reject',
+            });
+          }
+
+          console.log(
+            `RADIUS: device ${deviceMac} authorized via voucher ${v.code} ` +
+            `(${outcome.activeDevices}/${outcome.limit} devices${outcome.bound ? ', newly bound' : ''})`
+          );
+          return res.json(buildRadAttrs(v));
+        }
+
+        // Device limit reached — refuse rather than silently over-serve, since
+        // Ruijie's own user group enforces the same number gateway-side.
+        if (outcome.reason === 'device_limit_reached') {
+          console.warn(
+            `RADIUS: rejected ${deviceMac} for voucher ${v.code} — ` +
+            `device limit ${outcome.limit} reached`
+          );
+        }
+      }
     }
 
     return res.status(404).json({ error: 'session not found' });
@@ -122,6 +238,64 @@ gatewayRouter.get('/api/radius/acct', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('RADIUS acct error:', err);
     res.status(500).json({ error: 'internal error' });
+  }
+});
+
+// ── Client quota status (drives the "data finished" portal page) ──
+// GET /api/gateway/quota?mac=<client_mac>
+// Called by the captive portal when a device lands on /connect, so an
+// exhausted client sees why it lost access instead of a bare voucher form.
+//
+// Deliberately does NOT return the voucher code: this endpoint is reachable by
+// anyone on the captive network who knows a MAC, and a voucher code is a
+// bearer credential for the whole allowance.
+gatewayRouter.get('/api/gateway/quota', async (req: Request, res: Response) => {
+  const mac = normalizeMac(req.query.mac as string);
+  if (!mac) {
+    return res.status(400).json({ error: 'missing mac' });
+  }
+
+  try {
+    // A device can reach this endpoint two ways, so resolve both:
+    //   - the redemption device, recorded on users.mac_address
+    //   - a later device bound with the code it already owns (laptop, TV),
+    //     recorded in voucher_devices
+    // Only live sessions count; an expired one should see the voucher form.
+    const { rows } = await pool.query(
+      `WITH target AS (
+         SELECT id FROM users
+          WHERE REPLACE(REPLACE(UPPER(mac_address), ':', ''), '-', '') = $1
+         UNION
+         SELECT user_id FROM voucher_devices
+          WHERE mac_norm = $1 AND is_active = true
+       )
+       SELECT w.data_quota_bytes, w.data_used_bytes, w.is_uncapped, v.package_tier
+       FROM target t
+       JOIN users u ON u.id = t.id
+       LEFT JOIN wispr_profiles w ON w.user_id = u.id
+       LEFT JOIN vouchers v ON UPPER(v.code) = UPPER(u.voucher_code)
+       WHERE u.session_expires_at > NOW()
+       ORDER BY u.created_at DESC
+       LIMIT 1`,
+      [mac]
+    );
+
+    if (rows.length === 0) {
+      return res.json({ found: false, exhausted: false });
+    }
+
+    const row = rows[0];
+    return res.json({
+      found: true,
+      exhausted: isOverQuota(row),
+      uncapped: !!row.is_uncapped,
+      usedBytes: Number(row.data_used_bytes ?? 0),
+      quotaBytes: Number(row.data_quota_bytes ?? 0),
+      packageTier: row.package_tier ?? null,
+    });
+  } catch (err) {
+    console.error('quota status error:', err);
+    return res.status(500).json({ error: 'internal error' });
   }
 });
 

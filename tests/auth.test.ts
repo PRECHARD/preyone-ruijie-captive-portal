@@ -176,7 +176,7 @@ describe('POST /api/auth/register', () => {
   it('creates account for valid request', async () => {
     vi.mocked(pool.query)
       .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce(undefined);
+      .mockResolvedValueOnce({ rowCount: 1 });
 
     const res = await request(createApp())
       .post('/api/auth/register')
