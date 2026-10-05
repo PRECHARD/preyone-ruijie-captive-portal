@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import rateLimit from 'express-rate-limit';
 import { pool } from '../db/pool';
+import { loadPermissions } from '../middleware/rbac';
 import { sendAdminSignupConfirmation, sendAdminSignupNotification, sendPasswordResetEmail } from '../services/notificationService';
 import { setPreyoneCookie, clearPreyoneCookie, resolveAuthToken } from '../utils/ssoCookie';
 import crypto from 'crypto';
@@ -127,6 +128,10 @@ adminAuthRouter.post('/signup', authLimiter, async (req: Request, res: Response)
     // would let anyone self-assign into an arbitrary tenant's data. The same
     // rule as requireCompany applies -- only an unambiguous singleton is used,
     // otherwise the account stays unassigned until an existing admin assigns it.
+    //
+    // This is the PORTAL realm, so it is written to portal_company_id.
+    // company_id is a transit_companies FK and would reject a portal UUID;
+    // a signup must never claim a transit tenant.
     const { rows: companyRows } = await client.query(
       'SELECT id FROM companies ORDER BY created_at ASC LIMIT 2'
     );
@@ -135,7 +140,7 @@ adminAuthRouter.post('/signup', authLimiter, async (req: Request, res: Response)
     const passwordHash = await bcrypt.hash(password, 12);
     const emailVerificationToken = crypto.randomBytes(32).toString('hex');
     const { rows } = await client.query(
-      `INSERT INTO admin_users (full_name, email, phone, role, password_hash, approved, email_verification_token, company_id)
+      `INSERT INTO admin_users (full_name, email, phone, role, password_hash, approved, email_verification_token, portal_company_id)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id, full_name, email, role, approved`,
       [fullName, email, phone, normalizedRole, passwordHash, approved, emailVerificationToken, companyId]
     );
@@ -178,7 +183,7 @@ adminAuthRouter.post('/login', authLimiter, async (req: Request, res: Response) 
   }
 
   const { rows } = await pool.query(
-    'SELECT id, full_name, email, phone, role, approved, password_hash, company_id FROM admin_users WHERE email = $1',
+    'SELECT id, full_name, email, phone, role, approved, password_hash, company_id, portal_company_id FROM admin_users WHERE email = $1',
     [email.toLowerCase().trim()]
   );
 
@@ -204,7 +209,7 @@ adminAuthRouter.post('/login', authLimiter, async (req: Request, res: Response) 
   await recordAuditLog(user.id, user.full_name, 'login', 'admin_user', user.id);
 
   const token = jwt.sign(
-    { id: user.id, email: user.email, role: user.role, fullName: user.full_name, company_id: user.company_id ?? null },
+    { id: user.id, email: user.email, role: user.role, fullName: user.full_name, company_id: user.company_id ?? null, portal_company_id: user.portal_company_id ?? null },
     getJwtSecret(),
     { expiresIn: '7d' }
   );
@@ -215,7 +220,7 @@ adminAuthRouter.post('/login', authLimiter, async (req: Request, res: Response) 
 
   res.json({
     token,
-    user: { id: user.id, fullName: user.full_name, email: user.email, phone: user.phone, role: user.role, company_id: user.company_id ?? null },
+    user: { id: user.id, fullName: user.full_name, email: user.email, phone: user.phone, role: user.role, company_id: user.company_id ?? null, portal_company_id: user.portal_company_id ?? null },
   });
 });
 
@@ -236,7 +241,7 @@ adminAuthRouter.get('/me', async (req: Request, res: Response) => {
   try {
     const decoded = jwt.verify(token, getJwtSecret()) as any;
     const { rows } = await pool.query(
-      'SELECT id, full_name, email, phone, role, company_id, created_at, email_verified FROM admin_users WHERE id = $1',
+      'SELECT id, full_name, email, phone, role, company_id, portal_company_id, created_at, email_verified FROM admin_users WHERE id = $1',
       [decoded.id]
     );
     if (rows.length === 0) {
@@ -246,9 +251,10 @@ adminAuthRouter.get('/me', async (req: Request, res: Response) => {
     const user = rows[0];
 
     // Tenant + subscribed modules (SSO session payload)
-    // Company is either the user's assigned company or the singleton profile company.
-    let tenantId: string | null = user.company_id ?? null;
-    const companyId = user.company_id ?? null;
+    // Both are PORTAL concepts, so they resolve against portal_company_id.
+    // company_id is transit-owned and would never match a companies row.
+    let tenantId: string | null = user.portal_company_id ?? null;
+    const companyId = user.portal_company_id ?? null;
     if (!companyId) {
       const { rows: companyRows } = await pool.query('SELECT id FROM companies ORDER BY created_at LIMIT 1');
       tenantId = companyRows[0]?.id ?? null;
@@ -259,7 +265,15 @@ adminAuthRouter.get('/me', async (req: Request, res: Response) => {
     );
     const subscribed_modules = moduleRows.map((r) => r.module);
 
-    res.json({ ...user, tenant_id: tenantId, subscribed_modules });
+    // The admin console gates its navigation on this array, so /me must return
+    // the SAME effective set requireAdminAuth builds (role_permissions +
+    // user_permissions + company_permissions), keyed by company_id -- the
+    // transit company, which is what company_permissions is scoped to.
+    // Omitting it left the browser with an empty list, and its gate then hid
+    // every page except Overview for any admin whose company_id was set.
+    const permissions = await loadPermissions(user.role, user.id, user.company_id ?? null);
+
+    res.json({ ...user, tenant_id: tenantId, subscribed_modules, permissions });
   } catch {
     res.status(401).json({ error: 'Invalid token' });
   }

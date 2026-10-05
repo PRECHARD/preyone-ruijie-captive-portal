@@ -578,19 +578,60 @@ const SQL = `
   UPDATE companies SET slug = lower(name) WHERE slug IS NULL;
 
   -- ----- Phase 2 (tenancy): staff + company module subscriptions -----
-  ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS company_id UUID REFERENCES companies(id) ON DELETE SET NULL;
-  CREATE INDEX IF NOT EXISTS idx_admin_users_company ON admin_users (company_id);
-
-  -- Repair: an earlier migration created admin_users.company_id with a foreign
-  -- key to transit_companies(id) instead of companies(id). Because the column
-  -- is added with IF NOT EXISTS, the statement above is a permanent no-op once
-  -- the column exists, so the wrong constraint survived every later run.
   --
-  -- The two ID spaces do not overlap, so any value stored under the transit FK
-  -- is meaningless to the portal (companies) tables. The column is nullable and
-  -- every account is unassigned, so it is safe to drop and re-point: no data is
-  -- discarded. company_permissions keeps its transit_companies FK on purpose --
-  -- it stores real transit permissions (e.g. route.templates.manage).
+  -- Two disjoint realms hang off one admin account, and they must not share a
+  -- column. company_id is transit-owned (transit_companies) and is what the
+  -- Transit Operations console scopes on; portal_company_id is portal-owned
+  -- (companies) and is what POS/invoice/WiFi scope on. The ID spaces do not
+  -- overlap, so a value from one can never satisfy the other's foreign key --
+  -- which is exactly the property that stops one realm's tenant leaking into
+  -- the other. Both are nullable; NULL means "unassigned" and is resolved by the
+  -- singleton fallbacks in middleware/company.ts and GET /api/admin/auth/me.
+  ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS company_id UUID REFERENCES transit_companies(id);
+  CREATE INDEX IF NOT EXISTS idx_admin_users_company ON admin_users (company_id);
+  ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS portal_company_id UUID REFERENCES companies(id) ON DELETE SET NULL;
+  CREATE INDEX IF NOT EXISTS idx_admin_users_portal_company ON admin_users (portal_company_id);
+
+  -- ════════════════ RBAC Engine ════════════════
+  -- Must exist before company_permissions, which FKs to transit_companies above.
+  CREATE TABLE IF NOT EXISTS permissions (
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    code          TEXT UNIQUE NOT NULL,
+    description   TEXT NOT NULL DEFAULT ''
+  );
+
+  CREATE TABLE IF NOT EXISTS role_permissions (
+    role            TEXT NOT NULL,
+    permission_code TEXT NOT NULL REFERENCES permissions(code) ON DELETE CASCADE,
+    granted_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (role, permission_code)
+  );
+
+  -- user_permissions: polymorphic user_id (admin_users.id OR transit_users.id)
+  CREATE TABLE IF NOT EXISTS user_permissions (
+    user_id         UUID NOT NULL,
+    permission_code TEXT NOT NULL REFERENCES permissions(code) ON DELETE CASCADE,
+    granted_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (user_id, permission_code)
+  );
+
+  -- company_permissions: capability granted to EVERY user of a transit company,
+  -- regardless of role. Used to hand a narrow capability (e.g. route template
+  -- management) to a company whose owner is field staff, without inventing a
+  -- new role or widening the holder's role_permissions.
+  CREATE TABLE IF NOT EXISTS company_permissions (
+    company_id      UUID NOT NULL REFERENCES transit_companies(id) ON DELETE CASCADE,
+    permission_code TEXT NOT NULL REFERENCES permissions(code) ON DELETE CASCADE,
+    granted_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (company_id, permission_code)
+  );
+  CREATE INDEX IF NOT EXISTS idx_company_permissions_company ON company_permissions (company_id);
+
+  -- Repair: an earlier migration pointed company_id at companies(id) instead of
+  -- transit_companies(id). ADD COLUMN IF NOT EXISTS never re-points an existing
+  -- constraint, so the wrong one survives every later run. company_permissions
+  -- keeps its transit_companies FK on purpose -- it stores real transit
+  -- permissions (e.g. route.templates.manage) and is keyed by company_id.
   DO $$
   DECLARE
     targets text;
@@ -601,12 +642,14 @@ const SQL = `
        AND contype = 'f'
        AND conkey = ARRAY[(SELECT attnum FROM pg_attribute
                             WHERE attrelid = 'admin_users'::regclass AND attname = 'company_id')];
-    IF targets IS NOT NULL AND targets LIKE '%transit_companies%' THEN
-      RAISE NOTICE 'Re-pointing admin_users.company_id from transit_companies to companies';
+    IF targets IS NOT NULL
+       AND targets LIKE '%companies(id)%'
+       AND targets NOT LIKE '%transit_companies%' THEN
+      RAISE NOTICE 'Re-pointing admin_users.company_id back to transit_companies';
       ALTER TABLE admin_users DROP CONSTRAINT admin_users_company_id_fkey;
       ALTER TABLE admin_users
         ADD CONSTRAINT admin_users_company_id_fkey
-        FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE SET NULL;
+        FOREIGN KEY (company_id) REFERENCES transit_companies(id);
     END IF;
   END $$;
 
@@ -765,7 +808,64 @@ const SQL = `
     await client.query(`CREATE INDEX IF NOT EXISTS idx_pos_shifts_company_id ON pos_shifts (company_id, id)`);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_pos_documents_company_id ON pos_documents (company_id, id)`);
 
-    console.log('Migration complete. Packages seeded. POS tenant scoping applied.');
+    // ── RBAC seeds ──
+    // Idempotent: ON CONFLICT DO NOTHING, so re-running never revokes or
+    // duplicates a live grant. The catalog must be populated before
+    // role_permissions, which FKs to permissions(code).
+    const permissionCatalog: [string, string][] = [
+      ['system.developer', 'Unrestricted platform and system access'],
+      ['company.admin', 'Manage company settings, staff and devices'],
+      ['operations.manage', 'Manage routes, trips and shifts'],
+      ['finance.view', 'View financial reports'],
+      ['transit.field_app', 'Use the transit field handset app'],
+      ['route.templates.manage', 'Create and edit route templates'],
+    ];
+    for (const [code, description] of permissionCatalog) {
+      await client.query(
+        'INSERT INTO permissions (code, description) VALUES ($1, $2) ON CONFLICT (code) DO NOTHING',
+        [code, description]
+      );
+    }
+
+    const rolePermissionMap: [string, string][] = [
+      ['CEO', 'system.developer'],
+      ['CEO', 'company.admin'],
+      ['CEO', 'operations.manage'],
+      ['CEO', 'finance.view'],
+      ['SUPER_ADMIN', 'system.developer'],
+      ['SUPER_ADMIN', 'company.admin'],
+      ['SUPER_ADMIN', 'operations.manage'],
+      ['SUPER_ADMIN', 'finance.view'],
+      ['COMPANY_ADMIN', 'company.admin'],
+      ['COMPANY_ADMIN', 'operations.manage'],
+      ['COMPANY_ADMIN', 'finance.view'],
+      ['MANAGER', 'operations.manage'],
+      ['MANAGER', 'finance.view'],
+      // Route template management. Field roles (CONDUCTOR/DRIVER/TICKET_SELLER)
+      // are deliberately absent: a company whose owner is field staff receives
+      // this via company_permissions instead of a role-wide default.
+      ['SUPER_ADMIN', 'route.templates.manage'],
+      ['COMPANY_ADMIN', 'route.templates.manage'],
+      ['MANAGER', 'route.templates.manage'],
+      ['OPERATIONS', 'route.templates.manage'],
+      // Field roles: handset app only, so a conductor can run trips without
+      // seeing fares, staff or company settings.
+      ['CONDUCTOR', 'transit.field_app'],
+      ['DRIVER', 'transit.field_app'],
+      ['TICKET_SELLER', 'transit.field_app'],
+      ['DISPATCHER', 'operations.manage'],
+      ['DISPATCHER', 'transit.field_app'],
+      ['ACCOUNTANT', 'finance.view'],
+      ['ACCOUNTANT', 'transit.field_app'],
+    ];
+    for (const [role, permission] of rolePermissionMap) {
+      await client.query(
+        'INSERT INTO role_permissions (role, permission_code) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+        [role, permission]
+      );
+    }
+
+    console.log('Migration complete. Packages seeded. POS tenant scoping applied. RBAC seeded.');
   } finally {
     client.release();
     await pool.end();

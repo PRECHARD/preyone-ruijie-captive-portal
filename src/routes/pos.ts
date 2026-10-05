@@ -23,7 +23,8 @@ interface StaffUser {
   email: string;
   role: string;
   fullName: string;
-  company_id?: string | null;
+  /** Portal company (companies). POS is the portal realm; company_id is transit-owned. */
+  portal_company_id?: string | null;
 }
 
 const round2 = (n: number): number => Math.round((Number(n) || 0) * 100) / 100;
@@ -35,7 +36,7 @@ const str = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
 
 function signToken(user: StaffUser): string {
   return jwt.sign(
-    { id: user.id, email: user.email, role: user.role, fullName: user.fullName, company_id: user.company_id ?? null },
+    { id: user.id, email: user.email, role: user.role, fullName: user.fullName, portal_company_id: user.portal_company_id ?? null },
     JWT_SECRET,
     { expiresIn: '12h' }
   );
@@ -62,7 +63,7 @@ const operatorLimiter = rateLimit({
 
 router.get('/auth/operators', operatorLimiter, async (_req, res) => {
   const { rows } = await pool.query(
-    `SELECT id, full_name, email, role, company_id
+    `SELECT id, full_name, email, role, portal_company_id
        FROM admin_users
       WHERE pin_hash IS NOT NULL AND approved = TRUE
       ORDER BY full_name`
@@ -82,7 +83,7 @@ router.post('/auth/pin', pinLimiter, async (req, res) => {
     return;
   }
   const { rows } = await pool.query(
-    `SELECT id, email, full_name, role, pin_hash, company_id
+    `SELECT id, email, full_name, role, pin_hash, portal_company_id
        FROM admin_users
       WHERE id = $1 AND pin_hash IS NOT NULL AND approved = TRUE`,
     [userId]
@@ -94,7 +95,7 @@ router.post('/auth/pin', pinLimiter, async (req, res) => {
       email: row.email,
       role: row.role,
       fullName: row.full_name,
-      company_id: row.company_id ?? null,
+      portal_company_id: row.portal_company_id ?? null,
     };
     res.json({ token: signToken(user), user });
     return;
@@ -155,10 +156,9 @@ router.use(requireAdminAuth, requireStaff, requireCompany);
 
 // ── Tenant scoping ─────────────────────────────────────────────────
 //
-// requireCompany has populated req.company, and it is the ONLY trustworthy
-// source of the tenant: req.adminUser.company_id is nullable and its foreign
-// key points at transit_companies rather than companies, so it must never be
-// used to filter POS rows.
+// requireCompany has populated req.company from admin_users.portal_company_id,
+// and it is the ONLY trustworthy source of the tenant: admin_users.company_id
+// is transit-owned and would never resolve against the companies table.
 //
 // Every shift/document query below is constrained with company_id = this value,
 // which is what closes the cross-tenant IDOR: an admin of another company now
@@ -225,7 +225,9 @@ router.post('/devices/register', async (req, res) => {
        last_seen = NOW(),
        updated_at = NOW()
      RETURNING *`,
-    [deviceId, deviceType, name, branch, appVersion, serverUrl, (req.adminUser as { company_id?: string | null })?.company_id ?? null]
+    // Registered against the portal tenant resolved by requireCompany, never the
+    // raw admin column: a device must land in the same company as its shifts.
+    [deviceId, deviceType, name, branch, appVersion, serverUrl, req.company?.id ?? null]
   );
   res.json({ ok: true, device: rows[0] });
 });
@@ -559,9 +561,9 @@ router.get('/shifts', async (req, res) => {
   const { rows } = await pool.query(
     `SELECT s.*, u.full_name AS cashier_name
        FROM pos_shifts s LEFT JOIN admin_users u ON u.id = s.cashier_id
-      WHERE s.company_id = $${all ? 1 : 2} ${all ? '' : 'AND s.cashier_id = $3'}
+      WHERE s.company_id = $1 ${all ? '' : 'AND s.cashier_id = $2'}
       ORDER BY s.opened_at DESC LIMIT 100`,
-    all ? [tenantId(req)] : [tenantId(req), tenantId(req), req.adminUser!.id]
+    all ? [tenantId(req)] : [tenantId(req), req.adminUser!.id]
   );
   res.json(rows);
 });

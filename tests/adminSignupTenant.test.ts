@@ -36,6 +36,13 @@ function insertedCompanyId(): unknown {
   return call?.[1]?.[7];
 }
 
+function insertSql(): string {
+  const call = queryMock.mock.calls.find(
+    (c: any[]) => typeof c[0] === 'string' && c[0].includes('INSERT INTO admin_users')
+  );
+  return String(call?.[0] ?? '');
+}
+
 describe('admin signup tenant binding', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -78,6 +85,29 @@ describe('admin signup tenant binding', () => {
     const res = await signup();
     expect(res.status).toBe(201);
     expect(insertedCompanyId()).toBe(COMPANY);
+  });
+
+  it('writes the portal tenant to portal_company_id, never to company_id', async () => {
+    // The two realms have disjoint ID spaces and separate FKs. company_id points
+    // at transit_companies, so writing a portal UUID there is not merely wrong,
+    // it violates the foreign key and 500s the signup. Pin the column, not just
+    // the value.
+    const res = await signup();
+    expect(res.status).toBe(201);
+    const sql = insertSql();
+    expect(sql).toMatch(/portal_company_id/);
+    expect(sql).not.toMatch(/,\s*company_id\s*\)/);
+    expect(sql).not.toMatch(/email_verification_token,\s*company_id/);
+  });
+
+  it('never claims a transit tenant on signup', async () => {
+    // Signup resolves the PORTAL company only, so the column list must not
+    // mention company_id at all -- otherwise a new admin silently joins a bus
+    // operator's tenant.
+    await signup();
+    const columns = insertSql().slice(0, insertSql().toUpperCase().indexOf(') VALUES'));
+    expect(columns).toMatch(/portal_company_id/);
+    expect(columns).not.toMatch(/\bcompany_id\b/);
   });
 
   it('never lets the request body choose the company', async () => {
