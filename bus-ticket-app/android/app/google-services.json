@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "897616520068",
+    "project_id": "bus-ticket-app-aaecf",
+    "storage_bucket": "bus-ticket-app-aaecf.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:897616520068:android:b69de80293488dd85133d1",
+        "android_client_info": {
+          "package_name": "com.preyone.bus_ticket_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDVlaqVSaVs74lLHL09JR1IeOpan3N1a34"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
