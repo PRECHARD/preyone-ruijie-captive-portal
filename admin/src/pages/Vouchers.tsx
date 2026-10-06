@@ -635,16 +635,27 @@ export default function Vouchers() {
     link.click();
   };
 
-  const printVoucherJpeg = async (voucher: Voucher) => {
-    const { dataUrl, fileName } = await generateVoucherJpegBlob(voucher);
-    const w = window.open('', '_blank', 'width=900,height=560');
-    if (!w) { showToast({ title: 'Pop-up blocked', message: 'Allow pop-ups, then try printing again.', type: 'error' }); return; }
+  const printVoucherPdf = async (voucher: Voucher) => {
+    const c = document.createElement('canvas');
+    c.width = 800; c.height = 450;
+    await drawVoucherCanvas(c, voucher, user?.fullName || 'Preyone UltraNet');
+    const doc = new jsPDF('portrait', 'mm', 'a4');
+    const imgData = c.toDataURL('image/jpeg', 0.95);
+    const pw = 210, ph = 297, m = 10;
+    const iw = pw - m * 2, ih = iw * 450 / 800;
+    doc.addImage(imgData, 'JPEG', (pw - iw) / 2, (ph - ih) / 2, iw, ih);
+    const url = URL.createObjectURL(doc.output('blob'));
+    const w = window.open('', '_blank', 'width=900,height=600');
+    if (!w) {
+      URL.revokeObjectURL(url);
+      showToast({ title: 'Pop-up blocked', message: 'Allow pop-ups, then try printing again.', type: 'error' });
+      return;
+    }
     w.document.write(
-      '<!doctype html><html><head><title>' + fileName + '</title>' +
-      '<style>html,body{margin:0;padding:0;background:#fff;}img{display:block;max-width:100%;height:auto;margin:0 auto;}' +
-      '@media print{img{max-width:100%;}}</style>' +
-      '</head><body><img src="' + dataUrl + '" alt="Preyone UltraNet voucher" />' +
-      '<script>window.addEventListener("load",function(){setTimeout(function(){window.focus();window.print();},250);});</scr' + 'ipt>' +
+      '<!doctype html><html><head><title>Preyone Voucher</title>' +
+      '<style>html,body{margin:0;padding:0;height:100%;}embed{display:block;width:100%;height:100%;border:0;}</style>' +
+      '</head><body><embed src="' + url + '" type="application/pdf" />' +
+      '<script>window.addEventListener("load",function(){setTimeout(function(){window.focus();window.print();},500);});</scr' + 'ipt>' +
       '</body></html>'
     );
     w.document.close();
@@ -694,14 +705,15 @@ export default function Vouchers() {
     setTimeout(() => setVStatus(null), 2000);
   };
 
-  const shareWhatsApp = async () => {
-    if (!voucherCardData) return;
+  const shareWhatsApp = async (target?: Voucher) => {
+    const data = target || voucherCardData;
+    if (!data) return;
     const c = document.createElement('canvas');
     c.width = 800; c.height = 450;
-    await drawVoucherCanvas(c, voucherCardData, user?.fullName || 'Preyone UltraNet');
+    await drawVoucherCanvas(c, data, user?.fullName || 'Preyone UltraNet');
     const blob = await new Promise<Blob | null>(resolve => c.toBlob(resolve, 'image/jpeg', 0.95));
     if (!blob) return;
-    const file = new File([blob], 'voucher-' + (voucherCardData.code || 'PREYONE-XXXX').toLowerCase() + '.jpeg', { type: 'image/jpeg' });
+    const file = new File([blob], 'voucher-' + (data.code || 'PREYONE-XXXX').toLowerCase() + '.jpeg', { type: 'image/jpeg' });
     if (navigator.canShare?.({ files: [file] })) {
       try { await navigator.share({ files: [file], title: 'Preyone Voucher' }); return; } catch {}
     }
@@ -896,7 +908,7 @@ export default function Vouchers() {
       </div>
 
       <div className="voucher-card-actions-bar">
-            <button className="btn-action btn-action--wa" onClick={shareWhatsApp}>
+            <button className="btn-action btn-action--wa" onClick={() => shareWhatsApp()}>
               <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
               WhatsApp
             </button>
@@ -1285,32 +1297,8 @@ export default function Vouchers() {
 
               <section className="vd-section">
                 <h4 className="vd-section-title">Share &amp; Notify</h4>
-                <p className="vd-count">{v.phone ? `Holder phone: ${v.phone}` : 'No holder phone registered for this voucher.'}</p>
+                <p className="vd-count">Download, print, or send this voucher as an image.</p>
                 <div className="vd-actions">
-                  <button
-                    className="btn-action btn-action--wa"
-                    onClick={() =>
-                      window.open(
-                        'https://wa.me/' + ((v.phone || '').replace(/[^\d]/g, '')) + '?text=' + encodeURIComponent(waText),
-                        '_blank'
-                      )
-                    }
-                    disabled={!v.phone}
-                    title={v.phone ? 'Send the voucher to the holder on WhatsApp' : 'Add a holder phone to send on WhatsApp'}
-                  >
-                    WhatsApp → holder
-                  </button>
-                  <button
-                    className="btn-action btn-action--sms"
-                    onClick={() => window.open('sms:' + (v.phone || '') + '?body=' + encodeURIComponent(waText), '_self')}
-                    disabled={!v.phone}
-                    title="SMS the voucher to the holder"
-                  >
-                    SMS → holder
-                  </button>
-                  <button className="btn-sm" onClick={() => copyCode(v.code)}>
-                    Copy code
-                  </button>
                   <button className="btn-sm" onClick={() => copyCode(waText)}>
                     Copy All
                   </button>
@@ -1318,11 +1306,11 @@ export default function Vouchers() {
                     <svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10 3v12M5 10l5 5 5-5" /><path d="M3 16v1a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-1" /></svg>
                     Download JPEG
                   </button>
-                  <button className="btn-action btn-action--print" onClick={() => printVoucherJpeg(v)}>
+                  <button className="btn-action btn-action--print" onClick={() => printVoucherPdf(v)}>
                     <svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 4h12v12H4z" /><path d="M7 10h6M10 7v6" /></svg>
                     Print
                   </button>
-                  <button className="btn-action btn-action--wa" onClick={() => window.open('https://wa.me/?text=' + encodeURIComponent(waText), '_blank')}>
+                  <button className="btn-action btn-action--wa" onClick={() => shareWhatsApp(v)}>
                     <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
                     Send via WhatsApp
                   </button>
