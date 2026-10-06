@@ -141,7 +141,7 @@ export default function Vouchers() {
 
   useEffect(() => {
     api.get<Package[]>('/packages').then(setPackages).catch(() => {});
-    api.get<Voucher[]>('/vouchers').then(setVouchers).catch(() => {});
+    api.get<{ vouchers: Voucher[] }>('/vouchers').then(data => setVouchers(data.vouchers)).catch(() => {});
     if (isMgmt) {
       api.get<ApprovalRequest[]>('/vouchers/pending-approvals').then(setPendingApprovals).catch(() => {});
     }
@@ -268,7 +268,7 @@ export default function Vouchers() {
       setVUses(1);
       setVPayMethod('Cash');
       setVPayRef('');
-      api.get<Voucher[]>('/vouchers').then(setVouchers).catch(() => {});
+      api.get<{ vouchers: Voucher[] }>('/vouchers').then(data => setVouchers(data.vouchers)).catch(() => {});
       showToast({ title: 'Voucher Created', message: `"${data.code}" created successfully`, type: 'success' });
       playVoucherSound();
     } catch (err: any) {
@@ -319,7 +319,7 @@ export default function Vouchers() {
       });
       setBulkStatus({ type: 'success', msg: data.message });
       setBulkResults(data.vouchers);
-      api.get<Voucher[]>('/vouchers').then(setVouchers).catch(() => {});
+      api.get<{ vouchers: Voucher[] }>('/vouchers').then(data => setVouchers(data.vouchers)).catch(() => {});
       showToast({ title: 'Bulk Vouchers', message: data.message, type: 'success' });
       playVoucherSound();
     } catch (err: any) {
@@ -355,7 +355,7 @@ export default function Vouchers() {
       const data = await api.post<any>(`/vouchers/approvals/${id}/approve`);
       setPendingApprovals(prev => prev.filter(a => a.id !== id));
       setVStatus({ type: 'success', msg: data.message || 'Approved' });
-      api.get<Voucher[]>('/vouchers').then(setVouchers).catch(() => {});
+      api.get<{ vouchers: Voucher[] }>('/vouchers').then(data => setVouchers(data.vouchers)).catch(() => {});
       showToast({ title: 'Approved', message: data.message || 'Voucher request approved', type: 'success' });
       playAlertSound();
     } catch (err: any) {
@@ -391,7 +391,7 @@ export default function Vouchers() {
         type: 'success',
       });
       setDetailVoucher(prev => (prev ? { ...prev, bound_macs: [], device_count: 0 } : prev));
-      api.get<Voucher[]>('/vouchers').then(setVouchers).catch(() => {});
+      api.get<{ vouchers: Voucher[] }>('/vouchers').then(data => setVouchers(data.vouchers)).catch(() => {});
     } catch (err: any) {
       showToast({ title: 'Could not release bindings', message: err.message || 'Please try again.', type: 'error' });
     } finally {
