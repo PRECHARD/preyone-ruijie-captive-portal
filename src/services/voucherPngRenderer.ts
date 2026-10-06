@@ -39,7 +39,7 @@ export async function drawVoucherPng(data: VoucherData): Promise<Buffer> {
   const W = 800, H = 450;
   const canvas = createCanvas(W, H);
   const ctx = canvas.getContext('2d');
-  const code = data.code;
+  const code = (data.code || '').toLowerCase();
   const tierText = data.packageTier;
   const priceText = data.priceAmount ? '$' + data.priceAmount.toFixed(2) : '';
   const durShort = data.durShort;

@@ -24,7 +24,7 @@
   }
 
   window.drawVoucherCanvas = async function (c, data, issuedByName) {
-    var code = data.code || 'PREYONE-XXXX';
+    var code = (data.code || 'PREYONE-XXXX').toLowerCase();
     voucherCode = code;
     var tierText = data.package_tier || 'Custom';
     var priceText = data.price_amount ? '$' + parseFloat(data.price_amount).toFixed(2) : '';
@@ -213,7 +213,7 @@
     var c = document.createElement('canvas');
     await window.drawVoucherCanvas(c, data, 'Preyone Enterprises');
     var link = document.createElement('a');
-    link.download = 'preyone-voucher-' + data.code + '.png';
+    link.download = 'preyone-voucher-' + (data.code || '').toLowerCase() + '.png';
     link.href = c.toDataURL('image/png');
     link.click();
   };

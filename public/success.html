@@ -320,7 +320,7 @@
   <script>
     document.addEventListener('DOMContentLoaded', function () {
       var params = new URLSearchParams(location.search);
-      var code = params.get('voucher');
+      var code = (params.get('voucher') || '').toLowerCase();
       var sessionToken = params.get('token');
       var dataLimitGb = params.get('dataLimit') ? parseFloat(params.get('dataLimit')) : null;
       var isUncapped = params.get('uncapped') === 'true';
