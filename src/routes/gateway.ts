@@ -299,6 +299,30 @@ gatewayRouter.get('/api/gateway/quota', async (req: Request, res: Response) => {
   }
 });
 
+// ── End-user device beacon (device-model extraction) ───────────────
+// The captive-portal page reports its browser User-Agent after a session is
+// live. We only record it onto an ACTIVE session for that MAC so a caller
+// cannot pollute arbitrary rows; the admin SPA parses it with ua-parser-js.
+// GET /report-ua?mac=<client_mac>&ua=<urlencoded User-Agent>
+gatewayRouter.get('/report-ua', async (req: Request, res: Response) => {
+  const mac = (req.query.mac as string | undefined)?.trim().toUpperCase();
+  const ua = (req.query.ua as string | undefined)?.trim();
+  if (!mac || !ua || ua.length > 1024) {
+    res.set('Content-Type', 'text/plain');
+    res.status(400).send('bad request');
+    return;
+  }
+  try {
+    await pool.query(
+      `UPDATE users SET user_agent = $1
+       WHERE UPPER(mac_address) = $2 AND session_expires_at > NOW()`,
+      [ua, mac]
+    );
+  } catch { /* non-critical */ }
+  res.set('Content-Type', 'text/plain');
+  res.send('OK');
+});
+
 // ── Gateway health check ──
 // The EG105G-P sends this every ~2 minutes to verify the auth server is alive
 // GET /ping/?gw_sn=<serial>&gw_id=<mac>&dev_model=<model>&dev_softversion=<fw>&sys_uptime=<seconds>

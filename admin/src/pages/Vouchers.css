@@ -511,6 +511,14 @@
   background: rgba(37, 211, 102, 0.05);
 }
 
+.btn-action--sms {
+  color: #38bdf8;
+}
+.btn-action--sms:hover {
+  border-color: #38bdf8;
+  background: rgba(56, 189, 248, 0.05);
+}
+
 .btn-action--copy {
   color: var(--cyan);
 }

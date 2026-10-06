@@ -1249,13 +1249,35 @@ export default function Vouchers() {
               </section>
 
               <section className="vd-section">
-                <h4 className="vd-section-title">Share</h4>
+                <h4 className="vd-section-title">Share &amp; Notify</h4>
+                <p className="vd-count">{v.phone ? `Holder phone: ${v.phone}` : 'No holder phone registered for this voucher.'}</p>
                 <div className="vd-actions">
-                  <button className="btn-action btn-action--wa" onClick={() => window.open('https://wa.me/?text=' + encodeURIComponent(waText), '_blank')}>
-                    Send via WhatsApp
+                  <button
+                    className="btn-action btn-action--wa"
+                    onClick={() =>
+                      window.open(
+                        'https://wa.me/' + ((v.phone || '').replace(/[^\d]/g, '')) + '?text=' + encodeURIComponent(waText),
+                        '_blank'
+                      )
+                    }
+                    disabled={!v.phone}
+                    title={v.phone ? 'Send the voucher to the holder on WhatsApp' : 'Add a holder phone to send on WhatsApp'}
+                  >
+                    WhatsApp → holder
+                  </button>
+                  <button
+                    className="btn-action btn-action--sms"
+                    onClick={() => window.open('sms:' + (v.phone || '') + '?body=' + encodeURIComponent(waText), '_self')}
+                    disabled={!v.phone}
+                    title="SMS the voucher to the holder"
+                  >
+                    SMS → holder
                   </button>
                   <button className="btn-sm" onClick={() => copyCode(v.code)}>
                     Copy code
+                  </button>
+                  <button className="btn-sm" onClick={() => copyCode(waText)}>
+                    Copy share text
                   </button>
                 </div>
               </section>

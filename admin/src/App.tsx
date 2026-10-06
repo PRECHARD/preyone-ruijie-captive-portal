@@ -2,8 +2,9 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAuth } from './context/AuthContext';
 import Layout from './components/Layout';
 import Login from './pages/Login';
-import Dashboard from './pages/Dashboard';
-import CompanyDashboard from './pages/CompanyDashboard';
+import WifiDashboard from './pages/WifiDashboard';
+import TransitOperationsDashboard from './pages/TransitOperationsDashboard';
+import PosDashboard from './pages/PosDashboard';
 import Vouchers from './pages/Vouchers';
 import Users from './pages/Users';
 import Sessions from './pages/Sessions';
@@ -226,11 +227,14 @@ export default function App() {
 
   const safeSection = sectionAllowed(user, section) ? section : 'overview';
   if (safeSection !== section) setSection('overview');
-  const isCompany = !!user.companyId;
 
   return (
     <Layout activeSection={safeSection} onNavigate={go} workspace={workspace} onWorkspaceChange={changeWorkspace}>
-      {safeSection === 'overview' && (isCompany ? <CompanyDashboard onNavigate={setSection} /> : <Dashboard onNavigate={setSection} />)}
+      {safeSection === 'overview' && (
+        workspace === 'transit' ? <TransitOperationsDashboard onNavigate={setSection} />
+        : workspace === 'pos' ? <PosDashboard onNavigate={setSection} />
+        : <WifiDashboard onNavigate={setSection} />
+      )}
       {safeSection === 'vouchers' && <Vouchers />}
       {safeSection === 'users' && <Users />}
       {safeSection === 'sessions' && <Sessions />}

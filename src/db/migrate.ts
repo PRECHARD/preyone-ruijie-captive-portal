@@ -44,6 +44,9 @@ const SQL = `
   ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verification_token TEXT;
   ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_password_token TEXT;
   ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_password_expires_at TIMESTAMPTZ;
+  -- Client browser descriptor reported by the captive-portal UA beacon; feeds
+  -- the WiFi dashboard's device-model extraction (parsed client-side).
+  ALTER TABLE users ADD COLUMN IF NOT EXISTS user_agent TEXT;
 
   CREATE INDEX IF NOT EXISTS idx_users_voucher_code  ON users (voucher_code);
   CREATE INDEX IF NOT EXISTS idx_users_session_token ON users (session_token);

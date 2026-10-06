@@ -680,6 +680,32 @@ router.get('/documents/:id', async (req, res) => {
   res.json({ ...doc.rows[0], items: items.rows, payments: pays.rows, customer: customer.rows[0] || null });
 });
 
+// One-click quote → invoice conversion. Only a non-voided quotation owned by
+// this tenant can be converted; the doc_number is re-issued from the shared
+// sequence so the UNIQUE constraint keeps holding.
+router.post('/documents/:id/convert-to-invoice', async (req, res) => {
+  const doc = await pool.query(
+    `SELECT id, doc_type, status FROM pos_documents
+      WHERE id = $1 AND company_id = $2 AND doc_type = 'quotation' AND status <> 'void'`,
+    [req.params.id, tenantId(req)]
+  );
+  if (doc.rows.length === 0) {
+    res.status(404).json({ error: 'Quotation not found' });
+    return;
+  }
+  const seq = await pool.query(`SELECT nextval('pos_doc_number_seq') AS v`);
+  const docNumber = `INV-${String(seq.rows[0].v).padStart(4, '0')}`;
+  const updated = await pool.query(
+    `UPDATE pos_documents
+        SET doc_type = 'invoice',
+            doc_number = $1,
+            status = CASE WHEN status IN ('sent','draft') THEN 'unpaid' ELSE status END
+      WHERE id = $2 RETURNING *`,
+    [docNumber, req.params.id]
+  );
+  res.json(updated.rows[0]);
+});
+
 // Atomic checkout: creates document + items + payments, decrements stock
 router.post('/checkout', async (req, res) => {
   const me = req.adminUser!;
@@ -939,6 +965,138 @@ router.post('/documents/:id/void', requireRole(...MANAGER_ROLES), async (req, re
     throw e;
   } finally {
     client.release();
+  }
+});
+
+// ── POS sector dashboard ───────────────────────────────────────────
+// Real-time till counters, best sellers, low-stock alerts, cashier
+// performance and the invoice/quotation ledger for THIS tenant only.
+router.get('/dashboard', async (req, res) => {
+  const cid = tenantId(req);
+  try {
+    const [tillRes, profitRes, methodRes, sellerRes, stockRes, staffRes, ledgerRes, overdueRes, recentRes, shiftRes] =
+      await Promise.all([
+        pool.query(
+          `SELECT COUNT(*)::int AS docs,
+                  COALESCE(SUM(d.total),0)::numeric AS gross,
+                  COALESCE(SUM(d.amount_paid),0)::numeric AS collected,
+                  COALESCE(SUM(d.total - d.subtotal),0)::numeric AS vat
+             FROM pos_documents d
+            WHERE d.company_id = $1 AND d.doc_type IN ('sale','invoice') AND d.status <> 'void'
+              AND d.created_at >= date_trunc('day', NOW())`,
+          [cid]
+        ),
+        pool.query(
+          `SELECT COALESCE(SUM(i.line_total - i.qty * COALESCE(p.cost_price,0)),0)::numeric AS profit
+             FROM pos_document_items i
+             JOIN pos_documents d ON d.id = i.document_id
+             LEFT JOIN pos_products p ON p.id = i.product_id
+            WHERE d.company_id = $1 AND d.doc_type IN ('sale','invoice') AND d.status <> 'void'
+              AND d.created_at >= date_trunc('day', NOW())`,
+          [cid]
+        ),
+        pool.query(
+          `SELECT p.method, COUNT(*)::int AS count, COALESCE(SUM(p.amount),0)::numeric AS total
+             FROM pos_document_payments p
+             JOIN pos_documents d ON d.id = p.document_id
+            WHERE d.company_id = $1 AND d.status <> 'void' AND p.paid_at >= date_trunc('day', NOW())
+            GROUP BY p.method ORDER BY total DESC`,
+          [cid]
+        ),
+        pool.query(
+          `SELECT i.description, COALESCE(SUM(i.qty),0)::numeric AS qty_sold,
+                  COALESCE(SUM(i.line_total),0)::numeric AS revenue
+             FROM pos_document_items i
+             JOIN pos_documents d ON d.id = i.document_id
+            WHERE d.company_id = $1 AND d.status <> 'void'
+            GROUP BY i.description ORDER BY revenue DESC LIMIT 10`,
+          [cid]
+        ),
+        pool.query(
+          `SELECT id, name, stock_qty, low_stock_threshold
+             FROM pos_products
+            WHERE active = TRUE AND track_stock = TRUE AND stock_qty <= low_stock_threshold
+            ORDER BY stock_qty ASC LIMIT 30`
+        ),
+        pool.query(
+          `SELECT u.full_name AS cashier, COUNT(*)::int AS count, COALESCE(SUM(d.total),0)::numeric AS gross
+             FROM pos_documents d
+             LEFT JOIN admin_users u ON u.id = d.cashier_id
+            WHERE d.company_id = $1 AND d.status <> 'void' AND d.created_at >= date_trunc('day', NOW())
+            GROUP BY u.full_name ORDER BY gross DESC LIMIT 20`,
+          [cid]
+        ),
+        pool.query(
+          `SELECT d.doc_type, d.status, COUNT(*)::int AS count,
+                  COALESCE(SUM(d.total),0)::numeric AS amount,
+                  COALESCE(SUM(d.total - d.amount_paid),0)::numeric AS outstanding
+             FROM pos_documents d
+            WHERE d.company_id = $1 AND d.status <> 'void'
+            GROUP BY d.doc_type, d.status`,
+          [cid]
+        ),
+        pool.query(
+          `SELECT COUNT(*)::int AS count, COALESCE(SUM(d.total - d.amount_paid),0)::numeric AS outstanding
+             FROM pos_documents d
+            WHERE d.company_id = $1 AND d.doc_type = 'invoice'
+              AND d.status IN ('unpaid','partial') AND d.due_date IS NOT NULL AND d.due_date < CURRENT_DATE`,
+          [cid]
+        ),
+        pool.query(
+          `SELECT d.id, d.doc_number, d.doc_type, d.status, d.total, d.amount_paid,
+                  d.issue_date, d.due_date, c.name AS customer_name, u.full_name AS cashier_name
+             FROM pos_documents d
+             LEFT JOIN pos_customers c ON c.id = d.customer_id
+             LEFT JOIN admin_users u ON u.id = d.cashier_id
+            WHERE d.company_id = $1 AND d.status <> 'void'
+            ORDER BY d.created_at DESC LIMIT 12`,
+          [cid]
+        ),
+        pool.query(
+          `SELECT COUNT(*) FILTER (WHERE s.status = 'open')::int AS open, COUNT(*)::int AS total
+             FROM pos_shifts s WHERE s.company_id = $1`,
+          [cid]
+        ),
+      ]);
+
+    const ledgerRows = ledgerRes.rows as any[];
+    const cell = (t: string, s: string) =>
+      ledgerRows.find((r: any) => r.doc_type === t && r.status === s);
+
+    res.json({
+      till: {
+        docs: tillRes.rows[0].docs,
+        gross: tillRes.rows[0].gross,
+        collected: tillRes.rows[0].collected,
+        vat: tillRes.rows[0].vat,
+        profit: profitRes.rows[0].profit,
+        byMethod: methodRes.rows,
+      },
+      bestSellers: sellerRes.rows,
+      lowStock: stockRes.rows,
+      staff: staffRes.rows,
+      ledger: {
+        invoices: {
+          issued: (cell('invoice', 'paid')?.count || 0) + (cell('invoice', 'unpaid')?.count || 0) + (cell('invoice', 'partial')?.count || 0) + (cell('invoice', 'sent')?.count || 0),
+          paid: cell('invoice', 'paid')?.count || 0,
+          unpaid: cell('invoice', 'unpaid')?.count || 0,
+          partial: cell('invoice', 'partial')?.count || 0,
+          amountDue: (cell('invoice', 'unpaid')?.amount || 0) + (cell('invoice', 'partial')?.amount || 0),
+          overdue: overdueRes.rows[0],
+        },
+        quotations: {
+          draft: cell('quotation', 'draft')?.count || 0,
+          sent: cell('quotation', 'sent')?.count || 0,
+          converted: cell('quotation', 'paid')?.count || 0,
+        },
+        sales: cell('sale', 'paid')?.count || 0,
+        recent: recentRes.rows,
+      },
+      shifts: { open: shiftRes.rows[0].open, total: shiftRes.rows[0].total },
+    });
+  } catch (err: any) {
+    console.error('POS dashboard error:', err.message, err.query);
+    res.status(500).json({ error: 'POS dashboard query failed' });
   }
 });
 

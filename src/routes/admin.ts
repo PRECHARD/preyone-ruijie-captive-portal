@@ -858,6 +858,95 @@ adminRouter.get('/dashboard', requirePermission(PERMISSIONS.COMPANY_ADMIN), asyn
   }
 });
 
+// ── UltraNet WiFi sector dashboard ─────────────────────────────────
+// Aggregates ACCESS-POINT / gateway / captive-portal session state ONLY.
+// No transit or POS tables are read here (sector isolation).
+adminRouter.get('/dashboard/wifi', async (_req: Request, res: Response) => {
+  try {
+    const [apRes, gwRes, clientRes, voucherRes, logRes] = await Promise.all([
+      pool.query(
+        `SELECT name, model, mac_address, ip_address, location, status,
+                firmware_version, uptime_seconds, clients_count, last_seen
+         FROM ap_devices ORDER BY name`
+      ),
+      pool.query(
+        `SELECT dev_model,
+                COUNT(*) FILTER (WHERE last_seen >= NOW() - interval '3 minutes')::int AS online,
+                COUNT(*)::int AS total
+         FROM gateway_heartbeats GROUP BY dev_model ORDER BY total DESC`
+      ),
+      pool.query(
+        `SELECT u.id AS user_id, u.full_name, u.mac_address, u.ip_address,
+                u.created_at AS connected_at, u.session_expires_at,
+                u.voucher_code, u.user_agent, v.package_tier,
+                wp.bandwidth_up_kbps, wp.bandwidth_down_kbps,
+                wp.data_used_bytes, wp.data_quota_bytes, wp.session_start
+         FROM users u
+         LEFT JOIN vouchers v ON UPPER(u.voucher_code) = UPPER(v.code)
+         LEFT JOIN LATERAL (
+           SELECT bandwidth_up_kbps, bandwidth_down_kbps, data_used_bytes,
+                  data_quota_bytes, session_start
+           FROM wispr_profiles wp2
+           WHERE wp2.user_id = u.id AND wp2.session_end IS NULL
+           ORDER BY wp2.session_start DESC LIMIT 1
+         ) wp ON TRUE
+         WHERE u.session_expires_at > NOW()
+         ORDER BY wp.session_start DESC NULLS LAST
+         LIMIT 200`
+      ),
+      pool.query(
+        `SELECT
+           (SELECT COUNT(*)::int FROM users WHERE session_expires_at > NOW()) AS active_sessions,
+           (SELECT COUNT(DISTINCT voucher_code)::int FROM users WHERE session_expires_at > NOW() AND voucher_code IS NOT NULL) AS active_vouchers,
+           (SELECT COUNT(*)::int FROM voucher_redemptions WHERE created_at >= date_trunc('day', NOW())) AS redeemed_today,
+           (SELECT COUNT(*)::int FROM vouchers WHERE created_at >= date_trunc('day', NOW()) AND deleted_at IS NULL) AS created_today,
+           (SELECT COUNT(*)::int FROM voucher_approvals WHERE status = 'pending') AS pending_approvals,
+           (SELECT COUNT(*)::int FROM access_log WHERE created_at >= date_trunc('day', NOW())) AS connections_today,
+           (SELECT COUNT(*)::int FROM users WHERE created_at >= date_trunc('day', NOW())) AS signups_today`
+      ),
+      pool.query(
+        `SELECT al.id, al.event, al.mac_address, al.ip_address, al.detail,
+                al.created_at, u.voucher_code
+         FROM access_log al
+         LEFT JOIN users u ON u.id = al.user_id
+         ORDER BY al.created_at DESC LIMIT 25`
+      ),
+    ]);
+
+    const aps = apRes.rows;
+    const vouchers = voucherRes.rows[0] || {};
+    const authRate = vouchers.connections_today > 0
+      ? Math.round((vouchers.redeemed_today / vouchers.connections_today) * 100)
+      : 0;
+
+    res.json({
+      aps: {
+        total: aps.length,
+        online: aps.filter((a: any) => a.status === 'online').length,
+        offline: aps.filter((a: any) => a.status === 'offline').length,
+        clients: aps.reduce((s: number, a: any) => s + (a.clients_count || 0), 0),
+        gateways: { total: gwRes.rows.reduce((s: number, g: any) => s + g.total, 0), online: gwRes.rows.reduce((s: number, g: any) => s + g.online, 0), byModel: gwRes.rows },
+      },
+      apsList: aps,
+      clients: clientRes.rows,
+      vouchers: {
+        activeSessions: vouchers.active_sessions || 0,
+        activeVouchers: vouchers.active_vouchers || 0,
+        redeemedToday: vouchers.redeemed_today || 0,
+        createdToday: vouchers.created_today || 0,
+        pendingApprovals: vouchers.pending_approvals || 0,
+        connectionsToday: vouchers.connections_today || 0,
+        signupsToday: vouchers.signups_today || 0,
+        authSuccessRate: authRate,
+      },
+      connectionLog: logRes.rows,
+    });
+  } catch (err: any) {
+    console.error('WiFi dashboard error:', err.message, err.query);
+    res.status(500).json({ error: 'WiFi dashboard query failed' });
+  }
+});
+
 adminRouter.get('/revenue', requirePermission(PERMISSIONS.COMPANY_ADMIN), async (_req: Request, res: Response) => {
   const { rows: revenue } = await pool.query(`
     SELECT COALESCE(SUM(amount), 0)::float AS total_revenue
