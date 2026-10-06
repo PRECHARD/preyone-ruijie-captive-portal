@@ -89,6 +89,7 @@ function fmtDate(d: string): string {
 
 const PAYMENT_METHODS = ['Cash', 'EcoCash', 'OneMoney', 'Omari', 'InnBucks'];
 const IS_MOBILE_MONEY = (m: string) => m !== 'Cash';
+const lc = (s?: string) => (s || '').toLowerCase();
 
 export default function Vouchers() {
   const { user } = useAuth();
@@ -163,12 +164,12 @@ export default function Vouchers() {
         for (const a of approvals) {
           if (a.status === 'approved' && !processedApprovalIds.current.has(a.id)) {
             processedApprovalIds.current.add(a.id);
-            const codes = a.voucher_data?.codes;
-            const code = a.voucher_data?.code;
-            if (a.request_type === 'single' && (code || codes?.[0])) {
-              const pkg = packages.find(p => p.tier_name === a.package_tier);
-              setVoucherCardData({
-                code: code || codes?.[0],
+const codes = a.voucher_data?.codes;
+              const code = a.voucher_data?.code;
+              if (a.request_type === 'single' && (code || codes?.[0])) {
+                const pkg = packages.find(p => p.tier_name === a.package_tier);
+                setVoucherCardData({
+                  code: lc(code || codes?.[0]),
                 package_tier: a.package_tier,
                 price_amount: a.price_amount?.toString() || '',
                 max_uses: a.max_uses,
@@ -178,7 +179,7 @@ export default function Vouchers() {
                 data_limit_gb: pkg?.data_limit_gb ?? null,
                 is_uncapped: pkg?.is_uncapped ?? false,
               });
-              showToast({ title: 'Voucher Approved', message: `"${code || codes?.[0]}" is ready to share`, type: 'success' });
+              showToast({ title: 'Voucher Approved', message: `"${lc(code || codes?.[0])}" is ready to share`, type: 'success' });
               playVoucherSound();
             } else if (a.request_type === 'bulk' && codes?.length) {
               const pkg = packages.find(p => p.tier_name === a.package_tier);
@@ -204,9 +205,9 @@ export default function Vouchers() {
   }, [packages]);
 
   const generateCode = useCallback((tier: string) => {
-    const prefix = tier.slice(0, 4).toUpperCase();
-    const rand = Math.random().toString(36).substring(2, 8).toUpperCase();
-    return prefix + '-' + rand;
+    const prefix = tier.slice(0, 4);
+    const rand = Math.random().toString(36).substring(2, 8);
+    return (prefix + '-' + rand).toLowerCase();
   }, []);
 
   const selectPackage = useCallback((tier: string) => {
@@ -260,7 +261,7 @@ export default function Vouchers() {
         paymentMethod: vPayMethod,
         paymentReference: IS_MOBILE_MONEY(vPayMethod) ? vPayRef.trim() : undefined,
       });
-      setVStatus({ type: 'success', msg: `Voucher "${data.code}" created successfully.` });
+      setVStatus({ type: 'success', msg: `Voucher "${lc(data.code)}" created successfully.` });
       setVoucherCardData(data);
       setSelectedPkg(null);
       setVCode('');
@@ -269,7 +270,7 @@ export default function Vouchers() {
       setVPayMethod('Cash');
       setVPayRef('');
       api.get<{ vouchers: Voucher[] }>('/vouchers').then(data => setVouchers(data.vouchers)).catch(() => {});
-      showToast({ title: 'Voucher Created', message: `"${data.code}" created successfully`, type: 'success' });
+      showToast({ title: 'Voucher Created', message: `"${lc(data.code)}" created successfully`, type: 'success' });
       playVoucherSound();
     } catch (err: any) {
       if (err.requiresApproval) {
@@ -387,7 +388,7 @@ export default function Vouchers() {
       const released = Number(data?.released ?? 0);
       showToast({
         title: 'MAC bindings released',
-        message: data?.message || `Released ${released} device slot(s) on ${voucher.code}`,
+        message: data?.message || `Released ${released} device slot(s) on ${lc(voucher.code)}`,
         type: 'success',
       });
       setDetailVoucher(prev => (prev ? { ...prev, bound_macs: [], device_count: 0 } : prev));
@@ -806,7 +807,7 @@ export default function Vouchers() {
             <div className="vcb-code">
               <label>Voucher Code</label>
               <div className="input-with-btn">
-                <input type="text" value={vCode} onChange={e => setVCode(e.target.value)} placeholder="Select a package" readOnly={!selectedPkg} />
+                <input type="text" value={vCode} onChange={e => setVCode(e.target.value.toLowerCase())} placeholder="Select a package" readOnly={!selectedPkg} />
                 {selectedPkg && (
                   <button type="button" className="btn-icon" onClick={() => setVCode(generateCode(selectedPkg.tier_name))} title="Generate new code">
                     <svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 10a7 7 0 1 1-2-5" /><polyline points="17 3 17 7 13 7" /></svg>
@@ -889,8 +890,8 @@ export default function Vouchers() {
               <div className="token-container">
                 <span className="token-title" style={{ color: '#64748b' }}>WI-FI VOUCHER PIN</span>
                 <div className="token-box" style={{ background: '#f8fafc', borderColor: '#cbd5e1' }}>
-                  <span className="token-string" style={{ color: '#0284c7', cursor: 'pointer' }} onClick={() => copyCode(voucherCardData.code)}>
-                    {voucherCardData.code}
+                  <span className="token-string" style={{ color: '#0284c7', cursor: 'pointer' }} onClick={() => copyCode(lc(voucherCardData.code))}>
+                    {lc(voucherCardData.code)}
                   </span>
                 </div>
               </div>
@@ -996,7 +997,7 @@ export default function Vouchers() {
             <div className="card" style={{ padding: '1rem', marginTop: '1rem' }}>
               <div style={{ display: 'flex', gap: '0.3rem', flexWrap: 'wrap' }}>
                 {bulkResults.map((v: any, i: number) => (
-                  <span key={i} className="bulk-code-chip" onClick={() => copyCode(v.code)} title="Click to copy">{v.code}</span>
+                  <span key={i} className="bulk-code-chip" onClick={() => copyCode(lc(v.code))} title="Click to copy">{lc(v.code)}</span>
                 ))}
               </div>
               <div className="voucher-card-actions-bar" style={{ marginTop: '0.75rem' }}>
@@ -1004,7 +1005,7 @@ export default function Vouchers() {
                   const msg = bulkResults.map((v: any) => {
                     const tier = v.package_tier || 'Custom';
                     const price = v.price_amount ? ' $' + parseFloat(v.price_amount).toFixed(2) : '';
-                    return 'Code: ' + v.code + ' | ' + tier + price;
+                    return 'Code: ' + lc(v.code) + ' | ' + tier + price;
                   }).join('%0A');
                   window.open('https://wa.me/?text=' + '*Preyone Bulk Vouchers*%0A%0A' + msg + '%0A%0A_Thank you for choosing Preyone_', '_blank');
                 }}>
@@ -1092,7 +1093,7 @@ export default function Vouchers() {
               <tbody>
                 {myApprovals.map((a: ApprovalRequest) => {
                   const isExpanded = expandedApproval === a.id;
-                  const codes = a.voucher_data?.codes || (a.voucher_data?.code ? [a.voucher_data.code] : []);
+                  const codes = (a.voucher_data?.codes || (a.voucher_data?.code ? [a.voucher_data.code] : [])).map(c => lc(c));
                   const isApproved = a.status === 'approved' && codes.length > 0;
                   const pkg = packages.find(p => p.tier_name === a.package_tier);
                   return (
@@ -1104,7 +1105,7 @@ export default function Vouchers() {
                               {codes.length === 1 ? codes[0] : codes[0] + ' +' + (codes.length - 1) + ' more'}
                             </span>
                           ) : (
-                            <span className="code-cell">{a.voucher_data?.code || '—'}</span>
+                            <span className="code-cell">{lc(a.voucher_data?.code) || '—'}</span>
                           )}
                         </td>
                         <td>{a.package_tier || '—'}</td>
@@ -1193,7 +1194,7 @@ export default function Vouchers() {
             <tbody>
               {vouchers.map(v => (
                 <tr key={v.id}>
-                  <td><span className="code-cell" onClick={() => copyCode(v.code)} title="Click to copy">{v.code}</span></td>
+                  <td><span className="code-cell" onClick={() => copyCode(lc(v.code))} title="Click to copy">{lc(v.code)}</span></td>
                   <td><span className="money money--sm">{v.price_amount ? '$' + parseFloat(v.price_amount).toFixed(2) : '—'}</span></td>
                   <td>{fmtDur(v.duration_min)}</td>
                   <td>{v.bandwidth_mbps_up}/{v.bandwidth_mbps_down} Mbps</td>
@@ -1206,7 +1207,7 @@ export default function Vouchers() {
                     <button
                       className="btn-sm"
                       onClick={() => setDetailVoucher(v)}
-                      aria-label={`View details for voucher ${v.code}`}
+                      aria-label={`View details for voucher ${lc(v.code)}`}
                     >
                       Details
                     </button>
@@ -1232,7 +1233,7 @@ export default function Vouchers() {
         const waText = [
           '*Preyone Voucher*',
           '',
-          `Code: ${v.code}`,
+          `Code: ${lc(v.code)}`,
           `Package: ${v.package_tier || 'Standard'}`,
           `Price: ${v.price_amount ? '$' + parseFloat(v.price_amount).toFixed(2) : '—'}`,
           `Duration: ${fmtDur(v.duration_min)}`,
@@ -1244,10 +1245,10 @@ export default function Vouchers() {
         ].join('\n');
 
         return (
-          <Modal open onClose={() => setDetailVoucher(null)} title={`Voucher ${v.code}`}>
+          <Modal open onClose={() => setDetailVoucher(null)} title={`Voucher ${lc(v.code)}`}>
             <div className="voucher-detail">
               <div className="vd-head">
-                <div className="vd-code" onClick={() => copyCode(v.code)} title="Click to copy">{v.code}</div>
+                <div className="vd-code" onClick={() => copyCode(lc(v.code))} title="Click to copy">{lc(v.code)}</div>
                 <span className={`badge badge--${statusTone}`}>{v.status || 'Unknown'}</span>
               </div>
 
