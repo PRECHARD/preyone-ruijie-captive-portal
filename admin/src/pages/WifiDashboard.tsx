@@ -32,6 +32,12 @@ interface WifiDashboardData {
     id: number; event: string; mac_address: string | null; ip_address: string | null;
     detail: string | null; created_at: string; voucher_code: string | null;
   }[];
+  voucherUsage: {
+    voucher_code: string; redeemed_by: string | null; mac_address: string | null;
+    ip_address: string | null; redeemed_at: string;
+    holder_name: string | null; alias: string | null; phone: string | null; user_agent: string | null;
+    package_tier: string | null; price_amount: string | null;
+  }[];
 }
 
 function fmtBytes(b?: number | null): string {
@@ -229,6 +235,41 @@ export default function WifiDashboard({ onNavigate }: { onNavigate?: (s: string)
                         </tr>
                       );
                     })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* ── Voucher usage (users connected with sold vouchers) ── */}
+          <div className="section-head" style={{ marginTop: '1.5rem' }}>
+            <h2 className="section-head-title">Voucher Usage</h2>
+            <p className="section-head-desc">Users who connected using the vouchers we sold · device · package</p>
+          </div>
+          <div className="card card-table">
+            {data.voucherUsage.length === 0 ? (
+              <div className="table-empty"><p>No voucher redemptions recorded yet.</p></div>
+            ) : (
+              <div className="table-scroll">
+                <table className="data-table">
+                  <thead><tr><th>Voucher</th><th>User</th><th>Device</th><th>Phone</th><th>MAC</th><th>Package</th><th>Price</th><th>Redeemed</th></tr></thead>
+                  <tbody>
+                    {data.voucherUsage.map((vu) => (
+                      <tr key={vu.voucher_code + ':' + vu.redeemed_at}>
+                        <td><span className="code-cell">{vu.voucher_code}</span></td>
+                        <td>{vu.holder_name || vu.redeemed_by || vu.alias || '—'}
+                          {vu.holder_name && vu.alias && <span className="muted" style={{ display: 'block', fontSize: 11 }}>{vu.alias}</span>}
+                        </td>
+                        <td>
+                          {vu.user_agent ? <span className="device-cell"><FiSmartphone size={12} /> {deviceShort(vu.user_agent)}</span> : '—'}
+                        </td>
+                        <td>{vu.phone || '—'}</td>
+                        <td className="vd-mono" style={{ fontSize: 11 }}>{vu.mac_address || '—'}</td>
+                        <td>{vu.package_tier || '—'}</td>
+                        <td className="money money--sm">{vu.price_amount ? '$' + parseFloat(vu.price_amount).toFixed(2) : '—'}</td>
+                        <td className="muted">{fmtAgo(vu.redeemed_at)}</td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>

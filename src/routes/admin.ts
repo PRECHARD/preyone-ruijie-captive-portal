@@ -863,7 +863,7 @@ adminRouter.get('/dashboard', requirePermission(PERMISSIONS.COMPANY_ADMIN), asyn
 // No transit or POS tables are read here (sector isolation).
 adminRouter.get('/dashboard/wifi', async (_req: Request, res: Response) => {
   try {
-    const [apRes, gwRes, clientRes, voucherRes, logRes] = await Promise.all([
+    const [apRes, gwRes, clientRes, voucherRes, logRes, redemptionRes] = await Promise.all([
       pool.query(
         `SELECT name, model, mac_address, ip_address, location, status,
                 firmware_version, uptime_seconds, clients_count, last_seen
@@ -911,6 +911,16 @@ adminRouter.get('/dashboard/wifi', async (_req: Request, res: Response) => {
          LEFT JOIN users u ON u.id = al.user_id
          ORDER BY al.created_at DESC LIMIT 25`
       ),
+      pool.query(
+        `SELECT vr.voucher_code, vr.full_name AS redeemed_by, vr.mac_address,
+                vr.ip_address, vr.created_at AS redeemed_at,
+                u.full_name AS holder_name, u.alias, u.phone, u.user_agent,
+                v.package_tier, v.price_amount
+         FROM voucher_redemptions vr
+         LEFT JOIN users u ON u.id = vr.user_id
+         LEFT JOIN vouchers v ON v.id = vr.voucher_id
+         ORDER BY vr.created_at DESC LIMIT 50`
+      ),
     ]);
 
     const aps = apRes.rows;
@@ -940,6 +950,7 @@ adminRouter.get('/dashboard/wifi', async (_req: Request, res: Response) => {
         authSuccessRate: authRate,
       },
       connectionLog: logRes.rows,
+      voucherUsage: redemptionRes.rows,
     });
   } catch (err: any) {
     console.error('WiFi dashboard error:', err.message, err.query);

@@ -527,6 +527,14 @@
   background: rgba(0, 229, 255, 0.05);
 }
 
+.btn-action--print {
+  color: #b388ff;
+}
+.btn-action--print:hover {
+  border-color: #b388ff;
+  background: rgba(179, 136, 255, 0.08);
+}
+
 .preyone-voucher {
   position: relative;
   width: min(580px, 100%);
@@ -986,5 +994,7 @@
 .vd-actions {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
+  margin-top: 10px;
 }

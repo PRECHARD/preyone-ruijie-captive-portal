@@ -657,7 +657,7 @@ transitWebRouter.get('/dashboard', requirePermission(PERMISSIONS.COMPANY_ADMIN, 
       statusRes, todayRes, weekRes, monthRes,
       vehicleRes, deviceRes, staffRes, shiftRes,
       routeRes, templateRes, userRes, companyRes, tripRes,
-      historyRes,
+      historyRes, history7dRes,
     ] = await Promise.all([
       q('t', `SELECT status, COUNT(*)::int AS count FROM transit_trips t WHERE {{scope}} GROUP BY status`),
       q('k', `SELECT COUNT(*)::int AS tickets, COALESCE(SUM(k.total_cents),0)::bigint AS gross,
@@ -710,6 +710,21 @@ transitWebRouter.get('/dashboard', requirePermission(PERMISSIONS.COMPANY_ADMIN, 
              LEFT JOIN transit_trips t ON t.opened_at >= h.hour AND t.opened_at < h.hour + interval '1 hour'
             GROUP BY h.hour ORDER BY h.hour`, p);
       })(),
+      (() => {
+        const p: any[] = [];
+        const sc = companyWhere('t', u, p);
+        return pool.query(
+          `WITH days AS (
+             SELECT generate_series(date_trunc('day', NOW()) - interval '6 days',
+                                    date_trunc('day', NOW()), interval '1 day') AS day
+           )
+           SELECT to_char(d.day AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS day,
+                  COUNT(t.id) FILTER (WHERE ${sc})::int AS trips,
+                  COUNT(t.id) FILTER (WHERE ${sc} AND t.status IN ('COMPLETED','CLOSED'))::int AS completed
+             FROM days d
+             LEFT JOIN transit_trips t ON t.opened_at >= d.day AND t.opened_at < d.day + interval '1 day'
+            GROUP BY d.day ORDER BY d.day`, p);
+      })(),
     ]);
 
     const counts: Record<string, number> = {};
@@ -752,6 +767,7 @@ transitWebRouter.get('/dashboard', requirePermission(PERMISSIONS.COMPANY_ADMIN, 
       routes: routeRes.rows,
       recentTrips: tripRes.rows,
       history24h: historyRes.rows,
+      history7d: history7dRes.rows,
     });
   } catch (err: any) {
     console.error('Transit dashboard error:', err.message, err.query);

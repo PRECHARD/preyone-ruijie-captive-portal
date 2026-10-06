@@ -30,6 +30,7 @@ interface TransitDashboardData {
   period: { week: { tickets: number; gross: number }; month: { tickets: number; gross: number } };
   routes: { route: string; trips: number; gross: number }[];
   history24h: { hour: string; trips: number; completed: number }[];
+  history7d: { day: string; trips: number; completed: number }[];
   recentTrips: {
     id: string; trip_no: string; bus_reg: string | null; route_code: string | null; route_name: string | null;
     route_from: string | null; route_to: string | null; departure_time: string | null; driver: string | null;
@@ -68,6 +69,13 @@ function fmtHourLabel(h?: string | null): string {
   } catch { return ''; }
 }
 
+function fmtDayLabel(d?: string | null): string {
+  if (!d) return '';
+  const dt = new Date(d + 'T00:00:00Z');
+  if (isNaN(dt.getTime())) return d.slice(5) || '';
+  return dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+}
+
 export default function TransitOperationsDashboard({ onNavigate }: { onNavigate?: (s: string) => void }) {
   const [data, setData] = useState<TransitDashboardData | null>(null);
   const [error, setError] = useState('');
@@ -85,6 +93,18 @@ export default function TransitOperationsDashboard({ onNavigate }: { onNavigate?
 
   const cur = (data?.company?.currency as string | null) || 'USD';
   const st = data?.status;
+
+  const h24 = data?.history24h ?? [];
+  const h7 = data?.history7d ?? [];
+  const h24Total = h24.reduce((s, b) => s + (b.trips || 0), 0);
+  const using7d = h24.length > 0 && h24Total === 0 && h7.length > 0;
+  const hist = using7d ? h7 : h24;
+  const histTitle = using7d ? 'Trips — Last 7 Days' : 'Trips — Last 24 Hours';
+  const histDesc = using7d
+    ? 'No departures in the last 24h — showing this week by day'
+    : 'Departures by hour · completed trips in \u201Cgreen\u201D';
+  const histKey = using7d ? 'day' : 'hour';
+  const histLabel = using7d ? fmtDayLabel : fmtHourLabel;
 
   return (
     <div className="dashboard sector-dashboard">
@@ -164,27 +184,27 @@ export default function TransitOperationsDashboard({ onNavigate }: { onNavigate?
             <span className="sector-chip"><FiUsers size={12} /> Transit users <b>{data.fleet.transitUsers}</b></span>
           </div>
 
-          {/* ── 24h trip history ── */}
+          {/* ── Trip history (24h, falls back to 7d when the day is quiet) ── */}
           <div className="section-head" style={{ marginTop: '1.5rem' }}>
-            <h2 className="section-head-title">Trips — Last 24 Hours</h2>
-            <p className="section-head-desc">Departures by hour · completed trips in {`\u201C`}green{`\u201D`}</p>
+            <h2 className="section-head-title">{histTitle}</h2>
+            <p className="section-head-desc">{histDesc}</p>
           </div>
           <div className="card">
-            {data.history24h.length === 0 ? (
-              <div className="table-empty"><p>No trip departures in the last 24 hours.</p></div>
+            {hist.length === 0 ? (
+              <div className="table-empty"><p>No trip departures recorded yet.</p></div>
             ) : (
               <div className="hist-wrap">
                 <div className="hist-chart">
-                  {data.history24h.map((h) => {
-                    const max = Math.max(1, ...data.history24h.map((x) => x.trips));
+                  {hist.map((h: any) => {
+                    const max = Math.max(1, ...hist.map((x: any) => x.trips));
                     const tripsPct = Math.max(3, Math.round((h.trips / max) * 100));
                     const compPct = h.trips > 0 ? Math.max(2, Math.round((h.completed / h.trips) * 100)) : 0;
                     return (
-                      <div className="hist-col" key={h.hour} title={`${fmtHourLabel(h.hour)} — ${h.trips} trips · ${h.completed} completed`}>
+                      <div className="hist-col" key={h[histKey]} title={`${histLabel(h[histKey])} — ${h.trips} trips · ${h.completed} completed`}>
                         <div className="hist-bar" style={{ height: tripsPct + '%' }}>
                           <div className="hist-bar-comp" style={{ height: compPct + '%' }} />
                         </div>
-                        <span className="hist-label">{fmtHourLabel(h.hour)}</span>
+                        <span className="hist-label">{histLabel(h[histKey])}</span>
                       </div>
                     );
                   })}

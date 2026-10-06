@@ -54,8 +54,9 @@ describe('GET /api/admin/dashboard/wifi (UltraNet sector aggregate)', () => {
         pendingApprovals: 0, connectionsToday: 0, signupsToday: 0, authSuccessRate: 0,
       },
       connectionLog: [],
+      voucherUsage: [],
     });
-    expect(calls).toHaveLength(5);
+    expect(calls).toHaveLength(6);
   });
 
   it('reads only wifi-sector tables (no transit/POS references) and surfaces user_agent', async () => {
@@ -71,6 +72,8 @@ describe('GET /api/admin/dashboard/wifi (UltraNet sector aggregate)', () => {
     expect(allSql).toContain('access_log');
     expect(allSql).toContain('user_agent');
     expect(allSql).toContain('voucher_approvals');
+    expect(allSql).toMatch(/voucher_redemptions vr/);
+    expect(allSql).toMatch(/LEFT JOIN vouchers v ON v.id = vr.voucher_id/);
     expect(allSql).not.toMatch(/transit_|pos_/);
   });
 

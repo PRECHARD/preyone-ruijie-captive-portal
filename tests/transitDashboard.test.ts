@@ -67,6 +67,7 @@ describe('GET /api/v1/transit/dashboard', () => {
       routes: [],
       recentTrips: [],
       history24h: [],
+      history7d: [],
     });
 
     // Every parameterised query must carry the admin's company id first.
@@ -95,6 +96,12 @@ describe('GET /api/v1/transit/dashboard', () => {
 
   it('exposes a company-scoped 24h trip history for the chart', async () => {
     (pool.query as any).mockImplementation(async (sql: string) => {
+      if (/interval '6 days'/.test(sql)) {
+        return { rows: [
+          { day: '2026-10-04', trips: 5, completed: 3 },
+          { day: '2026-10-05', trips: 7, completed: 4 },
+        ] };
+      }
       if (/generate_series/.test(sql)) {
         return { rows: [
           { hour: '2026-10-05T06:00:00.000Z', trips: 2, completed: 1 },
@@ -110,6 +117,10 @@ describe('GET /api/v1/transit/dashboard', () => {
     expect(res.body.history24h).toEqual([
       { hour: '2026-10-05T06:00:00.000Z', trips: 2, completed: 1 },
       { hour: '2026-10-05T07:00:00.000Z', trips: 4, completed: 2 },
+    ]);
+    expect(res.body.history7d).toEqual([
+      { day: '2026-10-04', trips: 5, completed: 3 },
+      { day: '2026-10-05', trips: 7, completed: 4 },
     ]);
   });
 });

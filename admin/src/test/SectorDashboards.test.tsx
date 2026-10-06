@@ -45,19 +45,33 @@ describe('Sector dashboards render against live CEO payloads', () => {
     render(<TransitOperationsDashboard />);
     expect(await screen.findByText('Preyone Transit Operations')).toBeInTheDocument();
     expect(screen.getByText('Mupota Bus Service · mupota-bus-service')).toBeInTheDocument();
-    expect(screen.getByText('Trips — Last 24 Hours')).toBeInTheDocument();
+    expect(screen.getByText('Trips — Last 7 Days')).toBeInTheDocument();
     expect(screen.getAllByText('MUTARE - CHIPENDEKE').length).toBeGreaterThan(0);
     expect(screen.queryAllByText('601-20261002').length).toBeGreaterThan(0);
     expect(transitApi.get).toHaveBeenCalledWith('/dashboard');
   });
 
-  it('TransitOperationsDashboard — 24h chart renders a bar per hour', async () => {
+  it('TransitOperationsDashboard — quiet 24h window falls back to the 7-day chart', async () => {
     (transitApi.get as any).mockResolvedValue(liveTransit as any);
     const { container } = render(<TransitOperationsDashboard />);
     await screen.findByText('Preyone Transit Operations');
     await tick();
+    expect(screen.getByText('Trips — Last 7 Days')).toBeInTheDocument();
+    expect(screen.getByText('No departures in the last 24h', { exact: false })).toBeInTheDocument();
     const bars = container.querySelectorAll('.hist-bar');
-    expect(bars.length).toBe((liveTransit as any).history24h.length);
+    expect(bars.length).toBe((liveTransit as any).history7d.length);
+  });
+
+  it('WifiDashboard — voucher usage lists users connected with sold vouchers', async () => {
+    (api.get as any).mockResolvedValue(liveWifi as any);
+    render(<WifiDashboard />);
+    await screen.findByText('Preyone UltraNet WiFi');
+    expect(screen.getByText('Voucher Usage')).toBeInTheDocument();
+    const d = liveWifi as any;
+    if (d.voucherUsage && d.voucherUsage.length > 0) {
+      expect(screen.getAllByText(d.voucherUsage[0].voucher_code).length).toBeGreaterThan(0);
+      expect(screen.getAllByText(d.voucherUsage[0].holder_name).length).toBeGreaterThan(0);
+    }
   });
 
   it('PosDashboard — live POS aggregate', async () => {

@@ -404,13 +404,13 @@ export default function Vouchers() {
     return (code || 'PREYONE').slice(0, 3).toUpperCase() + d.getFullYear() + ('0' + (d.getMonth() + 1)).slice(-2) + ('0' + d.getDate()).slice(-2) + '-' + String(Math.floor(Math.random() * 9000) + 1000);
   }
 
-  const downloadVoucherPNG = () => {
+  const downloadVoucherJPEG = () => {
     if (!voucherCardData) return;
-    renderVoucherPNG(voucherCardData, user?.fullName || 'Preyone UltraNet');
+    renderVoucherJPEG(voucherCardData, user?.fullName || 'Preyone UltraNet');
   };
 
   const drawVoucherCanvas = async (c: HTMLCanvasElement, data: any, issuedByName: string) => {
-    const code = data.code || 'PREYONE-XXXX';
+    const code = (data.code || 'PREYONE-XXXX').toLowerCase();
     const tierText = data.package_tier || 'Custom';
     const priceText = data.price_amount ? '$' + parseFloat(data.price_amount).toFixed(2) : '';
     const durShort = fmtDurShort(data.duration_min);
@@ -606,13 +606,48 @@ export default function Vouchers() {
     ctx.fillText('SN: ' + serial, W - 14, H - 10);
   };
 
-  const renderVoucherPNG = async (data: any, issuedByName: string) => {
+  const renderVoucherJPEG = async (data: any, issuedByName: string) => {
     const c = document.createElement('canvas');
     await drawVoucherCanvas(c, data, issuedByName);
     var link = document.createElement('a');
-    link.download = 'preyone-voucher-' + data.code + '.png';
-    link.href = c.toDataURL('image/png');
+    link.download = 'voucher-' + (data.code || 'PREYONE-XXXX').toLowerCase() + '.jpeg';
+    link.href = c.toDataURL('image/jpeg', 0.95);
     link.click();
+  };
+
+  // High-quality JPEG export of a single voucher's canvas card. The PIN is
+  // lowercased inside drawVoucherCanvas, so the filename uses the lowercased
+  // code to keep them strict and consistent.
+  const generateVoucherJpegBlob = async (voucher: Voucher): Promise<{ dataUrl: string; blob: Blob; fileName: string }> => {
+    const c = document.createElement('canvas');
+    c.width = 800; c.height = 450;
+    await drawVoucherCanvas(c, voucher, user?.fullName || 'Preyone UltraNet');
+    const dataUrl = c.toDataURL('image/jpeg', 0.95);
+    const blob = await (await fetch(dataUrl)).blob();
+    return { dataUrl, blob, fileName: 'voucher-' + (voucher.code || 'PREYONE-XXXX').toLowerCase() + '.jpeg' };
+  };
+
+  const handleDownloadJpeg = async (voucher: Voucher) => {
+    const { dataUrl, fileName } = await generateVoucherJpegBlob(voucher);
+    const link = document.createElement('a');
+    link.href = dataUrl;
+    link.download = fileName;
+    link.click();
+  };
+
+  const printVoucherJpeg = async (voucher: Voucher) => {
+    const { dataUrl, fileName } = await generateVoucherJpegBlob(voucher);
+    const w = window.open('', '_blank', 'width=900,height=560');
+    if (!w) { showToast({ title: 'Pop-up blocked', message: 'Allow pop-ups, then try printing again.', type: 'error' }); return; }
+    w.document.write(
+      '<!doctype html><html><head><title>' + fileName + '</title>' +
+      '<style>html,body{margin:0;padding:0;background:#fff;}img{display:block;max-width:100%;height:auto;margin:0 auto;}' +
+      '@media print{img{max-width:100%;}}</style>' +
+      '</head><body><img src="' + dataUrl + '" alt="Preyone UltraNet voucher" />' +
+      '<script>window.addEventListener("load",function(){setTimeout(function(){window.focus();window.print();},250);});</scr' + 'ipt>' +
+      '</body></html>'
+    );
+    w.document.close();
   };
 
   const printVoucherPDF = async () => {
@@ -621,11 +656,11 @@ export default function Vouchers() {
     c.width = 800; c.height = 450;
     await drawVoucherCanvas(c, voucherCardData, user?.fullName || 'Preyone UltraNet');
     const doc = new jsPDF('portrait', 'mm', 'a4');
-    const imgData = c.toDataURL('image/png');
+    const imgData = c.toDataURL('image/jpeg', 0.95);
     const pw = 210, ph = 297, m = 10;
     const iw = pw - m * 2, ih = iw * 450 / 800;
-    doc.addImage(imgData, 'PNG', (pw - iw) / 2, (ph - ih) / 2, iw, ih);
-    doc.save('preyone-voucher-' + voucherCardData.code + '.pdf');
+    doc.addImage(imgData, 'JPEG', (pw - iw) / 2, (ph - ih) / 2, iw, ih);
+    doc.save('preyone-voucher-' + (voucherCardData.code || '').toLowerCase() + '.pdf');
   };
 
   const printBulkPDFs = async () => {
@@ -638,7 +673,7 @@ export default function Vouchers() {
       const c = document.createElement('canvas');
       c.width = 800; c.height = 450;
       await drawVoucherCanvas(c, bulkResults[i], user?.fullName || 'Preyone UltraNet');
-      const imgData = c.toDataURL('image/png');
+      const imgData = c.toDataURL('image/jpeg', 0.95);
       const col = i % cols, row = Math.floor(i / cols) % rows;
       const pad = 3;
       let iw = cw - pad * 2, ih = iw * 450 / 800;
@@ -648,7 +683,7 @@ export default function Vouchers() {
       doc.setDrawColor(210, 210, 210);
       doc.setLineWidth(0.2);
       doc.rect(m + col * cw + 1, m + row * ch + 1, cw - 2, ch - 2, 'S');
-      doc.addImage(imgData, 'PNG', x, y, iw, ih);
+      doc.addImage(imgData, 'JPEG', x, y, iw, ih);
     }
     doc.save('preyone-bulk-vouchers.pdf');
   };
@@ -664,9 +699,9 @@ export default function Vouchers() {
     const c = document.createElement('canvas');
     c.width = 800; c.height = 450;
     await drawVoucherCanvas(c, voucherCardData, user?.fullName || 'Preyone UltraNet');
-    const blob = await new Promise<Blob | null>(resolve => c.toBlob(resolve, 'image/png'));
+    const blob = await new Promise<Blob | null>(resolve => c.toBlob(resolve, 'image/jpeg', 0.95));
     if (!blob) return;
-    const file = new File([blob], 'preyone-voucher-' + voucherCardData.code + '.png', { type: 'image/png' });
+    const file = new File([blob], 'voucher-' + (voucherCardData.code || 'PREYONE-XXXX').toLowerCase() + '.jpeg', { type: 'image/jpeg' });
     if (navigator.canShare?.({ files: [file] })) {
       try { await navigator.share({ files: [file], title: 'Preyone Voucher' }); return; } catch {}
     }
@@ -869,7 +904,7 @@ export default function Vouchers() {
               <svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2"><rect x="5" y="2" width="13" height="15" rx="2"/><polyline points="2 5 2 18 15 18"/></svg>
               Copy All
             </button>
-            <button className="btn-action btn-action--download" onClick={downloadVoucherPNG}>
+            <button className="btn-action btn-action--download" onClick={downloadVoucherJPEG}>
               <svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10 3v12M5 10l5 5 5-5" /><path d="M3 16v1a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-1" /></svg>
               Download Voucher
             </button>
@@ -974,7 +1009,7 @@ export default function Vouchers() {
                 </button>
                 <button className="btn-action btn-action--download" onClick={() => {
                   bulkResults.forEach((v: any, i: number) => {
-                    setTimeout(() => renderVoucherPNG(v, user?.fullName || 'Preyone UltraNet'), i * 500);
+                    setTimeout(() => renderVoucherJPEG(v, user?.fullName || 'Preyone UltraNet'), i * 500);
                   });
                   setBulkStatus({ type: 'success', msg: 'Downloading ' + bulkResults.length + ' vouchers...' });
                 }}>
@@ -1099,7 +1134,7 @@ export default function Vouchers() {
                                 </button>
                                 <button className="btn-action btn-action--download" onClick={() => {
                                   codes.forEach((c: string, i: number) => {
-                                    setTimeout(() => renderVoucherPNG({
+                                    setTimeout(() => renderVoucherJPEG({
                                       code: c,
                                       package_tier: a.package_tier,
                                       price_amount: a.price_amount?.toString() || '',
@@ -1277,7 +1312,19 @@ export default function Vouchers() {
                     Copy code
                   </button>
                   <button className="btn-sm" onClick={() => copyCode(waText)}>
-                    Copy share text
+                    Copy All
+                  </button>
+                  <button className="btn-action btn-action--download" onClick={() => handleDownloadJpeg(v)}>
+                    <svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10 3v12M5 10l5 5 5-5" /><path d="M3 16v1a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-1" /></svg>
+                    Download JPEG
+                  </button>
+                  <button className="btn-action btn-action--print" onClick={() => printVoucherJpeg(v)}>
+                    <svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 4h12v12H4z" /><path d="M7 10h6M10 7v6" /></svg>
+                    Print
+                  </button>
+                  <button className="btn-action btn-action--wa" onClick={() => window.open('https://wa.me/?text=' + encodeURIComponent(waText), '_blank')}>
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+                    Send via WhatsApp
                   </button>
                 </div>
               </section>
