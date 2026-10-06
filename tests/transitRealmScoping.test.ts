@@ -112,21 +112,33 @@ describe('transitWeb company scoping reads AdminUser.companyId', () => {
   });
 });
 
-describe('systemAdmin platform gate reads AdminUser.companyId', () => {
+describe('systemAdmin platform gate is keyed on the system.developer capability', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('403s a company-scoped admin even when the role grants system.developer', async () => {
-    // This is the exact gate that regressed silently: a renamed field makes
-    // companyId undefined, the guard passes, and Level 0 platform endpoints
-    // (tenants, global revenue, system health) open up to a company admin.
+  it('403s a company-scoped admin without the system.developer capability', async () => {
+    // The Level 0 boundary is the platform super-admin capability, not the
+    // presence/absence of a companyId. A Level 1+ ops admin must stay out even
+    // if their company binding is momentarily NULL.
     (pool.query as any).mockResolvedValue({ rows: [], rowCount: 0 });
-    const b = appWith({ companyId: COMPANY, permissions: ['system.developer'] }, (x) =>
+    const b = appWith({ companyId: COMPANY, permissions: ['company.admin', 'operations.manage'] }, (x) =>
       x.use('/sa', systemAdminRouter)
     );
     await request(b).get('/sa/companies').expect(403);
   });
 
-  it('allows a platform admin through', async () => {
+  it('lets a company-scoped platform owner through when they hold system.developer', async () => {
+    // The platform owner is bound to their own transit company (companyId set)
+    // yet still carries system.developer -- exactly the Preyone CEO. Blocking
+    // them on companyId alone locked the whole Level 0 console (tenants, audit,
+    // gateway, system health) behind a 403 while /admin/* stayed open.
+    (pool.query as any).mockResolvedValue({ rows: [], rowCount: 0 });
+    const b = appWith({ companyId: COMPANY, permissions: ['system.developer'] }, (x) =>
+      x.use('/sa', systemAdminRouter)
+    );
+    await request(b).get('/sa/companies').expect(200);
+  });
+
+  it('allows an unscoped platform admin through', async () => {
     (pool.query as any).mockResolvedValue({ rows: [], rowCount: 0 });
     const b = appWith({ companyId: null, permissions: ['system.developer'] }, (x) =>
       x.use('/sa', systemAdminRouter)
