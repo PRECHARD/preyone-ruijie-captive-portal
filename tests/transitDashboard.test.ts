@@ -95,7 +95,7 @@ describe('GET /api/v1/transit/dashboard', () => {
 
   it('exposes a company-scoped 24h trip history for the chart', async () => {
     (pool.query as any).mockImplementation(async (sql: string) => {
-      if (/date_trunc\('hour', t\.opened_at\)/.test(sql)) {
+      if (/generate_series/.test(sql)) {
         return { rows: [
           { hour: '2026-10-05T06:00:00.000Z', trips: 2, completed: 1 },
           { hour: '2026-10-05T07:00:00.000Z', trips: 4, completed: 2 },

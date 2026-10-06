@@ -695,11 +695,21 @@ transitWebRouter.get('/dashboard', requirePermission(PERMISSIONS.COMPANY_ADMIN, 
                 (SELECT COALESCE(SUM(k.total_cents),0) FROM transit_tickets k WHERE k.trip_id = t.id)::bigint AS total_cents
          FROM transit_trips t LEFT JOIN transit_users u ON u.id = t.user_id AND u.deleted_at IS NULL
          WHERE ${sc} ORDER BY t.opened_at DESC LIMIT $${p.length}`, p); })(),
-      q('t', `SELECT date_trunc('hour', t.opened_at) AS hour,
-                     COUNT(*)::int AS trips,
-                     COUNT(*) FILTER (WHERE t.status IN ('COMPLETED','CLOSED'))::int AS completed
-              FROM transit_trips t WHERE {{scope}} AND t.opened_at >= NOW() - interval '24 hours'
-              GROUP BY 1 ORDER BY 1`),
+      (() => {
+        const p: any[] = [];
+        const sc = companyWhere('t', u, p);
+        return pool.query(
+          `WITH hours AS (
+             SELECT generate_series(date_trunc('hour', NOW()) - interval '23 hours',
+                                    date_trunc('hour', NOW()), interval '1 hour') AS hour
+           )
+           SELECT to_char(h.hour AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS hour,
+                  COUNT(t.id) FILTER (WHERE ${sc})::int AS trips,
+                  COUNT(t.id) FILTER (WHERE ${sc} AND t.status IN ('COMPLETED','CLOSED'))::int AS completed
+             FROM hours h
+             LEFT JOIN transit_trips t ON t.opened_at >= h.hour AND t.opened_at < h.hour + interval '1 hour'
+            GROUP BY h.hour ORDER BY h.hour`, p);
+      })(),
     ]);
 
     const counts: Record<string, number> = {};
