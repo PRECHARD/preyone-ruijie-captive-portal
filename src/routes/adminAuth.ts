@@ -62,6 +62,50 @@ adminAuthRouter.get('/verify-email', async (req: Request, res: Response) => {
   }
 });
 
+// Recovery path for the email_verified gate on /login. Deliberately its own
+// limiter: resends are far more frequent than signups but must still be
+// capped, and unlike login it counts every attempt so probing for registered
+// addresses is not a cheaper way past the cap.
+const resendLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests. Try again in 15 minutes.' },
+});
+
+// Always answers 200 with the same body, so the endpoint cannot be used to
+// discover which addresses are registered.
+adminAuthRouter.post('/resend-verification', resendLimiter, async (req: Request, res: Response) => {
+  const { email } = req.body as { email?: string };
+  const generic = { message: 'If that address is registered and unverified, a new verification email has been sent.' };
+  if (!email) { res.json(generic); return; }
+
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, full_name, email, approved, role, email_verified
+         FROM admin_users WHERE email = $1`,
+      [email.toLowerCase().trim()]
+    );
+    const user = rows[0];
+    // Unknown addresses, already-verified accounts and unapproved Staff all
+    // fall through: only an approved + unverified account receives an email.
+    if (user && user.email_verified !== true && (user.role !== 'Staff' || user.approved)) {
+      const token = crypto.randomBytes(32).toString('hex');
+      await pool.query(
+        'UPDATE admin_users SET email_verification_token = $1 WHERE id = $2',
+        [token, user.id]
+      );
+      await recordAuditLog(user.id, user.full_name, 'verification_resent', 'admin_user', user.id, 'Verification email resent');
+      sendAdminSignupConfirmation(user.email, user.full_name, user.role, user.approved === true, token);
+    }
+    res.json(generic);
+  } catch (err) {
+    console.error('Resend verification error:', err);
+    res.json(generic);
+  }
+});
+
 adminAuthRouter.post('/signup', authLimiter, async (req: Request, res: Response) => {
   const { fullName, email, phone, role = 'Staff', password } = req.body as {
     fullName: string; email: string; phone: string; role?: string; password: string;
@@ -181,7 +225,9 @@ adminAuthRouter.post('/login', authLimiter, async (req: Request, res: Response) 
   }
 
   const { rows } = await pool.query(
-    'SELECT id, full_name, email, phone, role, approved, password_hash, company_id, portal_company_id FROM admin_users WHERE email = $1',
+    `SELECT id, full_name, email, phone, role, approved, password_hash,
+            company_id, portal_company_id, email_verified
+       FROM admin_users WHERE email = $1`,
     [email.toLowerCase().trim()]
   );
 
@@ -200,6 +246,18 @@ adminAuthRouter.post('/login', authLimiter, async (req: Request, res: Response) 
   // Staff accounts must be approved by Manager/CEO
   if (user.role === 'Staff' && !user.approved) {
     res.status(403).json({ error: 'Your account is pending approval. Contact a Manager or CEO.' });
+    return;
+  }
+
+  // Unverified accounts cannot sign in. The response carries a stable `code`
+  // and the resend endpoint so the SPA can offer a recovery path -- enforcement
+  // without one is a permanent lockout (there is no other way back in).
+  if (!user.email_verified) {
+    res.status(403).json({
+      error: 'Your email address has not been verified. Check your inbox for the link, or request a new one.',
+      code: 'EMAIL_NOT_VERIFIED',
+      resendEndpoint: '/api/admin/auth/resend-verification',
+    });
     return;
   }
 

@@ -5,6 +5,7 @@ import { showToast } from '../utils/toast';
 import jsPDF from 'jspdf';
 import { playVoucherSound, playAlertSound } from '../utils/sound';
 import EmptyState from '../components/EmptyState';
+import Modal from '../components/Modal';
 import './Vouchers.css';
 
 interface Package {
@@ -19,21 +20,36 @@ interface Package {
   is_uncapped: boolean;
 }
 
-interface Voucher {
-  id: string;
-  code: string;
-  price_amount: string;
-  duration_min: number;
-  bandwidth_mbps_up: number;
-  bandwidth_mbps_down: number;
-  data_limit_gb: number | null;
-  is_uncapped: boolean;
-  max_uses: number;
-  used_count: number;
-  expires_at: string;
-  created_at: string;
-  package_tier: string | null;
-}
+  interface Voucher {
+    id: string;
+    code: string;
+    price_amount: string;
+    duration_min: number;
+    bandwidth_mbps_up: number;
+    bandwidth_mbps_down: number;
+    data_limit_gb: number | null;
+    is_uncapped: boolean;
+    max_uses: number;
+    used_count: number;
+    expires_at: string;
+    created_at: string;
+    package_tier: string | null;
+    // Returned by GET /admin/vouchers (admin.ts, the LATERAL joins) but not part
+    // of the core row. Optional so the create/bulk flows, which build partial
+    // voucher objects, stay type-compatible.
+    status?: string | null;
+    first_redeemed_at?: string | null;
+    activated_at?: string | null;
+    device_count?: number;
+    bound_macs?: string[] | null;
+    phone?: string | null;
+    mac_address?: string | null;
+    first_name?: string | null;
+    last_name?: string | null;
+    alias?: string | null;
+    traffic_used_bytes?: number;
+    traffic_total_bytes?: number | null;
+  }
 
 interface ApprovalRequest {
   id: string;
@@ -108,6 +124,8 @@ export default function Vouchers() {
 
   const [voucherCardData, setVoucherCardData] = useState<any>(null);
   const [expandedApproval, setExpandedApproval] = useState<string | null>(null);
+  const [detailVoucher, setDetailVoucher] = useState<Voucher | null>(null);
+  const [releasingMac, setReleasingMac] = useState(false);
 
   const loadClockStatus = useCallback(() => {
     if (needsClockIn) {
@@ -354,6 +372,30 @@ export default function Vouchers() {
       playAlertSound();
     } catch (err: any) {
       setVStatus({ type: 'error', msg: err.message || 'Failed to reject' });
+    }
+  };
+
+  // Releases every active device binding. The endpoint deactivates rather than
+  // deletes, so the redemption history survives and re-binding the same MAC later
+  // stays idempotent. It is gated on COMPANY_ADMIN server-side -- a 403 lands in
+  // the catch below rather than failing silently.
+  const handleReleaseMac = async (voucher: Voucher) => {
+    if (releasingMac) return;
+    setReleasingMac(true);
+    try {
+      const data = await api.post<any>(`/vouchers/${voucher.id}/reset-mac`);
+      const released = Number(data?.released ?? 0);
+      showToast({
+        title: 'MAC bindings released',
+        message: data?.message || `Released ${released} device slot(s) on ${voucher.code}`,
+        type: 'success',
+      });
+      setDetailVoucher(prev => (prev ? { ...prev, bound_macs: [], device_count: 0 } : prev));
+      api.get<Voucher[]>('/vouchers').then(setVouchers).catch(() => {});
+    } catch (err: any) {
+      showToast({ title: 'Could not release bindings', message: err.message || 'Please try again.', type: 'error' });
+    } finally {
+      setReleasingMac(false);
     }
   };
 
@@ -957,7 +999,7 @@ export default function Vouchers() {
             <p className="section-head-desc">Staff requests awaiting your authorization</p>
           </div>
           {pendingApprovals.length > 0 ? (
-            <div className="card card-table">
+            <div className="card card-table approvals-scroll">
               <table className="data-table">
                 <thead><tr><th>Staff</th><th>Type</th><th>Package</th><th>Amount</th><th>Count</th><th>Requested</th><th>Actions</th></tr></thead>
                 <tbody>
@@ -1100,7 +1142,7 @@ export default function Vouchers() {
           <div className="table-empty"><p>No vouchers created yet.</p></div>
         ) : (
           <table className="data-table">
-            <thead><tr><th>Code</th><th>Price</th><th>Duration</th><th>Bandwidth</th><th>Data</th><th>Max Uses</th><th>Used</th><th>Package</th><th>Created</th></tr></thead>
+            <thead><tr><th>Code</th><th>Price</th><th>Duration</th><th>Bandwidth</th><th>Data</th><th>Max Uses</th><th>Used</th><th>Package</th><th>Created</th><th>Actions</th></tr></thead>
             <tbody>
               {vouchers.map(v => (
                 <tr key={v.id}>
@@ -1113,12 +1155,114 @@ export default function Vouchers() {
                   <td>{v.used_count}/{v.max_uses}</td>
                   <td>{v.package_tier || <span className="muted">—</span>}</td>
                   <td>{fmtDate(v.created_at)}</td>
+                  <td>
+                    <button
+                      className="btn-sm"
+                      onClick={() => setDetailVoucher(v)}
+                      aria-label={`View details for voucher ${v.code}`}
+                    >
+                      Details
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         )}
       </div>
+
+      {detailVoucher && (() => {
+        const v = detailVoucher;
+        const statusTone = v.status === 'Active' ? 'yes' : v.status === 'Unused' ? 'warn' : 'no';
+        const macs = Array.isArray(v.bound_macs) ? v.bound_macs : [];
+        const gb = (b?: number | null) => (b == null ? null : (b / (1024 ** 3)).toFixed(2) + ' GB');
+        const trafficUsed = gb(v.traffic_used_bytes);
+        const trafficTotal = v.traffic_total_bytes == null ? null : gb(v.traffic_total_bytes);
+        const holderName = [v.first_name, v.last_name].filter(Boolean).join(' ') || v.alias || null;
+
+        // Real triggers only: code + terms the customer needs. There is no
+        // message-template schema in this build, so nothing here is invented.
+        const waText = [
+          '*Preyone Voucher*',
+          '',
+          `Code: ${v.code}`,
+          `Package: ${v.package_tier || 'Standard'}`,
+          `Price: ${v.price_amount ? '$' + parseFloat(v.price_amount).toFixed(2) : '—'}`,
+          `Duration: ${fmtDur(v.duration_min)}`,
+          `Speed: ${v.bandwidth_mbps_up}/${v.bandwidth_mbps_down} Mbps`,
+          `Data: ${v.is_uncapped ? 'Unlimited' : (v.data_limit_gb ?? 'Unlimited') + ' GB'}`,
+          `Valid until: ${fmtDate(v.expires_at)}`,
+          '',
+          '_Thank you for choosing Preyone_',
+        ].join('\n');
+
+        return (
+          <Modal open onClose={() => setDetailVoucher(null)} title={`Voucher ${v.code}`}>
+            <div className="voucher-detail">
+              <div className="vd-head">
+                <div className="vd-code" onClick={() => copyCode(v.code)} title="Click to copy">{v.code}</div>
+                <span className={`badge badge--${statusTone}`}>{v.status || 'Unknown'}</span>
+              </div>
+
+              <div className="vd-grid">
+                <div className="vd-cell"><span className="vd-label">Price</span><span className="vd-value">{v.price_amount ? '$' + parseFloat(v.price_amount).toFixed(2) : '—'}</span></div>
+                <div className="vd-cell"><span className="vd-label">Duration</span><span className="vd-value">{fmtDur(v.duration_min)}</span></div>
+                <div className="vd-cell"><span className="vd-label">Bandwidth</span><span className="vd-value">{v.bandwidth_mbps_up}/{v.bandwidth_mbps_down} Mbps</span></div>
+                <div className="vd-cell"><span className="vd-label">Data</span><span className="vd-value">{v.is_uncapped ? 'Unlimited' : (v.data_limit_gb ?? 'Unlimited') + ' GB'}</span></div>
+                <div className="vd-cell"><span className="vd-label">Uses</span><span className="vd-value">{v.used_count}/{v.max_uses}</span></div>
+                <div className="vd-cell"><span className="vd-label">Package</span><span className="vd-value">{v.package_tier || '—'}</span></div>
+                <div className="vd-cell"><span className="vd-label">Created</span><span className="vd-value">{fmtDate(v.created_at)}</span></div>
+                <div className="vd-cell"><span className="vd-label">Activated</span><span className="vd-value">{v.activated_at ? fmtDate(v.activated_at) : '—'}</span></div>
+                <div className="vd-cell"><span className="vd-label">First redeemed</span><span className="vd-value">{v.first_redeemed_at ? fmtDate(v.first_redeemed_at) : '—'}</span></div>
+                <div className="vd-cell"><span className="vd-label">Expires</span><span className="vd-value">{fmtDate(v.expires_at)}</span></div>
+              </div>
+
+              {(holderName || v.phone || v.mac_address || trafficUsed) && (
+                <section className="vd-section">
+                  <h4 className="vd-section-title">Redemption</h4>
+                  <div className="vd-grid">
+                    <div className="vd-cell"><span className="vd-label">Holder</span><span className="vd-value">{holderName || '—'}</span></div>
+                    <div className="vd-cell"><span className="vd-label">Phone</span><span className="vd-value">{v.phone || '—'}</span></div>
+                    <div className="vd-cell"><span className="vd-label">MAC</span><span className="vd-value vd-mono">{v.mac_address || '—'}</span></div>
+                    <div className="vd-cell"><span className="vd-label">Traffic</span><span className="vd-value">{trafficUsed ? `${trafficUsed}${trafficTotal ? ' / ' + trafficTotal : ''}` : '—'}</span></div>
+                  </div>
+                </section>
+              )}
+
+              <section className="vd-section">
+                <h4 className="vd-section-title">Device bindings</h4>
+                <p className="vd-count">{v.device_count ?? macs.length} active device{(v.device_count ?? macs.length) === 1 ? '' : 's'}</p>
+                {macs.length > 0 ? (
+                  <ul className="vd-macs">
+                    {macs.map(m => <li key={m} className="vd-mono">{m}</li>)}
+                  </ul>
+                ) : (
+                  <p className="muted">No devices currently bound.</p>
+                )}
+                <button
+                  className="btn-sm btn-reject"
+                  onClick={() => handleReleaseMac(v)}
+                  disabled={releasingMac || (v.device_count ?? macs.length) === 0}
+                >
+                  {releasingMac ? 'Releasing…' : 'Release all bindings'}
+                </button>
+              </section>
+
+              <section className="vd-section">
+                <h4 className="vd-section-title">Share</h4>
+                <div className="vd-actions">
+                  <button className="btn-action btn-action--wa" onClick={() => window.open('https://wa.me/?text=' + encodeURIComponent(waText), '_blank')}>
+                    Send via WhatsApp
+                  </button>
+                  <button className="btn-sm" onClick={() => copyCode(v.code)}>
+                    Copy code
+                  </button>
+                </div>
+              </section>
+            </div>
+          </Modal>
+        );
+      })()}
     </div>
   );
 }

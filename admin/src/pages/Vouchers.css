@@ -847,7 +847,136 @@
   .pkg-price {
     font-size: 1.2rem;
   }
-  .voucher-card-actions-bar {
-    flex-wrap: wrap;
+    .voucher-card-actions-bar {
+      flex-wrap: wrap;
+    }
   }
+
+/* ── Pending approvals ─────────────────────────────────────────────────────
+   The queue is unbounded server-side, so without a cap a long list pushes the
+   package grid and voucher list below the fold. The header stays pinned while
+   rows scroll: background-image alone is transparent, hence the opaque
+   background-color underneath it. */
+.approvals-scroll {
+  max-height: 380px;
+  overflow-y: auto;
+}
+
+.approvals-scroll thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background-color: var(--surface2);
+  background-image: linear-gradient(180deg, rgba(0, 229, 255, 0.06), transparent);
+}
+
+/* ── Voucher detail drawer ────────────────────────────────────────────────
+   Rendered through the shared Modal (plain CSS, no new paradigm). */
+.voucher-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.vd-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.vd-code {
+  font-family: var(--font-display);
+  font-size: 1.3rem;
+  letter-spacing: 0.06em;
+  color: var(--cyan);
+  text-shadow: 0 0 12px rgba(0, 229, 255, 0.3);
+  cursor: copy;
+  user-select: none;
+  overflow-wrap: anywhere;
+}
+
+.vd-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+}
+
+.vd-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.vd-label {
+  font-size: 0.6rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+.vd-value {
+  font-size: 0.85rem;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.vd-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.75rem;
+}
+
+.vd-section {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.6rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--border);
+}
+
+.vd-section-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-muted);
+}
+
+.vd-count {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--text);
+}
+
+.vd-macs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.vd-macs li {
+  padding: 4px 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-dim);
+  overflow-wrap: anywhere;
+}
+
+.vd-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }

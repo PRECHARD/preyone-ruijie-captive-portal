@@ -448,8 +448,12 @@ export async function sendPasswordResetEmail(email: string, resetToken: string, 
 
 // ── Portal email verification ─────────────────────────────────────────
 export async function sendPortalEmailVerification(email: string, token: string, fullName: string): Promise<boolean> {
-  const baseUrl = process.env.BASE_URL || 'http://localhost:3000';
-  const verifyUrl = `${baseUrl}/verify-email?token=${token}`;
+  // Must hit the MOUNTED portal route (authRouter -> /api/auth/verify-email),
+  // which reads users.email_verification_token. A bare /verify-email path is
+  // swallowed by the SPA fallback, so the link rendered, the token was never
+  // consumed, and email_verified never flipped to true.
+  const baseUrl = (process.env.BASE_URL || 'http://localhost:3000').replace(/\/$/, '');
+  const verifyUrl = `${baseUrl}/api/auth/verify-email?token=${encodeURIComponent(token)}`;
   return sendMail(
     email,
     'Verify Your Email — Preyone WiFi',
@@ -500,8 +504,9 @@ export async function sendPortalAccountCreated(
   fullName: string,
   verifyToken: string
 ): Promise<boolean> {
-  const baseUrl = process.env.BASE_URL || 'http://localhost:3000';
-  const verifyUrl = `${baseUrl}/verify-email?token=${verifyToken}`;
+  // Same mounted-route requirement as sendPortalEmailVerification above.
+  const baseUrl = (process.env.BASE_URL || 'http://localhost:3000').replace(/\/$/, '');
+  const verifyUrl = `${baseUrl}/api/auth/verify-email?token=${encodeURIComponent(verifyToken)}`;
   const loginUrl = `${baseUrl}/login`;
   return sendMail(
     email,
