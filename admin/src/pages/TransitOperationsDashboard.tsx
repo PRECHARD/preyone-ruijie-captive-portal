@@ -29,6 +29,7 @@ interface TransitDashboardData {
   today: { tickets: number; gross: number; cash: number };
   period: { week: { tickets: number; gross: number }; month: { tickets: number; gross: number } };
   routes: { route: string; trips: number; gross: number }[];
+  history24h: { hour: string; trips: number; completed: number }[];
   recentTrips: {
     id: string; trip_no: string; bus_reg: string | null; route_code: string | null; route_name: string | null;
     route_from: string | null; route_to: string | null; departure_time: string | null; driver: string | null;
@@ -54,6 +55,17 @@ function fmtAgo(d?: string | null): string {
     if (hrs < 24) return `${hrs}h ago`;
     return `${Math.floor(hrs / 24)}d ago`;
   } catch { return d; }
+}
+
+function fmtHourLabel(h?: string | null): string {
+  if (!h) return '';
+  try {
+    const d = new Date(h);
+    if (isNaN(d.getTime())) return h.slice(11, 16) || '';
+    const now = new Date();
+    const isYesterday = now.getTime() - d.getTime() > 12 * 3600 * 1000;
+    return (isYesterday ? '−' : '') + String(d.getHours()).padStart(2, '0') + ':00';
+  } catch { return ''; }
 }
 
 export default function TransitOperationsDashboard({ onNavigate }: { onNavigate?: (s: string) => void }) {
@@ -150,6 +162,35 @@ export default function TransitOperationsDashboard({ onNavigate }: { onNavigate?
             <span className="sector-chip"><FiClock size={12} /> Shifts <b>{data.fleet.openShifts} open</b>/<b>{data.fleet.totalShifts}</b></span>
             <span className="sector-chip"><FiArchive size={12} /> Active templates <b>{data.fleet.activeTemplates}</b></span>
             <span className="sector-chip"><FiUsers size={12} /> Transit users <b>{data.fleet.transitUsers}</b></span>
+          </div>
+
+          {/* ── 24h trip history ── */}
+          <div className="section-head" style={{ marginTop: '1.5rem' }}>
+            <h2 className="section-head-title">Trips — Last 24 Hours</h2>
+            <p className="section-head-desc">Departures by hour · completed trips in {`\u201C`}green{`\u201D`}</p>
+          </div>
+          <div className="card">
+            {data.history24h.length === 0 ? (
+              <div className="table-empty"><p>No trip departures in the last 24 hours.</p></div>
+            ) : (
+              <div className="hist-wrap">
+                <div className="hist-chart">
+                  {data.history24h.map((h) => {
+                    const max = Math.max(1, ...data.history24h.map((x) => x.trips));
+                    const tripsPct = Math.max(3, Math.round((h.trips / max) * 100));
+                    const compPct = h.trips > 0 ? Math.max(2, Math.round((h.completed / h.trips) * 100)) : 0;
+                    return (
+                      <div className="hist-col" key={h.hour} title={`${fmtHourLabel(h.hour)} — ${h.trips} trips · ${h.completed} completed`}>
+                        <div className="hist-bar" style={{ height: tripsPct + '%' }}>
+                          <div className="hist-bar-comp" style={{ height: compPct + '%' }} />
+                        </div>
+                        <span className="hist-label">{fmtHourLabel(h.hour)}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* ── Live trip board ── */}

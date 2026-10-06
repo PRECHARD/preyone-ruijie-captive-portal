@@ -66,6 +66,7 @@ describe('GET /api/v1/transit/dashboard', () => {
       period: { week: { tickets: 0, gross: 0 }, month: { tickets: 0, gross: 0 } },
       routes: [],
       recentTrips: [],
+      history24h: [],
     });
 
     // Every parameterised query must carry the admin's company id first.
@@ -90,5 +91,25 @@ describe('GET /api/v1/transit/dashboard', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.status).toMatchObject({ scheduled: 2, open: 3, cancelled: 1, completed: 0 });
+  });
+
+  it('exposes a company-scoped 24h trip history for the chart', async () => {
+    (pool.query as any).mockImplementation(async (sql: string) => {
+      if (/date_trunc\('hour', t\.opened_at\)/.test(sql)) {
+        return { rows: [
+          { hour: '2026-10-05T06:00:00.000Z', trips: 2, completed: 1 },
+          { hour: '2026-10-05T07:00:00.000Z', trips: 4, completed: 2 },
+        ] };
+      }
+      return { rows: [] };
+    });
+
+    const res = await request(createApp()).get('/api/v1/transit/dashboard');
+
+    expect(res.status).toBe(200);
+    expect(res.body.history24h).toEqual([
+      { hour: '2026-10-05T06:00:00.000Z', trips: 2, completed: 1 },
+      { hour: '2026-10-05T07:00:00.000Z', trips: 4, completed: 2 },
+    ]);
   });
 });

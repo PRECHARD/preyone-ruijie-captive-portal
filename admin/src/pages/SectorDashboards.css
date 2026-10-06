@@ -108,6 +108,50 @@
   max-width: 100%;
 }
 
+.hist-wrap { overflow-x: auto; padding-bottom: 4px; }
+
+.hist-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 160px;
+  min-width: 460px;
+  padding: 14px 6px 0;
+}
+
+.hist-col {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.hist-bar {
+  width: 100%;
+  max-width: 26px;
+  min-height: 2px;
+  border-radius: 4px 4px 0 0;
+  background: linear-gradient(180deg, #38bdf8, #6366f1);
+  position: relative;
+  overflow: hidden;
+  transition: height 0.4s ease;
+}
+
+.hist-bar-comp {
+  position: absolute;
+  inset: auto 0 0 0;
+  background: linear-gradient(180deg, #4ade80, #22c55e);
+}
+
+.hist-label {
+  font-size: 9px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 .btn--sm { padding: 4px 10px; font-size: 12px; display: inline-flex; align-items: center; gap: 5px; }
 
 @media (max-width: 900px) {
