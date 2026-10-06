@@ -609,31 +609,47 @@ const codes = a.voucher_data?.codes;
 
   const renderVoucherJPEG = async (data: any, issuedByName: string) => {
     const c = document.createElement('canvas');
+    c.width = 800; c.height = 450;
     await drawVoucherCanvas(c, data, issuedByName);
-    var link = document.createElement('a');
-    link.download = 'voucher-' + (data.code || 'PREYONE-XXXX').toLowerCase() + '.jpeg';
-    link.href = c.toDataURL('image/jpeg', 0.95);
+    const blob = await new Promise<Blob | null>(resolve => c.toBlob(resolve, 'image/jpeg', 0.95));
+    if (!blob) return;
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.download = 'voucher-' + lc(data.code) + '.jpeg';
+    link.href = url;
+    document.body.appendChild(link);
     link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 3000);
+    setVStatus({ type: 'success', msg: `Downloaded ${lc(data.code) || 'voucher'}.jpeg` });
+    setTimeout(() => setVStatus(null), 2000);
   };
 
   // High-quality JPEG export of a single voucher's canvas card. The PIN is
   // lowercased inside drawVoucherCanvas, so the filename uses the lowercased
   // code to keep them strict and consistent.
-  const generateVoucherJpegBlob = async (voucher: Voucher): Promise<{ dataUrl: string; blob: Blob; fileName: string }> => {
+  const generateVoucherJpegBlob = async (voucher: Voucher): Promise<{ url: string; blob: Blob; fileName: string }> => {
     const c = document.createElement('canvas');
     c.width = 800; c.height = 450;
     await drawVoucherCanvas(c, voucher, user?.fullName || 'Preyone UltraNet');
-    const dataUrl = c.toDataURL('image/jpeg', 0.95);
-    const blob = await (await fetch(dataUrl)).blob();
-    return { dataUrl, blob, fileName: 'voucher-' + (voucher.code || 'PREYONE-XXXX').toLowerCase() + '.jpeg' };
+    const blob = await new Promise<Blob | null>(resolve => c.toBlob(resolve, 'image/jpeg', 0.95));
+    if (!blob) throw new Error('Could not render voucher image');
+    return { url: URL.createObjectURL(blob), blob, fileName: 'voucher-' + (voucher.code || 'PREYONE-XXXX').toLowerCase() + '.jpeg' };
   };
 
   const handleDownloadJpeg = async (voucher: Voucher) => {
-    const { dataUrl, fileName } = await generateVoucherJpegBlob(voucher);
-    const link = document.createElement('a');
-    link.href = dataUrl;
-    link.download = fileName;
-    link.click();
+    try {
+      const { url, fileName } = await generateVoucherJpegBlob(voucher);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 3000);
+    } catch (err: any) {
+      showToast({ title: 'Download failed', message: err?.message || 'Could not create the voucher JPEG.', type: 'error' });
+    }
   };
 
   const printVoucherPdf = async (voucher: Voucher) => {
