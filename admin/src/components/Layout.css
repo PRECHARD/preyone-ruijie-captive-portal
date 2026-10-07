@@ -756,65 +756,107 @@
 
 @media (max-width: 768px) {
   :root {
-    --nav-height: 64px;
+    --nav-height: 56px;
   }
-  .admin-logo {
-    height: 36px;
-  }
-  .admin-brand-label {
-    font-size: 7.5px;
-    letter-spacing: 1.5px;
+  /* Single-row flex header: hamburger + logo far-left, compact tabs in the
+     middle, user pill pinned far-right. Nothing wraps or overflows. */
+  .admin-nav-inner {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    height: 100%;
+    padding: 0 12px;
   }
   .nav-hamburger {
     width: 38px;
     height: 38px;
-    margin-left: 10px;
+    margin-left: 0;
     font-size: 17px;
-  }
-  .admin-nav-center {
-    gap: 6px;
-    padding: 0 8px;
+    flex-shrink: 0;
   }
   .admin-nav-brand {
-    padding: 0 8px;
-  }
-  .admin-main {
-    padding: 14px;
-  }
-  .sidebar {
-    top: var(--nav-height);
-  }
-  .workspace-switch {
-    gap: 0;
-  }
-  .ws-btn {
-    padding: 6px 9px;
-    font-size: 11.5px;
-  }
-  .ws-btn .ws-label {
-    display: none;
-  }
-  .app-warning-banner {
-    padding: 8px 12px;
-  }
-}
-
-@media (max-width: 480px) {
-  .admin-logo {
-    height: 32px;
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 8px;
+    flex-shrink: 0;
+    padding: 0;
+    border: none;
+    background: none;
   }
   .admin-brand-label {
     display: none;
   }
+  .admin-logo {
+    height: 34px;
+    width: auto;
+    max-width: 110px;
+    object-fit: contain;
+    object-position: left center;
+  }
+  .admin-nav-center {
+    flex: 1 1 auto;
+    min-width: 0;
+    justify-content: center;
+    gap: 4px;
+    margin: 0 6px;
+    padding: 0;
+    border: none;
+    overflow: hidden;
+  }
+  .workspace-switch {
+    flex-shrink: 1;
+    min-width: 0;
+    max-width: 100%;
+    gap: 4px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .workspace-switch::-webkit-scrollbar {
+    display: none;
+  }
+  .ws-btn {
+    flex: 0 1 auto;
+    min-width: 0;
+    gap: 6px;
+    padding: 7px 9px;
+    font-size: 11.5px;
+    white-space: nowrap;
+  }
+  .ws-btn .ws-label {
+    display: none;
+  }
+  .sidebar {
+    top: var(--nav-height);
+  }
+  .admin-main {
+    padding: 14px;
+  }
+}
+
+@media (max-width: 480px) {
+  .admin-nav-inner {
+    gap: 6px;
+    padding: 0 10px;
+  }
+  .admin-logo {
+    height: 28px;
+    max-width: 90px;
+  }
   .admin-nav-brand {
-    padding: 0 6px;
+    gap: 6px;
   }
   .nav-hamburger {
     width: 34px;
     height: 34px;
   }
   .admin-nav-center {
-    padding: 0 6px;
+    gap: 4px;
+    margin: 0 2px;
+  }
+  .ws-btn {
+    padding: 6px 7px;
   }
   .admin-main {
     padding: 12px;

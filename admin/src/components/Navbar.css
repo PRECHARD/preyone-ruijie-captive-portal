@@ -163,7 +163,14 @@
 
 @media (max-width: 768px) {
   .navbar-right {
-    padding: 0 10px;
+    margin-left: auto;
+    flex-shrink: 0;
+    padding: 0;
+  }
+  .navbar-profile {
+    flex-wrap: nowrap;
+    flex-shrink: 0;
+    white-space: nowrap;
   }
   .navbar-profile-name {
     max-width: 110px;
@@ -176,7 +183,7 @@
 
 @media (max-width: 480px) {
   .navbar-right {
-    padding: 0 8px;
+    padding: 0;
   }
   .navbar-profile-name {
     max-width: 80px;
@@ -186,9 +193,9 @@
     display: none;
   }
   .navbar-profile {
-    gap: 7px;
-    height: 36px;
-    padding: 0 9px;
+    gap: 6px;
+    height: 34px;
+    padding: 0 8px;
   }
   .navbar-dot {
     width: 7px;
