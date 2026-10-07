@@ -179,7 +179,7 @@
 
 .voucher-card-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1.2rem; }
 .voucher-card-title { font-family: 'Montserrat', sans-serif; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-dim); }
-.voucher-card-code { font-family: 'Bebas Neue', sans-serif; font-size: 2rem; letter-spacing: 0.08em; color: var(--pink); line-height: 1; cursor: pointer; transition: opacity 0.2s; }
+.voucher-card-code { font-family: 'Montserrat', sans-serif; font-size: 2rem; letter-spacing: 0.08em; color: var(--pink); line-height: 1; cursor: pointer; transition: opacity 0.2s; }
 .voucher-card-code:hover { opacity: 0.8; }
 .ceo-theme .voucher-card-code { color: #ffd700; }
 .voucher-card-body { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.8rem; }
