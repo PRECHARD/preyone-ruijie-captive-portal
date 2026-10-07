@@ -40,13 +40,32 @@ interface Package {
     status?: string | null;
     first_redeemed_at?: string | null;
     activated_at?: string | null;
+    max_devices?: number | null;
     device_count?: number;
     bound_macs?: string[] | null;
+    devices?: Array<{
+      mac_address: string;
+      label: string | null;
+      is_active: boolean;
+      bound_at: string | null;
+      last_seen_at: string | null;
+      unbound_at: string | null;
+    }> | null;
     phone?: string | null;
     mac_address?: string | null;
     first_name?: string | null;
     last_name?: string | null;
     alias?: string | null;
+    redemption_name?: string | null;
+    redemption_mac?: string | null;
+    redemption_ip?: string | null;
+    redemption_at?: string | null;
+    redemptions?: Array<{
+      full_name: string | null;
+      mac_address: string | null;
+      ip_address: string | null;
+      redeemed_at: string;
+    }> | null;
     traffic_used_bytes?: number;
     traffic_total_bytes?: number | null;
   }
@@ -391,7 +410,7 @@ const codes = a.voucher_data?.codes;
         message: data?.message || `Released ${released} device slot(s) on ${lc(voucher.code)}`,
         type: 'success',
       });
-      setDetailVoucher(prev => (prev ? { ...prev, bound_macs: [], device_count: 0 } : prev));
+      setDetailVoucher(prev => (prev ? { ...prev, bound_macs: [], device_count: 0, devices: [] } : prev));
       api.get<{ vouchers: Voucher[] }>('/vouchers').then(data => setVouchers(data.vouchers)).catch(() => {});
     } catch (err: any) {
       showToast({ title: 'Could not release bindings', message: err.message || 'Please try again.', type: 'error' });
@@ -1206,7 +1225,7 @@ const codes = a.voucher_data?.codes;
           <div className="table-empty"><p>No vouchers created yet.</p></div>
         ) : (
           <table className="data-table">
-            <thead><tr><th>Code</th><th>Price</th><th>Duration</th><th>Bandwidth</th><th>Data</th><th>Max Uses</th><th>Used</th><th>Package</th><th>Created</th><th>Actions</th></tr></thead>
+            <thead><tr><th>Code</th><th>Price</th><th>Duration</th><th>Bandwidth</th><th>Data</th><th>Max Uses</th><th>Used</th><th>Devices</th><th>Package</th><th>Created</th><th>Actions</th></tr></thead>
             <tbody>
               {vouchers.map(v => (
                 <tr key={v.id}>
@@ -1217,6 +1236,7 @@ const codes = a.voucher_data?.codes;
                   <td>{v.is_uncapped ? 'Unlimited' : (v.data_limit_gb ?? 'Unlimited') + ' GB'}</td>
                   <td>{v.max_uses}</td>
                   <td>{v.used_count}/{v.max_uses}</td>
+                  <td>{v.device_count ?? 0}/{v.max_devices ?? '—'}</td>
                   <td>{v.package_tier || <span className="muted">—</span>}</td>
                   <td>{fmtDate(v.created_at)}</td>
                   <td>
@@ -1243,6 +1263,15 @@ const codes = a.voucher_data?.codes;
         const trafficUsed = gb(v.traffic_used_bytes);
         const trafficTotal = v.traffic_total_bytes == null ? null : gb(v.traffic_total_bytes);
         const holderName = [v.first_name, v.last_name].filter(Boolean).join(' ') || v.alias || null;
+        // Redemption row is the source of truth for the person + MAC + login time;
+        // the users account (if any) only supplements it.
+        const redemptionName = v.redemption_name || holderName || null;
+        const redemptionMac = v.redemption_mac || v.mac_address || null;
+        const redemptionAt = v.redemption_at || v.first_redeemed_at || null;
+        const theRedemptions = Array.isArray(v.redemptions) ? v.redemptions : [];
+        const devices = (Array.isArray(v.devices) && v.devices.length > 0)
+          ? v.devices
+          : macs.map(m => ({ mac_address: m, label: null, is_active: true, bound_at: null, last_seen_at: null, unbound_at: null }));
 
         // Real triggers only: code + terms the customer needs. There is no
         // message-template schema in this build, so nothing here is invented.
@@ -1274,6 +1303,7 @@ const codes = a.voucher_data?.codes;
                 <div className="vd-cell"><span className="vd-label">Bandwidth</span><span className="vd-value">{v.bandwidth_mbps_up}/{v.bandwidth_mbps_down} Mbps</span></div>
                 <div className="vd-cell"><span className="vd-label">Data</span><span className="vd-value">{v.is_uncapped ? 'Unlimited' : (v.data_limit_gb ?? 'Unlimited') + ' GB'}</span></div>
                 <div className="vd-cell"><span className="vd-label">Uses</span><span className="vd-value">{v.used_count}/{v.max_uses}</span></div>
+                <div className="vd-cell"><span className="vd-label">Devices</span><span className="vd-value">{(v.device_count ?? 0)}/{v.max_devices ?? '—'}</span></div>
                 <div className="vd-cell"><span className="vd-label">Package</span><span className="vd-value">{v.package_tier || '—'}</span></div>
                 <div className="vd-cell"><span className="vd-label">Created</span><span className="vd-value">{fmtDate(v.created_at)}</span></div>
                 <div className="vd-cell"><span className="vd-label">Activated</span><span className="vd-value">{v.activated_at ? fmtDate(v.activated_at) : '—'}</span></div>
@@ -1281,24 +1311,48 @@ const codes = a.voucher_data?.codes;
                 <div className="vd-cell"><span className="vd-label">Expires</span><span className="vd-value">{fmtDate(v.expires_at)}</span></div>
               </div>
 
-              {(holderName || v.phone || v.mac_address || trafficUsed) && (
+              {(redemptionName || v.phone || redemptionMac || redemptionAt || trafficUsed || theRedemptions.length > 0) && (
                 <section className="vd-section">
                   <h4 className="vd-section-title">Redemption</h4>
                   <div className="vd-grid">
-                    <div className="vd-cell"><span className="vd-label">Holder</span><span className="vd-value">{holderName || '—'}</span></div>
+                    <div className="vd-cell"><span className="vd-label">Holder</span><span className="vd-value">{redemptionName || '—'}</span></div>
                     <div className="vd-cell"><span className="vd-label">Phone</span><span className="vd-value">{v.phone || '—'}</span></div>
-                    <div className="vd-cell"><span className="vd-label">MAC</span><span className="vd-value vd-mono">{v.mac_address || '—'}</span></div>
+                    <div className="vd-cell"><span className="vd-label">MAC</span><span className="vd-value vd-mono">{redemptionMac || '—'}</span></div>
+                    <div className="vd-cell"><span className="vd-label">Redeemed on</span><span className="vd-value">{redemptionAt ? fmtDate(redemptionAt) : '—'}</span></div>
                     <div className="vd-cell"><span className="vd-label">Traffic</span><span className="vd-value">{trafficUsed ? `${trafficUsed}${trafficTotal ? ' / ' + trafficTotal : ''}` : '—'}</span></div>
                   </div>
+                  {theRedemptions.length > 0 && (
+                    <>
+                      <p className="vd-count">{theRedemptions.length} activation{theRedemptions.length === 1 ? '' : 's'} recorded</p>
+                      <ul className="vd-macs">
+                        {theRedemptions.map((red, i) => (
+                          <li key={i}>
+                            {red.full_name || 'Unknown person'}
+                            {red.mac_address ? ` · ${red.mac_address}` : ''}
+                            {red.ip_address ? ` · ${red.ip_address}` : ''}
+                            {red.redeemed_at ? ` · ${fmtDate(red.redeemed_at)}` : ''}
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  )}
                 </section>
               )}
 
               <section className="vd-section">
                 <h4 className="vd-section-title">Device bindings</h4>
-                <p className="vd-count">{v.device_count ?? macs.length} active device{(v.device_count ?? macs.length) === 1 ? '' : 's'}</p>
-                {macs.length > 0 ? (
+                <p className="vd-count">{(v.device_count ?? macs.length)} of {v.max_devices ?? '—'} device slot{(v.max_devices ?? 2) === 1 ? '' : 's'} in use</p>
+                {devices.length > 0 ? (
                   <ul className="vd-macs">
-                    {macs.map(m => <li key={m} className="vd-mono">{m}</li>)}
+                    {devices.map(d => (
+                      <li key={d.mac_address}>
+                        <span className="vd-mono">{d.mac_address}</span>
+                        {d.label ? ` · ${d.label}` : ''}
+                        {d.bound_at ? ` · bound ${fmtDate(d.bound_at)}` : ''}
+                        {d.last_seen_at ? ` · last seen ${fmtDate(d.last_seen_at)}` : ''}
+                        {!d.is_active ? ' · released' : ''}
+                      </li>
+                    ))}
                   </ul>
                 ) : (
                   <p className="muted">No devices currently bound.</p>

@@ -252,19 +252,56 @@ adminRouter.get('/vouchers', async (req: Request, res: Response) => {
   const dataFrom = `
     FROM vouchers v
     LEFT JOIN voucher_status vs ON vs.id = v.id
+    -- Redemption source of truth: every activation writes a row here with the
+    -- person's name, the device MAC and the login time, so any redeemed code
+    -- (cloud or local) can be accounted for even when no users account exists.
+    LEFT JOIN LATERAL (
+      SELECT vr.full_name AS redemption_name,
+             vr.mac_address AS redemption_mac,
+             vr.ip_address AS redemption_ip,
+             vr.created_at AS redemption_at
+      FROM voucher_redemptions vr
+      WHERE vr.voucher_id = v.id
+      ORDER BY vr.created_at DESC
+      LIMIT 1
+    ) sub ON TRUE
     LEFT JOIN LATERAL (
       SELECT u.first_name, u.last_name, u.alias, u.phone, u.mac_address
       FROM users u
       WHERE u.voucher_code = v.code
       ORDER BY u.created_at DESC
       LIMIT 1
-    ) sub ON TRUE
+    ) usr ON TRUE
     LEFT JOIN LATERAL (
-      SELECT count(*)::int AS device_count,
-             array_agg(vd.mac_address ORDER BY vd.bound_at) FILTER (WHERE vd.is_active) AS bound_macs
+      SELECT count(*) FILTER (WHERE vd.is_active)::int AS device_count,
+             array_agg(vd.mac_address ORDER BY vd.bound_at) FILTER (WHERE vd.is_active) AS bound_macs,
+             COALESCE(
+               json_agg(json_build_object(
+                 'mac_address', vd.mac_address,
+                 'label', vd.label,
+                 'is_active', vd.is_active,
+                 'bound_at', vd.bound_at,
+                 'last_seen_at', vd.last_seen_at,
+                 'unbound_at', vd.unbound_at
+               ) ORDER BY vd.bound_at) FILTER (WHERE vd.is_active),
+               '[]'::json
+             ) AS devices
       FROM voucher_devices vd
       WHERE vd.voucher_id = v.id
     ) dev ON TRUE
+    LEFT JOIN LATERAL (
+      SELECT COALESCE(
+               json_agg(json_build_object(
+                 'full_name', vr.full_name,
+                 'mac_address', vr.mac_address,
+                 'ip_address', vr.ip_address,
+                 'redeemed_at', vr.created_at
+               ) ORDER BY vr.created_at),
+               '[]'::json
+             ) AS redemptions
+      FROM voucher_redemptions vr
+      WHERE vr.voucher_id = v.id
+    ) red ON TRUE
     LEFT JOIN LATERAL (
       SELECT COALESCE(SUM(w.data_used_bytes), 0)::bigint AS used_bytes
       FROM wispr_profiles w
@@ -280,7 +317,8 @@ adminRouter.get('/vouchers', async (req: Request, res: Response) => {
   const { rows } = await pool.query(
     `SELECT v.*,
             vs.status,
-            sub.first_name, sub.last_name, sub.alias, sub.phone, sub.mac_address,
+            sub.redemption_name, sub.redemption_mac, sub.redemption_ip, sub.redemption_at,
+            usr.first_name, usr.last_name, usr.alias, usr.phone, usr.mac_address,
             -- Prefer the stored column (backfilled, and staff-editable) but fall
             -- back to the first redemption row. Deriving it here means codes
             -- redeemed from now on get an activation time WITHOUT adding a write
@@ -291,6 +329,8 @@ adminRouter.get('/vouchers', async (req: Request, res: Response) => {
             ) AS first_redeemed_at,
             COALESCE(dev.device_count, 0) AS device_count,
             dev.bound_macs,
+            dev.devices,
+            red.redemptions,
             COALESCE(traffic.used_bytes, 0) AS traffic_used_bytes,
             CASE WHEN v.is_uncapped OR v.data_limit_gb IS NULL THEN NULL
                  ELSE (v.data_limit_gb * 1073741824)::bigint END AS traffic_total_bytes
