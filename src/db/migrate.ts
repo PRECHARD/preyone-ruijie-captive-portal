@@ -1252,6 +1252,27 @@ const SQL = `
     AND REPLACE(REPLACE(UPPER(u.mac_address), ':', ''), '-', '') ~ '^[0-9A-F]{12}$'
   ON CONFLICT (voucher_id, mac_norm) DO NOTHING;
 
+  -- Access Voucher PIN canonicalisation: the PIN is presented in lowercase on
+  -- every output (voucher preview, JPEG, PDF, print, WhatsApp share, admin
+  -- lists, copy-PIN) and authentication is case-insensitive (gateway + portal
+  -- compare UPPER(code)), so the canonical stored representation is lowercase.
+  -- This backfills legacy uppercase codes (locally-minted pre-digitisation) to
+  -- the canonical form together with every child column so joins never break.
+  -- Idempotent: re-running is a no-op. Collision-guarded so two codes that
+  -- differ only by case never merge (the unique constraint is on the value).
+  UPDATE vouchers SET code = lower(code)
+   WHERE code <> lower(code)
+     AND NOT EXISTS (SELECT 1 FROM vouchers v2 WHERE v2.code = lower(vouchers.code) AND v2.id <> vouchers.id);
+  UPDATE users SET voucher_code = lower(voucher_code)
+   WHERE voucher_code IS NOT NULL AND voucher_code <> lower(voucher_code);
+  UPDATE payments SET voucher_code = lower(voucher_code)
+   WHERE voucher_code IS NOT NULL AND voucher_code <> lower(voucher_code);
+  UPDATE transactions SET voucher_code = lower(voucher_code)
+   WHERE voucher_code IS NOT NULL AND voucher_code <> lower(voucher_code);
+  UPDATE sales SET voucher_code = lower(voucher_code) WHERE voucher_code <> lower(voucher_code);
+  UPDATE voucher_redemptions SET voucher_code = lower(voucher_code) WHERE voucher_code <> lower(voucher_code);
+  UPDATE voucher_devices SET voucher_code = lower(voucher_code) WHERE voucher_code <> lower(voucher_code);
+
   -- ════════════════ Voucher Lifecycle: Activation, Disable, Soft Delete ════════════════
   -- The admin console needs to show and manage a voucher's lifecycle, but a stored
   -- status column would be a second copy of facts we can already derive

@@ -171,13 +171,32 @@ describe('Admin routes', () => {
       // sold_by is null for a non-Staff sale with no price: the handler only
       // attributes a seller when the voucher was actually paid for, which is
       // what makes Staff's own-sales scoping sound.
+      // The canonical stored PIN is lowercase even when the client sends
+      // uppercase. Authentication is case-insensitive, and every output path
+      // (preview, JPEG, PDF, print, share, admin lists, copy-PIN) renders the
+      // stored code — one case at the source keeps all of them consistent.
       const insertCall = (pool.query as any).mock.calls.find(
         (c: any[]) => typeof c[0] === 'string' && c[0].includes('INSERT INTO vouchers')
       );
       expect(insertCall).toBeDefined();
       expect(insertCall[1]).toEqual([
-        'TEST50', 60, 1, null, null, true, 2, 5, null, null, null, null,
+        'test50', 60, 1, null, null, true, 2, 5, null, null, null, null,
       ]);
+    });
+
+    it('normalises the PIN to lowercase even for mixed/uppercase input', async () => {
+      (pool.query as any).mockResolvedValue({ rows: [{ id: 'v9', code: 'ab12cd', duration_min: 60 }] });
+
+      const res = await request(createApp())
+        .post('/api/admin/vouchers')
+        .send({ code: 'Ab12CD' });
+
+      expect(res.status).toBe(201);
+      const insertCall = (pool.query as any).mock.calls.find(
+        (c: any[]) => typeof c[0] === 'string' && c[0].includes('INSERT INTO vouchers')
+      );
+      expect(insertCall).toBeDefined();
+      expect(insertCall[1][0]).toBe('ab12cd');
     });
 
     it('returns 422 when code is missing', async () => {

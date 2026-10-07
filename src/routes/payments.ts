@@ -98,7 +98,7 @@ async function getOrCreateUserByPhone(phone: string, fullName?: string): Promise
 
 function uniqueVoucherCode(): string {
   // Base32-ish (no 0,1,O,I) so codes are easy to read out loud
-  const alphabet = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  const alphabet = 'abcdefghjkmnpqrstuvwxyz23456789';
   const bytes = randomBytes(8);
   let code = 'CT-';
   for (const b of bytes) code += alphabet[b % alphabet.length];

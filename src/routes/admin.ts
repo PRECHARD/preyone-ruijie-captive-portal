@@ -154,7 +154,11 @@ adminRouter.post('/vouchers', async (req: Request, res: Response) => {
     }
     ruijieMint = await staffRuijieMint(resolvedPackageTier, `Staff sale by ${req.adminUser!.fullName}`);
   }
-  const voucherCode = ruijieMint ? ruijieMint.code : code.toUpperCase();
+  // Canonical stored PIN is lowercase. Authentication is case-insensitive
+  // (gateway + portal compare UPPER(code)), and every output path renders the
+  // stored code, so one case at the source keeps preview/JPEG/PDF/print/share,
+  // admin lists and copy-PIN all presenting the same lowercase PIN.
+  const voucherCode = ruijieMint ? ruijieMint.code : String(code).trim().toLowerCase();
 
   const { rows } = await pool.query(
     `INSERT INTO vouchers (code, duration_min, max_uses, expires_at, data_limit_gb, is_uncapped, bandwidth_mbps_up, bandwidth_mbps_down, sold_by, price_amount, package_tier, max_devices)
@@ -1839,7 +1843,7 @@ adminRouter.post('/vouchers/bulk', async (req: Request, res: Response) => {
   if (pkgs.length === 0) { res.status(422).json({ error: 'Package not found' }); return; }
   const pkg = pkgs[0];
 
-  const slug = packageTier.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+  const slug = packageTier.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
 
   // Ruijie Cloud: mint all codes up front (one API call each, quantity=1) so the
   // HTTP work never happens inside the DB transaction.
@@ -1852,7 +1856,7 @@ adminRouter.post('/vouchers/bulk', async (req: Request, res: Response) => {
     }
   }
   const created: any[] = [];
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const chars = 'abcdefghjkmnpqrstuvwxyz23456789';
 
   const client = await pool.connect();
   try {
@@ -1861,7 +1865,7 @@ adminRouter.post('/vouchers/bulk', async (req: Request, res: Response) => {
       const bytes = crypto.randomBytes(4);
       let rand = '';
       for (let j = 0; j < 4; j++) rand += chars[bytes[j] % chars.length];
-      const code = ruijieMints.length > i ? ruijieMints[i].code : `${slug}-${rand}`;
+      const code = ruijieMints.length > i ? ruijieMints[i].code : `${slug}-${rand}`.toLowerCase();
 
       const { rows } = await client.query(
         `INSERT INTO vouchers (code, duration_min, max_uses, expires_at, data_limit_gb, is_uncapped, bandwidth_mbps_up, bandwidth_mbps_down, sold_by, price_amount, package_tier, max_devices)
@@ -1992,10 +1996,10 @@ adminRouter.post('/vouchers/approvals/:id/approve', requirePermission(PERMISSION
   if (pkgRes.rows.length === 0) { res.status(422).json({ error: 'Package not found' }); return; }
   const pkg = pkgRes.rows[0];
 
-  const slug = approval.package_tier.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+  const slug = approval.package_tier.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
   const created: any[] = [];
   const count = approval.voucher_count || 1;
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const chars = 'abcdefghjkmnpqrstuvwxyz23456789';
 
   // Ruijie Cloud: mint all codes up front so HTTP work happens before BEGIN.
   let ruijieMints: StaffRuijieMint[] = [];
@@ -2018,7 +2022,7 @@ adminRouter.post('/vouchers/approvals/:id/approve', requirePermission(PERMISSION
       const voucherCode = ruijieMints.length > i
         ? ruijieMints[i].code
         : (approval.request_type === 'single' && approval.voucher_data?.code
-          ? approval.voucher_data.code.toUpperCase()
+          ? String(approval.voucher_data.code || '').trim().toLowerCase()
           : `${slug}-${rand}`);
 
       const { rows: vrows } = await client.query(
