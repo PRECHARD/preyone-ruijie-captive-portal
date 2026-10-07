@@ -46,7 +46,6 @@ export function Nav() {
 
         <div className="hidden items-center gap-4 lg:flex">
           <a href="tel:+263771327202" className="text-xs font-bold tracking-wide text-slate-300 transition-colors hover:text-cyan-300">
-            +263 771 327 202
           </a>
           <Link to="/#contact" className="btn-primary px-5 py-2.5 text-xs uppercase tracking-wide">
             Get Connected
