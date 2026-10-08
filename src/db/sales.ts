@@ -10,16 +10,36 @@ export interface StaffSalesItem {
 export async function getStaffDailySalesItemized(staffId: string): Promise<StaffSalesItem[]> {
   const { rows } = await pool.query(
     `SELECT 
-       v.package_name,
+       COALESCE(v.package_tier, 'Standard') AS package_name,
        COUNT(v.id) AS quantity,
        v.price_amount AS price,
        COALESCE(SUM(v.price_amount), 0) AS total_revenue
      FROM vouchers v
      WHERE v.sold_by = $1 
        AND v.created_at >= CURRENT_DATE
-     GROUP BY v.package_name, v.price_amount
+     GROUP BY COALESCE(v.package_tier, 'Standard'), v.price_amount
      ORDER BY quantity DESC`,
     [staffId]
+  );
+  return rows.map((r: any) => ({
+    package_name: r.package_name,
+    quantity: parseInt(r.quantity, 10),
+    price: parseFloat(r.price) || 0,
+    total_revenue: parseFloat(r.total_revenue) || 0,
+  }));
+}
+
+export async function getPlatformDailySalesItemized(): Promise<StaffSalesItem[]> {
+  const { rows } = await pool.query(
+    `SELECT 
+       COALESCE(v.package_tier, 'Standard') AS package_name,
+       COUNT(v.id) AS quantity,
+       v.price_amount AS price,
+       COALESCE(SUM(v.price_amount), 0) AS total_revenue
+     FROM vouchers v
+     WHERE v.created_at >= CURRENT_DATE AND v.deleted_at IS NULL
+     GROUP BY COALESCE(v.package_tier, 'Standard'), v.price_amount
+     ORDER BY quantity DESC`
   );
   return rows.map((r: any) => ({
     package_name: r.package_name,
@@ -107,7 +127,7 @@ export async function getStaffSalesMatrix(): Promise<any[]> {
             a.role,
             COUNT(v.id) FILTER (WHERE v.created_at >= CURRENT_DATE) AS vouchers_sold_today,
             COALESCE(SUM(v.price_amount) FILTER (WHERE v.created_at >= CURRENT_DATE), 0) AS revenue_today,
-            MAX(v.created_at) FILTER (WHERE v.created_by = a.id) AS last_active
+            MAX(v.created_at) FILTER (WHERE v.sold_by = a.id) AS last_active
      FROM admin_users a
      LEFT JOIN vouchers v ON v.sold_by = a.id
      WHERE a.deleted_at IS NULL
@@ -138,7 +158,7 @@ export async function getRecentActivity(limit = 20): Promise<any[]> {
   const { rows } = await pool.query(
     `SELECT v.id,
             v.code,
-            v.package_name,
+            COALESCE(v.package_tier, 'Standard') AS package_name,
             v.price_amount,
             v.created_at,
             a.full_name AS sold_by_name

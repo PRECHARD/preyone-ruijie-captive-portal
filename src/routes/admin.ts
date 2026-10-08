@@ -9,6 +9,7 @@ import { sendAdminApprovedNotification, sendAdminRejectedNotification } from '..
 import { isRuijieCloudConfigured, mintRuijieVoucherForTier } from '../services/ruijieMint';
 import {
   getStaffDailySalesItemized,
+  getPlatformDailySalesItemized,
   getStaffDailyRevenue,
   getPlatformDailyRevenue,
   getPlatformYesterdayRevenue,
@@ -2938,7 +2939,7 @@ adminRouter.get('/dashboard/ultranet/sales-summary', async (req: Request, res: R
       getRecentActivity(20),
     ]);
     const [itemized] = await Promise.all([
-      isStaff ? getStaffDailySalesItemized(user.id) : Promise.resolve([]),
+      isStaff ? getStaffDailySalesItemized(user.id) : getPlatformDailySalesItemized(),
     ]);
     res.json({ mySales, platformDaily, platformYesterday, weekly, monthly, target, matrix, velocity, activity, itemized });
   } catch (e: any) {
