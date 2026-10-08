@@ -123,7 +123,7 @@ export async function getRuijieAccessToken(forceRefresh = false): Promise<string
   return accessToken;
 }
 
-async function withTokenRefresh<T>(fn: (accessToken: string) => Promise<T>): Promise<T> {
+export async function withTokenRefresh<T>(fn: (accessToken: string) => Promise<T>): Promise<T> {
   try {
     const token = await getRuijieAccessToken();
     return await fn(token);

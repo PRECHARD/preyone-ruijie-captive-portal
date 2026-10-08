@@ -103,13 +103,15 @@ adminRouter.get('/packages', async (_req: Request, res: Response) => {
 });
 
 adminRouter.post('/vouchers', async (req: Request, res: Response) => {
-  const { code, maxUses = 1, expiresAt, priceAmount, packageTier, paymentMethod, paymentReference } = req.body as {
+  const { code, maxUses = 1, expiresAt, priceAmount, packageTier, paymentMethod, paymentReference, holderName, holderPhone } = req.body as {
     code: string; maxUses?: number; expiresAt?: string; priceAmount?: number | null; packageTier?: string;
-    paymentMethod?: string; paymentReference?: string;
+    paymentMethod?: string; paymentReference?: string; holderName?: string; holderPhone?: string;
   };
 
   const saleMethod = paymentMethod && paymentMethod.trim() ? paymentMethod.trim() : 'Cash';
   const saleReference = paymentReference && paymentReference.trim() ? paymentReference.trim() : null;
+  const holderNameValue = holderName && holderName.trim() ? holderName.trim().slice(0, 120) : null;
+  const holderPhoneValue = holderPhone && holderPhone.trim() ? holderPhone.trim().slice(0, 32) : null;
 
   let durationMin = 60;
   let dataLimitGb: number | null = null;
@@ -174,9 +176,10 @@ adminRouter.post('/vouchers', async (req: Request, res: Response) => {
   const voucherCode = ruijieMint ? ruijieMint.code : String(code).trim().toLowerCase();
 
   const { rows } = await pool.query(
-    `INSERT INTO vouchers (code, duration_min, max_uses, expires_at, data_limit_gb, is_uncapped, bandwidth_mbps_up, bandwidth_mbps_down, sold_by, price_amount, package_tier, max_devices)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *`,
-    [voucherCode, durationMin, maxUses, expiresAt ?? null, dataLimitGb, isUncapped, bandwidthUp, bandwidthDown, soldBy, priceAmount ?? null, resolvedPackageTier, maxDevices]
+    `INSERT INTO vouchers (code, duration_min, max_uses, expires_at, data_limit_gb, is_uncapped, bandwidth_mbps_up, bandwidth_mbps_down, sold_by, price_amount, package_tier, max_devices, holder_name, holder_phone, ruijie_sync_status, ruijie_voucher_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16) RETURNING *`,
+    [voucherCode, durationMin, maxUses, expiresAt ?? null, dataLimitGb, isUncapped, bandwidthUp, bandwidthDown, soldBy, priceAmount ?? null, resolvedPackageTier, maxDevices,
+     holderNameValue, holderPhoneValue, ruijieMint ? 'synced' : null, ruijieMint ? ruijieMint.code : null]
   );
 
   if (ruijieMint) {

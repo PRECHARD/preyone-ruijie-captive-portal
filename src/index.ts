@@ -20,10 +20,12 @@ import { transitRouter } from './routes/transit';
 import { transitWebRouter } from './routes/transitWeb';
 import { systemAdminRouter } from './routes/systemAdmin';
 import { starlinkRouter } from './routes/starlink';
+import { ruijieRouter } from './routes/ruijie';
 import { ensureStarlinkSchema } from './db/starlink';
 import { errorHandler } from './middleware/errorHandler';
 import { maintenanceCheck } from './middleware/maintenanceMode';
 import { scheduleSessionCleanup } from './services/sessionCleanup';
+import { ensureVoucherRuijieSchema, startRuijieAccountingPolling } from './services/ruijieService';
 import { scheduleAccessLogCleanup } from './services/accessLogCleanup';
 
 const app = express();
@@ -326,6 +328,10 @@ app.use('/api/payments', paymentsRouter);
 app.use('/api/transit', transitRouter);
 app.use('/api/pos', posRouter);
 app.use('/api/starlink', starlinkRouter);
+// Ruijie Cloud maint-API proxy — admin-auth guarded inside the router.
+// Mounted under /api/ so the subdomain middleware (line ~169) is bypassed and
+// it cannot collide with gatewayRouter's /api/radius + /api/gateway paths.
+app.use('/api/ruijie', ruijieRouter);
 
 // Standard route aliases
 app.get('/login', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'account-login.html')));
@@ -393,6 +399,20 @@ app.listen(PORT, () => {
   ensureStarlinkSchema()
     .then(() => console.log('Starlink portal schema ready.'))
     .catch((err) => console.error('Starlink schema ensure failed:', err));
+
+  // Ruijie Cloud: additive voucher columns (ADD COLUMN IF NOT EXISTS) so the
+  // /api/ruijie routes work without a manual migrate step. Never blocks boot.
+  ensureVoucherRuijieSchema()
+    .then(() => console.log('Ruijie voucher sync schema ready.'))
+    .catch((err) => console.error('Ruijie voucher schema ensure failed:', err));
+
+  // Periodic accounting reconciliation (skips itself when Ruijie keys are
+  // missing or RUIJIE_ACCOUNTING_INTERVAL_MIN<=0 — local DB flows unaffected).
+  try {
+    startRuijieAccountingPolling();
+  } catch (err) {
+    console.error('Ruijie accounting polling failed to start:', err);
+  }
 
   if (process.env.ENABLE_SESSION_CLEANUP !== 'false') {
     const intervalMinutes = Number(process.env.SESSION_CLEANUP_INTERVAL_MIN ?? 15);

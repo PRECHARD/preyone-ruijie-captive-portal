@@ -161,16 +161,19 @@ describe('Admin routes', () => {
 
       const res = await request(createApp())
         .post('/api/admin/vouchers')
-        .send({ code: 'test50' });
+        .send({ code: 'test50', holderName: 'Jane Doe', holderPhone: '+263771000111' });
 
       expect(res.status).toBe(201);
       expect(res.body).toEqual({ ...fakeVoucher, package_tier: null });
-      // The insert carries 12 columns: code, duration, max_uses, expires_at,
+      // The insert carries 16 columns: code, duration, max_uses, expires_at,
       // data_limit, is_uncapped, bandwidth up/down, sold_by, price, tier,
-      // max_devices. Defaults come from the handler (60 min, uncapped, 2/5 Mbps).
-      // sold_by is null for a non-Staff sale with no price: the handler only
-      // attributes a seller when the voucher was actually paid for, which is
-      // what makes Staff's own-sales scoping sound.
+      // max_devices, holder_name, holder_phone, ruijie_sync_status,
+      // ruijie_voucher_id. Defaults come from the handler (60 min, uncapped,
+      // 2/5 Mbps). sold_by is null for a non-Staff sale with no price: the
+      // handler only attributes a seller when the voucher was actually paid
+      // for, which is what makes Staff's own-sales scoping sound.
+      // ruijie_sync_status/ruijie_voucher_id are null when Ruijie Cloud is not
+      // configured (no mint happened); they become 'synced'/code on a minted sale.
       // The canonical stored PIN is lowercase even when the client sends
       // uppercase. Authentication is case-insensitive, and every output path
       // (preview, JPEG, PDF, print, share, admin lists, copy-PIN) renders the
@@ -181,6 +184,7 @@ describe('Admin routes', () => {
       expect(insertCall).toBeDefined();
       expect(insertCall[1]).toEqual([
         'test50', 60, 1, null, null, true, 2, 5, null, null, null, null,
+        'Jane Doe', '+263771000111', null, null,
       ]);
     });
 

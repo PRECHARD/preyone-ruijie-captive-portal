@@ -1602,6 +1602,20 @@ const SQL = `
       ALTER TABLE transit_shifts ADD COLUMN IF NOT EXISTS conductor_phone TEXT NOT NULL DEFAULT '';
     `);
 
+    // Ruijie Cloud voucher sync + accounting reconciliation. Additive only:
+    // ADD COLUMN IF NOT EXISTS so live sales, sessions and RADIUS state are
+    // untouched. Mirrors ensureVoucherRuijieSchema() (boot-time safety net).
+    await client.query(`
+      ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS holder_name TEXT;
+      ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS holder_phone TEXT;
+      ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS ruijie_sync_status TEXT;
+      ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS ruijie_voucher_id TEXT;
+      ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS data_consumed_mb NUMERIC(12,2);
+      ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS last_accounting_sync TIMESTAMPTZ;
+      CREATE INDEX IF NOT EXISTS idx_vouchers_ruijie_sync_status
+        ON vouchers (ruijie_sync_status) WHERE ruijie_sync_status IS NOT NULL;
+    `);
+
     console.log('Migration complete. Packages + transit + RBAC seeded.');
   } finally {
     client.release();
