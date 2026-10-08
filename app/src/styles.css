@@ -36,23 +36,122 @@ body {
   text-transform: uppercase;
 }
 
-/* ---- Login ---- */
+/* ---- Login (revamped — kept in concord with admin.preyone.com) ---- */
+@keyframes loginOrbFloat {
+  0% { transform: translate3d(0, 0, 0) scale(1); }
+  100% { transform: translate3d(6vmax, 4vmax, 0) scale(1.15); }
+}
+@keyframes loginCardIn {
+  from { opacity: 0; transform: translateY(22px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes loginSpin { to { transform: rotate(360deg); } }
+@keyframes loginShineSweep {
+  0% { left: -70%; }
+  55%, 100% { left: 130%; }
+}
+@keyframes loginGradientFlow {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+@keyframes loginShake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-7px); }
+  40% { transform: translateX(6px); }
+  60% { transform: translateX(-4px); }
+  80% { transform: translateX(3px); }
+}
+@keyframes loginPulseGlow {
+  0%, 100% { box-shadow: 0 30px 80px rgba(0, 0, 0, 0.5), 0 0 50px rgba(168, 85, 247, 0.2); }
+  50% { box-shadow: 0 30px 80px rgba(0, 0, 0, 0.5), 0 0 80px rgba(0, 229, 255, 0.3); }
+}
+@keyframes loginLogoPulse {
+  0%, 100% { box-shadow: 0 0 24px rgba(0, 229, 255, 0.5), 0 0 44px rgba(168, 85, 247, 0.45); }
+  50% { box-shadow: 0 0 34px rgba(0, 229, 255, 0.75), 0 0 60px rgba(168, 85, 247, 0.65); }
+}
+
 .login-wrap {
+  position: relative;
   min-height: 100%;
   display: grid;
   place-items: center;
   padding: 24px;
+  overflow: hidden;
+}
+
+/* Floating aurora orbs — mirrors the admin auth backdrop */
+.login-wrap::before,
+.login-wrap::after {
+  content: '';
+  position: absolute;
+  width: 44vmax;
+  height: 44vmax;
+  border-radius: 50%;
+  filter: blur(70px);
+  opacity: 0.5;
+  pointer-events: none;
+  z-index: 0;
+  animation: loginOrbFloat 16s ease-in-out infinite alternate;
+}
+.login-wrap::before {
+  top: -18vmax;
+  left: -12vmax;
+  background: radial-gradient(circle, rgba(0, 229, 255, 0.5), transparent 65%);
+}
+.login-wrap::after {
+  bottom: -20vmax;
+  right: -14vmax;
+  background: radial-gradient(circle, rgba(168, 85, 247, 0.55), transparent 65%);
+  animation-delay: -8s;
 }
 
 .login-card {
+  position: relative;
+  z-index: 1;
   width: 100%;
-  max-width: 400px;
-  padding: 44px 38px;
-  background: linear-gradient(180deg, rgba(122, 14, 87, 0.35), rgba(18, 8, 38, 0.85));
-  border: 1px solid var(--line);
+  max-width: 410px;
+  padding: 46px 38px 30px;
+  background: linear-gradient(180deg, rgba(122, 14, 87, 0.3), rgba(18, 8, 38, 0.9));
+  backdrop-filter: blur(20px) saturate(150%);
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
+  border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 20px;
-  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.5), 0 0 60px rgba(168, 85, 247, 0.18);
+  box-shadow:
+    0 30px 80px rgba(0, 0, 0, 0.55),
+    0 0 70px rgba(168, 85, 247, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
   text-align: center;
+  animation: loginCardIn 0.55s cubic-bezier(0.22, 1, 0.36, 1) both, loginPulseGlow 5s ease-in-out infinite;
+}
+
+/* Sweeping top hairline — same ribbon as the admin console card */
+.login-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 24px;
+  right: 24px;
+  height: 2px;
+  border-radius: 0 0 4px 4px;
+  background: linear-gradient(90deg, transparent, #00e5ff, #a855f7, #ff00ff, transparent);
+  background-size: 200% 100%;
+  animation: loginGradientFlow 5s linear infinite;
+}
+
+.login-brow {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: #7be0ff;
+  padding: 5px 12px;
+  margin-bottom: 16px;
+  border-radius: 999px;
+  border: 1px solid rgba(0, 229, 255, 0.4);
+  background: rgba(0, 229, 255, 0.08);
+  box-shadow: 0 0 18px rgba(0, 229, 255, 0.2);
 }
 
 .login-logo {
@@ -60,6 +159,7 @@ body {
   height: 64px;
   border-radius: 50%;
   box-shadow: 0 0 24px rgba(0, 229, 255, 0.5), 0 0 44px rgba(168, 85, 247, 0.45);
+  animation: loginLogoPulse 4s ease-in-out infinite;
 }
 
 .login-title {
@@ -67,10 +167,14 @@ body {
   font-size: 40px;
   letter-spacing: 2px;
   margin: 16px 0 4px;
-  background: linear-gradient(92deg, #fff 5%, var(--cyan) 60%, var(--pink) 110%);
+  /* Aligned with the admin brand gradient (cyan → pink → magenta) */
+  background: linear-gradient(92deg, #7be0ff 0%, #00d4ff 28%, #ff5fa4 62%, #ff00ff 100%);
+  background-size: 200% 100%;
+  animation: loginGradientFlow 7s ease infinite;
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
+  filter: drop-shadow(0 0 12px rgba(0, 212, 255, 0.3));
 }
 
 .login-tag {
@@ -85,10 +189,11 @@ body {
   margin-bottom: 16px;
 }
 
-.field span {
+.field > span:first-child {
   display: block;
   font-size: 11px;
-  letter-spacing: 1px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--muted);
   margin-bottom: 6px;
@@ -99,42 +204,135 @@ body {
   padding: 12px 14px;
   font: inherit;
   color: var(--text);
-  background: rgba(0, 0, 0, 0.35);
-  border: 1px solid var(--line);
+  background: rgba(5, 5, 14, 0.6);
+  border: 1px solid rgba(148, 163, 184, 0.22);
   border-radius: 10px;
   outline: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
 }
+
+.field input::placeholder { color: rgba(183, 166, 214, 0.4); }
+
+.field input:hover { border-color: rgba(0, 229, 255, 0.35); }
 
 .field input:focus {
   border-color: var(--cyan);
-  box-shadow: 0 0 0 3px rgba(0, 229, 255, 0.15);
+  background: rgba(5, 5, 14, 0.85);
+  box-shadow: 0 0 0 3px rgba(0, 229, 255, 0.14), 0 0 26px rgba(0, 229, 255, 0.14);
+}
+
+.field-pw {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.field-pw input { padding-right: 42px; }
+
+.field-eye {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  padding: 4px;
+  cursor: pointer;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  line-height: 0;
+  transition: color 0.2s, filter 0.2s;
+  z-index: 1;
+}
+
+.field-eye:hover {
+  color: var(--cyan);
+  filter: drop-shadow(0 0 6px rgba(0, 229, 255, 0.6));
 }
 
 .login-error {
   color: #ff9da0;
   font-size: 13px;
   margin: 0 0 14px;
+  padding: 9px 12px;
+  text-align: left;
+  background: rgba(255, 23, 68, 0.1);
+  border: 1px solid rgba(255, 23, 68, 0.32);
+  border-radius: 8px;
+  animation: loginShake 0.4s ease;
+  box-shadow: 0 0 20px rgba(255, 23, 68, 0.12);
 }
 
 .login-btn {
+  position: relative;
+  overflow: hidden;
   width: 100%;
   padding: 13px;
-  font: 700 15px var(--font-body);
+  font: 800 15px var(--font-body);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
   color: #fff;
   border: 0;
   border-radius: 10px;
   cursor: pointer;
-  background: linear-gradient(92deg, var(--magenta), var(--pink));
-  box-shadow: 0 10px 30px rgba(168, 85, 247, 0.35);
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  background: linear-gradient(120deg, var(--magenta) 0%, var(--pink) 55%, var(--cyan) 135%);
+  background-size: 170% 100%;
+  background-position: 0% 50%;
+  box-shadow: 0 10px 34px rgba(168, 85, 247, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  transition: transform 0.15s ease, box-shadow 0.15s ease, background-position 0.4s ease;
+}
+
+/* Travelling shine — same as admin CTA */
+.login-btn::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -70%;
+  width: 42%;
+  height: 100%;
+  background: linear-gradient(100deg, transparent, rgba(255, 255, 255, 0.4), transparent);
+  transform: skewX(-20deg);
+  animation: loginShineSweep 3.4s ease-in-out infinite;
+  pointer-events: none;
 }
 
 .login-btn:hover:not(:disabled) {
-  transform: translateY(-1px);
-  box-shadow: 0 14px 40px rgba(168, 85, 247, 0.5);
+  transform: translateY(-2px);
+  background-position: 60% 50%;
+  box-shadow: 0 16px 46px rgba(168, 85, 247, 0.6), 0 0 34px rgba(0, 229, 255, 0.3);
 }
 
-.login-btn:disabled { opacity: 0.6; cursor: default; }
+.login-btn:active:not(:disabled) { transform: translateY(0); }
+
+.login-btn:disabled {
+  opacity: 0.9;
+  cursor: wait;
+}
+
+.login-btn:disabled::after { animation-duration: 1.6s; }
+
+.login-spinner {
+  display: inline-block;
+  width: 15px;
+  height: 15px;
+  margin-right: 9px;
+  vertical-align: -2px;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: loginSpin 0.7s linear infinite;
+}
+
+.login-foot {
+  margin-top: 22px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(168, 85, 247, 0.22);
+  font-size: 11.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(183, 166, 214, 0.65);
+}
 
 /* ---- Gateway shell ---- */
 .gw-shell {

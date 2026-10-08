@@ -12,6 +12,9 @@ export default function Login() {
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
   const [signedUp, setSignedUp] = useState<{ fullName: string; role: string; pendingApproval: boolean } | null>(null);
+  // In-flight marker for the primary CTA — button flips to "Signing in…" /
+  // "Creating Account…" with a spinner until the request settles.
+  const [busy, setBusy] = useState(false);
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -44,6 +47,7 @@ export default function Login() {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setBusy(true);
     try {
       await login(email, password);
     } catch (err: any) {
@@ -53,6 +57,8 @@ export default function Login() {
         return;
       }
       setError(err.message);
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -64,11 +70,14 @@ export default function Login() {
       setError('Passwords do not match');
       return;
     }
+    setBusy(true);
     try {
       const result = await signup({ fullName: sName, email: sEmail, phone: sPhone, role: sRole, password: sPassword });
       setSignedUp({ fullName: sName, role: sRole, pendingApproval: !!result.pendingApproval });
     } catch (err: any) {
       setError(err.message);
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -128,6 +137,7 @@ export default function Login() {
               <img src="/images/preyone-plan-white-outline@4x.png" alt="Preyone" className="auth-logo" />
               <span className="auth-brand-title">Admin Console</span>
             </div>
+            <span className="auth-brand-badge">Secure · SSO</span>
           </div>
         </div>
         <div className="auth-body">
@@ -141,10 +151,17 @@ export default function Login() {
           )}
 
           {view !== 'forgot' && view !== 'reset' && view !== 'gate' && (
-            <div className="auth-tabs">
-              <button className={'auth-tab' + (view === 'login' ? ' active' : '')} onClick={() => { switchView('login'); setSignedUp(null); }}>Sign In</button>
-              <button className={'auth-tab' + (view === 'signup' ? ' active' : '')} onClick={() => { switchView('signup'); setSignedUp(null); }}>Sign Up</button>
-            </div>
+            <>
+              <div className="auth-tabs" role="tablist">
+                <button className={'auth-tab' + (view === 'login' ? ' active' : '')} onClick={() => { switchView('login'); setSignedUp(null); }}>Sign In</button>
+                <button className={'auth-tab' + (view === 'signup' ? ' active' : '')} onClick={() => { switchView('signup'); setSignedUp(null); }}>Sign Up</button>
+              </div>
+              <p className="auth-tagline">
+                {view === 'login'
+                  ? 'Secure command-center access — one identity across every Preyone product.'
+                  : 'Join the console — your account activates instantly or after Manager approval.'}
+              </p>
+            </>
           )}
 
           {signedUp && (
@@ -189,8 +206,10 @@ export default function Login() {
                   </button>
                 </div>
               </div>
-              {error && <div className="auth-error">{error}</div>}
-              <button type="submit" className="auth-btn">Sign In</button>
+              {error && <div className="auth-error" role="alert">{error}</div>}
+              <button type="submit" className="auth-btn" disabled={busy}>
+                {busy ? (<><span className="auth-btn-spinner" aria-hidden="true" />Signing in…</>) : 'Sign In'}
+              </button>
               <button type="button" className="auth-link-btn" onClick={() => { switchView('forgot'); setEmail(''); }}>Forgot Password?</button>
             </form>
           )}
@@ -236,9 +255,11 @@ export default function Login() {
                   <input type={showSPassword ? 'text' : 'password'} value={sConfirmPassword} onChange={e => setSConfirmPassword(e.target.value)} placeholder="Re-enter your password" required minLength={6} />
                 </div>
               </div>
-              {error && <div className="auth-error">{error}</div>}
+              {error && <div className="auth-error" role="alert">{error}</div>}
               {successMsg && <div className="auth-success">{successMsg}</div>}
-              <button type="submit" className="auth-btn">Create Account</button>
+              <button type="submit" className="auth-btn" disabled={busy}>
+                {busy ? (<><span className="auth-btn-spinner" aria-hidden="true" />Creating Account…</>) : 'Create Account'}
+              </button>
             </form>
           )}
 
