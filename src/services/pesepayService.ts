@@ -498,6 +498,14 @@ export interface PesepayGatewayRequest {
   phone?: string;
   email?: string;
   fullName?: string;
+  /**
+   * Per-flow override for where Pesepay sends the customer's BROWSER after
+   * checkout (additive, optional). The server-to-server resultUrl callback is
+   * intentionally NOT overridable — it must always hit our webhook.
+   * The Starlink portal passes its own return URL so subscribers land back on
+   * /starlink/portal instead of the WiFi payment-status page.
+   */
+  returnUrl?: string;
 }
 
 export interface PesepayGatewayResponse {
@@ -572,7 +580,7 @@ export async function initiatePesepayPayment(
       },
       amountDetails: { amount, currencyCode: currency },
       reasonForPayment: paymentRequest.reasonForPayment,
-      returnUrl: getPesepayReturnUrl(),
+      returnUrl: paymentRequest.returnUrl || getPesepayReturnUrl(),
       resultUrl: getPesepayResultUrl(),
       merchantReference: paymentRequest.reference,
     };

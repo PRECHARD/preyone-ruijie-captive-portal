@@ -19,6 +19,8 @@ import { gatewayRouter } from './routes/gateway';
 import { transitRouter } from './routes/transit';
 import { transitWebRouter } from './routes/transitWeb';
 import { systemAdminRouter } from './routes/systemAdmin';
+import { starlinkRouter } from './routes/starlink';
+import { ensureStarlinkSchema } from './db/starlink';
 import { errorHandler } from './middleware/errorHandler';
 import { maintenanceCheck } from './middleware/maintenanceMode';
 import { scheduleSessionCleanup } from './services/sessionCleanup';
@@ -212,6 +214,19 @@ app.use((req, res, next) => {
     return res.status(503).send('Admin build not found');
   }
 
+  // starlink.preyone.com → Starlink customer portal (admin SPA bundle; the
+  // SPA branches to the portal on /starlink/* paths — see admin/src/main.tsx).
+  if (host === 'starlink.preyone.com') {
+    const adminDist = path.join(__dirname, '..', 'admin', 'dist');
+    if (fs.existsSync(adminDist)) {
+      const adminStatic = express.static(adminDist);
+      return adminStatic(req, res, () => {
+        res.sendFile(path.join(adminDist, 'index.html'));
+      });
+    }
+    return res.status(503).send('Starlink portal build not found');
+  }
+
   // wifi.preyone.com → captive portal
   if (host === 'wifi.preyone.com') {
     // Tell OS this is a captive portal (triggers popup on iOS/Android/Windows)
@@ -232,6 +247,17 @@ app.use((req, res, next) => {
 
   // preyone.com → main site (React SPA build)
   if (host === 'preyone.com' || host === 'www.preyone.com') {
+    // /starlink/* deep links belong to the Starlink customer portal, which
+    // ships inside the admin SPA bundle — route them there before the site SPA.
+    if (req.path.startsWith('/starlink')) {
+      const adminDist = path.join(__dirname, '..', 'admin', 'dist');
+      if (fs.existsSync(adminDist)) {
+        return express.static(adminDist)(req, res, () => {
+          res.sendFile(path.join(adminDist, 'index.html'));
+        });
+      }
+      return res.status(503).send('Starlink portal build not found');
+    }
     const siteDist = path.join(__dirname, '..', 'site', 'dist');
     if (fs.existsSync(siteDist)) {
       // The APK is also downloadable from the main site, so the download must
@@ -299,6 +325,7 @@ app.use('/api/v1/transit', transitWebRouter);
 app.use('/api/payments', paymentsRouter);
 app.use('/api/transit', transitRouter);
 app.use('/api/pos', posRouter);
+app.use('/api/starlink', starlinkRouter);
 
 // Standard route aliases
 app.get('/login', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'account-login.html')));
@@ -360,6 +387,12 @@ if (!process.env.JWT_SECRET || process.env.JWT_SECRET === 'preyone-jwt-secret-ch
 // Start server
 app.listen(PORT, () => {
   console.log(`Captive portal running on http://0.0.0.0:${PORT}`);
+
+  // Starlink customer portal: create its additive tables (IF NOT EXISTS) at
+  // boot so the portal works without a separate migrate step. Never blocks boot.
+  ensureStarlinkSchema()
+    .then(() => console.log('Starlink portal schema ready.'))
+    .catch((err) => console.error('Starlink schema ensure failed:', err));
 
   if (process.env.ENABLE_SESSION_CLEANUP !== 'false') {
     const intervalMinutes = Number(process.env.SESSION_CLEANUP_INTERVAL_MIN ?? 15);

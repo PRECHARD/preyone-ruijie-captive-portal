@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { FiChevronDown, FiLogOut } from 'react-icons/fi';
+import { FiChevronDown, FiLogOut, FiGlobe } from 'react-icons/fi';
 import { useAuth } from '../context/AuthContext';
 import './Navbar.css';
 
@@ -26,6 +26,15 @@ export default function Navbar({ className }: { className?: string }) {
 
   return (
     <div className={'navbar-right' + (className ? ' ' + className : '')} ref={userRef}>
+      <a
+        className="navbar-portal"
+        href="/starlink/portal"
+        title="Starlink Customer Portal"
+        aria-label="Open Starlink Customer Portal"
+      >
+        <FiGlobe aria-hidden="true" />
+        <span className="navbar-portal-label">Starlink Portal</span>
+      </a>
       <button
         type="button"
         className="navbar-profile"
