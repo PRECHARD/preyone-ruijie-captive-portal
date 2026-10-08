@@ -215,6 +215,11 @@ export interface RuijieOnlineUser {
   upMb: number | null;
   downMb: number | null;
   onlineTimeSec: number | null;
+  ssid: string | null;
+  band: string | null;
+  rssi: number | null;
+  upRate: number | null;
+  downRate: number | null;
 }
 
 function parseOnlineUser(u: Record<string, unknown>): RuijieOnlineUser {
@@ -226,6 +231,8 @@ function parseOnlineUser(u: Record<string, unknown>): RuijieOnlineUser {
   const code = pick(u, ['userName', 'username', 'name', 'account', 'code', 'voucherCode', 'codeNo']);
   const ip = pick(u, ['ip', 'userIp', 'ipAddress', 'hostIp', 'clientIp']);
   const sid = pick(u, ['onlineId', 'sessionId', 'sessionToken', 'id', 'token']);
+  const ssid = pick(u, ['ssid', 'ssidName']);
+  const band = pick(u, ['band', 'radioBand', 'frequency']);
   // Duration: activeSec is seconds; activeTime is milliseconds. `onlineTime`
   // is an epoch start timestamp, NOT a duration — never treat it as one.
   const activeSec = toNumber(u.activeSec);
@@ -240,6 +247,11 @@ function parseOnlineUser(u: Record<string, unknown>): RuijieOnlineUser {
     upMb: up ? toMb(up[1], up[0]) : null,
     downMb: down ? toMb(down[1], down[0]) : null,
     onlineTimeSec,
+    ssid: ssid != null ? String(ssid) : null,
+    band: band != null ? String(band) : null,
+    rssi: toNumber(pick(u, ['rssi', 'rssiInt'])),
+    upRate: toNumber(pick(u, ['upRate', 'uplinkRate'])),
+    downRate: toNumber(pick(u, ['downRate', 'downlinkRate'])),
   };
 }
 

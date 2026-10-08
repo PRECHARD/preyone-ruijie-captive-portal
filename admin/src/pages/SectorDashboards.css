@@ -435,3 +435,55 @@
 @media (max-width: 380px) {
   .un-hero-stats { grid-template-columns: minmax(0,1fr); }
 }
+
+/* -- Ruijie Cloud status strip (hero) -- */
+.un-ruijie-strip {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 7px 13px;
+  border: 1px solid rgba(0, 240, 255, 0.22);
+  background: rgba(13, 15, 24, 0.75);
+  border-radius: 999px;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: rgba(255, 255, 255, 0.62);
+}
+.un-ruijie-strip-main { color: #fff; font-weight: 700; }
+.un-ruijie-strip-sep { color: rgba(255, 255, 255, 0.25); }
+.un-rdot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.un-rdot.is-on { background: var(--un-green); box-shadow: 0 0 8px var(--un-green); animation: un-blink 2s ease-in-out infinite; }
+.un-rdot.is-off { background: var(--un-red); box-shadow: 0 0 8px var(--un-red); }
+@keyframes un-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+
+/* -- Ruijie hardware inventory — physical LED cards -- */
+.hw-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
+.hw-card {
+  position: relative;
+  padding: 13px 14px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  transition: transform 0.15s ease, box-shadow 0.3s ease, border-color 0.3s ease;
+}
+.hw-card--on {
+  border-color: rgba(0, 240, 255, 0.45);
+  box-shadow: 0 0 18px rgba(0, 240, 255, 0.18), inset 0 0 22px rgba(0, 240, 255, 0.05);
+}
+.hw-card--off {
+  border-color: rgba(248, 113, 113, 0.45);
+  box-shadow: 0 0 18px rgba(248, 113, 113, 0.15), inset 0 0 22px rgba(248, 113, 113, 0.05);
+}
+.hw-card:hover { transform: translateY(-2px); }
+.hw-top { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.hw-led { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.hw-led--on { background: var(--un-cyan); box-shadow: 0 0 10px var(--un-cyan), 0 0 18px rgba(0, 240, 255, 0.6); animation: un-blink 2s ease-in-out infinite; }
+.hw-led--off { background: var(--un-red); box-shadow: 0 0 10px var(--un-red); }
+.hw-status { font-size: 10px; font-weight: 800; letter-spacing: 0.14em; }
+.hw-card--on .hw-status { color: var(--un-cyan); }
+.hw-card--off .hw-status { color: var(--un-red); }
+.hw-name { font-size: 14px; font-weight: 700; color: #fff; overflow-wrap: anywhere; }
+.hw-meta { font-size: 11px; color: rgba(255, 255, 255, 0.55); margin-top: 3px; }
+.hw-sn { font-size: 10px; color: rgba(255, 255, 255, 0.35); margin-top: 6px; letter-spacing: 0.06em; }

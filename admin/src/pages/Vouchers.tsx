@@ -68,6 +68,10 @@ interface Package {
     }> | null;
     traffic_used_bytes?: number;
     traffic_total_bytes?: number | null;
+    // Captured by the >=$4.99 holder modal (POST /vouchers) and editable via
+    // PATCH /vouchers/:id. Rendered on the voucher canvas when present.
+    holder_name?: string | null;
+    holder_phone?: string | null;
   }
 
 interface ApprovalRequest {
@@ -146,6 +150,22 @@ export default function Vouchers() {
   const [expandedApproval, setExpandedApproval] = useState<string | null>(null);
   const [detailVoucher, setDetailVoucher] = useState<Voucher | null>(null);
   const [releasingMac, setReleasingMac] = useState(false);
+
+  // ── High-stakes (>= $4.99) customer capture + inline holder editing ──
+  // The modal intercepts generation so no >=$4.99 voucher can be created
+  // without a customer name; Edit Holder patches holder_name/holder_phone via
+  // PATCH /vouchers/:id (backend allowlists those two fields only).
+  const HOLDER_THRESHOLD = 4.99;
+  const [holderModal, setHolderModal] = useState<'single' | 'bulk' | null>(null);
+  const [holderName, setHolderName] = useState('');
+  const [holderPhone, setHolderPhone] = useState('');
+  const [holderSaving, setHolderSaving] = useState(false);
+  const [holderError, setHolderError] = useState('');
+  const [editHolderVoucher, setEditHolderVoucher] = useState<Voucher | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editPhone, setEditPhone] = useState('');
+  const [editSaving, setEditSaving] = useState(false);
+  const [editError, setEditError] = useState('');
 
   const loadClockStatus = useCallback(() => {
     if (needsClockIn) {
@@ -269,6 +289,20 @@ const codes = a.voucher_data?.codes;
     if (vUses < 1) { setVStatus({ type: 'error', msg: 'Max uses must be at least 1' }); return; }
     if (needsClockIn && !isClockedIn) { setVStatus({ type: 'error', msg: 'You must clock in before selling vouchers.' }); return; }
 
+    // High-stakes gate: >= $4.99 intercepts and demands customer details
+    // BEFORE the voucher is generated.
+    if (parseFloat(vPrice) >= HOLDER_THRESHOLD) {
+      setHolderError('');
+      setHolderModal('single');
+      return;
+    }
+    await submitCreate('', '');
+  };
+
+  // Generation half of handleCreate — runs only after the holder gate (or for
+  // sub-threshold sales, which skip the modal entirely).
+  const submitCreate = async (hName: string, hPhone: string): Promise<boolean> => {
+    if (!selectedPkg) return false;
     setCreating(true);
     setVStatus(null);
     try {
@@ -279,6 +313,8 @@ const codes = a.voucher_data?.codes;
         priceAmount: parseFloat(vPrice),
         paymentMethod: vPayMethod,
         paymentReference: IS_MOBILE_MONEY(vPayMethod) ? vPayRef.trim() : undefined,
+        holderName: hName.trim() || undefined,
+        holderPhone: hPhone.trim() || undefined,
       });
       setVStatus({ type: 'success', msg: `Voucher "${lc(data.code)}" created successfully.` });
       setVoucherCardData(data);
@@ -291,14 +327,58 @@ const codes = a.voucher_data?.codes;
       api.get<{ vouchers: Voucher[] }>('/vouchers').then(data => setVouchers(data.vouchers)).catch(() => {});
       showToast({ title: 'Voucher Created', message: `"${lc(data.code)}" created successfully`, type: 'success' });
       playVoucherSound();
+      return true;
     } catch (err: any) {
       if (err.requiresApproval) {
         setVStatus({ type: 'approval', msg: err.message || 'Approval required' });
       } else {
         setVStatus({ type: 'error', msg: err.message || 'Failed to create voucher' });
       }
+      return false;
     } finally {
       setCreating(false);
+    }
+  };
+
+  // Modal confirm: validates, then generates with the captured customer.
+  const submitHolderModal = async () => {
+    if (!holderName.trim()) { setHolderError('Customer full name is required for this sale.'); return; }
+    if (holderPhone.trim() && !/^\+?[0-9\s-]{7,20}$/.test(holderPhone.trim())) {
+      setHolderError('Enter a valid phone number, e.g. +263771234567.');
+      return;
+    }
+    setHolderSaving(true);
+    setHolderError('');
+    const ok = holderModal === 'single'
+      ? await submitCreate(holderName, holderPhone)
+      : await submitBulk(holderName, holderPhone);
+    setHolderSaving(false);
+    if (ok) {
+      setHolderModal(null);
+      setHolderName('');
+      setHolderPhone('');
+    }
+  };
+
+  // Inline holder edit — PATCH allowlists holderName/holderPhone server-side,
+  // so PIN, price and expiry can never be touched from here.
+  const saveEditHolder = async () => {
+    if (!editHolderVoucher) return;
+    setEditSaving(true);
+    setEditError('');
+    try {
+      const id = editHolderVoucher.id;
+      const name = editName.trim();
+      const phone = editPhone.trim();
+      await api.patch(`/vouchers/${id}`, { holderName: name, holderPhone: phone });
+      setEditHolderVoucher(null);
+      setVouchers(prev => prev.map(x => (x.id === id ? { ...x, holder_name: name || null, holder_phone: phone || null } : x)));
+      setDetailVoucher(prev => (prev && prev.id === id ? { ...prev, holder_name: name || null, holder_phone: phone || null } : prev));
+      showToast({ title: 'Holder Updated', message: `"${lc(editHolderVoucher.code)}" holder details saved`, type: 'success' });
+    } catch (err: any) {
+      setEditError(err.message || 'Failed to update holder');
+    } finally {
+      setEditSaving(false);
     }
   };
 
@@ -327,6 +407,18 @@ const codes = a.voucher_data?.codes;
     if (bulkCount < 1 || bulkCount > 100) { setBulkStatus({ type: 'error', msg: 'Count must be 1-100' }); return; }
     if (needsClockIn && !isClockedIn) { setBulkStatus({ type: 'error', msg: 'You must clock in before selling vouchers.' }); return; }
 
+    // High-stakes gate (unit price: custom price, else package price)
+    const bulkPkg = packages.find(p => p.tier_name === bulkTier);
+    const unitPrice = bulkPrice ? parseFloat(bulkPrice) : parseFloat(bulkPkg?.price_amount || '0');
+    if (unitPrice >= HOLDER_THRESHOLD) {
+      setHolderError('');
+      setHolderModal('bulk');
+      return;
+    }
+    await submitBulk('', '');
+  };
+
+  const submitBulk = async (hName: string, hPhone: string): Promise<boolean> => {
     setBulkCreating(true);
     setBulkStatus(null);
     try {
@@ -336,18 +428,22 @@ const codes = a.voucher_data?.codes;
         priceAmount: bulkPrice ? parseFloat(bulkPrice) : undefined,
         paymentMethod: bulkPayMethod,
         paymentReference: IS_MOBILE_MONEY(bulkPayMethod) ? bulkPayRef.trim() : undefined,
+        holderName: hName.trim() || undefined,
+        holderPhone: hPhone.trim() || undefined,
       });
       setBulkStatus({ type: 'success', msg: data.message });
       setBulkResults(data.vouchers);
       api.get<{ vouchers: Voucher[] }>('/vouchers').then(data => setVouchers(data.vouchers)).catch(() => {});
       showToast({ title: 'Bulk Vouchers', message: data.message, type: 'success' });
       playVoucherSound();
+      return true;
     } catch (err: any) {
       if (err.requiresApproval) {
         setBulkStatus({ type: 'approval', msg: err.message || 'Approval required' });
       } else {
         setBulkStatus({ type: 'error', msg: err.message || 'Failed to generate bulk' });
       }
+      return false;
     } finally {
       setBulkCreating(false);
     }
@@ -483,6 +579,20 @@ const codes = a.voucher_data?.codes;
     var nGrad = ctx.createLinearGradient(115, 0, 301, 0);
     nGrad.addColorStop(0, '#71ff2f'); nGrad.addColorStop(0.5, '#13d8ff'); nGrad.addColorStop(1, '#8b4dff');
     ctx.fillStyle = nGrad; ctx.beginPath(); ctx.roundRect(115, 132, 200, 3, 2); ctx.fill();
+
+    // ── Holder (customer) name — printed between the header rule and the
+    // spec columns when the sale captured one. Auto-skips otherwise, so
+    // legacy vouchers render byte-identical to before.
+    var holderName = String(data.holder_name || '').trim();
+    if (holderName) {
+      ctx.fillStyle = 'rgba(255,255,255,0.45)'; ctx.font = '600 8px Montserrat, sans-serif'; ctx.textAlign = 'left';
+      ctx.fillText('ISSUED FOR', 115, 152);
+      ctx.fillStyle = '#ffffff'; ctx.font = '700 14px Montserrat, sans-serif';
+      var hn = holderName;
+      while (ctx.measureText(hn).width > 232 && hn.length > 2) { hn = hn.slice(0, -1); }
+      if (hn !== holderName) hn += '..';
+      ctx.fillText(hn, 115, 170);
+    }
 
     // ── RIGHT: Voucher Code Box ──
     var cpX = 370, cpY = 28, cpW = 400, codeBoxH = 84;
@@ -1240,13 +1350,27 @@ const codes = a.voucher_data?.codes;
                   <td>{v.package_tier || <span className="muted">—</span>}</td>
                   <td>{fmtDate(v.created_at)}</td>
                   <td>
-                    <button
-                      className="btn-sm"
-                      onClick={() => setDetailVoucher(v)}
-                      aria-label={`View details for voucher ${lc(v.code)}`}
-                    >
-                      Details
-                    </button>
+                    <div className="row-actions">
+                      <button
+                        className="btn-sm"
+                        onClick={() => setDetailVoucher(v)}
+                        aria-label={`View details for voucher ${lc(v.code)}`}
+                      >
+                        Details
+                      </button>
+                      <button
+                        className="btn-sm"
+                        onClick={() => {
+                          setEditHolderVoucher(v);
+                          setEditName(v.holder_name || '');
+                          setEditPhone(v.holder_phone || '');
+                          setEditError('');
+                        }}
+                        aria-label={`Edit holder for voucher ${lc(v.code)}`}
+                      >
+                        Edit Holder
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -1254,6 +1378,103 @@ const codes = a.voucher_data?.codes;
           </table>
         )}
       </div>
+
+      {/* ── High-stakes (>= $4.99) customer capture — gates generation ── */}
+      {holderModal && (() => {
+        const gatePrice = holderModal === 'single'
+          ? parseFloat(vPrice || '0')
+          : (bulkPrice ? parseFloat(bulkPrice) : parseFloat(packages.find(p => p.tier_name === bulkTier)?.price_amount || '0'));
+        return (
+          <Modal
+            open
+            onClose={() => { if (!holderSaving) setHolderModal(null); }}
+            title={holderModal === 'single' ? 'Customer Details Required' : 'Batch Customer Details'}
+          >
+            <div className="holder-capture">
+              <p className="holder-capture__lead">
+                This sale is <strong>${gatePrice.toFixed(2)}</strong>{holderModal === 'bulk' ? ' per voucher' : ''} — record the customer before the voucher{holderModal === 'bulk' ? 's are' : ' is'} generated.
+              </p>
+              <label className="holder-capture__label" htmlFor="holder-name-input">Customer Full Name / Holder Name *</label>
+              <input
+                id="holder-name-input"
+                className="holder-capture__input"
+                value={holderName}
+                onChange={e => setHolderName(e.target.value)}
+                placeholder="e.g. Tendai Moyo"
+                maxLength={120}
+                autoFocus
+              />
+              <label className="holder-capture__label" htmlFor="holder-phone-input">Phone Number</label>
+              <input
+                id="holder-phone-input"
+                className="holder-capture__input"
+                value={holderPhone}
+                onChange={e => setHolderPhone(e.target.value)}
+                placeholder="+263 77 123 4567"
+                inputMode="tel"
+                maxLength={32}
+              />
+              {holderError && <p className="holder-capture__error" role="alert">{holderError}</p>}
+              <div className="holder-capture__actions">
+                <button className="btn-sm" onClick={() => setHolderModal(null)} disabled={holderSaving}>Cancel</button>
+                <button
+                  className="btn-action btn-action--download"
+                  onClick={submitHolderModal}
+                  disabled={holderSaving || !holderName.trim()}
+                >
+                  {holderSaving ? 'Generating…' : 'Confirm & Generate'}
+                </button>
+              </div>
+            </div>
+          </Modal>
+        );
+      })()}
+
+      {/* ── Edit Holder (row action → PATCH /vouchers/:id) ── */}
+      {editHolderVoucher && (
+        <Modal
+          open
+          onClose={() => { if (!editSaving) setEditHolderVoucher(null); }}
+          title={`Edit Holder — ${lc(editHolderVoucher.code)}`}
+        >
+          <div className="holder-capture">
+            <p className="holder-capture__lead">
+              Updates <strong>holder name</strong> and <strong>phone</strong> only. PIN, price, expiry and uses stay locked.
+            </p>
+            <label className="holder-capture__label" htmlFor="edit-holder-name">Customer Full Name / Holder Name</label>
+            <input
+              id="edit-holder-name"
+              className="holder-capture__input"
+              value={editName}
+              onChange={e => setEditName(e.target.value)}
+              placeholder="e.g. Tendai Moyo"
+              maxLength={120}
+              autoFocus
+            />
+            <label className="holder-capture__label" htmlFor="edit-holder-phone">Phone Number</label>
+            <input
+              id="edit-holder-phone"
+              className="holder-capture__input"
+              value={editPhone}
+              onChange={e => setEditPhone(e.target.value)}
+              placeholder="+263 77 123 4567"
+              inputMode="tel"
+              maxLength={32}
+            />
+            {editError && <p className="holder-capture__error" role="alert">{editError}</p>}
+            <div className="holder-capture__actions">
+              <button className="btn-sm" onClick={() => setEditHolderVoucher(null)} disabled={editSaving}>Cancel</button>
+              <button
+                className="btn-action btn-action--download"
+                onClick={saveEditHolder}
+                disabled={editSaving || (!editName.trim() && !editPhone.trim())}
+              >
+                {editSaving ? 'Saving…' : 'Save Holder'}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
 
       {detailVoucher && (() => {
         const v = detailVoucher;

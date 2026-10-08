@@ -2,9 +2,16 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('../api/client', () => ({
-  api: { get: vi.fn(), post: vi.fn(), getToken: vi.fn(() => 'bearer-test') },
+  api: { get: vi.fn(), post: vi.fn(), patch: vi.fn(), getToken: vi.fn(() => 'bearer-test') },
   transitApi: { get: vi.fn(), post: vi.fn() },
   systemApi: { get: vi.fn(), post: vi.fn() },
+  ruijieApi: {
+    get: vi.fn((path: string) =>
+      path === '/status'
+        ? Promise.resolve(undefined)
+        : Promise.resolve({ skipped: true, reason: 'test', users: [], devices: [] })),
+    post: vi.fn(() => Promise.resolve({ skipped: true, reason: 'test' })),
+  },
 }));
 
 vi.mock('../api/pos', () => ({

@@ -404,6 +404,48 @@ adminRouter.post('/vouchers/:id/disable', requirePermission(PERMISSIONS.COMPANY_
   res.json(rows[0]);
 });
 
+// ── Holder edit: customer name/phone ONLY ──
+// Strict allowlist — any other field in the body is rejected outright, so this
+// route can never alter PIN, price, expiry or any session-state column.
+// Scoped via loadScopedVoucher (Staff may fix holders on their own sales).
+adminRouter.patch('/vouchers/:id', async (req: Request, res: Response) => {
+  const raw = (req.body ?? {}) as Record<string, unknown>;
+  const allowed = ['holderName', 'holderPhone'];
+  const extra = Object.keys(raw).filter((k) => !allowed.includes(k));
+  if (extra.length > 0) {
+    res.status(422).json({ error: `Field(s) not editable here: ${extra.join(', ')}. Only holderName/holderPhone.` });
+    return;
+  }
+  if (!('holderName' in raw) && !('holderPhone' in raw)) {
+    res.status(422).json({ error: 'Nothing to update. Provide holderName and/or holderPhone.' });
+    return;
+  }
+
+  const voucher = await loadScopedVoucher(req.adminUser!.id, req.adminUser!.role, req.params.id);
+  if (!voucher) { res.status(404).json({ error: 'Voucher not found' }); return; }
+
+  const holderName = raw.holderName == null || String(raw.holderName).trim() === '' ? null : String(raw.holderName).trim().slice(0, 120);
+  const holderPhone = raw.holderPhone == null || String(raw.holderPhone).trim() === '' ? null : String(raw.holderPhone).trim().slice(0, 32);
+
+  const { rows } = await pool.query(
+    `UPDATE vouchers SET holder_name = $2, holder_phone = $3
+      WHERE id = $1 AND deleted_at IS NULL
+      RETURNING id, code, holder_name, holder_phone`,
+    [voucher.id, holderName, holderPhone]
+  );
+  if (!rows[0]) { res.status(404).json({ error: 'Voucher not found' }); return; }
+
+  await recordAuditLog(
+    req.adminUser!.id,
+    req.adminUser!.fullName,
+    'voucher_holder_update',
+    'voucher',
+    voucher.id,
+    `Holder for ${voucher.code}: name="${holderName ?? ''}" phone="${holderPhone ?? ''}"`
+  );
+  res.json(rows[0]);
+});
+
 adminRouter.post('/vouchers/:id/extend', requirePermission(PERMISSIONS.COMPANY_ADMIN), async (req: Request, res: Response) => {
   const voucher = await loadScopedVoucher(req.adminUser!.id, req.adminUser!.role, req.params.id);
   if (!voucher) { res.status(404).json({ error: 'Voucher not found' }); return; }
@@ -1821,13 +1863,15 @@ adminRouter.delete('/whitelist/:id', requirePermission(PERMISSIONS.SYSTEM_DEVELO
 // ═══════════════════════════════════════════════════════
 
 adminRouter.post('/vouchers/bulk', async (req: Request, res: Response) => {
-  const { count = 10, packageTier, priceAmount, expiresAt, paymentMethod, paymentReference } = req.body as {
+  const { count = 10, packageTier, priceAmount, expiresAt, paymentMethod, paymentReference, holderName, holderPhone } = req.body as {
     count?: number; packageTier?: string; priceAmount?: number; expiresAt?: string;
-    paymentMethod?: string; paymentReference?: string;
+    paymentMethod?: string; paymentReference?: string; holderName?: string; holderPhone?: string;
   };
 
   const saleMethod = paymentMethod && paymentMethod.trim() ? paymentMethod.trim() : 'Cash';
   const saleReference = paymentReference && paymentReference.trim() ? paymentReference.trim() : null;
+  const holderNameValue = holderName && holderName.trim() ? holderName.trim().slice(0, 120) : null;
+  const holderPhoneValue = holderPhone && holderPhone.trim() ? holderPhone.trim().slice(0, 32) : null;
 
   if (!packageTier) { res.status(422).json({ error: 'packageTier required' }); return; }
   if (count < 1 || count > 100) { res.status(422).json({ error: 'count must be between 1 and 100' }); return; }
@@ -1884,9 +1928,9 @@ adminRouter.post('/vouchers/bulk', async (req: Request, res: Response) => {
       const code = ruijieMints.length > i ? ruijieMints[i].code : `${slug}-${rand}`.toLowerCase();
 
       const { rows } = await client.query(
-        `INSERT INTO vouchers (code, duration_min, max_uses, expires_at, data_limit_gb, is_uncapped, bandwidth_mbps_up, bandwidth_mbps_down, sold_by, price_amount, package_tier, max_devices)
-         VALUES ($1, $2, 1, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
-        [code, pkg.duration_min, expiresAt || null, pkg.data_limit_gb, pkg.is_uncapped, pkg.bandwidth_mbps_up, pkg.bandwidth_mbps_down, req.adminUser!.id, priceAmount || null, packageTier, pkg.max_devices]
+        `INSERT INTO vouchers (code, duration_min, max_uses, expires_at, data_limit_gb, is_uncapped, bandwidth_mbps_up, bandwidth_mbps_down, sold_by, price_amount, package_tier, max_devices, holder_name, holder_phone)
+         VALUES ($1, $2, 1, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING *`,
+        [code, pkg.duration_min, expiresAt || null, pkg.data_limit_gb, pkg.is_uncapped, pkg.bandwidth_mbps_up, pkg.bandwidth_mbps_down, req.adminUser!.id, priceAmount || null, packageTier, pkg.max_devices, holderNameValue, holderPhoneValue]
       );
 
       if (ruijieMints.length > i) {

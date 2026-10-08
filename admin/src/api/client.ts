@@ -57,5 +57,7 @@ export const api = createClient('/api/admin');
 export const systemApi = createClient('/api/v1/admin');
 /** Transit company web-admin API (devices, staff, trips, tickets, financials). */
 export const transitApi = createClient('/api/v1/transit');
+/** Ruijie Cloud telemetry (sessions, devices, accounting, kick). Admin auth required. */
+export const ruijieApi = createClient('/api/ruijie');
 
 export { getToken, setToken, clearToken };

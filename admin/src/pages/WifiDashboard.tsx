@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
-import { api } from '../api/client';
+import { api, ruijieApi } from '../api/client';
 import { deviceShort } from '../utils/device';
+import { showToast } from '../utils/toast';
 import {
   FiRadio, FiActivity, FiCreditCard, FiServer, FiSmartphone, FiTrendingUp,
   FiGrid, FiWifi, FiUsers, FiDollarSign, FiKey, FiShield, FiClock, FiChevronRight,
@@ -68,6 +69,30 @@ const TABS = [
 ] as const;
 type TabId = typeof TABS[number]['id'];
 
+// ── Ruijie Cloud shapes (GET /api/ruijie/sessions | /devices | /status) ──
+interface RuijieSession {
+  mac: string; ip: string | null; username: string | null; sessionId: string | null;
+  usedMb: number | null; upMb: number | null; downMb: number | null;
+  onlineTimeSec: number | null; ssid: string | null; band: string | null;
+  rssi: number | null; upRate: number | null; downRate: number | null;
+  code: string | null; holderName: string | null; holderPhone: string | null;
+}
+interface RuijieDevice {
+  sn: string; name: string | null; alias: string | null; commonType: string | null;
+  productClass: string | null; softwareVersion: string | null;
+  onlineStatus: string | null; ip: string | null;
+}
+interface RuijieStatusData {
+  configured: boolean; groupId: string | null; lastAccountingSync: string | null;
+  vouchers: { total: number; bySyncStatus: { synced: number; missing: number; pending: number; never: number }; withUsage: number };
+  pollingIntervalMin: string;
+}
+
+const RG_DEVICE_ONLINE = new Set(['online', '1', 'up', 'true', 'yes', 'connected']);
+function rgOnline(d: RuijieDevice): boolean {
+  return RG_DEVICE_ONLINE.has(String(d.onlineStatus ?? '').trim().toLowerCase());
+}
+
 function fmtMoney(n: number): string {
   return '$' + (n || 0).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 }
@@ -87,6 +112,26 @@ function fmtUptime(s?: number | null): string {
   if (h > 24) return `${Math.floor(h / 24)}d ${h % 24}h`;
   if (h > 0) return `${h}h ${m}m`;
   return `${m}m`;
+}
+
+// Ruijie upRate/downRate are reported in kbps.
+function fmtRate(r?: number | null): string {
+  if (r == null) return '—';
+  if (r >= 1000) return (r / 1000).toFixed(1) + ' Mbps';
+  return Math.round(r) + ' kbps';
+}
+
+function fmtMb(mb?: number | null): string {
+  if (mb == null) return '—';
+  if (mb >= 1024) return (mb / 1024).toFixed(1) + ' GB';
+  return mb.toFixed(1) + ' MB';
+}
+
+function rssiTone(r?: number | null): string {
+  if (r == null) return '';
+  if (r >= -60) return 'un-up';
+  if (r >= -75) return '';
+  return 'un-down';
 }
 
 function Sparkline({ data, w = 92, h = 28 }: { data: { revenue: number }[]; w?: number; h?: number }) {
@@ -179,6 +224,14 @@ export default function WifiDashboard({ onNavigate }: { onNavigate?: (s: string)
   const [error, setError] = useState('');
   const [tab, setTab] = useState<TabId>('overview');
 
+  // Ruijie Cloud telemetry — separate state so the local dashboard still
+  // renders when the cloud is unconfigured or the remote API is down.
+  const [rgSessions, setRgSessions] = useState<RuijieSession[]>([]);
+  const [rgDevices, setRgDevices] = useState<RuijieDevice[]>([]);
+  const [rgStatus, setRgStatus] = useState<RuijieStatusData | null>(null);
+  const [rgNote, setRgNote] = useState('');
+  const [kicking, setKicking] = useState<string | null>(null);
+
   const load = useCallback(() => {
     api.get<WifiDashboardData>('/dashboard/wifi').then(setData).catch((e) => setError(e.message || 'Failed to load'));
     api.get<SalesSummary>('/dashboard/ultranet/sales-summary').then((s) => {
@@ -199,7 +252,49 @@ export default function WifiDashboard({ onNavigate }: { onNavigate?: (s: string)
     }).catch(() => {});
   }, []);
 
+  // Cloud calls hit the remote Ruijie API — poll on a slower cadence (60s)
+  // than the local dashboard (30s) to stay well inside cloud rate limits.
+  const loadRg = useCallback(async () => {
+    try {
+      const r = await ruijieApi.get<{ skipped: boolean; reason?: string; users?: RuijieSession[] }>('/sessions');
+      setRgSessions(!r || r.skipped ? [] : (r.users || []));
+      setRgNote(r?.skipped ? String(r.reason || 'unavailable') : '');
+    } catch { setRgNote('cloud_error'); }
+    try {
+      const d = await ruijieApi.get<{ skipped: boolean; devices?: RuijieDevice[] }>('/devices');
+      setRgDevices(!d || d.skipped ? [] : (d.devices || []));
+    } catch { /* local dashboard must not sink on cloud errors */ }
+    try {
+      const s = await ruijieApi.get<RuijieStatusData>('/status');
+      setRgStatus(s && s.vouchers ? s : null);
+    } catch { /* status strip simply stays hidden */ }
+  }, []);
+
   useEffect(() => { load(); const i = setInterval(load, 30000); return () => clearInterval(i); }, [load]);
+  useEffect(() => { loadRg(); const i = setInterval(loadRg, 60000); return () => clearInterval(i); }, [loadRg]);
+
+  // Kick: the backend answers {skipped:true} when Ruijie exposes no REST
+  // disconnect endpoint — show that honestly, never fake a success.
+  const kickClient = async (s: RuijieSession) => {
+    setKicking(s.mac);
+    try {
+      const r = await ruijieApi.post<{ skipped?: boolean; reason?: string; ok?: boolean }>('/kick', { mac: s.mac });
+      if (r?.skipped) {
+        showToast({
+          title: 'Disconnect Unavailable',
+          message: 'Ruijie Cloud exposes no disconnect API for this client. Use the Ruijie app or console CLI.',
+          type: 'warning',
+        });
+      } else {
+        showToast({ title: 'Client Disconnected', message: `${s.mac} was kicked from the network`, type: 'success' });
+        loadRg();
+      }
+    } catch (err: any) {
+      showToast({ title: 'Disconnect Failed', message: err.message || 'Could not kick the client', type: 'error' });
+    } finally {
+      setKicking(null);
+    }
+  };
 
   const v = data?.vouchers;
   const weekTotal = sales ? sales.weekly.reduce((s, p) => s + p.revenue, 0) : 0;
@@ -259,6 +354,22 @@ export default function WifiDashboard({ onNavigate }: { onNavigate?: (s: string)
             <span className="un-stat-sub">{v?.redeemedToday ?? 0} redeemed today</span>
           </div>
         </div>
+
+        {/* ── Ruijie Cloud status strip — honest state, never faked ── */}
+        {rgStatus && (
+          <div className="un-ruijie-strip" title={`Polling every ${rgStatus.pollingIntervalMin} min · group ${rgStatus.groupId || '—'}`}>
+            <span className={'un-rdot' + (rgStatus.configured ? ' is-on' : ' is-off')} />
+            <span className="un-ruijie-strip-main">
+              {rgStatus.configured ? 'Ruijie Cloud linked' : 'Ruijie Cloud not configured'}
+            </span>
+            <span className="un-ruijie-strip-sep">·</span>
+            <span>accounting {rgStatus.lastAccountingSync ? fmtAgo(rgStatus.lastAccountingSync) : 'never synced'}</span>
+            <span className="un-ruijie-strip-sep">·</span>
+            <span>{rgStatus.vouchers.bySyncStatus.synced}/{rgStatus.vouchers.total} vouchers synced</span>
+            <span className="un-ruijie-strip-sep">·</span>
+            <span>{rgSessions.length} live on cloud</span>
+          </div>
+        )}
       </div>
 
       {/* ── Tab navigation ── */}
@@ -435,6 +546,38 @@ export default function WifiDashboard({ onNavigate }: { onNavigate?: (s: string)
                 )}
               </div>
 
+              {/* ── Ruijie Cloud hardware inventory — physical LED cards ── */}
+              <div className="un-panel">
+                <SectionTitle
+                  title="Ruijie Hardware Inventory"
+                  sub={rgDevices.length ? 'Live cloud telemetry · online / offline LED status' : 'No hardware returned by the cloud inventory'}
+                />
+                {rgDevices.length === 0 ? (
+                  <div className="table-empty">
+                    <p>{rgNote ? `Cloud inventory unavailable (${rgNote}).` : 'No devices found in this Ruijie group.'}</p>
+                  </div>
+                ) : (
+                  <div className="hw-grid">
+                    {rgDevices.map((d) => {
+                      const online = rgOnline(d);
+                      return (
+                        <div key={d.sn} className={'hw-card' + (online ? ' hw-card--on' : ' hw-card--off')}>
+                          <div className="hw-top">
+                            <span className={'hw-led' + (online ? ' hw-led--on' : ' hw-led--off')} />
+                            <span className="hw-status">{online ? 'ONLINE' : 'OFFLINE'}</span>
+                          </div>
+                          <div className="hw-name">{d.alias || d.name || d.sn}</div>
+                          <div className="hw-meta">{d.commonType || 'Device'} · {d.productClass || 'unknown model'}</div>
+                          <div className="hw-meta">IP {d.ip || '—'}</div>
+                          <div className="hw-meta">FW {d.softwareVersion || '—'}</div>
+                          <div className="hw-sn">SN {d.sn}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
               {data.aps.gateways.byModel.length > 0 && (
                 <div className="chip-row">
                   {data.aps.gateways.byModel.map((g) => (
@@ -451,10 +594,56 @@ export default function WifiDashboard({ onNavigate }: { onNavigate?: (s: string)
           {tab === 'sessions' && (
             <>
               <div className="hud-grid">
-                <div className="hud-card hud-card--cyan"><div className="hud-label">Active Sessions</div><div className="hud-value">{v?.activeSessions ?? 0}</div></div>
+                <div className="hud-card hud-card--cyan"><div className="hud-label">Active Sessions</div><div className="hud-value">{v?.activeSessions ?? 0}</div><div className="hud-meta">{rgSessions.length} live on cloud</div></div>
                 <div className="hud-card"><div className="hud-label">Signups Today</div><div className="hud-value">{v?.signupsToday ?? 0}</div></div>
                 <div className="hud-card"><div className="hud-label">Connections Today</div><div className="hud-value">{v?.connectionsToday ?? 0}</div></div>
                 <div className="hud-card"><div className="hud-label">Pending Approvals</div><div className="hud-value">{v?.pendingApprovals ?? 0}</div></div>
+              </div>
+
+              <div className="un-panel">
+                <SectionTitle
+                  title="Live Cloud Sessions · Ruijie"
+                  sub="Holder · PIN · SSID/band · signal · speed · data used · disconnect"
+                />
+                {rgSessions.length === 0 ? (
+                  <div className="table-empty">
+                    <p>{rgNote ? `Ruijie telemetry unavailable (${rgNote}).` : 'No clients online on the cloud controller.'}</p>
+                  </div>
+                ) : (
+                  <div className="table-scroll">
+                    <table className="data-table un-table">
+                      <thead><tr><th>Holder</th><th>PIN</th><th>MAC</th><th>IP</th><th>SSID · Band</th><th>Signal</th><th>Speed ↓/↑</th><th>Data Used</th><th>Online</th><th>Actions</th></tr></thead>
+                      <tbody>
+                        {rgSessions.map((s) => (
+                          <tr key={s.mac}>
+                            <td>
+                              {s.holderName || <span className="muted">—</span>}
+                              {s.holderPhone && <span className="muted" style={{ display: 'block', fontSize: 11 }}>{s.holderPhone}</span>}
+                            </td>
+                            <td>{(s.code || s.username) ? <span className="code-cell">{s.code || s.username}</span> : '—'}</td>
+                            <td className="vd-mono" style={{ fontSize: 11 }}>{s.mac}</td>
+                            <td style={{ fontSize: 12 }}>{s.ip || '—'}</td>
+                            <td style={{ fontSize: 12 }}>{s.ssid || '—'}{s.band ? <span className="muted"> · {s.band}</span> : ''}</td>
+                            <td className={rssiTone(s.rssi)} style={{ fontSize: 12 }}>{s.rssi != null ? `${s.rssi} dBm` : '—'}</td>
+                            <td className="muted" style={{ fontSize: 11 }}>{fmtRate(s.downRate)} ↓<br />{fmtRate(s.upRate)} ↑</td>
+                            <td className="muted" style={{ fontSize: 11 }}>{fmtMb(s.usedMb)}</td>
+                            <td className="muted">{fmtUptime(s.onlineTimeSec)}</td>
+                            <td>
+                              <button
+                                className="btn-sm"
+                                disabled={kicking === s.mac}
+                                onClick={() => kickClient(s)}
+                                aria-label={`Disconnect client ${s.mac}`}
+                              >
+                                {kicking === s.mac ? '…' : 'Kick'}
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
 
               <div className="un-panel">

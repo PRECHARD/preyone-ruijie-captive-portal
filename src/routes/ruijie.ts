@@ -9,6 +9,7 @@ import {
   listRuijieOnlineUsers,
   syncAccountingData,
   syncVoucherToRuijie,
+  type RuijieOnlineUser,
 } from '../services/ruijieService';
 
 export const ruijieRouter = Router();
@@ -84,7 +85,75 @@ ruijieRouter.get('/status', async (_req, res) => {
   }
 });
 
-// GET /api/ruijie/sessions — live captive-portal session telemetry.
+// GET /api/ruijie/sessions — live captive-portal session telemetry,
+// enriched server-side with the local voucher record (PIN + holder details)
+// so the frontend never has to join two data sources itself.
+export interface EnrichedSession extends RuijieOnlineUser {
+  code: string | null;
+  holderName: string | null;
+  holderPhone: string | null;
+}
+
+async function enrichSessions(sessions: RuijieOnlineUser[]): Promise<EnrichedSession[]> {
+  const out: EnrichedSession[] = sessions.map((s) => ({ ...s, code: null, holderName: null, holderPhone: null }));
+  const macs = [...new Set(out.map((s) => s.mac).filter((m) => m.length >= 12))];
+  if (macs.length === 0) return out;
+
+  try {
+    const codeByMac = new Map<string, string>();
+
+    // 1) Bound portal devices (mac_norm is already hex-only lowercase).
+    const { rows: devRows } = await pool.query(
+      `SELECT DISTINCT ON (mac_norm) mac_norm, lower(voucher_code) AS code
+         FROM voucher_devices WHERE is_active = TRUE AND mac_norm = ANY($1)`,
+      [macs]
+    );
+    for (const row of devRows) codeByMac.set(String(row.mac_norm), String(row.code));
+
+    // 2) Portal users who authenticated but never bound a device.
+    const unresolved = macs.filter((m) => !codeByMac.has(m));
+    if (unresolved.length > 0) {
+      const { rows: userRows } = await pool.query(
+        `SELECT DISTINCT ON (lower(regexp_replace(mac_address, '[^a-fA-F0-9]', '', 'g')))
+           lower(regexp_replace(mac_address, '[^a-fA-F0-9]', '', 'g')) AS mac_norm,
+           lower(voucher_code) AS code
+           FROM users
+          WHERE voucher_code IS NOT NULL
+            AND lower(regexp_replace(mac_address, '[^a-fA-F0-9]', '', 'g')) = ANY($1)`,
+        [unresolved]
+      );
+      for (const row of userRows) codeByMac.set(String(row.mac_norm), String(row.code));
+    }
+
+    // 3) Voucher rows → holder details.
+    const codes = [...new Set(codeByMac.values())];
+    const holderByCode = new Map<string, { name: string | null; phone: string | null }>();
+    if (codes.length > 0) {
+      const { rows: vRows } = await pool.query(
+        `SELECT lower(code) AS code, holder_name, holder_phone
+           FROM vouchers WHERE lower(code) = ANY($1) AND deleted_at IS NULL`,
+        [codes]
+      );
+      for (const row of vRows) {
+        holderByCode.set(String(row.code), { name: row.holder_name ?? null, phone: row.holder_phone ?? null });
+      }
+    }
+
+    for (const s of out) {
+      const code = codeByMac.get(s.mac);
+      if (!code) continue;
+      s.code = code;
+      const holder = holderByCode.get(code);
+      s.holderName = holder?.name ?? null;
+      s.holderPhone = holder?.phone ?? null;
+    }
+  } catch (err) {
+    // Holder enrichment must never sink live telemetry — sessions still ship.
+    console.error('[RUIJIE API] session holder enrichment failed:', err);
+  }
+  return out;
+}
+
 ruijieRouter.get('/sessions', async (_req, res) => {
   try {
     if (!isRuijieCloudConfigured()) {
@@ -92,7 +161,8 @@ ruijieRouter.get('/sessions', async (_req, res) => {
       return;
     }
     const users = await listRuijieOnlineUsers();
-    res.json({ skipped: false, count: users.length, users });
+    const enriched = await enrichSessions(users);
+    res.json({ skipped: false, count: enriched.length, users: enriched });
   } catch (err) {
     sendRuijieError(res, err, 'Failed to fetch Ruijie online users');
   }
