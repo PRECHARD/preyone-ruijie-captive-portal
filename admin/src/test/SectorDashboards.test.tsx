@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('../api/client', () => ({
@@ -34,10 +34,14 @@ describe('Sector dashboards render against live CEO payloads', () => {
     (api.get as any).mockResolvedValue(liveWifi as any);
     render(<WifiDashboard />);
     expect(await screen.findByText('Preyone UltraNet WiFi')).toBeInTheDocument();
+    expect(screen.getByText('Auth Success')).toBeInTheDocument();
+    expect(screen.getByText('Command Center')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('Network'));
     expect(screen.getByText('Access Point Monitoring')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('Sessions'));
     expect(screen.getByText('Active Client Sessions')).toBeInTheDocument();
-    expect(screen.getByText('Redemption Success')).toBeInTheDocument();
     expect(api.get).toHaveBeenCalledWith('/dashboard/wifi');
+    expect(api.get).toHaveBeenCalledWith('/dashboard/ultranet/sales-summary');
   });
 
   it('TransitOperationsDashboard — live Mupota Bus Service aggregate', async () => {
@@ -66,6 +70,7 @@ describe('Sector dashboards render against live CEO payloads', () => {
     (api.get as any).mockResolvedValue(liveWifi as any);
     render(<WifiDashboard />);
     await screen.findByText('Preyone UltraNet WiFi');
+    fireEvent.click(screen.getByRole('tab', { name: 'Vouchers' }));
     expect(screen.getByText('Voucher Usage')).toBeInTheDocument();
     const d = liveWifi as any;
     if (d.voucherUsage && d.voucherUsage.length > 0) {
