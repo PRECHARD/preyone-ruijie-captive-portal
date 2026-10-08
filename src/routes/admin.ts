@@ -7,6 +7,18 @@ import { PERMISSIONS, requirePermission, scopeUserVoucherCodeCondition, scopeVou
 import { recordAuditLog } from './adminAuth';
 import { sendAdminApprovedNotification, sendAdminRejectedNotification } from '../services/notificationService';
 import { isRuijieCloudConfigured, mintRuijieVoucherForTier } from '../services/ruijieMint';
+import {
+  getStaffDailySalesItemized,
+  getStaffDailyRevenue,
+  getPlatformDailyRevenue,
+  getPlatformYesterdayRevenue,
+  getPlatformWeeklyRevenue,
+  getPlatformMonthlyRevenue,
+  getPlatformMonthlyTarget,
+  getStaffSalesMatrix,
+  getHourlySalesVelocity,
+  getRecentActivity,
+} from '../db/sales';
 import { RuijieApiError } from '../services/ruijieCloud';
 import ExcelJS from 'exceljs';
 import path from 'path';
@@ -2910,3 +2922,27 @@ adminRouter.delete('/devices/:id', requireRole('CEO'), async (req: Request, res:
   await recordAuditLog(req.adminUser!.id, req.adminUser!.fullName, 'pos_device_delete', 'pos_device', id, `Removed device ${rows[0].device_id}`);
   res.json({ message: 'Device removed' });
 });
+adminRouter.get('/dashboard/ultranet/sales-summary', async (req: Request, res: Response) => {
+  try {
+    const user = req.adminUser!;
+    const isStaff = user.role === 'Staff';
+    const [mySales, platformDaily, platformYesterday, weekly, monthly, target, matrix, velocity, activity] = await Promise.all([
+      isStaff ? getStaffDailyRevenue(user.id) : Promise.resolve(0),
+      getPlatformDailyRevenue(),
+      getPlatformYesterdayRevenue(),
+      getPlatformWeeklyRevenue(),
+      getPlatformMonthlyRevenue(),
+      getPlatformMonthlyTarget(),
+      getStaffSalesMatrix(),
+      getHourlySalesVelocity(1),
+      getRecentActivity(20),
+    ]);
+    const [itemized] = await Promise.all([
+      isStaff ? getStaffDailySalesItemized(user.id) : Promise.resolve([]),
+    ]);
+    res.json({ mySales, platformDaily, platformYesterday, weekly, monthly, target, matrix, velocity, activity, itemized });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+

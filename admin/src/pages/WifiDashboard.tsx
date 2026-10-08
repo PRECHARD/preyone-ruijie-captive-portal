@@ -7,7 +7,23 @@ import {
 import './Dashboard.css';
 import './SectorDashboards.css';
 
-interface WifiDashboardData {
+interface SalesItemized { package_name: string; quantity: number; price: number; total_revenue: number }
+interface WeeklyPoint { day: string; revenue: number }
+interface StaffMatrix { id: string; full_name: string; role: string; vouchers_sold_today: number; revenue_today: number; last_active: string | null }
+interface HourlyVel { hour: number; volume: number; revenue: number }
+interface Activity { id: string; code: string; package_name: string; price_amount: number; created_at: string; sold_by_name: string | null }
+interface SalesSummary {
+  mySales: number
+  platformDaily: number
+  platformYesterday: number
+  weekly: WeeklyPoint[]
+  monthly: number
+  target: number
+  matrix: StaffMatrix[]
+  velocity: HourlyVel[]
+  activity: Activity[]
+  itemized: SalesItemized[]
+}interface WifiDashboardData {
   aps: {
     total: number; online: number; offline: number; clients: number;
     gateways: { total: number; online: number; byModel: { dev_model: string; online: number; total: number }[] };
@@ -57,7 +73,27 @@ function fmtUptime(s?: number | null): string {
   return `${m}m`;
 }
 
-function fmtAgo(d?: string | null): string {
+function fmtZim(n: number): string {
+  return (n || 0).toLocaleString('en-ZW', { style: 'currency', currency: 'ZWL', minimumFractionDigits: 0, maximumFractionDigits: 0 });
+}
+function Sparkline({ data }: { data: { revenue: number }[] }) {
+  if (!data.length) return <svg width="80" height="24"><rect width="80" height="24" fill="none"/></svg>;
+  const max = Math.max(...data.map(d => d.revenue), 1);
+  const points = data.map((d, i) => ((i * 80) / Math.max(1, data.length - 1)) + ',' + (24 - (d.revenue / max) * 20)).join(' ');
+  return <svg width="80" height="24" viewBox="0 0 80 24"><polyline points={points} fill="none" stroke="#00F0FF" strokeWidth="2" /></svg>;
+}
+function Gauge({ value }: { value: number }) {
+  const pct = Math.max(0, Math.min(100, value));
+  const r = 16, c = 18, sw = 4;
+  const circ = 2 * Math.PI * r;
+  const dash = (pct / 100) * circ;
+  return <svg width="40" height="24"><circle cx={c} cy="12" r={r} stroke="#1E293B" strokeWidth={sw} fill="none"/><circle cx={c} cy="12" r={r} stroke="#A855F7" strokeWidth={sw} fill="none" strokeDasharray={circ} strokeDashoffset={circ - dash} strokeLinecap="round" transform="rotate(-90 18 12)"/></svg>;
+}
+function drift(p: number, y: number): { v: number; up: boolean } {
+  if (y <= 0) return { v: 0, up: p > 0 };
+  const v = Math.round(((p - y) / y) * 100);
+  return { v, up: v >= 0 };
+}function fmtAgo(d?: string | null): string {
   if (!d) return '—';
   try {
     const mins = Math.max(0, Math.floor((Date.now() - new Date(d).getTime()) / 60000));
@@ -70,11 +106,12 @@ function fmtAgo(d?: string | null): string {
 }
 
 export default function WifiDashboard({ onNavigate }: { onNavigate?: (s: string) => void }) {
-  const [data, setData] = useState<WifiDashboardData | null>(null);
+  const [data, setData] = useState<WifiDashboardData | null>(null); const [sales, setSales] = useState<SalesSummary | null>(null);
   const [error, setError] = useState('');
 
   const load = useCallback(() => {
     api.get<WifiDashboardData>('/dashboard/wifi').then(setData).catch((e) => setError(e.message || 'Failed to load'));
+    api.get<SalesSummary>('/dashboard/ultranet/sales-summary').then(setSales).catch(() => {});
   }, []);
 
   useEffect(() => { load(); const i = setInterval(load, 30000); return () => clearInterval(i); }, [load]);
@@ -85,7 +122,7 @@ export default function WifiDashboard({ onNavigate }: { onNavigate?: (s: string)
     <div className="dashboard sector-dashboard">
       <div className="section-head sector-head">
         <div>
-          <h2 className="section-head-title">Preyone UltraNet WiFi</h2>
+          <h2 className="section-head-title">Preyone UltraNet WiFi <span className="muted hud-tag">High-Tech Telemetry</span></h2>
           <p className="section-head-desc">Live network &amp; captive-portal telemetry</p>
         </div>
         <span className="live-pill"><span className="live-dot" /> LIVE <span className="live-sub">30s</span></span>
@@ -141,6 +178,32 @@ export default function WifiDashboard({ onNavigate }: { onNavigate?: (s: string)
                 <span className="hero-label">Redemption Success</span>
                 <span className="hero-value">{v?.authSuccessRate ?? 0}%</span>
                 <span className="hero-sub">{v?.connectionsToday ?? 0} connections · {v?.pendingApprovals ?? 0} approvals pending</span>
+              </div>
+            </div>
+          </div>
+
+          {/* ── Executive HUD sales telemetry ── */}
+          <div className="hud-grid">
+            <div className="hud-card">
+              <div className="hud-label">My Sales (Today)</div>
+              <div className="hud-value">{sales ? fmtZim(sales.mySales) : '—'}</div>
+            </div>
+            <div className="hud-card">
+              <div className="hud-label">Total Daily Revenue</div>
+              <div className="hud-value">{sales ? fmtZim(sales.platformDaily) : '—'}</div>
+              {sales && (() => { const d = drift(sales.platformDaily, sales.platformYesterday); return <div className={'hud-meta ' + (d.up ? 'up' : 'down')}>{d.up ? '▲' : '▼'} {Math.abs(d.v)}% vs yesterday</div>; })()}
+            </div>
+            <div className="hud-card">
+              <div className="hud-label">Weekly Revenue</div>
+              <div className="hud-value">{sales ? fmtZim(sales.weekly.reduce((s, p) => s + p.revenue, 0)) : '—'}</div>
+              <div className="hud-meta"><Sparkline data={sales ? sales.weekly : []} /></div>
+            </div>
+            <div className="hud-card">
+              <div className="hud-label">Monthly Revenue</div>
+              <div className="hud-value">{sales ? fmtZim(sales.monthly) : '—'}</div>
+              <div className="hud-meta hud-meta--row">
+                <Gauge value={sales && sales.target > 0 ? Math.min(100, (sales.monthly / sales.target) * 100) : 0} />
+                <span>{sales && sales.target > 0 ? Math.round((sales.monthly / sales.target) * 100) + '% of ' + fmtZim(sales.target) : 'Target ' + fmtZim(sales ? sales.target : 0)}</span>
               </div>
             </div>
           </div>
@@ -277,7 +340,16 @@ export default function WifiDashboard({ onNavigate }: { onNavigate?: (s: string)
           </div>
 
           {/* ── Captive portal activity ── */}
-          <div className="section-head" style={{ marginTop: '1.5rem' }}>
+          
+          <div className="hud-grid" style={{marginTop:12}}>
+            <div className="hud-card"><div className="hud-label">What They Sold (Today)</div><div className="hud-body">{sales && sales.itemized && sales.itemized.length>0 ? (<table className="table"><thead><tr><th>Package</th><th>Qty</th><th>Price</th><th>Total</th></tr></thead><tbody>{sales.itemized.map((i:any,idx:number)=>(<tr key={idx}><td>{i.package_name}</td><td>{i.quantity}</td><td>{fmtZim(i.price)}</td><td>{fmtZim(i.total_revenue)}</td></tr>))}</tbody></table>) : (<div className="muted">No sales today</div>)}</div></div>
+            <div className="hud-card"><div className="hud-label">Sales Velocity (24h)</div><div className="hud-body">{sales && sales.velocity && sales.velocity.length>0 ? (<table className="table"><thead><tr><th>Hour</th><th>Vol</th><th>Revenue</th></tr></thead><tbody>{sales.velocity.map((v:any,idx:number)=>(<tr key={idx}><td>{v.hour}:00</td><td>{v.volume}</td><td>{fmtZim(v.revenue)}</td></tr>))}</tbody></table>) : (<div className="muted">No data</div>)}</div></div>
+          </div>
+          <div className="hud-grid" style={{marginTop:12}}>
+            <div className="hud-card"><div className="hud-label">Staff Sales Matrix</div><div className="hud-body">{sales && sales.matrix && sales.matrix.length>0 ? (<table className="table"><thead><tr><th>Staff</th><th>Role</th><th>Vouchers</th><th>Revenue</th><th>Last</th></tr></thead><tbody>{sales.matrix.map((m:any,idx:number)=>(<tr key={idx}><td>{m.full_name}</td><td>{m.role}</td><td>{m.vouchers_sold_today}</td><td>{fmtZim(m.revenue_today)}</td><td>{m.last_active ? fmtAgo(m.last_active) : '—'}</td></tr>))}</tbody></table>) : (<div className="muted">No data</div>)}</div></div>
+            <div className="hud-card"><div className="hud-label">Live Activity Stream</div><div className="hud-body">{sales && sales.activity && sales.activity.length>0 ? (<div className="activity-list">{sales.activity.map((a:any,idx:number)=>(<div key={idx} className="activity-item"><span>{a.sold_by_name||'Staff'}</span> sold <span>{a.package_name||a.code}</span> — {fmtZim(a.price_amount)} <span className="muted">{fmtAgo(a.created_at)}</span></div>))}</div>) : (<div className="muted">No recent activity</div>)}</div></div>
+          </div>
+<div className="section-head" style={{ marginTop: '1.5rem' }}>
             <h2 className="section-head-title">Connections &amp; Authentication</h2>
             <p className="section-head-desc">Live captive-portal connection log</p>
           </div>
