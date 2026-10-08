@@ -464,9 +464,23 @@ input:focus, select:focus, button:focus-visible {
 /* ── History (SALES & RECEIPTS) ─────────────────────── */
 
 .history-pane { padding: 1rem 1.2rem; overflow: auto; max-width: 980px; margin: 0 auto; width: 100%; }
-.history-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.6rem; }
+.history-head { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.6rem; flex-wrap: wrap; }
 .history-title { font-size: 0.7rem; letter-spacing: 0.14em; color: var(--muted); font-weight: 700; }
+.history-filters { display: flex; align-items: center; gap: 0.35rem; flex-wrap: wrap; }
+.hist-tab {
+  font-size: 0.76rem; font-weight: 700; padding: 0.3rem 0.7rem;
+  border: 1px solid var(--line-soft); border-radius: 999px;
+  background: #fff; color: var(--muted); cursor: pointer;
+  transition: all 0.15s ease;
+}
+.hist-tab:hover { color: var(--violet); border-color: var(--violet); }
+.hist-tab.on {
+  background: var(--violet); border-color: var(--violet); color: #fff;
+  box-shadow: 0 2px 8px rgba(124, 58, 237, 0.3);
+}
 .history-list { display: flex; flex-direction: column; gap: 0.5rem; }
+.history-item { display: flex; gap: 0.5rem; align-items: stretch; }
+.history-item .history-row { flex: 1; }
 .history-row {
   display: flex; flex-direction: column; gap: 0.2rem;
   background: #fff; border: 1px solid var(--line-soft); border-radius: 12px;
@@ -479,3 +493,17 @@ input:focus, select:focus, button:focus-visible {
 .hr-amt { margin-left: auto; font-weight: 700; color: var(--violet); font-size: 1.05rem; }
 .hr-arrow { color: var(--line-soft); font-size: 1.2rem; }
 .hr-sub { font-size: 0.78rem; color: var(--muted); }
+.hr-tag {
+  font-size: 0.62rem; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase;
+  padding: 0.12rem 0.5rem; border-radius: 999px;
+}
+.hr-tag.invoice { background: rgba(124, 58, 237, 0.12); color: var(--violet); border: 1px solid rgba(124, 58, 237, 0.35); }
+.hr-tag.quotation { background: rgba(245, 158, 11, 0.14); color: #b45309; border: 1px solid rgba(245, 158, 11, 0.4); }
+.hr-pay {
+  font-size: 0.74rem; font-weight: 700; padding: 0 0.85rem;
+  border: 1px solid var(--violet); border-radius: 12px;
+  background: rgba(124, 58, 237, 0.08); color: var(--violet);
+  cursor: pointer; white-space: nowrap;
+  transition: all 0.15s ease;
+}
+.hr-pay:hover { background: var(--violet); color: #fff; box-shadow: 0 3px 12px rgba(124, 58, 237, 0.3); }
