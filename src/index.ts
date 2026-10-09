@@ -20,9 +20,13 @@ import { gatewayRouter } from './routes/gateway';
 import { transitRouter } from './routes/transit';
 import { transitWebRouter } from './routes/transitWeb';
 import { systemAdminRouter } from './routes/systemAdmin';
+import { starlinkRouter } from './routes/starlink';
+import { ruijieRouter } from './routes/ruijie';
+import { ensureStarlinkSchema } from './db/starlink';
 import { errorHandler } from './middleware/errorHandler';
 import { maintenanceCheck } from './middleware/maintenanceMode';
 import { scheduleSessionCleanup } from './services/sessionCleanup';
+import { ensureVoucherRuijieSchema, startRuijieAccountingPolling } from './services/ruijieService';
 import { scheduleAccessLogCleanup } from './services/accessLogCleanup';
 import { scheduleHandoverReminders } from './services/handoverReminder';
 
@@ -117,6 +121,7 @@ const SITEMAP_URLS = [
   { loc: 'https://preyone.com/services', changefreq: 'monthly', priority: '0.8' },
   { loc: 'https://preyone.com/portfolio', changefreq: 'monthly', priority: '0.8' },
   { loc: 'https://preyone.com/payment', changefreq: 'monthly', priority: '0.9' },
+
 ];
 
 app.get('/sitemap.xml', (_req, res) => {
@@ -215,6 +220,19 @@ app.use((req, res, next) => {
     return res.status(503).send('Admin build not found');
   }
 
+  // starlink.preyone.com → Starlink customer portal (admin SPA bundle; the
+  // SPA branches to the portal on /starlink/* paths — see admin/src/main.tsx).
+  if (host === 'starlink.preyone.com') {
+    const adminDist = path.join(__dirname, '..', 'admin', 'dist');
+    if (fs.existsSync(adminDist)) {
+      const adminStatic = express.static(adminDist);
+      return adminStatic(req, res, () => {
+        res.sendFile(path.join(adminDist, 'index.html'));
+      });
+    }
+    return res.status(503).send('Starlink portal build not found');
+  }
+
   // wifi.preyone.com → captive portal
   if (host === 'wifi.preyone.com') {
     // Tell OS this is a captive portal (triggers popup on iOS/Android/Windows)
@@ -235,6 +253,17 @@ app.use((req, res, next) => {
 
   // preyone.com → main site (React SPA build)
   if (host === 'preyone.com' || host === 'www.preyone.com') {
+    // /starlink/* deep links belong to the Starlink customer portal, which
+    // ships inside the admin SPA bundle — route them there before the site SPA.
+    if (req.path.startsWith('/starlink')) {
+      const adminDist = path.join(__dirname, '..', 'admin', 'dist');
+      if (fs.existsSync(adminDist)) {
+        return express.static(adminDist)(req, res, () => {
+          res.sendFile(path.join(adminDist, 'index.html'));
+        });
+      }
+      return res.status(503).send('Starlink portal build not found');
+    }
     const siteDist = path.join(__dirname, '..', 'site', 'dist');
     if (fs.existsSync(siteDist)) {
       // The APK is also downloadable from the main site, so the download must
@@ -305,6 +334,11 @@ app.use('/api/payments', paymentsRouter);
 app.use('/api/site', siteInvoicesRouter);
 app.use('/api/transit', transitRouter);
 app.use('/api/pos', posRouter);
+app.use('/api/starlink', starlinkRouter);
+// Ruijie Cloud maint-API proxy — admin-auth guarded inside the router.
+// Mounted under /api/ so the subdomain middleware (line ~169) is bypassed and
+// it cannot collide with gatewayRouter's /api/radius + /api/gateway paths.
+app.use('/api/ruijie', ruijieRouter);
 
 // Standard route aliases
 app.get('/login', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'account-login.html')));
@@ -366,6 +400,26 @@ if (!process.env.JWT_SECRET || process.env.JWT_SECRET === 'preyone-jwt-secret-ch
 // Start server
 app.listen(PORT, () => {
   console.log(`Captive portal running on http://0.0.0.0:${PORT}`);
+
+  // Starlink customer portal: create its additive tables (IF NOT EXISTS) at
+  // boot so the portal works without a separate migrate step. Never blocks boot.
+  ensureStarlinkSchema()
+    .then(() => console.log('Starlink portal schema ready.'))
+    .catch((err) => console.error('Starlink schema ensure failed:', err));
+
+  // Ruijie Cloud: additive voucher columns (ADD COLUMN IF NOT EXISTS) so the
+  // /api/ruijie routes work without a manual migrate step. Never blocks boot.
+  ensureVoucherRuijieSchema()
+    .then(() => console.log('Ruijie voucher sync schema ready.'))
+    .catch((err) => console.error('Ruijie voucher schema ensure failed:', err));
+
+  // Periodic accounting reconciliation (skips itself when Ruijie keys are
+  // missing or RUIJIE_ACCOUNTING_INTERVAL_MIN<=0 — local DB flows unaffected).
+  try {
+    startRuijieAccountingPolling();
+  } catch (err) {
+    console.error('Ruijie accounting polling failed to start:', err);
+  }
 
   if (process.env.ENABLE_SESSION_CLEANUP !== 'false') {
     const intervalMinutes = Number(process.env.SESSION_CLEANUP_INTERVAL_MIN ?? 15);

@@ -33,20 +33,30 @@ export function Nav() {
         </Link>
 
         <nav className="hidden items-center gap-7 lg:flex" aria-label="Primary">
-          {NAV_LINKS.map((link) => (
-            <Link
-              key={link.to}
-              to={link.to}
-              className="highlight-line text-xs font-bold uppercase tracking-[0.16em] text-slate-300 transition-colors hover:text-fuchsia-300"
-            >
-              {link.label}
-            </Link>
-          ))}
+          {NAV_LINKS.map((link) =>
+            link.to.startsWith('/starlink') ? (
+              // Starlink portal is a separate SPA bundle — full page load.
+              <a
+                key={link.to}
+                href={link.to}
+                className="highlight-line text-xs font-bold uppercase tracking-[0.16em] text-cyan-300 transition-colors hover:text-fuchsia-300"
+              >
+                {link.label}
+              </a>
+            ) : (
+              <Link
+                key={link.to}
+                to={link.to}
+                className="highlight-line text-xs font-bold uppercase tracking-[0.16em] text-slate-300 transition-colors hover:text-fuchsia-300"
+              >
+                {link.label}
+              </Link>
+            )
+          )}
         </nav>
 
         <div className="hidden items-center gap-4 lg:flex">
           <a href="tel:+263771327202" className="text-xs font-bold tracking-wide text-slate-300 transition-colors hover:text-cyan-300">
-            +263 771 327 202
           </a>
           <Link to="/#contact" className="btn-primary px-5 py-2.5 text-xs uppercase tracking-wide">
             Get Connected
@@ -75,15 +85,25 @@ export function Nav() {
             className="glass-strong overflow-hidden lg:hidden"
           >
             <nav className="container-site flex flex-col gap-1 py-4" aria-label="Mobile">
-              {NAV_LINKS.map((link) => (
-                <Link
-                  key={link.to}
-                  to={link.to}
-                  className="rounded-lg px-3 py-2.5 text-sm font-bold uppercase tracking-wider text-slate-200 transition-colors hover:bg-fuchsia-400/10 hover:text-fuchsia-300"
-                >
-                  {link.label}
-                </Link>
-              ))}
+              {NAV_LINKS.map((link) =>
+                link.to.startsWith('/starlink') ? (
+                  <a
+                    key={link.to}
+                    href={link.to}
+                    className="rounded-lg px-3 py-2.5 text-sm font-bold uppercase tracking-wider text-cyan-300 transition-colors hover:bg-cyan-400/10 hover:text-cyan-200"
+                  >
+                    {link.label}
+                  </a>
+                ) : (
+                  <Link
+                    key={link.to}
+                    to={link.to}
+                    className="rounded-lg px-3 py-2.5 text-sm font-bold uppercase tracking-wider text-slate-200 transition-colors hover:bg-fuchsia-400/10 hover:text-fuchsia-300"
+                  >
+                    {link.label}
+                  </Link>
+                )
+              )}
               <Link to="/#contact" className="btn-primary mt-3 w-full py-3.5 text-sm uppercase tracking-wide">
                 Get Connected
               </Link>

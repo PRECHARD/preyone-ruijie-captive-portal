@@ -23,13 +23,32 @@ vi.mock('../src/middleware/adminAuth', () => ({
   requireRole: () => vi.fn((_req: any, _res: any, next: any) => next()),
 }));
 
+// Cash handover approval is gated by requirePermission(COMPANY_ADMIN). Left
+// unmocked it would run the real loader against the stub pool, find no granted
+// permissions and 403 every route before the handler is reached. Each test
+// declares the permissions its actor holds via mockPermissions.
+const { mockPermissions } = vi.hoisted(() => ({ mockPermissions: { current: [] as string[] } }));
+
 vi.mock('../src/middleware/rbac', () => ({
-  PERMISSIONS: { SYSTEM_DEVELOPER: 'system.developer', COMPANY_ADMIN: 'company.admin', OPERATIONS_MANAGE: 'operations.manage', FINANCE_VIEW: 'finance.view', TRANSIT_FIELD_APP: 'transit.field_app' },
-  requirePermission: () => vi.fn((_req: any, _res: any, next: any) => next()),
-  scopeVoucherCondition: vi.fn(() => null),
-  scopeUserVoucherCodeCondition: vi.fn(() => null),
-  loadPermissions: vi.fn(() => Promise.resolve([])),
-  FIELD_STAFF_ROLES: ['CONDUCTOR', 'DRIVER', 'TICKET_SELLER'],
+  PERMISSIONS: new Proxy({}, { get: (_t, k) => String(k) }),
+  requirePermission: (...required: string[]) =>
+    vi.fn((_req: any, res: any, next: any) => {
+      if (required.length > 0 && !required.some((p) => mockPermissions.current.includes(p))) {
+        return res.status(403).json({ error: 'Insufficient permissions' });
+      }
+      next();
+    }),
+  requireTransitPermission: (...required: string[]) =>
+    vi.fn((_req: any, res: any, next: any) => {
+      if (required.length > 0 && !required.some((p) => mockPermissions.current.includes(p))) {
+        return res.status(403).json({ error: 'Insufficient permissions' });
+      }
+      next();
+    }),
+  loadPermissions: vi.fn(async () => mockPermissions.current),
+  scopeVoucherCondition: () => null,
+  scopeUserVoucherCodeCondition: () => null,
+  FIELD_STAFF_ROLES: [],
 }));
 
 import { pool } from '../src/db/pool';
@@ -43,7 +62,10 @@ function createApp() {
   return app;
 }
 
-function mockAuth(user: { id: string; role: string; fullName: string; email?: string }) {
+function mockAuth(user: { id: string; role: string; fullName: string; email?: string }, permissions?: string[]) {
+  // Supervisors hold company.admin in production; Staff hold none. Tests can
+  // override the grant explicitly to exercise the 403 path.
+  mockPermissions.current = permissions ?? (user.role === 'Staff' ? [] : ['COMPANY_ADMIN']);
   (requireAdminAuth as any).mockImplementation((_req: any, _res: any, next: any) => {
     _req.adminUser = { id: user.id, email: user.email || `${user.role}@test`, role: user.role, fullName: user.fullName };
     next();
@@ -63,12 +85,12 @@ describe('Voucher approval routes', () => {
     it('returns 201 for Staff submitting a valid request', async () => {
       mockAuth({ id: 'staff-1', role: 'Staff', fullName: 'Staff Jane' });
       mockPoolQuery
-        .mockResolvedValueOnce({ rows: [{ tier_name: 'PreMax' }] }) // package check
+        .mockResolvedValueOnce({ rows: [{ tier_name: 'PreMAX' }] }) // package check
         .mockResolvedValueOnce({ rows: [{ id: 'app-1', requested_by: 'staff-1', status: 'pending' }] }); // insert
 
       const res = await request(createApp())
         .post('/api/admin/vouchers/request-approval')
-        .send({ requestType: 'single', packageTier: 'PreMax', priceAmount: 34.99 });
+        .send({ requestType: 'single', packageTier: 'PreMAX', priceAmount: 34.99 });
 
       expect(res.status).toBe(201);
       expect(res.body.message).toContain('submitted');
@@ -77,11 +99,11 @@ describe('Voucher approval routes', () => {
 
     it('returns 403 for non-Staff users', async () => {
       mockAuth({ id: 'ceo-1', role: 'CEO', fullName: 'CEO' });
-      mockPoolQuery.mockResolvedValueOnce({ rows: [{ tier_name: 'PreMax' }] }); // package check runs before role check
+      mockPoolQuery.mockResolvedValueOnce({ rows: [{ tier_name: 'PreMAX' }] }); // package check runs before role check
 
       const res = await request(createApp())
         .post('/api/admin/vouchers/request-approval')
-        .send({ requestType: 'single', packageTier: 'PreMax' });
+        .send({ requestType: 'single', packageTier: 'PreMAX' });
 
       expect(res.status).toBe(403);
       expect(res.body.error).toContain('Only Staff need approval');
@@ -92,7 +114,7 @@ describe('Voucher approval routes', () => {
 
       const res = await request(createApp())
         .post('/api/admin/vouchers/request-approval')
-        .send({ packageTier: 'PreMax' });
+        .send({ packageTier: 'PreMAX' });
 
       expect(res.status).toBe(422);
     });
@@ -112,7 +134,7 @@ describe('Voucher approval routes', () => {
 
       const res = await request(createApp())
         .post('/api/admin/vouchers/request-approval')
-        .send({ requestType: 'invalid', packageTier: 'PreMax' });
+        .send({ requestType: 'invalid', packageTier: 'PreMAX' });
 
       expect(res.status).toBe(422);
     });
@@ -132,12 +154,12 @@ describe('Voucher approval routes', () => {
     it('accepts bulk request type', async () => {
       mockAuth({ id: 'staff-1', role: 'Staff', fullName: 'Staff' });
       mockPoolQuery
-        .mockResolvedValueOnce({ rows: [{ tier_name: 'PreLite' }] })
+        .mockResolvedValueOnce({ rows: [{ tier_name: 'PreLITE' }] })
         .mockResolvedValueOnce({ rows: [{ id: 'app-2' }] });
 
       const res = await request(createApp())
         .post('/api/admin/vouchers/request-approval')
-        .send({ requestType: 'bulk', packageTier: 'PreLite', count: 10 });
+        .send({ requestType: 'bulk', packageTier: 'PreLITE', count: 10 });
 
       expect(res.status).toBe(201);
     });
@@ -181,13 +203,13 @@ describe('Voucher approval routes', () => {
 
       // First query: fetch approval
       mockPoolQuery.mockResolvedValueOnce({
-        rows: [{ id: 'app-1', status: 'pending', request_type: 'single', package_tier: 'PreMax',
+        rows: [{ id: 'app-1', status: 'pending', request_type: 'single', package_tier: 'PreMAX',
                  voucher_count: 1, max_uses: 1, requested_by: 'staff-1', requested_by_name: 'Staff Jane',
                  price_amount: 34.99, voucher_data: { code: 'VIP001' } }]
       });
       // Second query: fetch package
       mockPoolQuery.mockResolvedValueOnce({
-        rows: [{ tier_name: 'PreMax', duration_min: 1440, data_limit_gb: 10, is_uncapped: false,
+        rows: [{ tier_name: 'PreMAX', duration_min: 1440, data_limit_gb: 10, is_uncapped: false,
                  bandwidth_mbps_up: 5, bandwidth_mbps_down: 10 }]
       });
 
@@ -214,12 +236,12 @@ describe('Voucher approval routes', () => {
       mockAuth({ id: 'ceo-1', role: 'CEO', fullName: 'CEO' });
 
       mockPoolQuery.mockResolvedValueOnce({
-        rows: [{ id: 'app-2', status: 'pending', request_type: 'bulk', package_tier: 'PreLite',
+        rows: [{ id: 'app-2', status: 'pending', request_type: 'bulk', package_tier: 'PreLITE',
                  voucher_count: 3, max_uses: 1, requested_by: 'staff-1', requested_by_name: 'Staff Jane',
                  price_amount: null, voucher_data: null }]
       });
       mockPoolQuery.mockResolvedValueOnce({
-        rows: [{ tier_name: 'PreLite', duration_min: 60, data_limit_gb: null, is_uncapped: true,
+        rows: [{ tier_name: 'PreLITE', duration_min: 60, data_limit_gb: null, is_uncapped: true,
                  bandwidth_mbps_up: 2, bandwidth_mbps_down: 5 }]
       });
 
@@ -242,12 +264,12 @@ describe('Voucher approval routes', () => {
       mockAuth({ id: 'mgr-1', role: 'Manager', fullName: 'Manager' });
 
       mockPoolQuery.mockResolvedValueOnce({
-        rows: [{ id: 'app-3', status: 'pending', request_type: 'single', package_tier: 'PreMax',
+        rows: [{ id: 'app-3', status: 'pending', request_type: 'single', package_tier: 'PreMAX',
                  voucher_count: 1, max_uses: 1, requested_by: 'staff-1', requested_by_name: 'Staff',
                  price_amount: null, voucher_data: null }]
       });
       mockPoolQuery.mockResolvedValueOnce({
-        rows: [{ tier_name: 'PreMax', duration_min: 1440, data_limit_gb: 10, is_uncapped: false,
+        rows: [{ tier_name: 'PreMAX', duration_min: 1440, data_limit_gb: 10, is_uncapped: false,
                  bandwidth_mbps_up: 5, bandwidth_mbps_down: 10 }]
       });
 
@@ -265,7 +287,7 @@ describe('Voucher approval routes', () => {
     it('rejects a pending request', async () => {
       mockAuth({ id: 'mgr-1', role: 'Manager', fullName: 'Manager' });
       mockPoolQuery.mockResolvedValueOnce({
-        rows: [{ id: 'app-1', status: 'pending', request_type: 'single', package_tier: 'PreMax',
+        rows: [{ id: 'app-1', status: 'pending', request_type: 'single', package_tier: 'PreMAX',
                  requested_by: 'staff-1', requested_by_name: 'Staff Jane' }]
       });
 
@@ -322,6 +344,9 @@ describe('Voucher approval routes', () => {
 
 describe('Restricted tier & bulk guards', () => {
   describe('POST /api/admin/vouchers — Staff + restricted tier', () => {
+    // Tier names are case-sensitive and must match packages.tier_name exactly
+    // ('PreMax', 'PreUltra', 'PreExecutive') or the restricted-tier guard below
+    // silently lets Staff sell them without approval.
     it('returns 403 with requiresApproval for PreMax', async () => {
       mockAuth({ id: 'staff-1', role: 'Staff', fullName: 'Staff' });
       // Mock clock-in check - return a row so check passes
@@ -364,12 +389,12 @@ describe('Restricted tier & bulk guards', () => {
       mockAuth({ id: 'staff-1', role: 'Staff', fullName: 'Staff' });
       mockPoolQuery
         .mockResolvedValueOnce({ rows: [{ id: 1 }] }) // clock-in
-        .mockResolvedValueOnce({ rows: [{ tier_name: 'PreLite', duration_min: 60, data_limit_gb: null, is_uncapped: true, bandwidth_mbps_up: 2, bandwidth_mbps_down: 5 }] }) // package lookup
+        .mockResolvedValueOnce({ rows: [{ tier_name: 'PreLITE', duration_min: 60, data_limit_gb: null, is_uncapped: true, bandwidth_mbps_up: 2, bandwidth_mbps_down: 5 }] }) // package lookup
         .mockResolvedValueOnce({ rows: [{ id: 'v-1', code: 'TEST123' }] }); // INSERT voucher
 
       const res = await request(createApp())
         .post('/api/admin/vouchers')
-        .send({ code: 'TEST123', packageTier: 'PreLite', priceAmount: 5.99 });
+        .send({ code: 'TEST123', packageTier: 'PreLITE', priceAmount: 5.99 });
 
       expect(res.status).toBe(201);
     });
@@ -377,13 +402,13 @@ describe('Restricted tier & bulk guards', () => {
     it('skips the guard for CEO', async () => {
       mockAuth({ id: 'ceo-1', role: 'CEO', fullName: 'CEO' });
       mockPoolQuery
-        .mockResolvedValueOnce({ rows: [{ tier_name: 'PreMax', duration_min: 1440, data_limit_gb: 10, is_uncapped: false, bandwidth_mbps_up: 5, bandwidth_mbps_down: 10 }] })
+        .mockResolvedValueOnce({ rows: [{ tier_name: 'PreMAX', duration_min: 1440, data_limit_gb: 10, is_uncapped: false, bandwidth_mbps_up: 5, bandwidth_mbps_down: 10 }] })
         .mockResolvedValueOnce({ rows: [{ id: 'v-1', code: 'VIP001' }] })
         .mockResolvedValueOnce(undefined); // sales insert
 
       const res = await request(createApp())
         .post('/api/admin/vouchers')
-        .send({ code: 'VIP001', packageTier: 'PreMax', priceAmount: 34.99 });
+        .send({ code: 'VIP001', packageTier: 'PreMAX', priceAmount: 34.99 });
 
       expect(res.status).toBe(201);
     });
@@ -407,7 +432,7 @@ describe('Restricted tier & bulk guards', () => {
 
       const res = await request(createApp())
         .post('/api/admin/vouchers/bulk')
-        .send({ packageTier: 'PreLite', count: 10 });
+        .send({ packageTier: 'PreLITE', count: 10 });
 
       expect(res.status).toBe(403);
       expect(res.body.requiresApproval).toBe(true);
@@ -417,7 +442,7 @@ describe('Restricted tier & bulk guards', () => {
       mockAuth({ id: 'mgr-1', role: 'Manager', fullName: 'Manager' });
       mockPoolQuery
         .mockResolvedValueOnce({ rows: [{ id: 1 }] }) // clock-in check
-        .mockResolvedValueOnce({ rows: [{ tier_name: 'PreLite', duration_min: 60, data_limit_gb: null, is_uncapped: true, bandwidth_mbps_up: 2, bandwidth_mbps_down: 5 }] });
+        .mockResolvedValueOnce({ rows: [{ tier_name: 'PreLITE', duration_min: 60, data_limit_gb: null, is_uncapped: true, bandwidth_mbps_up: 2, bandwidth_mbps_down: 5 }] });
 
       mockClientQuery
         .mockResolvedValueOnce(undefined) // BEGIN
@@ -428,7 +453,7 @@ describe('Restricted tier & bulk guards', () => {
 
       const res = await request(createApp())
         .post('/api/admin/vouchers/bulk')
-        .send({ packageTier: 'PreLite', count: 2 });
+        .send({ packageTier: 'PreLITE', count: 2 });
 
       expect(res.status).toBe(201);
       expect(res.body.count).toBe(2);
@@ -440,7 +465,7 @@ describe('Restricted tier & bulk guards', () => {
 
       const res = await request(createApp())
         .post('/api/admin/vouchers/bulk')
-        .send({ packageTier: 'PreLite', count: 5 });
+        .send({ packageTier: 'PreLITE', count: 5 });
 
       expect(res.status).toBe(403);
       expect(res.body.error).toContain('clock in');
@@ -461,7 +486,7 @@ describe('Restricted tier & bulk guards', () => {
 
       const res = await request(createApp())
         .post('/api/admin/vouchers/bulk')
-        .send({ packageTier: 'PreLite', count: 0 });
+        .send({ packageTier: 'PreLITE', count: 0 });
 
       expect(res.status).toBe(422);
     });
@@ -473,8 +498,8 @@ describe('Cash handover routes', () => {
     it('returns available sales for Staff', async () => {
       mockAuth({ id: 'staff-1', role: 'Staff', fullName: 'Staff' });
       mockPoolQuery.mockResolvedValueOnce({
-        rows: [{ id: 's-1', amount: '10.00', voucher_code: 'ABC', package_tier: 'PreLite' },
-               { id: 's-2', amount: '20.00', voucher_code: 'DEF', package_tier: 'PreLite' }]
+        rows: [{ id: 's-1', amount: '10.00', voucher_code: 'ABC', package_tier: 'PreLITE' },
+               { id: 's-2', amount: '20.00', voucher_code: 'DEF', package_tier: 'PreLITE' }]
       });
 
       const res = await request(createApp()).get('/api/admin/cash-handovers/available-sales');

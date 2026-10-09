@@ -8,8 +8,38 @@
   position: relative;
   display: flex;
   align-items: center;
+  gap: 10px;
   height: 100%;
   padding: 0 18px;
+}
+
+/* ── Starlink Portal jump-off (single row with the profile pill) ── */
+.navbar-portal {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 14px;
+  border: 1px solid rgba(34, 211, 238, 0.35);
+  border-radius: 999px;
+  background: rgba(34, 211, 238, 0.08);
+  color: #22d3ee;
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration: none;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.navbar-portal:hover {
+  background: rgba(34, 211, 238, 0.16);
+  border-color: rgba(34, 211, 238, 0.65);
+  color: #67e8f9;
+}
+.navbar-portal svg {
+  flex-shrink: 0;
+  font-size: 15px;
 }
 
 /* ── Profile pill ── */
@@ -163,7 +193,26 @@
 
 @media (max-width: 768px) {
   .navbar-right {
-    padding: 0 10px;
+    margin-left: auto;
+    flex-shrink: 0;
+    padding: 0;
+    /* Single row: portal pill + profile pill never wrap onto a second line. */
+    flex-wrap: nowrap;
+    gap: 8px;
+  }
+  .navbar-portal {
+    height: 38px;
+    padding: 0 11px;
+    font-size: 12px;
+  }
+  /* Keep the row compact — icon-only portal pill. */
+  .navbar-portal-label {
+    display: none;
+  }
+  .navbar-profile {
+    flex-wrap: nowrap;
+    flex-shrink: 0;
+    white-space: nowrap;
   }
   .navbar-profile-name {
     max-width: 110px;
@@ -176,7 +225,7 @@
 
 @media (max-width: 480px) {
   .navbar-right {
-    padding: 0 8px;
+    padding: 0;
   }
   .navbar-profile-name {
     max-width: 80px;
@@ -186,9 +235,9 @@
     display: none;
   }
   .navbar-profile {
-    gap: 7px;
-    height: 36px;
-    padding: 0 9px;
+    gap: 6px;
+    height: 34px;
+    padding: 0 8px;
   }
   .navbar-dot {
     width: 7px;

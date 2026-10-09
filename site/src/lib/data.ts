@@ -23,6 +23,7 @@ export type NavLink = { label: string; to: string }
 export const NAV_LINKS: NavLink[] = [
   { label: 'Home', to: '/' },
   { label: 'Starlink', to: '/#starlink' },
+  { label: 'Starlink Portal', to: '/starlink/portal' },
   { label: 'Hardware', to: '/#hardware' },
   { label: 'Services', to: '/services' },
   { label: 'Portfolio', to: '/portfolio' },

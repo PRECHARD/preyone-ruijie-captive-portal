@@ -531,7 +531,7 @@
       var sessionColumns = [
         { label: 'Name', render: function (r) { return '<span style="color:#fff;font-weight:600">' + escHtml(r.full_name) + '</span>'; } },
         { label: 'Phone', render: function (r) { return escHtml(r.phone || '—'); } },
-        { label: 'Voucher', render: function (r) { return '<code>' + escHtml(r.voucher_code || '—') + '</code>'; } },
+        { label: 'Voucher', render: function (r) { return '<code>' + escHtml((r.voucher_code || '—').toLowerCase()) + '</code>'; } },
         { label: 'Data Used', key: null, render: function (r) {
           var du = r.data_used_bytes || 0;
           return du > 1073741824 ? (du / 1073741824).toFixed(2) + ' GB' : du > 1048576 ? (du / 1048576).toFixed(0) + ' MB' : (du / 1024).toFixed(0) + ' KB';
@@ -559,7 +559,7 @@
 
       // Per-voucher breakdown
       var vCols = [
-        { label: 'Voucher Code', render: function (r) { return '<code>' + escHtml(r.voucher_code) + '</code>'; } },
+        { label: 'Voucher Code', render: function (r) { return '<code>' + escHtml((r.voucher_code || '').toLowerCase()) + '</code>'; } },
         { label: 'Connected Users', key: 'connected_users', render: function (r) { return '<span style="color:#13d8ff;font-weight:700">' + r.connected_users + '</span>'; } },
       ];
       $('voucherSessionContent').innerHTML = renderTable(vCols, d.perVoucher, 'No vouchers in use.');
@@ -1824,7 +1824,7 @@
           { label: 'Codes', render: function (r) {
             if (r.status !== 'approved' || !r.voucher_data || !r.voucher_data.codes) return '<span class="muted">—</span>';
             return r.voucher_data.codes.map(function (c) {
-              return '<span style="display:inline-block;font-family:monospace;font-size:0.8rem;color:var(--accent-cyan);background:rgba(255,255,255,0.04);border:1px solid var(--border);border-radius:4px;padding:0.1rem 0.4rem;margin:0.1rem;">' + c + '</span>';
+              return '<span style="display:inline-block;font-family:monospace;font-size:0.8rem;color:var(--accent-cyan);background:rgba(255,255,255,0.04);border:1px solid var(--border);border-radius:4px;padding:0.1rem 0.4rem;margin:0.1rem;">' + (typeof c === 'string' ? c.toLowerCase() : c) + '</span>';
             }).join('') +
             '<button class="btn-action btn-action--download download-approved-btn" style="margin-left:0.5rem;" data-codes="' + r.voucher_data.codes.join(',') + '">Download</button>';
           }},
@@ -2370,9 +2370,9 @@
   var selectedPkg = null;
 
   function generateCode(packageTier) {
-    var slug = packageTier.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+    var slug = packageTier.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
     var rand = '';
-    var chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    var chars = 'abcdefghjklmnpqrstuvwxyz23456789';
     for (var i = 0; i < 4; i++) rand += chars.charAt(Math.floor(Math.random() * chars.length));
     return slug + '-' + rand;
   }
@@ -2545,14 +2545,15 @@
     var container = $('voucherCardContainer');
     var tierText = data.package_tier || 'Custom';
     var priceText = data.price_amount ? '$' + parseFloat(data.price_amount).toFixed(2) : '';
-    var codeSafe = data.code.replace(/'/g, "\\'");
+    var codeLc = (data.code || '').toLowerCase();
+    var codeSafe = codeLc.replace(/'/g, "\\'");
     var bwVal = fmtBwSimple(data);
     var dataVal = fmtDataSimple(data);
     var durVal = fmtDurLong(data.duration_min);
 
     // WhatsApp text
     var waText = '*Preyone WiFi Voucher*%0A%0A' +
-      'Code: `' + data.code + '`%0A' +
+      'Code: `' + codeLc + '`%0A' +
       'Package: ' + tierText + '%0A' +
       'Duration: ' + durVal + '%0A' +
       'Bandwidth: ' + bwVal + '%0A' +
@@ -2583,7 +2584,7 @@
             '<div class="token-container">' +
               '<span class="token-title">WI-FI VOUCHER PIN</span>' +
               '<div class="token-box">' +
-                '<span class="token-string" style="cursor:pointer" onclick="navigator.clipboard.writeText(\'' + codeSafe + '\').then(function(){toast(\'Copied ' + codeSafe + '\',\'success\')})">' + data.code + '</span>' +
+                '<span class="token-string" style="cursor:pointer" onclick="navigator.clipboard.writeText(\'' + codeSafe + '\').then(function(){toast(\'Copied ' + codeSafe + '\',\'success\')})">' + codeLc + '</span>' +
               '</div>' +
             '</div>' +
             '<div class="voucher-footer">' +
@@ -2631,7 +2632,7 @@
   }
 
   function downloadVoucherCard(data) {
-    var code = data.code || 'PREYONE-XXXX';
+    var code = (data.code || 'PREYONE-XXXX').toLowerCase();
     var tierText = data.package_tier || 'Custom';
     var priceText = data.price_amount ? '$' + parseFloat(data.price_amount).toFixed(2) : '';
     var durShort = fmtDurShort(data.duration_min);
@@ -2694,10 +2695,10 @@
     ctx.fillStyle = '#0f172a'; ctx.font = '600 10px Montserrat, sans-serif'; ctx.textAlign = 'center';
     ctx.fillText('ACCESS VOUCHER PIN', cpX + cpW / 2, codeBoxY + 14);
     ctx.fillStyle = '#0f172a';
-    ctx.font = '42px "Bebas Neue", sans-serif';
+    ctx.font = '700 42px Montserrat, sans-serif';
     ctx.textAlign = 'center';
     var cfSize = 42;
-    while (ctx.measureText(code).width > cpW - 24 && cfSize > 22) { cfSize -= 2; ctx.font = cfSize + 'px "Bebas Neue", sans-serif'; }
+    while (ctx.measureText(code).width > cpW - 24 && cfSize > 22) { cfSize -= 2; ctx.font = cfSize + 'px Montserrat, sans-serif'; }
     ctx.shadowColor = 'rgba(15,23,42,0.1)'; ctx.shadowBlur = 3;
     ctx.fillText(code, cpX + cpW / 2, codeBoxY + codeBoxH / 2 + cfSize / 3 + 2);
     ctx.shadowBlur = 0;
@@ -2832,7 +2833,7 @@
 
     function doDownload() {
       var link = document.createElement('a');
-      link.download = 'preyone-voucher-' + data.code + '.png';
+      link.download = 'preyone-voucher-' + code + '.png';
       link.href = c.toDataURL('image/png');
       link.click();
       toast('Voucher card downloaded', 'success');
@@ -2849,7 +2850,7 @@
     if (!token) { toast('Sign in first', 'error'); return; }
 
     var tier = selectedPkg ? selectedPkg.tier_name : null;
-    var code = $('vCode').value.trim();
+    var code = $('vCode').value.trim().toLowerCase();
     var uses = parseInt($('vUses').value, 10);
     var priceInput = $('vPrice').value;
 
@@ -2870,7 +2871,7 @@
 
     api('/api/admin/vouchers', { method: 'POST', body: JSON.stringify(payload) }).then(function (data) {
       vStatus.className = 'form-status form-status--success';
-      vStatus.textContent = 'Voucher "' + data.code + '" created successfully.';
+      vStatus.textContent = 'Voucher "' + (data.code || '').toLowerCase() + '" created successfully.';
       vStatus.classList.remove('hidden');
       showVoucherCard(data);
       voucherForm.reset();
@@ -2880,7 +2881,7 @@
       Array.from(grid.children).forEach(function (c) { c.classList.remove('package-card--selected'); });
       $('vcbPkgBadge').textContent = '—';
       $('vCode').value = '';
-      toast('Voucher ' + data.code + ' created', 'success');
+      toast('Voucher ' + (data.code || '').toLowerCase() + ' created', 'success');
       loadVouchers();
     }).catch(function (err) {
       if (err.requiresApproval) {
@@ -2989,10 +2990,10 @@
 
         // Show codes
         var vouchers = data.vouchers;
-        var codesStr = vouchers.map(function (v) { return v.code; }).join(', ');
+        var codesStr = vouchers.map(function (v) { return v.code.toLowerCase(); }).join(', ');
         var codesSafe = codesStr.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
         var listHtml = vouchers.map(function (v) {
-          var sc = v.code.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+          var sc = v.code.toLowerCase().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
           return '<span style="display:inline-block;font-family:monospace;font-size:0.85rem;color:var(--accent-cyan);background:rgba(255,255,255,0.04);border:1px solid var(--border);border-radius:6px;padding:0.2rem 0.6rem;margin:0.2rem;">' + sc + '</span>';
         }).join('');
         $('bulkVoucherResults').innerHTML =

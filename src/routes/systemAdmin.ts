@@ -16,15 +16,17 @@ export const systemAdminRouter = Router();
 
 systemAdminRouter.use(requireAdminAuth);
 systemAdminRouter.use(requirePermission(PERMISSIONS.SYSTEM_DEVELOPER));
-// Level 0 endpoints are platform-only. Company-scoped admins (Level 1+) never
-// reach them even if their role grants system.developer in role_permissions.
-systemAdminRouter.use((req: Request, res: Response, next: NextFunction) => {
-  if (req.adminUser?.companyId) {
-    res.status(403).json({ error: 'Insufficient permissions' });
-    return;
-  }
-  next();
-});
+// Level 0 endpoints are platform-only, and system.developer is the single
+// badge of that access — requirePermission above already rejects anyone
+// without it. There is intentionally NO extra companyId guard here: the
+// platform owner holds their own transit company binding (companyId) while
+// carrying system.developer, and must keep working. Every other router
+// (admin.ts, transitWeb.ts) treats system.developer as authoritative, and the
+// SPA (App.tsx sectionAllowed) already lets a company-bound system.developer
+// see platform sections. A company-scoped admin with no system.developer is
+// still blocked above; a company that was mistakenly granted the capability
+// is an ops fix in user_permissions/company_permissions, not a reason to
+// lock out the real super-admin.
 
 // ── Tenant management ─────────────────────────────────────
 

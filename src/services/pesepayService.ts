@@ -499,9 +499,11 @@ export interface PesepayGatewayRequest {
   email?: string;
   fullName?: string;
   /**
-   * Overrides the global getPesepayReturnUrl() for this payment only. Used by
-   * the website checkout so the customer lands back on the marketing site,
-   * while staff POS sales keep returning to the portal/payment-status page.
+   * Per-flow override for where Pesepay sends the customer's BROWSER after
+   * checkout (additive, optional). The server-to-server resultUrl callback is
+   * intentionally NOT overridable — it must always hit our webhook.
+   * The Starlink portal passes its own return URL so subscribers land back on
+   * /starlink/portal instead of the WiFi payment-status page.
    */
   returnUrl?: string;
 }

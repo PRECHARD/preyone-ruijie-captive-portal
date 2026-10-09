@@ -448,8 +448,12 @@ export async function sendPasswordResetEmail(email: string, resetToken: string, 
 
 // ── Portal email verification ─────────────────────────────────────────
 export async function sendPortalEmailVerification(email: string, token: string, fullName: string): Promise<boolean> {
-  const baseUrl = process.env.BASE_URL || 'http://localhost:3000';
-  const verifyUrl = `${baseUrl}/verify-email?token=${token}`;
+  // Must hit the MOUNTED portal route (authRouter -> /api/auth/verify-email),
+  // which reads users.email_verification_token. A bare /verify-email path is
+  // swallowed by the SPA fallback, so the link rendered, the token was never
+  // consumed, and email_verified never flipped to true.
+  const baseUrl = (process.env.BASE_URL || 'http://localhost:3000').replace(/\/$/, '');
+  const verifyUrl = `${baseUrl}/api/auth/verify-email?token=${encodeURIComponent(token)}`;
   return sendMail(
     email,
     'Verify Your Email — Preyone WiFi',
@@ -500,8 +504,9 @@ export async function sendPortalAccountCreated(
   fullName: string,
   verifyToken: string
 ): Promise<boolean> {
-  const baseUrl = process.env.BASE_URL || 'http://localhost:3000';
-  const verifyUrl = `${baseUrl}/verify-email?token=${verifyToken}`;
+  // Same mounted-route requirement as sendPortalEmailVerification above.
+  const baseUrl = (process.env.BASE_URL || 'http://localhost:3000').replace(/\/$/, '');
+  const verifyUrl = `${baseUrl}/api/auth/verify-email?token=${encodeURIComponent(verifyToken)}`;
   const loginUrl = `${baseUrl}/login`;
   return sendMail(
     email,
@@ -589,5 +594,26 @@ export async function sendPortalSignupConfirmation(
       </div>
     </div>`,
     'Preyone UltraNet WiFi'
+  );
+}
+
+// Starlink portal: customer password reset link (additive � admin/WiFi flows untouched)
+export async function sendStarlinkPasswordReset(email: string, resetToken: string, fullName: string): Promise<boolean> {
+  const baseUrl = process.env.STARLINK_BASE_URL || process.env.BASE_URL || 'https://starlink.preyone.com';
+  const resetUrl = `${baseUrl.replace(/\/$/, '')}/starlink/portal?mode=reset&token=${resetToken}`;
+  return sendMail(
+    email,
+    'Reset Your Preyone Starlink Portal Password',
+    `<div style="font-family:'Segoe UI',Arial,sans-serif;max-width:560px;margin:32px auto;background:#0a0a0a;border-radius:16px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.12),0 0 40px rgba(0,229,255,0.08)">
+      ${emailHeader('Starlink Portal Password Reset')}
+      <div style="padding:24px 32px;text-align:center">
+        <p style="margin:0 0 12px;font-size:15px;color:#cbd5e1;line-height:1.6">Hi <strong style="color:#ffffff">${fullName}</strong>,</p>
+        <p style="margin:0 0 20px;font-size:15px;color:#cbd5e1;line-height:1.6">We received a request to reset your Preyone Starlink Portal password. Click the button below to set a new one. This link expires in <strong style="color:#00e5ff">1 hour</strong>.</p>
+        <a href="${resetUrl}" style="display:inline-block;background:linear-gradient(135deg,#00e5ff,#a855f7);color:#050505;padding:14px 36px;border-radius:8px;text-decoration:none;font-weight:700;font-size:14px;box-shadow:0 4px 20px rgba(0,229,255,0.3)">Reset Password</a>
+        <p style="margin:16px 0 0;font-size:13px;color:#64748b">If you didn't request this, you can safely ignore this email.</p>
+        ${emailFooter()}
+      </div>
+    </div>`,
+    'Preyone Starlink Portal'
   );
 }

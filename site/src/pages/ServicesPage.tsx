@@ -93,7 +93,7 @@ export function ServicesPage() {
               return (
                 <Reveal key={phase.title} delay={(i % 4) * 0.08} className="h-full">
                   <div className="glass mesh-card relative h-full overflow-hidden rounded-3xl p-6">
-                    <span className="absolute -right-2 -top-4 font-display text-[90px] leading-none text-white/6">
+                    <span className="absolute -top-3 right-2 font-display text-[90px] leading-none text-white/6">
                       {phase.step}
                     </span>
                     <div className="mb-5 flex h-12 w-12 items-center justify-center rounded-2xl border border-cyan-400/30 bg-cyan-400/8 text-cyan-300">

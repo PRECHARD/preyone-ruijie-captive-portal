@@ -122,7 +122,7 @@ async function req<T>(path: string, opts: RequestInit = {}): Promise<T> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   const token = auth.token();
   if (token) headers.Authorization = `Bearer ${token}`;
-  const res = await fetch(`/api/pos${path}`, { ...opts, headers });
+  const res = await fetch(`/api/pos${path}`, { credentials: 'include', ...opts, headers });
   if (res.status === 401) {
     auth.clear();
     throw new ApiError('Session expired — sign in again', 401);
@@ -212,11 +212,20 @@ export const api = {
     notes?: string;
   }) => req<CheckoutResult>('/checkout', { method: 'POST', body: JSON.stringify(payload) }),
 
-  documents: (type = 'sale', limit = 100, status?: string) => {
-    const qs = new URLSearchParams({ type, limit: String(limit) });
+  // No type → every document type (sales, invoices, quotations) in one list.
+  documents: (type?: string | null, limit = 100, status?: string) => {
+    const qs = new URLSearchParams({ limit: String(limit) });
+    if (type) qs.set('type', type);
     if (status) qs.set('status', status);
     return req<PosDocument[]>(`/documents?${qs.toString()}`);
   },
 
   document: (id: string) => req<PosDocument>(`/documents/${id}`),
+
+  // Installment payment against an existing invoice/quote (office or till issued)
+  recordPayment: (id: string, p: { amount: number; method: string; reference?: string }) =>
+    req<PosDocument & { balanceDue: number }>(`/documents/${id}/payments`, {
+      method: 'POST',
+      body: JSON.stringify(p),
+    }),
 };

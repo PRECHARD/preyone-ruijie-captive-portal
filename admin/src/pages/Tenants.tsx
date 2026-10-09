@@ -51,7 +51,7 @@ export default function Tenants() {
     commission_rate: '0.0', adminUsername: '', adminPassword: '', adminName: '', adminEmail: '', adminPhone: '',
   });
   const [editForm, setEditForm] = useState({
-    status: 'ACTIVE', commission_rate: '0.0', payment_gateway: 'contipay',
+    status: 'ACTIVE', commission_rate: '0.0', payment_gateway: 'pesepay',
     gateway_merchant_id: '', min_app_version: '', offline_lease_days: '7', contact_email: '',
   });
 
@@ -75,7 +75,7 @@ export default function Tenants() {
       setEditForm({
         status: d.status,
         commission_rate: String(d.commission_rate ?? 0),
-        payment_gateway: d.payment_gateway || 'contipay',
+        payment_gateway: d.payment_gateway || 'pesepay',
         gateway_merchant_id: d.gateway_merchant_id || '',
         min_app_version: d.min_app_version || '',
         offline_lease_days: String(d.offline_lease_days ?? 7),
@@ -268,7 +268,7 @@ export default function Tenants() {
             <div className="tx-form-row">
               <div className="tx-field"><label>Payment Gateway</label>
                 <select value={editForm.payment_gateway} onChange={e => setEditForm({ ...editForm, payment_gateway: e.target.value })}>
-                  {['contipay', 'paynow', 'innbucks', 'ecocash', 'other'].map(g => <option key={g} value={g}>{g.toUpperCase()}</option>)}
+                  {['pesepay', 'innbucks', 'ecocash', 'other'].map(g => <option key={g} value={g}>{g.toUpperCase()}</option>)}
                 </select>
               </div>
               <div className="tx-field"><label>Gateway Merchant ID</label>

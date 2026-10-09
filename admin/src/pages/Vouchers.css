@@ -468,49 +468,6 @@
 
 .muted { color: var(--text-muted); }
 
-/* ── Voucher List: toolbar, sortable headers, row actions, pager ── */
-
-.voucher-toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-bottom: 12px;
-}
-.voucher-toolbar__search { flex: 1 1 240px; min-width: 180px; }
-.voucher-toolbar__filter { flex: 0 1 auto; min-width: 150px; }
-
-.voucher-th-sortable { cursor: pointer; user-select: none; white-space: nowrap; }
-.voucher-th-sortable:hover { color: var(--cyan); }
-
-.voucher-sub {
-  font-size: 0.72rem;
-  color: var(--text-muted);
-  margin-top: 2px;
-  /* Usage and timeline cells stack three lines; keep the row readable without
-     forcing every other table on the page to grow. */
-  line-height: 1.35;
-}
-
-/* Word-wrap MACs and phone numbers instead of stretching the table. */
-.voucher-table td { max-width: 220px; overflow-wrap: anywhere; }
-
-.voucher-row--busy { opacity: 0.5; pointer-events: none; }
-
-.voucher-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.voucher-pager {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 14px;
-  margin-top: 14px;
-}
-.voucher-pager .btn-action:disabled { opacity: 0.4; cursor: not-allowed; }
-
 /* Voucher Card */
 .voucher-card-wrap {
   margin-top: 1.5rem;
@@ -554,12 +511,28 @@
   background: rgba(37, 211, 102, 0.05);
 }
 
+.btn-action--sms {
+  color: #38bdf8;
+}
+.btn-action--sms:hover {
+  border-color: #38bdf8;
+  background: rgba(56, 189, 248, 0.05);
+}
+
 .btn-action--copy {
   color: var(--cyan);
 }
 .btn-action--copy:hover {
   border-color: var(--cyan);
   background: rgba(0, 229, 255, 0.05);
+}
+
+.btn-action--print {
+  color: #b388ff;
+}
+.btn-action--print:hover {
+  border-color: #b388ff;
+  background: rgba(179, 136, 255, 0.08);
 }
 
 .preyone-voucher {
@@ -890,7 +863,215 @@
   .pkg-price {
     font-size: 1.2rem;
   }
-  .voucher-card-actions-bar {
-    flex-wrap: wrap;
+    .voucher-card-actions-bar {
+      flex-wrap: wrap;
+    }
   }
+
+/* ── Pending approvals ─────────────────────────────────────────────────────
+   The queue is unbounded server-side, so without a cap a long list pushes the
+   package grid and voucher list below the fold. The header stays pinned while
+   rows scroll: background-image alone is transparent, hence the opaque
+   background-color underneath it. */
+.approvals-scroll {
+  max-height: 380px;
+  overflow-y: auto;
+}
+
+.approvals-scroll thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background-color: var(--surface2);
+  background-image: linear-gradient(180deg, rgba(0, 229, 255, 0.06), transparent);
+}
+
+/* ── Voucher detail drawer ────────────────────────────────────────────────
+   Rendered through the shared Modal (plain CSS, no new paradigm). */
+.voucher-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.vd-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.vd-code {
+  font-family: var(--font-display);
+  font-size: 1.3rem;
+  letter-spacing: 0.06em;
+  color: var(--cyan);
+  text-shadow: 0 0 12px rgba(0, 229, 255, 0.3);
+  cursor: copy;
+  user-select: none;
+  overflow-wrap: anywhere;
+}
+
+.vd-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+}
+
+.vd-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.vd-label {
+  font-size: 0.6rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+.vd-value {
+  font-size: 0.85rem;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.vd-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.75rem;
+}
+
+.vd-section {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.6rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--border);
+}
+
+.vd-section-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-muted);
+}
+
+.vd-count {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--text);
+}
+
+.vd-macs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.vd-macs li {
+  padding: 4px 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-dim);
+  overflow-wrap: anywhere;
+}
+
+.vd-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+/* ── High-stakes holder capture modal (#0D0F18 glass + cyan) ────────────────
+   Used by the >=$4.99 generation gate and the Edit Holder row action. */
+.holder-capture {
+  background: rgba(13, 15, 24, 0.92);
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  border: 1px solid rgba(0, 240, 255, 0.35);
+  border-radius: 12px;
+  padding: 18px;
+  box-shadow: 0 0 24px rgba(0, 240, 255, 0.12), inset 0 0 32px rgba(0, 240, 255, 0.04);
+  color: var(--text, #e6f1ff);
+}
+
+.holder-capture__lead {
+  margin: 0 0 14px;
+  font-size: 0.92rem;
+  line-height: 1.5;
+  color: var(--text-dim, #9fb2c9);
+}
+
+.holder-capture__lead strong {
+  color: var(--un-cyan, #00f0ff);
+  font-weight: 700;
+}
+
+.holder-capture__label {
+  display: block;
+  margin: 10px 0 6px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--un-cyan, #00f0ff);
+}
+
+.holder-capture__input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(0, 240, 255, 0.25);
+  background: rgba(13, 15, 24, 0.85);
+  color: var(--text, #e6f1ff);
+  font-size: 0.95rem;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.holder-capture__input:focus {
+  border-color: var(--un-cyan, #00f0ff);
+  box-shadow: 0 0 0 2px rgba(0, 240, 255, 0.18);
+}
+
+.holder-capture__input::placeholder {
+  color: rgba(159, 178, 201, 0.55);
+}
+
+.holder-capture__error {
+  margin: 10px 0 0;
+  font-size: 0.85rem;
+  color: #ff6b6b;
+}
+
+.holder-capture__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+/* Two action buttons per voucher row (Details + Edit Holder) */
+.row-actions {
+  display: inline-flex;
+  gap: 6px;
+  flex-wrap: wrap;
 }

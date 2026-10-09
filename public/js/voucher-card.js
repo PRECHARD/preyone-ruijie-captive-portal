@@ -24,7 +24,7 @@
   }
 
   window.drawVoucherCanvas = async function (c, data, issuedByName) {
-    var code = data.code || 'PREYONE-XXXX';
+    var code = (data.code || 'PREYONE-XXXX').toLowerCase();
     voucherCode = code;
     var tierText = data.package_tier || 'Custom';
     var priceText = data.price_amount ? '$' + parseFloat(data.price_amount).toFixed(2) : '';
@@ -89,10 +89,10 @@
     ctx.fillStyle = '#0f172a'; ctx.font = '600 10px Montserrat, sans-serif'; ctx.textAlign = 'center';
     ctx.fillText('ACCESS VOUCHER PIN', cpX + cpW / 2, codeBoxY + 14);
     ctx.fillStyle = '#0f172a';
-    ctx.font = '42px "Bebas Neue", sans-serif';
+    ctx.font = '700 42px Montserrat, sans-serif';
     ctx.textAlign = 'center';
     var cfSize = 42;
-    while (ctx.measureText(code).width > cpW - 24 && cfSize > 22) { cfSize -= 2; ctx.font = cfSize + 'px "Bebas Neue", sans-serif'; }
+    while (ctx.measureText(code).width > cpW - 24 && cfSize > 22) { cfSize -= 2; ctx.font = cfSize + 'px Montserrat, sans-serif'; }
     ctx.shadowColor = 'rgba(15,23,42,0.1)'; ctx.shadowBlur = 3;
     ctx.fillText(code, cpX + cpW / 2, codeBoxY + codeBoxH / 2 + cfSize / 3 + 2);
     ctx.shadowBlur = 0;
@@ -213,7 +213,7 @@
     var c = document.createElement('canvas');
     await window.drawVoucherCanvas(c, data, 'Preyone Enterprises');
     var link = document.createElement('a');
-    link.download = 'preyone-voucher-' + data.code + '.png';
+    link.download = 'preyone-voucher-' + (data.code || '').toLowerCase() + '.png';
     link.href = c.toDataURL('image/png');
     link.click();
   };

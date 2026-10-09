@@ -7,6 +7,19 @@ import { PERMISSIONS, requirePermission, scopeUserVoucherCodeCondition, scopeVou
 import { recordAuditLog } from './adminAuth';
 import { sendAdminApprovedNotification, sendAdminRejectedNotification } from '../services/notificationService';
 import { isRuijieCloudConfigured, mintRuijieVoucherForTier } from '../services/ruijieMint';
+import {
+  getStaffDailySalesItemized,
+  getPlatformDailySalesItemized,
+  getStaffDailyRevenue,
+  getPlatformDailyRevenue,
+  getPlatformYesterdayRevenue,
+  getPlatformWeeklyRevenue,
+  getPlatformMonthlyRevenue,
+  getPlatformMonthlyTarget,
+  getStaffSalesMatrix,
+  getHourlySalesVelocity,
+  getRecentActivity,
+} from '../db/sales';
 import { RuijieApiError } from '../services/ruijieCloud';
 import ExcelJS from 'exceljs';
 import path from 'path';
@@ -90,13 +103,15 @@ adminRouter.get('/packages', async (_req: Request, res: Response) => {
 });
 
 adminRouter.post('/vouchers', async (req: Request, res: Response) => {
-  const { code, maxUses = 1, expiresAt, priceAmount, packageTier, paymentMethod, paymentReference } = req.body as {
+  const { code, maxUses = 1, expiresAt, priceAmount, packageTier, paymentMethod, paymentReference, holderName, holderPhone } = req.body as {
     code: string; maxUses?: number; expiresAt?: string; priceAmount?: number | null; packageTier?: string;
-    paymentMethod?: string; paymentReference?: string;
+    paymentMethod?: string; paymentReference?: string; holderName?: string; holderPhone?: string;
   };
 
   const saleMethod = paymentMethod && paymentMethod.trim() ? paymentMethod.trim() : 'Cash';
   const saleReference = paymentReference && paymentReference.trim() ? paymentReference.trim() : null;
+  const holderNameValue = holderName && holderName.trim() ? holderName.trim().slice(0, 120) : null;
+  const holderPhoneValue = holderPhone && holderPhone.trim() ? holderPhone.trim().slice(0, 32) : null;
 
   let durationMin = 60;
   let dataLimitGb: number | null = null;
@@ -154,12 +169,17 @@ adminRouter.post('/vouchers', async (req: Request, res: Response) => {
     }
     ruijieMint = await staffRuijieMint(resolvedPackageTier, `Staff sale by ${req.adminUser!.fullName}`);
   }
-  const voucherCode = ruijieMint ? ruijieMint.code : code.toUpperCase();
+  // Canonical stored PIN is lowercase. Authentication is case-insensitive
+  // (gateway + portal compare UPPER(code)), and every output path renders the
+  // stored code, so one case at the source keeps preview/JPEG/PDF/print/share,
+  // admin lists and copy-PIN all presenting the same lowercase PIN.
+  const voucherCode = ruijieMint ? ruijieMint.code : String(code).trim().toLowerCase();
 
   const { rows } = await pool.query(
-    `INSERT INTO vouchers (code, duration_min, max_uses, expires_at, data_limit_gb, is_uncapped, bandwidth_mbps_up, bandwidth_mbps_down, sold_by, price_amount, package_tier, max_devices)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *`,
-    [voucherCode, durationMin, maxUses, expiresAt ?? null, dataLimitGb, isUncapped, bandwidthUp, bandwidthDown, soldBy, priceAmount ?? null, resolvedPackageTier, maxDevices]
+    `INSERT INTO vouchers (code, duration_min, max_uses, expires_at, data_limit_gb, is_uncapped, bandwidth_mbps_up, bandwidth_mbps_down, sold_by, price_amount, package_tier, max_devices, holder_name, holder_phone, ruijie_sync_status, ruijie_voucher_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16) RETURNING *`,
+    [voucherCode, durationMin, maxUses, expiresAt ?? null, dataLimitGb, isUncapped, bandwidthUp, bandwidthDown, soldBy, priceAmount ?? null, resolvedPackageTier, maxDevices,
+     holderNameValue, holderPhoneValue, ruijieMint ? 'synced' : null, ruijieMint ? ruijieMint.code : null]
   );
 
   if (ruijieMint) {
@@ -380,6 +400,48 @@ adminRouter.post('/vouchers/:id/disable', requirePermission(PERMISSIONS.COMPANY_
     'voucher',
     voucher.id,
     `${disabled ? 'Disabled' : 'Enabled'} voucher ${voucher.code}`
+  );
+  res.json(rows[0]);
+});
+
+// ── Holder edit: customer name/phone ONLY ──
+// Strict allowlist — any other field in the body is rejected outright, so this
+// route can never alter PIN, price, expiry or any session-state column.
+// Scoped via loadScopedVoucher (Staff may fix holders on their own sales).
+adminRouter.patch('/vouchers/:id', async (req: Request, res: Response) => {
+  const raw = (req.body ?? {}) as Record<string, unknown>;
+  const allowed = ['holderName', 'holderPhone'];
+  const extra = Object.keys(raw).filter((k) => !allowed.includes(k));
+  if (extra.length > 0) {
+    res.status(422).json({ error: `Field(s) not editable here: ${extra.join(', ')}. Only holderName/holderPhone.` });
+    return;
+  }
+  if (!('holderName' in raw) && !('holderPhone' in raw)) {
+    res.status(422).json({ error: 'Nothing to update. Provide holderName and/or holderPhone.' });
+    return;
+  }
+
+  const voucher = await loadScopedVoucher(req.adminUser!.id, req.adminUser!.role, req.params.id);
+  if (!voucher) { res.status(404).json({ error: 'Voucher not found' }); return; }
+
+  const holderName = raw.holderName == null || String(raw.holderName).trim() === '' ? null : String(raw.holderName).trim().slice(0, 120);
+  const holderPhone = raw.holderPhone == null || String(raw.holderPhone).trim() === '' ? null : String(raw.holderPhone).trim().slice(0, 32);
+
+  const { rows } = await pool.query(
+    `UPDATE vouchers SET holder_name = $2, holder_phone = $3
+      WHERE id = $1 AND deleted_at IS NULL
+      RETURNING id, code, holder_name, holder_phone`,
+    [voucher.id, holderName, holderPhone]
+  );
+  if (!rows[0]) { res.status(404).json({ error: 'Voucher not found' }); return; }
+
+  await recordAuditLog(
+    req.adminUser!.id,
+    req.adminUser!.fullName,
+    'voucher_holder_update',
+    'voucher',
+    voucher.id,
+    `Holder for ${voucher.code}: name="${holderName ?? ''}" phone="${holderPhone ?? ''}"`
   );
   res.json(rows[0]);
 });
@@ -1810,13 +1872,15 @@ adminRouter.delete('/whitelist/:id', requirePermission(PERMISSIONS.SYSTEM_DEVELO
 // ═══════════════════════════════════════════════════════
 
 adminRouter.post('/vouchers/bulk', async (req: Request, res: Response) => {
-  const { count = 10, packageTier, priceAmount, expiresAt, paymentMethod, paymentReference } = req.body as {
+  const { count = 10, packageTier, priceAmount, expiresAt, paymentMethod, paymentReference, holderName, holderPhone } = req.body as {
     count?: number; packageTier?: string; priceAmount?: number; expiresAt?: string;
-    paymentMethod?: string; paymentReference?: string;
+    paymentMethod?: string; paymentReference?: string; holderName?: string; holderPhone?: string;
   };
 
   const saleMethod = paymentMethod && paymentMethod.trim() ? paymentMethod.trim() : 'Cash';
   const saleReference = paymentReference && paymentReference.trim() ? paymentReference.trim() : null;
+  const holderNameValue = holderName && holderName.trim() ? holderName.trim().slice(0, 120) : null;
+  const holderPhoneValue = holderPhone && holderPhone.trim() ? holderPhone.trim().slice(0, 32) : null;
 
   if (!packageTier) { res.status(422).json({ error: 'packageTier required' }); return; }
   if (count < 1 || count > 100) { res.status(422).json({ error: 'count must be between 1 and 100' }); return; }
@@ -1848,7 +1912,7 @@ adminRouter.post('/vouchers/bulk', async (req: Request, res: Response) => {
   if (pkgs.length === 0) { res.status(422).json({ error: 'Package not found' }); return; }
   const pkg = pkgs[0];
 
-  const slug = packageTier.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+  const slug = packageTier.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
 
   // Ruijie Cloud: mint all codes up front (one API call each, quantity=1) so the
   // HTTP work never happens inside the DB transaction.
@@ -1861,7 +1925,7 @@ adminRouter.post('/vouchers/bulk', async (req: Request, res: Response) => {
     }
   }
   const created: any[] = [];
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const chars = 'abcdefghjkmnpqrstuvwxyz23456789';
 
   const client = await pool.connect();
   try {
@@ -1870,12 +1934,12 @@ adminRouter.post('/vouchers/bulk', async (req: Request, res: Response) => {
       const bytes = crypto.randomBytes(4);
       let rand = '';
       for (let j = 0; j < 4; j++) rand += chars[bytes[j] % chars.length];
-      const code = ruijieMints.length > i ? ruijieMints[i].code : `${slug}-${rand}`;
+      const code = ruijieMints.length > i ? ruijieMints[i].code : `${slug}-${rand}`.toLowerCase();
 
       const { rows } = await client.query(
-        `INSERT INTO vouchers (code, duration_min, max_uses, expires_at, data_limit_gb, is_uncapped, bandwidth_mbps_up, bandwidth_mbps_down, sold_by, price_amount, package_tier, max_devices)
-         VALUES ($1, $2, 1, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
-        [code, pkg.duration_min, expiresAt || null, pkg.data_limit_gb, pkg.is_uncapped, pkg.bandwidth_mbps_up, pkg.bandwidth_mbps_down, req.adminUser!.id, priceAmount || null, packageTier, pkg.max_devices]
+        `INSERT INTO vouchers (code, duration_min, max_uses, expires_at, data_limit_gb, is_uncapped, bandwidth_mbps_up, bandwidth_mbps_down, sold_by, price_amount, package_tier, max_devices, holder_name, holder_phone)
+         VALUES ($1, $2, 1, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING *`,
+        [code, pkg.duration_min, expiresAt || null, pkg.data_limit_gb, pkg.is_uncapped, pkg.bandwidth_mbps_up, pkg.bandwidth_mbps_down, req.adminUser!.id, priceAmount || null, packageTier, pkg.max_devices, holderNameValue, holderPhoneValue]
       );
 
       if (ruijieMints.length > i) {
@@ -2019,10 +2083,10 @@ adminRouter.post('/vouchers/approvals/:id/approve', requirePermission(PERMISSION
   if (pkgRes.rows.length === 0) { res.status(422).json({ error: 'Package not found' }); return; }
   const pkg = pkgRes.rows[0];
 
-  const slug = approval.package_tier.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+  const slug = approval.package_tier.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
   const created: any[] = [];
   const count = approval.voucher_count || 1;
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const chars = 'abcdefghjkmnpqrstuvwxyz23456789';
 
   // Ruijie Cloud: mint all codes up front so HTTP work happens before BEGIN.
   let ruijieMints: StaffRuijieMint[] = [];
@@ -2045,7 +2109,7 @@ adminRouter.post('/vouchers/approvals/:id/approve', requirePermission(PERMISSION
       const voucherCode = ruijieMints.length > i
         ? ruijieMints[i].code
         : (approval.request_type === 'single' && approval.voucher_data?.code
-          ? approval.voucher_data.code.toUpperCase()
+          ? String(approval.voucher_data.code || '').trim().toLowerCase()
           : `${slug}-${rand}`);
 
       const { rows: vrows } = await client.query(
@@ -2973,3 +3037,27 @@ adminRouter.delete('/devices/:id', requireRole('CEO'), async (req: Request, res:
   await recordAuditLog(req.adminUser!.id, req.adminUser!.fullName, 'pos_device_delete', 'pos_device', id, `Removed device ${rows[0].device_id}`);
   res.json({ message: 'Device removed' });
 });
+adminRouter.get('/dashboard/ultranet/sales-summary', async (req: Request, res: Response) => {
+  try {
+    const user = req.adminUser!;
+    const isStaff = user.role === 'Staff';
+    const [mySales, platformDaily, platformYesterday, weekly, monthly, target, matrix, velocity, activity] = await Promise.all([
+      isStaff ? getStaffDailyRevenue(user.id) : Promise.resolve(0),
+      getPlatformDailyRevenue(),
+      getPlatformYesterdayRevenue(),
+      getPlatformWeeklyRevenue(),
+      getPlatformMonthlyRevenue(),
+      getPlatformMonthlyTarget(),
+      getStaffSalesMatrix(),
+      getHourlySalesVelocity(1),
+      getRecentActivity(20),
+    ]);
+    const [itemized] = await Promise.all([
+      isStaff ? getStaffDailySalesItemized(user.id) : getPlatformDailySalesItemized(),
+    ]);
+    res.json({ mySales, platformDaily, platformYesterday, weekly, monthly, target, matrix, velocity, activity, itemized });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+

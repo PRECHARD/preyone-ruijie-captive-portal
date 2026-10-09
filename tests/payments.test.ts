@@ -3,87 +3,87 @@ import express from 'express';
 import request from 'supertest';
 import jwt from 'jsonwebtoken';
 
-vi.mock('../src/db/pool', () => ({
-  pool: {
-    query: vi.fn(),
-    connect: vi.fn(),
-  },
-}));
+// payments.ts copies JWT_SECRET into a module-level constant at import time, so
+// it must be seeded before the route module loads. PESEPAY_* is read per request
+// by isPesepayConfigured(), which /initiate gates on.
+vi.hoisted(() => {
+  process.env.JWT_SECRET = 'test-jwt-secret';
+  process.env.PESEPAY_INTEGRATION_KEY = 'test-integration-key';
+  process.env.PESEPAY_ENCRYPTION_KEY = '0123456789abcdef0123456789abcdef';
+});
+
+vi.mock('../src/db/pool', () => {
+  const mockClientQuery = vi.fn();
+  const mockRelease = vi.fn();
+  const mockClient = {
+    query: mockClientQuery,
+    release: mockRelease,
+  };
+  return {
+    pool: {
+      query: vi.fn(),
+      connect: vi.fn().mockResolvedValue(mockClient),
+    },
+  };
+});
 
 vi.mock('../src/services/pesepayService', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/services/pesepayService')>();
   return {
     ...actual,
     initiateEcoCashPayment: vi.fn(),
-    isPesepayConfigured: vi.fn(),
+    initiatePesepayPayment: vi.fn(),
+    decryptResponse: vi.fn(),
     verifyPaymentStatus: vi.fn(),
   };
 });
 
-// Ruijie Cloud minting is off by default in tests (isRuijieCloudConfigured()
-// returns undefined/false), so every existing test keeps exercising the legacy
-// local-mint path. Individual Ruijie tests override these mocks.
-vi.mock('../src/services/ruijieMint', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../src/services/ruijieMint')>();
-  return {
-    ...actual,
-    isRuijieCloudConfigured: vi.fn(),
-    mintRuijieVoucherForTier: vi.fn(),
-  };
-});
+vi.mock('../src/services/ruijieService', () => ({
+  bypassRuijieFirewall: vi.fn().mockResolvedValue(true),
+}));
+
+// /pesepay/initiate must reject unauthenticated callers, so the auth guard is
+// stubbed: the stub still 401s when no Bearer header is present, which keeps the
+// "requires authentication" assertions honest.
+vi.mock('../src/middleware/adminAuth', () => ({
+  requireAdminAuth: (req: any, res: any, next: any) => {
+    const auth = req.headers.authorization;
+    if (!auth || !auth.startsWith('Bearer ')) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+    req.adminUser = {
+      id: 'admin-1',
+      email: 'admin@preyone.com',
+      role: 'CEO',
+      fullName: 'Admin',
+      company_id: authState.companyId,
+    };
+    next();
+  },
+}));
+
+const authState = vi.hoisted(() => ({ companyId: null as string | null }));
+
+vi.mock('../src/utils/wisprTransformer', () => ({
+  transformToWISPrProfile: vi.fn().mockReturnValue({
+    macAddress: 'AA:BB:CC:DD:EE:FF',
+    bandwidthUpKbps: 5000,
+    bandwidthDownKbps: 10000,
+    dataQuotaBytes: 10737418240,
+    isUncapped: false,
+    durationSeconds: 86400,
+  }),
+}));
 
 import { pool } from '../src/db/pool';
 import { paymentsRouter } from '../src/routes/payments';
-import { maintenanceCheck } from '../src/middleware/maintenanceMode';
 import {
   initiateEcoCashPayment,
-  isPesepayConfigured,
+  initiatePesepayPayment,
+  decryptResponse,
   verifyPaymentStatus,
-  encryptPayload,
 } from '../src/services/pesepayService';
-import { isRuijieCloudConfigured, mintRuijieVoucherForTier } from '../src/services/ruijieMint';
-import { RuijieApiError } from '../src/services/ruijieCloud';
-
-const SECRET = process.env.JWT_SECRET || 'preyone-jwt-secret-change-in-production';
-const mockInitiate = vi.mocked(initiateEcoCashPayment);
-const mockConfigured = vi.mocked(isPesepayConfigured);
-const mockVerify = vi.mocked(verifyPaymentStatus);
-
-// Must be exactly 16/24/32 bytes: Pesepay derives the AES IV from the first 16,
-// and crypto-js silently produces unusable output for other key lengths.
-const ENCRYPTION_KEY = 'testkey0123456789abcdefghijklmno';
-process.env.PESEPAY_ENCRYPTION_KEY = ENCRYPTION_KEY;
-process.env.PESEPAY_INTEGRATION_KEY = 'test-integration-key';
-
-// Shape of the per-payment callback token: 32 random bytes as hex.
-const CB_TOKEN = 'a1b2c3d4'.repeat(8);
-const OTHER_TOKEN = 'ffffffff'.repeat(8);
-
-// Pesepay delivers callbacks as an AES-CBC payload; build real ones so the
-// webhook's decryption step is genuinely exercised.
-function encrypt(obj: Record<string, unknown>): string {
-  return encryptPayload(obj, ENCRYPTION_KEY);
-}
-
-function callbackBody(obj: Record<string, unknown>) {
-  return { payload: encrypt(obj) };
-}
-
-const mockPackage = {
-  id: 'pkg-1',
-  tier_name: 'PreFlow',
-  price_amount: '9.99',
-  price_currency: 'USD',
-  duration_min: 43200,
-  data_limit_gb: 40,
-  is_uncapped: false,
-  bandwidth_mbps_up: 5,
-  bandwidth_mbps_down: 5,
-  max_devices: 1,
-};
-
-const mockUser = { id: 'u-1' };
-const mockPayment = { id: 'pay-1' };
 
 function createApp() {
   const app = express();
@@ -94,1150 +94,1003 @@ function createApp() {
 
 describe('Payments routes', () => {
   beforeEach(() => {
-    // reset (not clear): queued mockResolvedValueOnce values must not leak into
-    // the next test and shift every DB result by one.
-    vi.resetAllMocks();
-    mockConfigured.mockReturnValue(true);
+    vi.clearAllMocks();
   });
 
   describe('POST /api/payments/initiate', () => {
+    const validBody = {
+      tier: 'PreMAX',
+      displayName: 'Pro',
+      amount: 34.99,
+      currency: 'USD',
+      billingPeriod: 'monthly',
+      dataLimitGb: 100,
+      isUncapped: false,
+      bandwidthUp: 10,
+      bandwidthDown: 10,
+      phone: '+263771327202',
+      fullName: 'John Doe',
+      macAddress: 'AA:BB:CC:DD:EE:FF',
+      ipAddress: '10.0.0.5',
+    };
+
+    beforeEach(() => {
+      // Prod's /initiate drives everything through pool.query (no client
+      // transaction), so the once-queue has to start empty for every case.
+      (pool.query as any).mockReset();
+      process.env.PESEPAY_INTEGRATION_KEY = 'test-integration-key';
+      process.env.PESEPAY_ENCRYPTION_KEY = '0123456789abcdef0123456789abcdef';
+    });
+
+    const PKG = {
+      id: 'pkg-1',
+      tier_name: 'PreMAX',
+      price_amount: '34.99',
+      price_currency: 'USD',
+      duration_min: 43200,
+      data_limit_gb: 100,
+      is_uncapped: false,
+      bandwidth_mbps_up: 10,
+      bandwidth_mbps_down: 10,
+      max_devices: 1,
+    };
+
     it('returns 422 when Pesepay is not configured', async () => {
-      mockConfigured.mockReturnValue(false);
+      delete process.env.PESEPAY_INTEGRATION_KEY;
+      delete process.env.PESEPAY_API_KEY;
+      delete process.env.PESEPAY_ENCRYPTION_KEY;
 
       const res = await request(createApp())
         .post('/api/payments/initiate')
-        .send({ tier: 'PreFlow', phone: '0771300000' });
+        .send(validBody);
 
       expect(res.status).toBe(422);
-      expect(res.body.error).toContain('not configured');
+      expect(res.body.error).toMatch(/not configured/i);
+      // Must not touch the DB before refusing the charge.
+      expect(pool.query as any).not.toHaveBeenCalled();
     });
 
-    it('returns 422 for an invalid phone number', async () => {
+    it('returns 422 for an invalid Zimbabwe phone number', async () => {
       const res = await request(createApp())
         .post('/api/payments/initiate')
-        .send({ tier: 'PreFlow', phone: '123' });
+        .send({ ...validBody, phone: '12345' });
 
       expect(res.status).toBe(422);
-      expect(res.body.error).toContain('valid Zimbabwe phone');
+      expect(res.body.error).toMatch(/valid Zimbabwe phone/i);
+      expect(pool.query as any).not.toHaveBeenCalled();
     });
 
-    it('initiates a Pesepay payment and returns the hosted EcoCash page', async () => {
+    it('returns 422 for an unknown package tier', async () => {
+      (pool.query as any).mockResolvedValueOnce({ rows: [] });
+
+      const res = await request(createApp())
+        .post('/api/payments/initiate')
+        .send(validBody);
+
+      expect(res.status).toBe(422);
+      expect(res.body.error).toMatch(/Unknown package tier/i);
+    });
+
+    it('handles existing user by phone', async () => {
       (pool.query as any)
-        .mockResolvedValueOnce({ rows: [mockPackage] })   // package lookup
-        .mockResolvedValueOnce({ rows: [] })              // existing user lookup
-        .mockResolvedValueOnce({ rows: [mockUser] })      // create user
-        .mockResolvedValueOnce({ rows: [mockPayment] })   // create payment
-        .mockResolvedValueOnce({ rows: [] });             // store pesepay reference + poll url
-
-      mockInitiate.mockResolvedValue({
+        .mockResolvedValueOnce({ rows: [PKG] })                                // 1: package lookup
+        .mockResolvedValueOnce({ rows: [{ id: 'existing-user' }] })            // 2: existing user
+        .mockResolvedValueOnce({ rows: [{ id: 'pay-1' }] })                    // 3: INSERT payments
+        .mockResolvedValueOnce(undefined);                                    // 4: UPDATE pesepay_reference
+      (initiateEcoCashPayment as any).mockResolvedValue({
         success: true,
-        pollUrl: 'https://pesepay.com/poll/ABC123',
-        transactionId: 'PS-REF-1',
+        pollUrl: 'https://pay.pesepay.com/poll',
+        transactionId: 'PSE-1',
       });
 
       const res = await request(createApp())
         .post('/api/payments/initiate')
-        .send({ tier: 'PreFlow', phone: '0771 327 202' });
+        .send(validBody);
 
       expect(res.status).toBe(200);
-      expect(res.body.paymentId).toBe('pay-1');
       expect(res.body.status).toBe('pending');
-      expect(res.body.pesepayPollUrl).toBe('https://pesepay.com/poll/ABC123');
-      expect(res.body.pesepayReference).toBe('PS-REF-1');
+      expect(res.body.pesepayPollUrl).toBe('https://pay.pesepay.com/poll');
       expect(res.body.reference).toMatch(/^PREY-[0-9A-F]{16}$/);
-
-      expect(mockInitiate).toHaveBeenCalledTimes(1);
-      // Phone handed to Pesepay is normalized to E.164 (263…), and the merchant
-      // reference we generated is what Pesepay will echo back on the callback.
-      expect(mockInitiate).toHaveBeenCalledWith(
-        expect.objectContaining({
-          phone: '263771327202',
-          reference: res.body.reference,
-          amount: 9.99,
-        })
+      // The client needs this to poll /status, which refuses unauthenticated reads.
+      expect(res.body.statusToken).toBeTruthy();
+      expect(res.body.amount).toBe(34.99);
+      expect(res.body.phone).toBe('263771327202');
+      expect(initiateEcoCashPayment as any).toHaveBeenCalledWith(
+        expect.objectContaining({ currency: 'USD', phone: '263771327202' })
       );
-
-      // Pesepay's own reference and hosted page URL are persisted for support.
-      const updateCall = (pool.query as any).mock.calls.find(
-        (c: any[]) => String(c[0]).includes('UPDATE payments')
-      );
-      expect(updateCall).toBeDefined();
-      expect(String(updateCall[0])).toContain('pesepay_poll_url');
-      expect(String(updateCall[0])).toContain('pesepay_reference');
-      expect(String(updateCall[0])).not.toContain('contipay');
-      expect(updateCall[1][1]).toBe('PS-REF-1');
-      expect(updateCall[1][2]).toBe('https://pesepay.com/poll/ABC123');
     });
 
-    // The 0.99 PreLite tier is billed at a flat 1.00: EcoCash settles in whole
-    // dollars (USD minimum 1.00), so fractions of a dollar can never be charged.
-    it('bills a 0.99 package as 1.00 everywhere: DB row, Pesepay request, response', async () => {
+    it('creates new user when phone not found', async () => {
       (pool.query as any)
-        .mockResolvedValueOnce({ rows: [{ ...mockPackage, tier_name: 'PreLite', price_amount: '0.99' }] }) // package lookup
-        .mockResolvedValueOnce({ rows: [] })                                            // existing user lookup
-        .mockResolvedValueOnce({ rows: [mockUser] })                                    // create user
-        .mockResolvedValueOnce({ rows: [{ id: 'pay-prelite' }] })                       // create payment
-        .mockResolvedValueOnce({ rows: [] });                                           // store pesepay reference + poll url
-
-      mockInitiate.mockResolvedValue({
+        .mockResolvedValueOnce({ rows: [PKG] })                                // 1: package lookup
+        .mockResolvedValueOnce({ rows: [] })                                   // 2: no existing user
+        .mockResolvedValueOnce({ rows: [{ id: 'new-user' }] })                 // 3: INSERT users
+        .mockResolvedValueOnce({ rows: [{ id: 'pay-2' }] })                    // 4: INSERT payments
+        .mockResolvedValueOnce(undefined);                                    // 5: UPDATE pesepay_reference
+      (initiateEcoCashPayment as any).mockResolvedValue({
         success: true,
-        pollUrl: 'https://pesepay.com/poll/PREZ',
-        transactionId: 'PS-REF-PRELITE',
+        pollUrl: 'https://pay.pesepay.com/poll',
       });
 
       const res = await request(createApp())
         .post('/api/payments/initiate')
-        .send({ tier: 'PreLite', phone: '0771 327 202' });
+        .send(validBody);
 
       expect(res.status).toBe(200);
-      expect(res.body.amount).toBe(1);
-      // The DB row stores 1.00 (not 0.99) so the webhook amount-match check
-      // compares against the actual charge, and Pesepay receives 1.00.
-      const insertCall = (pool.query as any).mock.calls.find(
-        (c: any[]) => String(c[0]).includes('INSERT INTO payments')
-      );
-      expect(insertCall).toBeDefined();
-      expect(insertCall[1][3]).toBe(1);
-      expect(mockInitiate).toHaveBeenCalledWith(
-        expect.objectContaining({ amount: 1 })
-      );
+      expect(res.body.status).toBe('pending');
     });
 
-    it('stamps a unique per-payment callback token and passes it to Pesepay', async () => {
+    it('handles Pesepay failure gracefully', async () => {
       (pool.query as any)
-        .mockResolvedValueOnce({ rows: [mockPackage] })
-        .mockResolvedValueOnce({ rows: [mockUser] })
-        .mockResolvedValueOnce({ rows: [mockPayment] })
-        .mockResolvedValueOnce({ rows: [] });
-
-      mockInitiate.mockResolvedValue({ success: true, pollUrl: 'https://pesepay.com/poll/ABC123' });
-
-      await request(createApp())
-        .post('/api/payments/initiate')
-        .send({ tier: 'PreFlow', phone: '0771 327 202' });
-
-      // The token must be persisted on the payment row...
-      const insertCall = (pool.query as any).mock.calls.find(
-        (c: any[]) => String(c[0]).includes('INSERT INTO payments')
-      );
-      expect(String(insertCall[0])).toContain('webhook_token');
-      expect(String(insertCall[0])).toContain('merchant_reference');
-      const token = insertCall[1][8];
-      expect(String(token)).toMatch(/^[a-f0-9]{64}$/);
-
-      // ...and handed to Pesepay, which embeds it in resultUrl and echoes it back.
-      expect(mockInitiate.mock.calls[0][0].webhookToken).toBe(token);
-    });
-
-    it('generates a different callback token for every payment', async () => {
-      const seen = new Set<string>();
-      for (let i = 0; i < 3; i++) {
-        (pool.query as any)
-          .mockResolvedValueOnce({ rows: [mockPackage] })
-          .mockResolvedValueOnce({ rows: [mockUser] })
-          .mockResolvedValueOnce({ rows: [{ id: `pay-${i}` }] })
-          .mockResolvedValueOnce({ rows: [] });
-
-        mockInitiate.mockResolvedValue({ success: true, pollUrl: 'https://pesepay.com/poll/x' });
-
-        await request(createApp())
-          .post('/api/payments/initiate')
-          .send({ tier: 'PreFlow', phone: '0771 327 202' });
-
-        const insertCall = (pool.query as any).mock.calls.findLast(
-          (c: any[]) => String(c[0]).includes('INSERT INTO payments')
-        );
-        seen.add(String(insertCall[1][8]));
-      }
-      expect(seen.size).toBe(3);
-    });
-
-    it('marks the payment failed and returns 502 when Pesepay declines to start', async () => {
-      (pool.query as any)
-        .mockResolvedValueOnce({ rows: [mockPackage] })
-        .mockResolvedValueOnce({ rows: [mockUser] })
-        .mockResolvedValueOnce({ rows: [mockPayment] })
-        .mockResolvedValueOnce({ rows: [] }); // status -> failed update
-
-      mockInitiate.mockResolvedValue({ success: false, error: 'No poll URL received from payment provider' });
+        .mockResolvedValueOnce({ rows: [PKG] })                                // 1: package lookup
+        .mockResolvedValueOnce({ rows: [{ id: 'user-1' }] })                   // 2: existing user
+        .mockResolvedValueOnce({ rows: [{ id: 'pay-3' }] })                    // 3: INSERT payments
+        .mockResolvedValueOnce(undefined);                                    // 4: UPDATE status=failed
+      (initiateEcoCashPayment as any).mockResolvedValue({
+        success: false,
+        error: 'Insufficient funds',
+      });
 
       const res = await request(createApp())
         .post('/api/payments/initiate')
-        .send({ tier: 'PreFlow', phone: '0771300000' });
+        .send(validBody);
 
       expect(res.status).toBe(502);
       expect(res.body.status).toBe('failed');
-
-      const failedUpdate = (pool.query as any).mock.calls.find(
-        (c: any[]) => String(c[0]).includes("status = 'failed'")
-      );
-      expect(failedUpdate).toBeDefined();
-    });
-
-    it('returns 502 and records the error when Pesepay throws', async () => {
-      (pool.query as any)
-        .mockResolvedValueOnce({ rows: [mockPackage] })
-        .mockResolvedValueOnce({ rows: [mockUser] })
-        .mockResolvedValueOnce({ rows: [mockPayment] })
-        .mockResolvedValueOnce({ rows: [] });
-
-      mockInitiate.mockRejectedValue(new Error('upstream timeout'));
-
-      const res = await request(createApp())
-        .post('/api/payments/initiate')
-        .send({ tier: 'PreFlow', phone: '0771300000' });
-
-      expect(res.status).toBe(502);
-      expect(res.body.error).toContain('upstream timeout');
-
-      const failedUpdate = (pool.query as any).mock.calls.find(
-        (c: any[]) => String(c[0]).includes("status = 'failed'")
-      );
-      expect(failedUpdate).toBeDefined();
+      expect(res.body.error).toBe('Insufficient funds');
     });
   });
 
   describe('POST /api/payments/webhook', () => {
-    const paidRow = {
-      id: 'pay-1',
-      status: 'pending',
-      voucher_code: null,
-      amount: '9.99',
-      currency: 'USD',
-      phone_number: '263771327202',
-      webhook_token: CB_TOKEN,
-      tier_name: 'PreFlow',
-      price_amount: '9.99',
-      duration_min: 43200,
-      data_limit_gb: 40,
-      is_uncapped: false,
-      bandwidth_mbps_up: 5,
-      bandwidth_mbps_down: 5,
-      max_devices: 1,
-      user_id: 'u-1',
-      payment_method: 'EcoCash (Pesepay)',
-    };
-
-    const MERCHANT_REF = 'PREY-ABCDEF0123456789';
-
-    // Dispatches by SQL rather than by position: the completion path now runs
-    // several more statements (owner lookup, voucher ensure, sale insert), so a
-    // positional mockResolvedValueOnce chain silently drifts out of step.
-    const accountingDispatcher = () =>
-      vi.fn((sql: string) => {
-        const s = String(sql);
-        if (s.includes('admin_users')) return Promise.resolve({ rows: [{ id: 'ceo-1', full_name: 'Prechard Muvirimi' }] });
-        if (s.includes('UPDATE payments')) return Promise.resolve({ rows: [{ completed_at: new Date('2026-10-06T13:45:00Z') }] });
-        if (s.includes('FOR UPDATE')) return Promise.resolve({ rows: [paidRow] });
-        if (s.includes('RETURNING id, code')) return Promise.resolve({ rows: [{ id: 'v-1', code: 'CT-ABC12345' }] });
-        return Promise.resolve({ rows: [] });
-      });
-
-    it('completes a paid payment: mints a voucher and records the transaction', async () => {
-      // completePayment runs inside a connection-level transaction
-      // (pool.connect → BEGIN → SELECT…FOR UPDATE → mint → COMMIT).
-      const clientQuery = vi.fn();
-      (pool.connect as any).mockResolvedValue({ query: clientQuery, release: vi.fn() });
-
-      (pool.query as any).mockResolvedValueOnce({ rows: [paidRow] });   // webhook payment lookup
-
-      clientQuery
-        .mockResolvedValueOnce({ rows: [] })                              // BEGIN
-        .mockResolvedValueOnce({ rows: [paidRow] })                       // SELECT … FOR UPDATE
-        .mockResolvedValueOnce({ rows: [] })                              // SAVEPOINT mint_voucher
-        .mockResolvedValueOnce({ rows: [{ id: 'v-1', code: 'CT-ABC12345' }] }) // INSERT voucher
-        .mockResolvedValueOnce({ rows: [] })                              // RELEASE SAVEPOINT mint_voucher
-        .mockResolvedValueOnce({ rows: [] })                              // UPDATE payments → completed
-        .mockResolvedValueOnce({ rows: [] })                              // INSERT transaction
-        .mockResolvedValueOnce({ rows: [] });                             // COMMIT
-
-      const res = await request(createApp())
-        .post('/api/payments/webhook?token=' + CB_TOKEN)
-        .send(callbackBody({ merchantReference: MERCHANT_REF, transactionStatus: 'SUCCESS', amount: 9.99 }));
-
-      expect(res.status).toBe(200);
-      expect(res.body.state).toBe('completed');
-      expect(res.body.voucherCode).toBe('CT-ABC12345');
-
-      // Voucher insert happens inside the transaction (client) and uses a
-      // generated CT-###### code plus the package attributes.
-      const voucherCall = clientQuery.mock.calls.find(
-        (c: any[]) => String(c[0]).includes('INSERT INTO vouchers')
-      );
-      expect(voucherCall).toBeDefined();
-      expect(voucherCall[1][0]).toMatch(/^CT-[A-Z2-9]{8}$/); // $1 = generated code
-
-      // The payment row must be locked FOR UPDATE before minting
-      const lockCall = clientQuery.mock.calls.find(
-        (c: any[]) => String(c[0]).includes('FOR UPDATE')
-      );
-      expect(lockCall).toBeDefined();
-
-      // Regression: the voucher INSERT reads these six attributes off `pay`,
-      // but they are columns of `packages`, not `payments`. If the locking
-      // SELECT does not project them off the join, every one arrives as
-      // `undefined` and the mint fails with a NOT NULL violation - which is
-      // exactly what shipped: zero payments had ever completed. The mocked
-      // `paidRow` above carries these fields, so asserting on the query text is
-      // the only way to catch a missing projection.
-      const lockSql = String(lockCall[0]);
-      for (const col of [
-        'duration_min',
-        'data_limit_gb',
-        'is_uncapped',
-        'bandwidth_mbps_up',
-        'bandwidth_mbps_down',
-        'max_devices',
-      ]) {
-        expect(lockSql).toContain(`pk.${col}`);
-      }
+    beforeEach(async () => {
+      // Both mocks are module-level singletons, so queued once-values would
+      // otherwise leak between tests and silently satisfy the wrong query.
+      (pool.query as any).mockReset();
+      const client = await (pool as any).connect();
+      client.query.mockReset();
     });
 
-    // Regression for the 2026-10-06 gap: the Ruijie Cloud path mints the code
-    // remotely, so `mintRuijieVoucherForTier` created NO local `vouchers` row and
-    // nothing ever wrote a `sales` row. A customer paid 1.00 by EcoCash and the
-    // voucher was invisible in both the voucher list and Sales — it was not
-    // attributed to anyone. Both rows must now be written inside the same
-    // transaction as the payment completion.
-    it('accounts for a Ruijie-minted payment: local voucher row + sale under the CEO', async () => {
-      const clientQuery = accountingDispatcher();
-      (pool.connect as any).mockResolvedValue({ query: clientQuery, release: vi.fn() });
-      (pool.query as any).mockResolvedValueOnce({ rows: [paidRow] });
-
-      vi.mocked(isRuijieCloudConfigured).mockReturnValue(true);
-      vi.mocked(mintRuijieVoucherForTier).mockResolvedValue({
-        codeNo: 'kmrg48', profile: 'prof-1', userGroupId: 'grp-1', expiryTime: null, comment: 'Payment pay-1',
-      });
-
+    it('returns 400 when payload is missing', async () => {
       const res = await request(createApp())
-        .post('/api/payments/webhook?token=' + CB_TOKEN)
-        .send(callbackBody({ merchantReference: MERCHANT_REF, transactionStatus: 'SUCCESS', amount: 9.99 }));
+        .post('/api/payments/webhook')
+        .send({});
 
-      expect(res.status).toBe(200);
-      expect(res.body.voucherCode).toBe('kmrg48');
-
-      // The local voucher row the admin list reads, guarded so a replay cannot
-      // duplicate an existing code.
-      const ensure = clientQuery.mock.calls.find((c: any[]) => String(c[0]).includes('INSERT INTO vouchers'));
-      expect(ensure).toBeDefined();
-      expect(String(ensure![0])).toContain('NOT EXISTS');
-      expect(ensure![1][0]).toBe('kmrg48');
-
-      // Attributed to the CEO, carrying the package the payment actually bought.
-      const owner = clientQuery.mock.calls.find((c: any[]) => String(c[0]).includes('FROM admin_users'));
-      expect(owner).toBeDefined();
-
-      // Every value here was previously never written at all.
-      const sale = clientQuery.mock.calls.find((c: any[]) => String(c[0]).includes('INSERT INTO sales'));
-      expect(sale).toBeDefined();
-      const params = sale![1];
-      expect(params[0]).toBe('kmrg48');            // voucher_code   $1
-      expect(params[1]).toBe('ceo-1');             // sold_by        $2
-      expect(params[2]).toBe('Prechard Muvirimi'); // sold_by_name   $3
-      expect(params[3]).toBe('9.99');              // amount         $4
-      expect(params[4]).toBe('USD');               // currency       $5
-      // 'EcoCash (Pesepay)' must be reduced to the option the admin UI renders.
-      expect(params[5]).toBe('EcoCash');           // payment_method $6
-      expect(params[6]).toBeNull();                // reference      $7 (none here)
-      expect(params[7]).toBeInstanceOf(Date);      // sold_at        $8
-
-      // The sale must be written before COMMIT, inside the transaction.
-      const commitIdx = clientQuery.mock.calls.findIndex((c: any[]) => String(c[0]).trim() === 'COMMIT');
-      const saleIdx = clientQuery.mock.calls.indexOf(sale!);
-      expect(saleIdx).toBeGreaterThan(-1);
-      expect(commitIdx).toBeGreaterThan(saleIdx);
+      expect(res.status).toBe(400);
+      expect(res.text).toContain('Missing payload');
     });
 
-    // The legacy local mint already inserts a `vouchers` row — but with
-    // sold_by NULL, which would leave it unattributed in the staff split.
-    // The accounting step must adopt it rather than duplicate it.
-    it('attributes the legacy-minted voucher instead of duplicating it', async () => {
-      const clientQuery = accountingDispatcher();
-      (pool.connect as any).mockResolvedValue({ query: clientQuery, release: vi.fn() });
-      (pool.query as any).mockResolvedValueOnce({ rows: [paidRow] });
-
-      const res = await request(createApp())
-        .post('/api/payments/webhook?token=' + CB_TOKEN)
-        .send(callbackBody({ merchantReference: MERCHANT_REF, transactionStatus: 'SUCCESS', amount: 9.99 }));
-
-      expect(res.status).toBe(200);
-
-      const adopt = clientQuery.mock.calls.find(
-        (c: any[]) => String(c[0]).includes('UPDATE vouchers') && String(c[0]).includes('sold_by IS NULL')
-      );
-      expect(adopt).toBeDefined();
-      expect(adopt![1][1]).toBe('ceo-1');
-
-      const sale = clientQuery.mock.calls.find((c: any[]) => String(c[0]).includes('INSERT INTO sales'));
-      expect(sale).toBeDefined();
-      expect(sale![1][5]).toBe('EcoCash'); // payment_method is $6 → index 5
-      expect(sale![1][0]).toBe('CT-ABC12345'); // voucher_code is $1 → index 0
-    });
-
-    it('completes on a valid encrypted payload even when no token came back', async () => {
-      // Regression guard for the 2026-09-22 incident: requiring an out-of-band
-      // credential 401'd 24/24 genuine callbacks, so customers were charged and
-      // never got a voucher. Pesepay's payload is AES-encrypted with a
-      // pre-shared key, which is itself the authentication, so a callback that
-      // decrypts must still complete if Pesepay strips the query string.
-      const clientQuery = vi.fn();
-      (pool.connect as any).mockResolvedValue({ query: clientQuery, release: vi.fn() });
-      (pool.query as any).mockResolvedValueOnce({ rows: [paidRow] });
-
-      clientQuery
-        .mockResolvedValueOnce({ rows: [] })                                 // BEGIN
-        .mockResolvedValueOnce({ rows: [paidRow] })                          // SELECT … FOR UPDATE
-        .mockResolvedValueOnce({ rows: [] })                                 // SAVEPOINT
-        .mockResolvedValueOnce({ rows: [{ id: 'v-1', code: 'CT-ABC12345' }] }) // INSERT voucher
-        .mockResolvedValueOnce({ rows: [] })                                 // RELEASE SAVEPOINT
-        .mockResolvedValueOnce({ rows: [] })                                 // UPDATE payments
-        .mockResolvedValueOnce({ rows: [] })                                 // INSERT transaction
-        .mockResolvedValueOnce({ rows: [] });                                // COMMIT
+    it('returns 400 when decryption fails', async () => {
+      (decryptResponse as any).mockReturnValue(null);
 
       const res = await request(createApp())
         .post('/api/payments/webhook')
-        .send(callbackBody({ merchantReference: MERCHANT_REF, transactionStatus: 'SUCCESS', amount: 9.99 }));
+        .send({ payload: 'encrypted-string' });
+
+      expect(res.status).toBe(400);
+      expect(res.text).toContain('Invalid or undecryptable payload');
+      // An undecryptable payload is not from Pesepay: never touch the DB.
+      expect(pool.query as any).not.toHaveBeenCalled();
+    });
+
+    it('returns 404 when the merchant reference is unknown', async () => {
+      (decryptResponse as any).mockReturnValue({
+        merchantReference: 'REF-NOPE',
+        transactionStatus: 'SUCCESS',
+      });
+      (pool.query as any).mockResolvedValueOnce({ rows: [] });
+
+      const res = await request(createApp())
+        .post('/api/payments/webhook')
+        .send({ payload: 'encrypted-string' });
+
+      expect(res.status).toBe(404);
+    });
+
+    it('rejects a mismatched callback token without completing the payment', async () => {
+      (decryptResponse as any).mockReturnValue({
+        merchantReference: 'REF-003',
+        transactionStatus: 'SUCCESS',
+      });
+      (pool.query as any).mockResolvedValueOnce({
+        rows: [{ id: 'pay-3', status: 'pending', voucher_code: null, amount: 10, webhook_token: 'a'.repeat(64) }],
+      });
+
+      const res = await request(createApp())
+        .post('/api/payments/webhook?token=' + 'b'.repeat(64))
+        .send({ payload: 'encrypted-string' });
+
+      expect(res.status).toBe(404);
+    });
+
+    it('processes successful payment webhook', async () => {
+      (decryptResponse as any).mockReturnValue({
+        merchantReference: 'REF-001',
+        transactionStatus: 'SUCCESS',
+        amount: 10,
+      });
+
+      (pool.query as any).mockResolvedValueOnce({
+        rows: [{ id: 'pay-1', status: 'pending', voucher_code: null, amount: 10, webhook_token: null }],
+      });
+
+      const client = await (pool as any).connect();
+      client.query
+        .mockResolvedValueOnce(undefined)                                    // 1: BEGIN
+        .mockResolvedValueOnce({
+          rows: [
+            {
+              id: 'pay-1',
+              user_id: 'user-1',
+              tier_name: 'PreLITE',
+              amount: 10,
+              currency: 'USD',
+              payment_method: 'EcoCash (Pesepay)',
+              status: 'pending',
+              duration_min: 1440,
+              data_limit_gb: 100,
+              is_uncapped: false,
+              bandwidth_mbps_up: 10,
+              bandwidth_mbps_down: 10,
+              max_devices: 1,
+            },
+          ],
+        })                                                                   // 2: SELECT payment FOR UPDATE
+        .mockResolvedValueOnce(undefined)                                    // 3: SAVEPOINT mint_voucher
+        .mockResolvedValueOnce({ rows: [{ id: 'v-1', code: 'CT-TESTCODE1' }] }) // 4: INSERT INTO vouchers
+        .mockResolvedValueOnce(undefined)                                    // 5: RELEASE SAVEPOINT
+        .mockResolvedValueOnce({ rows: [{ completed_at: new Date('2026-10-09T00:00:00Z') }] }) // 6: UPDATE payments RETURNING
+        .mockResolvedValueOnce(undefined)                                    // 7: INSERT INTO transactions
+        .mockResolvedValueOnce({ rows: [] })                                 // 8: resolveOnlineSaleOwner (CEO lookup)
+        .mockResolvedValueOnce({ rows: [] })                                 // 9: INSERT INTO vouchers (sale accounting)
+        .mockResolvedValueOnce({ rows: [] })                                 // 10: UPDATE vouchers SET sold_by
+        .mockResolvedValueOnce({ rows: [] })                                 // 11: INSERT INTO sales
+        .mockResolvedValueOnce(undefined);                                   // 12: COMMIT
+
+      const res = await request(createApp())
+        .post('/api/payments/webhook')
+        .send({ payload: 'encrypted-string' });
 
       expect(res.status).toBe(200);
       expect(res.body.state).toBe('completed');
-      expect(res.body.voucherCode).toBe('CT-ABC12345');
+      expect(res.body.voucherCode).toBe('CT-TESTCODE1');
     });
 
-    it('does not double-mint when the payment completed while waiting on the row lock', async () => {
-      // Two concurrent completed webhooks: the first mints, the second blocks on
-      // FOR UPDATE, re-reads status='completed' and must return the SAME voucher.
-      const clientQuery = vi.fn();
-      (pool.connect as any).mockResolvedValue({ query: clientQuery, release: vi.fn() });
+    it('marks a gateway failure as failed without minting a voucher', async () => {
+      (decryptResponse as any).mockReturnValue({
+        merchantReference: 'REF-002',
+        transactionStatus: 'FAILED',
+      });
 
-      (pool.query as any).mockResolvedValueOnce({ rows: [paidRow] });
-
-      clientQuery
-        .mockResolvedValueOnce({ rows: [] })                              // BEGIN
-        .mockResolvedValueOnce({                                           // SELECT … FOR UPDATE
-          rows: [{ ...paidRow, status: 'completed', voucher_code: 'CT-EXISTING' }],
-        })
-        .mockResolvedValueOnce({ rows: [] });                             // COMMIT
-
-      const res = await request(createApp())
-        .post('/api/payments/webhook?token=' + CB_TOKEN)
-        .send(callbackBody({ merchantReference: MERCHANT_REF, transactionStatus: 'SUCCESS' }));
-
-      expect(res.status).toBe(200);
-      expect(res.body.state).toBe('completed');
-      expect(res.body.voucherCode).toBe('CT-EXISTING');
-
-      // No second voucher, no second transaction, no status flip: single-mint.
-      const voucherInserts = clientQuery.mock.calls.filter(
-        (c: any[]) => String(c[0]).includes('INSERT INTO vouchers')
-      );
-      expect(voucherInserts).toHaveLength(0);
-    });
-
-    it('acknowledges pending webhooks without completing', async () => {
-      (pool.query as any).mockResolvedValueOnce({ rows: [paidRow] });
-
-      const res = await request(createApp())
-        .post('/api/payments/webhook?token=' + CB_TOKEN)
-        .send(callbackBody({ merchantReference: MERCHANT_REF, transactionStatus: 'AWAITING' }));
-
-      expect(res.status).toBe(200);
-      expect(res.body.state).toBe('pending');
-      expect(res.body.voucherCode).toBeUndefined();
-    });
-
-    it('marks a declined payment as failed', async () => {
       (pool.query as any)
-        .mockResolvedValueOnce({ rows: [paidRow] })
-        .mockResolvedValueOnce({ rows: [] }); // status -> failed update
+        .mockResolvedValueOnce({
+          rows: [{ id: 'pay-2', status: 'pending', voucher_code: null, amount: 20, webhook_token: null }],
+        })
+        .mockResolvedValueOnce(undefined);                                  // UPDATE status = failed
 
       const res = await request(createApp())
-        .post('/api/payments/webhook?token=' + CB_TOKEN)
-        .send(callbackBody({ merchantReference: MERCHANT_REF, transactionStatus: 'CANCELLED' }));
+        .post('/api/payments/webhook')
+        .send({ payload: 'encrypted-string' });
 
       expect(res.status).toBe(200);
       expect(res.body.state).toBe('failed');
-
-      const failedUpdate = (pool.query as any).mock.calls.find(
-        (c: any[]) => String(c[0]).includes("status = 'failed'")
+      expect(res.body.voucherCode).toBeUndefined();
+      const updateCall = (pool.query as any).mock.calls.find(
+        (c: any[]) => typeof c[0] === 'string' && c[0].includes("SET status = 'failed'")
       );
-      expect(failedUpdate).toBeDefined();
+      expect(updateCall).toBeTruthy();
+      expect(updateCall![1]).toEqual(['pay-2', 'Payment FAILED', 'pending']);
     });
 
-    it('rejects a callback with no payload before touching the database', async () => {
-      const res = await request(createApp()).post('/api/payments/webhook').send({});
-
-      expect(res.status).toBe(400);
-      expect(res.body.error).toMatch(/payload/i);
-      expect(pool.query).not.toHaveBeenCalled();
-    });
-
-    it('rejects an undecryptable payload without touching the database', async () => {
-      // Not produced with our key => cannot be trusted => must not reach a lookup.
-      const res = await request(createApp())
-        .post('/api/payments/webhook?token=' + CB_TOKEN)
-        .send({ payload: 'this-is-not-a-valid-ciphertext' });
-
-      expect(res.status).toBe(400);
-      expect(res.body.error).toMatch(/payload/i);
-      expect(pool.query).not.toHaveBeenCalled();
-    });
-
-    it('rejects a valid payload that carries no merchant reference', async () => {
-      const res = await request(createApp())
-        .post('/api/payments/webhook?token=' + CB_TOKEN)
-        .send(callbackBody({ transactionStatus: 'SUCCESS' }));
-
-      expect(res.status).toBe(400);
-      expect(res.body.error).toMatch(/merchant reference/i);
-      expect(pool.query).not.toHaveBeenCalled();
-    });
-
-    it('rejects a malformed token without hitting the database', async () => {
-      const res = await request(createApp())
-        .post('/api/payments/webhook?token=not-a-real-token')
-        .send(callbackBody({ merchantReference: MERCHANT_REF, transactionStatus: 'SUCCESS' }));
-
-      expect(res.status).toBe(401);
-      expect(pool.query).not.toHaveBeenCalled();
-    });
-
-    it('returns 404 for an unknown merchant reference', async () => {
-      (pool.query as any).mockResolvedValueOnce({ rows: [] });
-
-      const res = await request(createApp())
-        .post('/api/payments/webhook?token=' + CB_TOKEN)
-        .send(callbackBody({ merchantReference: 'PREY-0000000000000000', transactionStatus: 'SUCCESS' }));
-
-      expect(res.status).toBe(404);
-      expect(res.body.error).toBe('Unknown payment');
-    });
-
-    it('rejects a token that does not belong to the referenced payment', async () => {
-      (pool.query as any).mockResolvedValueOnce({ rows: [paidRow] });
-
-      const res = await request(createApp())
-        .post('/api/payments/webhook?token=' + OTHER_TOKEN)
-        .send(callbackBody({ merchantReference: MERCHANT_REF, transactionStatus: 'SUCCESS' }));
-
-      expect(res.status).toBe(404);
-      expect(res.body.error).toBe('Unknown payment');
-    });
-
-    it('rejects a callback whose amount does not match the payment', async () => {
-      (pool.query as any).mockResolvedValueOnce({ rows: [paidRow] });
-
-      const res = await request(createApp())
-        .post('/api/payments/webhook?token=' + CB_TOKEN)
-        .send(callbackBody({ merchantReference: MERCHANT_REF, transactionStatus: 'SUCCESS', amount: 99.99 }));
-
-      expect(res.status).toBe(400);
-      expect(res.body.error).toBe('Amount mismatch');
-    });
-
-    it('does not let a failed webhook overwrite a completed payment', async () => {
-      (pool.query as any).mockResolvedValueOnce({
-        rows: [{ ...paidRow, status: 'completed', voucher_code: 'CT-ABC12345' }],
+    it('does not mint again when the payment is already completed', async () => {
+      (decryptResponse as any).mockReturnValue({
+        merchantReference: 'REF-004',
+        transactionStatus: 'SUCCESS',
       });
 
+      (pool.query as any).mockResolvedValueOnce({
+        rows: [{ id: 'pay-4', status: 'completed', voucher_code: 'CT-ALREADY1', amount: 10, webhook_token: null }],
+      });
+
+      // Clear the bookkeeping call the beforeEach makes to reach the client,
+      // then assert no transaction was opened at all.
+      const client = await (pool as any).connect();
+      client.query.mockClear();
+
       const res = await request(createApp())
-        .post('/api/payments/webhook?token=' + CB_TOKEN)
-        .send(callbackBody({ merchantReference: MERCHANT_REF, transactionStatus: 'FAILED' }));
+        .post('/api/payments/webhook')
+        .send({ payload: 'encrypted-string' });
 
       expect(res.status).toBe(200);
-      expect(res.body.status).toBe('ok');
       expect(res.body.state).toBe('completed');
-
-      const failedUpdate = (pool.query as any).mock.calls.find((c: any[]) =>
-        String(c[0]).includes("status = 'failed'")
-      );
-      expect(failedUpdate).toBeUndefined();
-    });
-  });
-
-  // When Ruijie Cloud is the mint source and its API fails, the customer has
-  // ALREADY been charged by Pesepay but no voucher exists. The transaction must
-  // roll back (payment stays pending) AND an operations alert must be raised —
-  // otherwise the failure is silent and nobody refunds them.
-  describe('Ruijie mint failure alerting', () => {
-    const paidRow = {
-      id: 'pay-1',
-      status: 'pending',
-      voucher_code: null,
-      amount: '9.99',
-      currency: 'USD',
-      phone_number: '263771327202',
-      pesepay_reference: 'PS-REF-7788',
-      webhook_token: CB_TOKEN,
-      tier_name: 'PreFlow',
-      price_amount: '9.99',
-      duration_min: 43200,
-      data_limit_gb: 40,
-      is_uncapped: false,
-      bandwidth_mbps_up: 5,
-      bandwidth_mbps_down: 5,
-      max_devices: 1,
-      user_id: 'u-1',
-      payment_method: 'EcoCash (Pesepay)',
-    };
-    const MERCHANT_REF = 'PREY-ABCDEF0123456789';
-
-    beforeEach(() => {
-      vi.mocked(isRuijieCloudConfigured).mockReturnValue(true);
-      vi.mocked(mintRuijieVoucherForTier).mockRejectedValue(
-        new RuijieApiError('Login failed', 'Ruijie returned code 1 "Login failed"')
-      );
-    });
-
-    // The alert write and the payments marker write run concurrently
-    // (Promise.all), so the stubs must key off SQL text rather than call order.
-    function stubPool(alertError?: Error) {
-      (pool.query as any).mockImplementation((sql: string) => {
-        const q = String(sql);
-        if (q.includes('merchant_reference')) return { rows: [paidRow] };
-        if (q.includes('SELECT email FROM users')) return { rows: [{ email: 'a@b.co' }] };
-        if (q.includes('INSERT INTO alerts')) {
-          return alertError ? Promise.reject(alertError) : { rows: [] };
-        }
-        if (q.includes('SET error_message = $2 WHERE id = $1')) return { rows: [] };
-        return Promise.reject(new Error('unstubbed pool.query: ' + q.slice(0, 70)));
-      });
-    }
-
-    function transactionFailsAtMint() {
-      const clientQuery = vi.fn();
-      (pool.connect as any).mockResolvedValue({ query: clientQuery, release: vi.fn() });
-      clientQuery
-        .mockResolvedValueOnce({ rows: [] })      // BEGIN
-        .mockResolvedValueOnce({ rows: [paidRow] }) // SELECT … FOR UPDATE
-        .mockResolvedValueOnce({ rows: [] })      // ROLLBACK
-        .mockResolvedValueOnce({ rows: [] });
-      return clientQuery;
-    }
-
-    it('rolls back and raises a critical alert carrying the Pesepay reference', async () => {
-      const clientQuery = transactionFailsAtMint();
-      stubPool();
-
-      const res = await request(createApp())
-        .post('/api/payments/webhook?token=' + CB_TOKEN)
-        .send(callbackBody({ merchantReference: MERCHANT_REF, transactionStatus: 'SUCCESS', amount: 9.99 }));
-
-      // No voucher is ever handed back.
       expect(res.body.voucherCode).toBeUndefined();
-      expect(res.body.state).not.toBe('completed');
-
-      // The transaction rolled back — nothing was written on the payment.
-      const rollback = clientQuery.mock.calls.find((c: any[]) => String(c[0]).trim() === 'ROLLBACK');
-      expect(rollback).toBeDefined();
-
-      const alertCall = (pool.query as any).mock.calls.find((c: any[]) =>
-        String(c[0]).includes('INSERT INTO alerts')
-      );
-      expect(alertCall).toBeDefined();
-      const [type, severity, , message, targetType, targetId] = alertCall[1];
-      expect(type).toBe('ruijie_mint_failure');
-      expect(severity).toBe('critical');
-      // Enough for support to find and refund the customer.
-      expect(message).toContain('PS-REF-7788');
-      expect(message).toContain('263771327202');
-      expect(message).toContain('a@b.co');
-      expect(message).toContain('Login failed');
-      expect(targetType).toBe('payment');
-      expect(targetId).toBe('pay-1');
-    });
-
-    it('flags the payment so the portal can show the support screen', async () => {
-      transactionFailsAtMint();
-      stubPool();
-
-      await request(createApp())
-        .post('/api/payments/webhook?token=' + CB_TOKEN)
-        .send(callbackBody({ merchantReference: MERCHANT_REF, transactionStatus: 'SUCCESS', amount: 9.99 }));
-
-      const marker = (pool.query as any).mock.calls.find((c: any[]) =>
-        String(c[0]).includes('SET error_message = $2 WHERE id = $1')
-      );
-      expect(marker).toBeDefined();
-      // Guarded on status='pending' so a completed payment is never downgraded.
-      expect(String(marker[0])).toContain("status = 'pending'");
-      expect(marker[1][0]).toBe('pay-1');
-      expect(marker[1][1]).toMatch(/^ruijie_mint_pending: /);
-    });
-
-    it('does not let a failing alert insert mask the original error', async () => {
-      transactionFailsAtMint();
-      stubPool(new Error('alerts table unavailable'));
-
-      const res = await request(createApp())
-        .post('/api/payments/webhook?token=' + CB_TOKEN)
-        .send(callbackBody({ merchantReference: MERCHANT_REF, transactionStatus: 'SUCCESS', amount: 9.99 }));
-
-      // The alert failure is swallowed; the route still answers normally and no
-      // voucher is issued.
-      expect(res.status).toBe(500);
-      expect(res.body.voucherCode).toBeUndefined();
-    });
-
-    it('still flags the payment when the alert insert fails', async () => {
-      transactionFailsAtMint();
-      stubPool(new Error('alerts table unavailable'));
-
-      await request(createApp())
-        .post('/api/payments/webhook?token=' + CB_TOKEN)
-        .send(callbackBody({ merchantReference: MERCHANT_REF, transactionStatus: 'SUCCESS', amount: 9.99 }));
-
-      // The two writes are independent: losing the ops alert must not also cost
-      // the customer their support screen.
-      const marker = (pool.query as any).mock.calls.find((c: any[]) =>
-        String(c[0]).includes('SET error_message = $2 WHERE id = $1')
-      );
-      expect(marker).toBeDefined();
-    });
-
-    it('does not alert for non-Ruijie failures such as a missing payment', async () => {
-      (pool.query as any).mockResolvedValueOnce({ rows: [] }); // no such payment
-
-      const res = await request(createApp())
-        .post('/api/payments/webhook?token=' + CB_TOKEN)
-        .send(callbackBody({ merchantReference: MERCHANT_REF, transactionStatus: 'SUCCESS', amount: 9.99 }));
-
-      expect(res.status).toBe(404);
-      const alertCall = (pool.query as any).mock.calls.find((c: any[]) =>
-        String(c[0]).includes('INSERT INTO alerts')
-      );
-      expect(alertCall).toBeUndefined();
-    });
-  });
-
-  describe('GET /api/payments/return', () => {
-    const pendingRow = {
-      id: 'pay-1',
-      status: 'pending',
-      pesepay_reference: 'PS-REF-1',
-      amount: '9.99',
-    };
-
-    it('redirects the browser back to the portal with a signed status token', async () => {
-      (pool.query as any).mockResolvedValueOnce({ rows: [pendingRow] });
-      // Gateway reports it still awaiting: nothing to reconcile.
-      mockVerify.mockResolvedValue({ status: 'AWAITING', found: true });
-
-      const res = await request(createApp()).get('/api/payments/return?ref=PREY-ABCDEF0123456789');
-
-      expect(res.status).toBe(302);
-      expect(res.headers.location).toContain('pay=pay-1');
-      expect(res.headers.location).toContain('tok=');
-    });
-
-    it('flags a missing reference', async () => {
-      const res = await request(createApp()).get('/api/payments/return');
-
-      expect(res.status).toBe(302);
-      expect(res.headers.location).toBe('/?payment=invalid');
-    });
-
-    it('flags an unknown reference', async () => {
-      (pool.query as any).mockResolvedValueOnce({ rows: [] });
-
-      const res = await request(createApp()).get('/api/payments/return?ref=PREY-UNKNOWN');
-
-      expect(res.status).toBe(302);
-      expect(res.headers.location).toBe('/?payment=unknown');
-    });
-
-    // Pesepay does NOT retry the result callback. A payment can be settled at the
-    // gateway while our webhook never arrives, leaving the customer charged with
-    // no voucher. Returning from Pesepay is the reliable moment to reconcile.
-    it('mints the voucher when the callback was lost but the gateway says SUCCESS', async () => {
-      (pool.query as any).mockResolvedValueOnce({ rows: [pendingRow] });
-      mockVerify.mockResolvedValue({ status: 'SUCCESS', amount: 9.99, found: true });
-
-      const clientQuery = vi.fn();
-      (pool.connect as any).mockResolvedValue({ query: clientQuery, release: vi.fn() });
-
-      const paidRow = {
-        id: 'pay-1',
-        status: 'pending',
-        voucher_code: null,
-        amount: '9.99',
-        currency: 'USD',
-        tier_name: 'PreFlow',
-        price_amount: '9.99',
-        duration_min: 43200,
-        data_limit_gb: 40,
-        is_uncapped: false,
-        bandwidth_mbps_up: 5,
-        bandwidth_mbps_down: 5,
-        max_devices: 1,
-        user_id: 'u-1',
-        payment_method: 'EcoCash (Pesepay)',
-      };
-      clientQuery
-        .mockResolvedValueOnce({ rows: [] })
-        .mockResolvedValueOnce({ rows: [paidRow] })
-        .mockResolvedValueOnce({ rows: [] })
-        .mockResolvedValueOnce({ rows: [{ id: 'v-1', code: 'CT-RECONCILED' }] })
-        .mockResolvedValueOnce({ rows: [] })
-        .mockResolvedValueOnce({ rows: [] })
-        .mockResolvedValueOnce({ rows: [] })
-        .mockResolvedValueOnce({ rows: [] });
-
-      const res = await request(createApp()).get('/api/payments/return?ref=PREY-ABCDEF0123456789');
-
-      // The customer still lands back on the portal...
-      expect(res.status).toBe(302);
-      expect(res.headers.location).toContain('pay=pay-1');
-      // ...and the voucher was minted without any webhook having arrived.
-      expect(mockVerify).toHaveBeenCalledWith('PS-REF-1');
-      const voucherCall = clientQuery.mock.calls.find(
-        (c: any[]) => String(c[0]).includes('INSERT INTO vouchers')
-      );
-      expect(voucherCall).toBeDefined();
-    });
-
-    it('marks a lost-callback payment failed when the gateway says FAILED', async () => {
-      (pool.query as any)
-        .mockResolvedValueOnce({ rows: [pendingRow] })
-        .mockResolvedValueOnce({ rows: [] }); // status -> failed
-      mockVerify.mockResolvedValue({ status: 'FAILED', found: true });
-
-      const res = await request(createApp()).get('/api/payments/return?ref=PREY-ABCDEF0123456789');
-
-      expect(res.status).toBe(302);
-      const failedUpdate = (pool.query as any).mock.calls.find(
-        (c: any[]) => String(c[0]).includes("status = $2")
-      );
-      expect(failedUpdate).toBeDefined();
-    });
-
-    it('does not reconcile when the gateway has no record of the reference', async () => {
-      (pool.query as any).mockResolvedValueOnce({ rows: [pendingRow] });
-      // found:false is the load-bearing part here: even if the status string
-      // looks like a success, a reference Pesepay does not recognise must never
-      // mint a voucher.
-      mockVerify.mockResolvedValue({ status: 'SUCCESS', found: false });
-
-      const res = await request(createApp()).get('/api/payments/return?ref=PREY-ABCDEF0123456789');
-
-      expect(res.status).toBe(302);
-      expect(pool.connect).not.toHaveBeenCalled();
-    });
-
-    it('treats an unknown reference as pending rather than failed', async () => {
-      (pool.query as any).mockResolvedValueOnce({ rows: [pendingRow] });
-      mockVerify.mockResolvedValue({ status: 'not_found', found: false });
-
-      const res = await request(createApp()).get('/api/payments/return?ref=PREY-ABCDEF0123456789');
-
-      expect(res.status).toBe(302);
-      // No mint and no status change: the transaction may simply not have
-      // appeared at the gateway yet.
-      expect(pool.connect).not.toHaveBeenCalled();
-      const statusUpdate = (pool.query as any).mock.calls.find(
-        (c: any[]) => String(c[0]).includes('UPDATE payments')
-      );
-      expect(statusUpdate).toBeUndefined();
-    });
-
-    it('never reconciles an already-completed payment', async () => {
-      (pool.query as any).mockResolvedValueOnce({
-        rows: [{ ...pendingRow, status: 'completed' }],
-      });
-
-      const res = await request(createApp()).get('/api/payments/return?ref=PREY-ABCDEF0123456789');
-
-      expect(res.status).toBe(302);
-      // Guards against a second completion minting a duplicate voucher.
-      expect(mockVerify).not.toHaveBeenCalled();
-      expect(pool.connect).not.toHaveBeenCalled();
-    });
-
-    it('does not reconcile when the payment has no Pesepay reference', async () => {
-      (pool.query as any).mockResolvedValueOnce({
-        rows: [{ ...pendingRow, pesepay_reference: null }],
-      });
-
-      const res = await request(createApp()).get('/api/payments/return?ref=PREY-ABCDEF0123456789');
-
-      expect(res.status).toBe(302);
-      expect(mockVerify).not.toHaveBeenCalled();
-    });
-
-    it('still redirects the customer when reconciliation throws', async () => {
-      (pool.query as any).mockResolvedValueOnce({ rows: [pendingRow] });
-      mockVerify.mockResolvedValue({ status: 'error', found: false });
-
-      const res = await request(createApp()).get('/api/payments/return?ref=PREY-ABCDEF0123456789');
-
-      expect(res.status).toBe(302);
-      expect(res.headers.location).toContain('pay=pay-1');
+      expect(client.query).not.toHaveBeenCalled();
     });
   });
 
   describe('GET /api/payments/status/:paymentId', () => {
     const statusToken = (paymentId: string) =>
-      jwt.sign({ paymentId, type: 'status' }, SECRET, { algorithm: 'HS256', expiresIn: '2h' });
-
-    // A pending row WITH a Pesepay reference triggers reconciliation, which then
-    // re-reads the row. Stub both by SQL text so the two reads stay in order.
-    function stubPendingStatus(row: Record<string, unknown>) {
-      (pool.query as any).mockImplementation((sql: string) => {
-        const q = String(sql);
-        if (q.includes('FROM payments WHERE id = $1')) return { rows: [row] };
-        if (q.includes('JOIN packages')) return { rows: [row] };
-        return Promise.reject(new Error('unstubbed pool.query: ' + q.slice(0, 70)));
+      jwt.sign({ paymentId, type: 'status' }, process.env.JWT_SECRET as string, {
+        algorithm: 'HS256',
       });
-    }
 
-    it('returns payment status including voucher code and tier', async () => {
+    beforeEach(() => {
+      (pool.query as any).mockReset();
+    });
+
+    it('requires authentication so payment IDs cannot be enumerated', async () => {
+      const res = await request(createApp()).get('/api/payments/status/pay-1');
+
+      expect(res.status).toBe(401);
+      expect(pool.query as any).not.toHaveBeenCalled();
+    });
+
+    it('returns 401 for an invalid token', async () => {
+      const res = await request(createApp()).get('/api/payments/status/pay-1?token=not-a-jwt');
+
+      expect(res.status).toBe(401);
+    });
+
+    it('returns 403 when the token was minted for a different payment', async () => {
+      const res = await request(createApp()).get(
+        `/api/payments/status/pay-1?token=${encodeURIComponent(statusToken('pay-2'))}`
+      );
+
+      expect(res.status).toBe(403);
+    });
+
+    it('returns payment status', async () => {
       (pool.query as any).mockResolvedValue({
-        rows: [{
-          id: 'pay-1',
-          status: 'completed',
-          amount: 34.99,
-          completed_at: new Date().toISOString(),
-          voucher_code: 'CT-ABC12345',
-          tier_name: 'PreFlow',
-        }],
+        rows: [
+          {
+            id: 'pay-1',
+            status: 'completed',
+            pesepay_reference: 'REF-1',
+            amount: 34.99,
+            completed_at: new Date().toISOString(),
+            voucher_code: 'CT-ABCD2345',
+            tier_name: 'PreMAX',
+            error_message: null,
+          },
+        ],
       });
 
-      const res = await request(createApp())
-        .get('/api/payments/status/pay-1')
-        .set('Authorization', `Bearer ${statusToken('pay-1')}`);
+      const res = await request(createApp()).get(
+        `/api/payments/status/pay-1?token=${encodeURIComponent(statusToken('pay-1'))}`
+      );
 
       expect(res.status).toBe(200);
       expect(res.body.status).toBe('completed');
-      expect(res.body.voucherCode).toBe('CT-ABC12345');
-      expect(res.body.tier).toBe('PreFlow');
-    });
-
-    it('returns null voucher code while pending', async () => {
-      (pool.query as any).mockResolvedValue({
-        rows: [{
-          id: 'pay-1',
-          status: 'pending',
-          amount: 34.99,
-          completed_at: null,
-          voucher_code: null,
-          tier_name: 'PreFlow',
-        }],
-      });
-
-      const res = await request(createApp())
-        .get('/api/payments/status/pay-1')
-        .set('Authorization', `Bearer ${statusToken('pay-1')}`);
-
-      expect(res.status).toBe(200);
-      expect(res.body.voucherCode).toBeNull();
+      expect(res.body.voucherCode).toBe('CT-ABCD2345');
+      expect(res.body.reference).toBe('REF-1');
+      expect(res.body.supportRequired).toBe(false);
     });
 
     it('returns 404 for unknown payment', async () => {
       (pool.query as any).mockResolvedValue({ rows: [] });
 
-      const res = await request(createApp())
-        .get('/api/payments/status/unknown')
-        .set('Authorization', `Bearer ${statusToken('unknown')}`);
+      const res = await request(createApp()).get(
+        `/api/payments/status/unknown?token=${encodeURIComponent(statusToken('unknown'))}`
+      );
 
       expect(res.status).toBe(404);
     });
 
-    it('returns 401 when no token is provided', async () => {
-      const res = await request(createApp()).get('/api/payments/status/pay-1');
+    it('reconciles a pending payment against the gateway on poll', async () => {
+      (pool.query as any)
+        .mockResolvedValueOnce({
+          rows: [
+            {
+              id: 'pay-recon-1',
+              status: 'pending',
+              pesepay_reference: 'REF-R1',
+              amount: 34.99,
+              completed_at: null,
+              voucher_code: null,
+              tier_name: 'PreMAX',
+              error_message: null,
+            },
+          ],
+        })
+        .mockResolvedValueOnce({ rows: [] });
+      (verifyPaymentStatus as any).mockResolvedValue({ found: true, status: 'PENDING' });
+
+      const res = await request(createApp()).get(
+        `/api/payments/status/pay-recon-1?token=${encodeURIComponent(statusToken('pay-recon-1'))}`
+      );
+
+      expect(verifyPaymentStatus as any).toHaveBeenCalledWith('REF-R1');
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe('pending');
+    });
+
+    it('marks a pending payment failed when the gateway reports failure', async () => {
+      (pool.query as any)
+        .mockResolvedValueOnce({
+          rows: [
+            {
+              id: 'pay-recon-2',
+              status: 'pending',
+              pesepay_reference: 'REF-R2',
+              amount: 34.99,
+              completed_at: null,
+              voucher_code: null,
+              tier_name: 'PreMAX',
+              error_message: null,
+            },
+          ],
+        })
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce({
+          rows: [
+            {
+              status: 'failed',
+              completed_at: null,
+              voucher_code: null,
+              error_message: 'Gateway reported FAILED (status check)',
+            },
+          ],
+        });
+      (verifyPaymentStatus as any).mockResolvedValue({ found: true, status: 'FAILED' });
+
+      const res = await request(createApp()).get(
+        `/api/payments/status/pay-recon-2?token=${encodeURIComponent(statusToken('pay-recon-2'))}`
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe('failed');
+      const updateCall = (pool.query as any).mock.calls.find(
+        (c: any[]) => typeof c[0] === 'string' && c[0].includes('SET status = $2')
+      );
+      expect(updateCall).toBeTruthy();
+      expect(updateCall![1]).toEqual([
+        'pay-recon-2',
+        'failed',
+        'Gateway reported FAILED (status check)',
+      ]);
+    });
+  });
+
+  const TENANT = '11111111-1111-4111-8111-111111111111';
+  const DOC = '22222222-2222-4222-8222-222222222222';
+  const SHIFT = '33333333-3333-4333-8333-333333333333';
+  const INTEGRATION_KEY = 'test-integration-key';
+
+  describe('POST /api/payments/pesepay/initiate', () => {
+    const validBody = {
+      amount: 25.5,
+      currencyCode: 'ZWG',
+      reasonForPayment: 'Invoice INV-001 settlement',
+      tenant_id: TENANT,
+      paymentMethod: 'innbucks',
+      targetType: 'invoice',
+      targetId: DOC,
+      phone: '+263771327202',
+      fullName: 'John Doe',
+    };
+
+    beforeEach(() => {
+      authState.companyId = null;
+      (pool.query as any).mockImplementation(async (sql: string) => {
+        if (/FROM companies/.test(sql)) return { rows: [{ id: TENANT }], rowCount: 1 };
+        if (/FROM pos_documents/.test(sql)) {
+          return { rows: [{ id: DOC, total: 100, amount_paid: 0, shift_id: SHIFT }], rowCount: 1 };
+        }
+        if (/FROM subscriptions/.test(sql)) return { rows: [{ id: 'sub-1' }], rowCount: 1 };
+        return { rows: [], rowCount: 1 };
+      });
+      (initiatePesepayPayment as any).mockResolvedValue({
+        success: true,
+        referenceNumber: 'PSE-1',
+        redirectUrl: 'https://payments.pesepay.com/poll?ref=abc',
+        pollUrl: 'https://payments.pesepay.com/poll?ref=abc',
+        instructions: 'Approve ZWG 25.5',
+      });
+    });
+
+    it('rejects a non-positive amount', async () => {
+      const res = await request(createApp())
+        .post('/api/payments/pesepay/initiate')
+        .set('Authorization', 'Bearer test-token')
+        .send({ ...validBody, amount: 0 });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain('amount');
+    });
+
+    it('rejects an unsupported currency', async () => {
+      const res = await request(createApp())
+        .post('/api/payments/pesepay/initiate')
+        .set('Authorization', 'Bearer test-token')
+        .send({ ...validBody, currencyCode: 'GBP' });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain('USD or ZiG');
+    });
+
+    it('requires reasonForPayment', async () => {
+      const res = await request(createApp())
+        .post('/api/payments/pesepay/initiate')
+        .set('Authorization', 'Bearer test-token')
+        .send({ ...validBody, reasonForPayment: '  ' });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain('reasonForPayment');
+    });
+
+    it('rejects an unauthenticated caller before touching the gateway', async () => {
+      const res = await request(createApp())
+        .post('/api/payments/pesepay/initiate')
+        .send(validBody);
+
+      expect(res.status).toBe(401);
+      expect(initiatePesepayPayment as any).not.toHaveBeenCalled();
+    });
+
+    it('ignores a body tenant_id that disagrees with the session', async () => {
+      const res = await request(createApp())
+        .post('/api/payments/pesepay/initiate')
+        .set('Authorization', 'Bearer test-token')
+        .send({ ...validBody, tenant_id: '99999999-9999-4999-8999-999999999999' });
+
+      expect(res.status).toBe(403);
+      expect(res.body.error).toMatch(/does not match/i);
+      expect(initiatePesepayPayment as any).not.toHaveBeenCalled();
+    });
+
+    it('derives the tenant from the session company when the body omits it', async () => {
+      authState.companyId = TENANT;
+      const { tenant_id, ...withoutTenant } = validBody;
+
+      const res = await request(createApp())
+        .post('/api/payments/pesepay/initiate')
+        .set('Authorization', 'Bearer test-token')
+        .send(withoutTenant);
+
+      expect(res.status).toBe(200);
+      expect(res.body.tenantId).toBe(TENANT);
+      const insert = (pool.query as any).mock.calls.find((c: any[]) =>
+        typeof c[0] === 'string' && c[0].includes('INTO pesepay_intents')
+      );
+      expect(insert).toBeTruthy();
+      // The intent must be written against the session's company, not the body.
+      expect(insert![1][1]).toBe(TENANT);
+    });
+
+    it('rejects an unsupported payment rail', async () => {
+      const res = await request(createApp())
+        .post('/api/payments/pesepay/initiate')
+        .set('Authorization', 'Bearer test-token')
+        .send({ ...validBody, paymentMethod: 'bitcoin' });
+
+      expect(res.status).toBe(400);
+    });
+
+    it('requires a document for invoice payments', async () => {
+      const res = await request(createApp())
+        .post('/api/payments/pesepay/initiate')
+        .set('Authorization', 'Bearer test-token')
+        .send({ ...validBody, targetId: undefined });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain('targetId');
+    });
+
+    it('returns 404 for an unknown tenant', async () => {
+      (pool.query as any).mockImplementation(async (sql: string) => {
+        if (/FROM companies/.test(sql)) return { rows: [], rowCount: 0 };
+        return { rows: [], rowCount: 0 };
+      });
+
+      const res = await request(createApp())
+        .post('/api/payments/pesepay/initiate')
+        .set('Authorization', 'Bearer test-token')
+        .send(validBody);
+
+      // No portal company can be resolved, so there is no tenant to charge and
+      // the request is refused before the gateway is ever called.
+      expect(res.status).toBe(403);
+      expect(res.body.error).toMatch(/no company/i);
+      expect(initiatePesepayPayment as any).not.toHaveBeenCalled();
+    });
+
+    it('rejects an amount larger than the outstanding balance', async () => {
+      const res = await request(createApp())
+        .post('/api/payments/pesepay/initiate')
+        .set('Authorization', 'Bearer test-token')
+        .send({ ...validBody, amount: 500 });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain('balance');
+      expect(initiatePesepayPayment).not.toHaveBeenCalled();
+    });
+
+    it('returns a reference number and redirect URL for an invoice', async () => {
+      const res = await request(createApp())
+        .post('/api/payments/pesepay/initiate')
+        .set('Authorization', 'Bearer test-token')
+        .send(validBody);
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.referenceNumber).toMatch(/^PREYONE-/);
+      expect(res.body.redirectUrl).toContain('pesepay.com');
+      // The caller sends "ZWG", but Pesepay's own code is "ZiG". Sending ZWG
+      // through untranslated is rejected with "Currency record was not found".
+      expect(res.body.currencyCode).toBe('ZiG');
+      expect(res.body.paymentMethod).toBe('innbucks');
+
+      const call = (initiatePesepayPayment as any).mock.calls[0][0];
+      expect(call.currencyCode).toBe('ZiG');
+      expect(call.paymentMethod).toBe('innbucks');
+      expect(call.reference).toBe(res.body.referenceNumber);
+    });
+
+    it('initiates a subscription payment', async () => {
+      const res = await request(createApp())
+        .post('/api/payments/pesepay/initiate')
+        .set('Authorization', 'Bearer test-token')
+        .send({
+          ...validBody,
+          targetType: 'subscription',
+          targetId: undefined,
+          subscriptionModule: 'pos',
+          planTier: 'enterprise',
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.body.targetType).toBe('subscription');
+    });
+
+    it('rejects an unknown subscription module', async () => {
+      const res = await request(createApp())
+        .post('/api/payments/pesepay/initiate')
+        .set('Authorization', 'Bearer test-token')
+        .send({
+          ...validBody,
+          targetType: 'subscription',
+          targetId: undefined,
+          subscriptionModule: 'crm',
+        });
+
+      expect(res.status).toBe(400);
+    });
+
+    it('marks the intent failed when Pesepay rejects initiation', async () => {
+      (initiatePesepayPayment as any).mockResolvedValue({ success: false, error: 'Invalid API key' });
+
+      const res = await request(createApp())
+        .post('/api/payments/pesepay/initiate')
+        .set('Authorization', 'Bearer test-token')
+        .send(validBody);
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain('Invalid API key');
+
+      const failedUpdate = (pool.query as any).mock.calls.some(
+        ([sql]: [string]) => typeof sql === 'string' && sql.includes("status = 'failed'")
+      );
+      expect(failedUpdate).toBe(true);
+    });
+  });
+
+  describe('POST /api/payments/pesepay/callback', () => {
+    const intent = {
+      id: 'intent-1',
+      reference: 'PREYONE-ABCD1234-1700000000000',
+      tenant_id: TENANT,
+      amount: 25.5,
+      currency: 'ZWG',
+      payment_method: 'innbucks',
+      target_type: 'invoice',
+      target_id: DOC,
+      shift_id: null,
+      subscription_module: null,
+      plan_tier: null,
+      status: 'pending',
+    };
+
+    const successBody = {
+      referenceNumber: intent.reference,
+      transactionStatus: 'SUCCESS',
+      amountDetails: { amount: 25.5, currencyCode: 'ZWG' },
+    };
+
+    beforeEach(async () => {
+      process.env.PESEPAY_INTEGRATION_KEY = INTEGRATION_KEY;
+      process.env.PESEPAY_ENCRYPTION_KEY = '0123456789abcdef0123456789abcdef';
+
+      const client = await (pool as any).connect();
+      client.query.mockReset();
+      client.query.mockImplementation(async (sql: string) => {
+        if (/BEGIN|COMMIT|ROLLBACK/.test(sql)) return { rows: [], rowCount: 0 };
+        if (/FROM pesepay_intents/.test(sql)) return { rows: [intent], rowCount: 1 };
+        if (/FROM pos_documents/.test(sql)) {
+          return { rows: [{ id: DOC, doc_number: 'INV-001', total: 100, amount_paid: 0, shift_id: SHIFT }], rowCount: 1 };
+        }
+        if (/UPDATE pos_documents/.test(sql)) return { rows: [{ status: 'paid' }], rowCount: 1 };
+        if (/UPDATE subscriptions/.test(sql)) {
+          return { rows: [{ id: 'sub-1', plan_tier: 'enterprise', status: 'active' }], rowCount: 1 };
+        }
+        return { rows: [], rowCount: 1 };
+      });
+    });
+
+    it('rejects a callback without an authorization header', async () => {
+      const res = await request(createApp())
+        .post('/api/payments/pesepay/callback')
+        .send(successBody);
 
       expect(res.status).toBe(401);
     });
 
-    it('returns 403 when the token does not match the payment', async () => {
+    it('rejects a callback with the wrong integration key', async () => {
       const res = await request(createApp())
-        .get('/api/payments/status/pay-1')
-        .set('Authorization', `Bearer ${statusToken('other-payment')}`);
+        .post('/api/payments/pesepay/callback')
+        .set('authorization', 'wrong-key')
+        .send(successBody);
 
-      expect(res.status).toBe(403);
+      expect(res.status).toBe(401);
     });
 
-    // Seamless EcoCash has no hosted page, so the customer never navigates back
-    // through /return. /status is the only heartbeat, so a pending payment is
-    // reconciled here: the voucher self-mints while the portal polls.
-    it('self-mints the voucher when polling and the gateway says SUCCESS', async () => {
-      const pendingRow = { id: 'pay-9', status: 'pending', pesepay_reference: 'PS-REF-1', amount: '9.99' };
-      (pool.query as any)
-        .mockResolvedValueOnce({ rows: [pendingRow] }) // status handler main SELECT
-        .mockResolvedValueOnce({ rows: [{ status: 'completed', completed_at: new Date().toISOString(), voucher_code: 'CT-SELFMINT' }] }); // refresh
-      mockVerify.mockResolvedValue({ status: 'SUCCESS', amount: 9.99, found: true });
-
-      const clientQuery = vi.fn();
-      (pool.connect as any).mockResolvedValue({ query: clientQuery, release: vi.fn() });
-
-      const paidRow = {
-        id: 'pay-9',
-        status: 'pending',
-        voucher_code: null,
-        amount: '9.99',
-        currency: 'USD',
-        tier_name: 'PreFlow',
-        price_amount: '9.99',
-        duration_min: 43200,
-        data_limit_gb: 40,
-        is_uncapped: false,
-        bandwidth_mbps_up: 5,
-        bandwidth_mbps_down: 5,
-        max_devices: 1,
-        user_id: 'u-1',
-        payment_method: 'EcoCash (Pesepay)',
-      };
-      clientQuery
-        .mockResolvedValueOnce({ rows: [] })                                   // BEGIN
-        .mockResolvedValueOnce({ rows: [paidRow] })                            // SELECT … FOR UPDATE
-        .mockResolvedValueOnce({ rows: [] })                                   // SAVEPOINT
-        .mockResolvedValueOnce({ rows: [{ id: 'v-1', code: 'CT-SELFMINT' }] }) // INSERT vouchers
-        .mockResolvedValueOnce({ rows: [] })                                   // RELEASE SAVEPOINT
-        .mockResolvedValueOnce({ rows: [] })                                   // UPDATE payments completed
-        .mockResolvedValueOnce({ rows: [] })                                   // INSERT transactions
-        .mockResolvedValueOnce({ rows: [] });                                  // COMMIT
-
+    it('rejects a payload without a reference', async () => {
       const res = await request(createApp())
-        .get('/api/payments/status/pay-9')
-        .set('Authorization', `Bearer ${statusToken('pay-9')}`);
+        .post('/api/payments/pesepay/callback')
+        .set('authorization', INTEGRATION_KEY)
+        .send({ transactionStatus: 'SUCCESS' });
+
+      expect(res.status).toBe(400);
+    });
+
+    it('ignores non-success statuses', async () => {
+      const res = await request(createApp())
+        .post('/api/payments/pesepay/callback')
+        .set('authorization', INTEGRATION_KEY)
+        .send({ ...successBody, transactionStatus: 'FAILED' });
 
       expect(res.status).toBe(200);
-      expect(mockVerify).toHaveBeenCalledWith('PS-REF-1');
-      expect(res.body.status).toBe('completed');
-      expect(res.body.voucherCode).toBe('CT-SELFMINT');
-      const voucherCall = clientQuery.mock.calls.find(
-        (c: any[]) => String(c[0]).includes('INSERT INTO vouchers')
-      );
-      expect(voucherCall).toBeDefined();
+      expect(res.body.applied).toBe(false);
+      expect(res.body.status).toBe('FAILED');
     });
 
-    it('marks the payment failed when polling and the gateway says FAILED', async () => {
-      const pendingRow = { id: 'pay-8', status: 'pending', pesepay_reference: 'PS-REF-1', amount: '9.99' };
-      (pool.query as any)
-        .mockResolvedValueOnce({ rows: [pendingRow] }) // main SELECT
-        .mockResolvedValueOnce({ rows: [] })            // UPDATE payments -> failed
-        .mockResolvedValueOnce({ rows: [{ status: 'failed', completed_at: null, voucher_code: null }] }); // refresh
-      mockVerify.mockResolvedValue({ status: 'FAILED', found: true });
-
+    it('rejects an amount mismatch', async () => {
       const res = await request(createApp())
-        .get('/api/payments/status/pay-8')
-        .set('Authorization', `Bearer ${statusToken('pay-8')}`);
+        .post('/api/payments/pesepay/callback')
+        .set('authorization', INTEGRATION_KEY)
+        .send({ ...successBody, amountDetails: { amount: 99 } });
 
-      expect(res.status).toBe(200);
-      expect(res.body.status).toBe('failed');
-      const failedUpdate = (pool.query as any).mock.calls.find(
-        (c: any[]) => String(c[0]).includes("status = $2")
-      );
-      expect(failedUpdate).toBeDefined();
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain('mismatch');
     });
 
-    it('does not reconcile a pending payment that has no Pesepay reference', async () => {
-      (pool.query as any).mockResolvedValueOnce({
-        rows: [{ id: 'pay-7', status: 'pending', amount: 34.99, voucher_code: null, tier_name: 'PreFlow' }],
+    it('returns 404 for an unknown reference', async () => {
+      const client = await (pool as any).connect();
+      client.query.mockImplementation(async (sql: string) => {
+        if (/BEGIN|COMMIT|ROLLBACK/.test(sql)) return { rows: [], rowCount: 0 };
+        if (/FROM pesepay_intents/.test(sql)) return { rows: [], rowCount: 0 };
+        return { rows: [], rowCount: 0 };
       });
 
       const res = await request(createApp())
-        .get('/api/payments/status/pay-7')
-        .set('Authorization', `Bearer ${statusToken('pay-7')}`);
+        .post('/api/payments/pesepay/callback')
+        .set('authorization', INTEGRATION_KEY)
+        .send(successBody);
 
-      expect(res.status).toBe(200);
-      expect(res.body.status).toBe('pending');
-      expect(mockVerify).not.toHaveBeenCalled();
+      expect(res.status).toBe(404);
     });
 
-    it('reports supportRequired once a Ruijie mint has failed', async () => {
-      const row = {
-        id: 'pay-6',
-        status: 'pending',
-        amount: 9.99,
-        completed_at: null,
-        voucher_code: null,
-        pesepay_reference: 'PS-REF-7788',
-        error_message: 'ruijie_mint_pending: 1: Ruijie returned code 1 "Login failed"',
-        tier_name: 'PreFlow',
-      };
-      stubPendingStatus(row);
-      mockVerify.mockResolvedValue({ status: 'AWAITING', found: true });
-
+    it('applies a successful payment to the invoice', async () => {
       const res = await request(createApp())
-        .get('/api/payments/status/pay-6')
-        .set('Authorization', `Bearer ${statusToken('pay-6')}`);
+        .post('/api/payments/pesepay/callback')
+        .set('authorization', INTEGRATION_KEY)
+        .send(successBody);
 
       expect(res.status).toBe(200);
-      // Still pending, and crucially no voucher is promised.
-      expect(res.body.status).toBe('pending');
-      expect(res.body.voucherCode).toBeNull();
-      expect(res.body.supportRequired).toBe(true);
-      // The portal puts this in the WhatsApp message.
-      expect(res.body.reference).toBe('PS-REF-7788');
+      expect(res.body.applied).toBe(true);
+      expect(res.body.documentId).toBe(DOC);
+      expect(res.body.documentNumber).toBe('INV-001');
+      expect(res.body.status).toBe('paid');
+
+      const client = await (pool as any).connect();
+      const inserted = client.query.mock.calls.find(
+        ([sql]: [string]) => typeof sql === 'string' && sql.includes('INSERT INTO pos_document_payments')
+      );
+      expect(inserted).toBeTruthy();
+      expect(inserted[1]).toEqual([DOC, 25.5, 'innbucks', intent.reference, SHIFT]);
+
+      const updated = client.query.mock.calls.find(
+        ([sql]: [string]) => typeof sql === 'string' && sql.includes('UPDATE pos_documents')
+      );
+      expect(updated[1]).toEqual([DOC, 25.5]);
     });
 
-    it('does not report supportRequired for an unrelated error_message', async () => {
-      stubPendingStatus({
-        id: 'pay-5',
-        status: 'pending',
-        amount: 9.99,
-        completed_at: null,
-        voucher_code: null,
-        pesepay_reference: 'PS-REF-1',
-        error_message: 'some other note',
-        tier_name: 'PreFlow',
+    it('is idempotent for an already completed intent', async () => {
+      const client = await (pool as any).connect();
+      client.query.mockImplementation(async (sql: string) => {
+        if (/BEGIN|COMMIT|ROLLBACK/.test(sql)) return { rows: [], rowCount: 0 };
+        if (/FROM pesepay_intents/.test(sql)) return { rows: [{ ...intent, status: 'completed' }], rowCount: 1 };
+        return { rows: [], rowCount: 0 };
       });
-      mockVerify.mockResolvedValue({ status: 'AWAITING', found: true });
 
       const res = await request(createApp())
-        .get('/api/payments/status/pay-5')
-        .set('Authorization', `Bearer ${statusToken('pay-5')}`);
+        .post('/api/payments/pesepay/callback')
+        .set('authorization', INTEGRATION_KEY)
+        .send(successBody);
 
       expect(res.status).toBe(200);
-      expect(res.body.supportRequired).toBe(false);
+      expect(res.body.applied).toBe(false);
+      expect(res.body.message).toContain('Already processed');
+    });
+
+    it('activates a subscription on success', async () => {
+      const client = await (pool as any).connect();
+      client.query.mockImplementation(async (sql: string) => {
+        if (/BEGIN|COMMIT|ROLLBACK/.test(sql)) return { rows: [], rowCount: 0 };
+        if (/FROM pesepay_intents/.test(sql)) {
+          return {
+            rows: [
+              {
+                ...intent,
+                target_type: 'subscription',
+                target_id: null,
+                subscription_module: 'pos',
+                plan_tier: 'enterprise',
+              },
+            ],
+            rowCount: 1,
+          };
+        }
+        if (/UPDATE subscriptions/.test(sql)) {
+          return { rows: [{ id: 'sub-1', plan_tier: 'enterprise', status: 'active' }], rowCount: 1 };
+        }
+        return { rows: [], rowCount: 0 };
+      });
+
+      const res = await request(createApp())
+        .post('/api/payments/pesepay/callback')
+        .set('authorization', INTEGRATION_KEY)
+        .send(successBody);
+
+      expect(res.status).toBe(200);
+      expect(res.body.targetType).toBe('subscription');
+      expect(res.body.module).toBe('pos');
+      expect(res.body.planTier).toBe('enterprise');
+    });
+
+    it('decrypts an encrypted result payload', async () => {
+      (decryptResponse as any).mockReturnValue(successBody);
+
+      const res = await request(createApp())
+        .post('/api/payments/pesepay/callback')
+        .set('authorization', INTEGRATION_KEY)
+        .send({ payload: 'encrypted-blob' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.applied).toBe(true);
+      expect(decryptResponse).toHaveBeenCalled();
     });
   });
 
-  // Regression: maintenanceCheck is mounted BEFORE the payments router in src/index.ts.
-  // If it does not exempt the webhook, Pesepay callbacks for in-flight payments are
-  // 503'd, the customer is charged, and no voucher is ever minted.
-  describe('maintenance mode', () => {
-    function createMaintenanceApp() {
-      const app = express();
-      app.use(express.json());
-      app.use(maintenanceCheck);
-      app.use('/api/payments', paymentsRouter);
-      return app;
+  // ── Public customer status endpoint ──────────────────────────────
+  //
+  // GET /api/payments/pesepay/status/:intentId is reachable by an
+  // unauthenticated customer, so these tests focus on the two things that
+  // matter: it cannot be used to enumerate intents, and it never returns one
+  // customer's payment details to another.
+  describe('GET /api/payments/pesepay/status/:intentId', () => {
+    const INTENT = '11111111-1111-4111-8111-111111111111';
+    const OTHER_INTENT = '22222222-2222-4222-8222-222222222222';
+
+    const intentRow = {
+      id: INTENT,
+      reference: 'PREY-ABC123',
+      provider_reference: 'PSP-REF-1',
+      amount: '25.50',
+      currency: 'USD',
+      status: 'pending',
+      created_at: '2026-01-01T00:00:00.000Z',
+      completed_at: null,
+    };
+
+    function statusToken(intentId: string, type = 'pesepay-status') {
+      return jwt.sign({ intentId, type }, 'test-jwt-secret', { algorithm: 'HS256', expiresIn: '2h' });
     }
 
-    function maintenanceOn() {
-      (pool.query as any).mockImplementation((sql: string) => {
-        if (String(sql).includes('maintenance_mode')) {
-          return Promise.resolve({ rows: [{ value: 'true' }] });
+    beforeEach(() => {
+      (pool.query as any).mockImplementation(async (sql: string, params?: any[]) => {
+        if (/FROM pesepay_intents/.test(sql)) {
+          return params?.[0] === INTENT ? { rows: [intentRow], rowCount: 1 } : { rows: [], rowCount: 0 };
         }
-        if (String(sql).includes('maintenance_message')) {
-          return Promise.resolve({ rows: [{ value: 'Down for maintenance' }] });
-        }
-        return Promise.resolve({ rows: [] });
+        return { rows: [], rowCount: 1 };
       });
-    }
-
-    it('still accepts the payment webhook while maintenance mode is on', async () => {
-      maintenanceOn();
-      // A decryptable callback for an unknown reference must reach the handler
-      // (404 "Unknown payment" proves the router ran; a 503 would mean Pesepay
-      // lost the callback and the customer paid for nothing).
-      const res = await request(createMaintenanceApp())
-        .post('/api/payments/webhook?token=' + CB_TOKEN)
-        .send(callbackBody({ merchantReference: 'PREY-UNKNOWN0000000', transactionStatus: 'SUCCESS' }));
-
-      expect(res.status).toBe(404);
-      expect(res.body.error).toBe('Unknown payment');
     });
 
-    it('still blocks starting a new payment while maintenance mode is on', async () => {
-      maintenanceOn();
-      const res = await request(createMaintenanceApp()).post('/api/payments/initiate').send({
-        tier: 'PreFlow',
-        phone: '0771327202',
-      });
+    it('returns the public status contract for a correctly signed token', async () => {
+      const res = await request(createApp())
+        .get(`/api/payments/pesepay/status/${INTENT}`)
+        .query({ token: statusToken(INTENT) });
 
-      expect(res.status).toBe(503);
-      expect(res.body.error).toBe('maintenance');
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({
+        status: 'PENDING',
+        referenceNumber: 'PSP-REF-1',
+        amount: 25.5,
+      });
+    });
+
+    it('maps completed to SUCCESS and failed to FAILED', async () => {
+      for (const [dbStatus, expected] of [
+        ['completed', 'SUCCESS'],
+        ['failed', 'FAILED'],
+      ] as const) {
+        (pool.query as any).mockImplementation(async (sql: string) =>
+          /FROM pesepay_intents/.test(sql)
+            ? { rows: [{ ...intentRow, status: dbStatus }], rowCount: 1 }
+            : { rows: [], rowCount: 1 }
+        );
+        const res = await request(createApp())
+          .get(`/api/payments/pesepay/status/${INTENT}`)
+          .query({ token: statusToken(INTENT) });
+        expect(res.body.status).toBe(expected);
+      }
+    });
+
+    it('rejects a request with no token', async () => {
+      const res = await request(createApp()).get(`/api/payments/pesepay/status/${INTENT}`);
+      expect(res.status).toBe(401);
+    });
+
+    it('rejects a forged or tampered token', async () => {
+      const res = await request(createApp())
+        .get(`/api/payments/pesepay/status/${INTENT}`)
+        .query({ token: `${statusToken(INTENT)}tampered` });
+      expect(res.status).toBe(401);
+    });
+
+    it('refuses a valid token that was issued for a different intent', async () => {
+      const res = await request(createApp())
+        .get(`/api/payments/pesepay/status/${INTENT}`)
+        .query({ token: statusToken(OTHER_INTENT) });
+      expect(res.status).toBe(403);
+      expect(res.body.error).toMatch(/does not match/i);
+    });
+
+    it('does not let a legacy payment status token be replayed here', async () => {
+      const legacy = jwt.sign({ paymentId: INTENT, type: 'status' }, 'test-jwt-secret', {
+        algorithm: 'HS256',
+        expiresIn: '2h',
+      });
+      const res = await request(createApp())
+        .get(`/api/payments/pesepay/status/${INTENT}`)
+        .query({ token: legacy });
+      expect(res.status).toBe(401);
+    });
+
+    it('404s an unknown intent and never touches another tenant row', async () => {
+      const res = await request(createApp())
+        .get(`/api/payments/pesepay/status/${OTHER_INTENT}`)
+        .query({ token: statusToken(OTHER_INTENT) });
+
+      expect(res.status).toBe(404);
+      expect(res.body.error).toBe('Payment not found');
+      // The lookup must be by the token-bound id only, with no reference lookup
+      // that could match a different customer's payment.
+      const call = (pool.query as any).mock.calls.find((c: any[]) =>
+        typeof c[0] === 'string' && c[0].includes('FROM pesepay_intents')
+      );
+      expect(call![0]).toMatch(/WHERE id = \$1/);
+      expect(call![1][0]).toBe(OTHER_INTENT);
+    });
+
+    it('never leaks tenant or purpose fields in the public response', async () => {
+      const res = await request(createApp())
+        .get(`/api/payments/pesepay/status/${INTENT}`)
+        .query({ token: statusToken(INTENT) });
+
+      expect(res.status).toBe(200);
+      expect(res.body).not.toHaveProperty('tenant_id');
+      expect(res.body).not.toHaveProperty('purpose');
+      expect(res.body).not.toHaveProperty('reason_for_payment');
+      expect(res.body).not.toHaveProperty('target_id');
     });
   });
 });

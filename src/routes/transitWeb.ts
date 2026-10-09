@@ -639,6 +639,142 @@ transitWebRouter.delete('/staff/:id', requirePermission(PERMISSIONS.COMPANY_ADMI
   }
 });
 
+// ── Transit operations dashboard ────────────────────────────────────
+// Company-scoped aggregates over transit_trips / transit_tickets /
+// transit_devices / transit_staff / transit_shifts only. No WiFi or POS
+// tables are read here (sector isolation).
+transitWebRouter.get('/dashboard', requirePermission(PERMISSIONS.COMPANY_ADMIN, PERMISSIONS.OPERATIONS_MANAGE), async (req: Request, res: Response) => {
+  const u = req.adminUser!;
+
+  const q = (alias: string, sql: string) => {
+    const params: any[] = [];
+    const scope = companyWhere(alias, u, params);
+    return pool.query(sql.replace('{{scope}}', scope), params);
+  };
+
+  try {
+    const [
+      statusRes, todayRes, weekRes, monthRes,
+      vehicleRes, deviceRes, staffRes, shiftRes,
+      routeRes, templateRes, userRes, companyRes, tripRes,
+      historyRes, history7dRes,
+    ] = await Promise.all([
+      q('t', `SELECT status, COUNT(*)::int AS count FROM transit_trips t WHERE {{scope}} GROUP BY status`),
+      q('k', `SELECT COUNT(*)::int AS tickets, COALESCE(SUM(k.total_cents),0)::bigint AS gross,
+                     COALESCE(SUM(k.cash_cents),0)::bigint AS cash
+              FROM transit_tickets k WHERE {{scope}} AND k.status <> 'CANCELLED' AND k.synced_at >= date_trunc('day', NOW())`),
+      q('k', `SELECT COUNT(*)::int AS tickets, COALESCE(SUM(k.total_cents),0)::bigint AS gross
+              FROM transit_tickets k WHERE {{scope}} AND k.status <> 'CANCELLED'
+              AND k.synced_at >= date_trunc('week', NOW())`),
+      q('k', `SELECT COUNT(*)::int AS tickets, COALESCE(SUM(k.total_cents),0)::bigint AS gross
+              FROM transit_tickets k WHERE {{scope}} AND k.status <> 'CANCELLED'
+              AND k.synced_at >= date_trunc('month', NOW())`),
+      q('t', `SELECT t.bus_reg AS registration, COUNT(*)::int AS tripCount
+              FROM transit_trips t WHERE {{scope}} AND t.bus_reg <> '' GROUP BY t.bus_reg ORDER BY t.bus_reg`),
+      q('d', `SELECT d.status, COUNT(*)::int AS total,
+                     COUNT(*) FILTER (WHERE d.last_seen >= NOW() - interval '5 minutes')::int AS online
+              FROM transit_devices d WHERE {{scope}} GROUP BY d.status`),
+      q('s', `SELECT s.role, COUNT(*)::int AS total FROM transit_staff s
+              WHERE {{scope}} AND s.status = 'ACTIVE' AND s.deleted_at IS NULL GROUP BY s.role`),
+      q('sh', `SELECT COUNT(*) FILTER (WHERE sh.status = 'OPEN')::int AS open, COUNT(*)::int AS total
+               FROM transit_shifts sh WHERE {{scope}}`),
+      q('k', `SELECT COALESCE(NULLIF(k.route_name,''), k.route_code) AS route,
+                     COUNT(*)::int AS trips, COALESCE(SUM(k.total_cents),0)::bigint AS gross
+              FROM transit_tickets k WHERE {{scope}} AND k.status <> 'CANCELLED'
+              GROUP BY 1 ORDER BY gross DESC LIMIT 8`),
+      q('rt', `SELECT COUNT(*)::int AS active FROM transit_route_templates rt WHERE {{scope}} AND rt.active = TRUE`),
+      q('tu', `SELECT COUNT(*)::int AS total FROM transit_users tu WHERE {{scope}}`),
+      (() => { const p: any[] = []; const sc = companyWhere('c', u, p, 'id'); return pool.query(
+        `SELECT id, name, slug, currency, default_receipt_prefix
+         FROM transit_companies c WHERE ${sc} AND c.deleted_at IS NULL ORDER BY c.created_at LIMIT 1`, p); })(),
+      (() => { const p: any[] = []; const sc = companyWhere('t', u, p); p.push(8); return pool.query(
+        `SELECT t.id, t.trip_no, t.bus_reg, t.route_code, t.route_name, t.route_from, t.route_to,
+                t.departure_time, t.driver, t.conductor1, t.status, t.opened_at, t.closed_at,
+                u.username AS operator,
+                (SELECT COUNT(*) FROM transit_tickets k WHERE k.trip_id = t.id)::int AS ticket_count,
+                (SELECT COALESCE(SUM(k.total_cents),0) FROM transit_tickets k WHERE k.trip_id = t.id)::bigint AS total_cents
+         FROM transit_trips t LEFT JOIN transit_users u ON u.id = t.user_id AND u.deleted_at IS NULL
+         WHERE ${sc} ORDER BY t.opened_at DESC LIMIT $${p.length}`, p); })(),
+      (() => {
+        const p: any[] = [];
+        const sc = companyWhere('t', u, p);
+        return pool.query(
+          `WITH hours AS (
+             SELECT generate_series(date_trunc('hour', NOW()) - interval '23 hours',
+                                    date_trunc('hour', NOW()), interval '1 hour') AS hour
+           )
+           SELECT to_char(h.hour AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS hour,
+                  COUNT(t.id) FILTER (WHERE ${sc})::int AS trips,
+                  COUNT(t.id) FILTER (WHERE ${sc} AND t.status IN ('COMPLETED','CLOSED'))::int AS completed
+             FROM hours h
+             LEFT JOIN transit_trips t ON t.opened_at >= h.hour AND t.opened_at < h.hour + interval '1 hour'
+            GROUP BY h.hour ORDER BY h.hour`, p);
+      })(),
+      (() => {
+        const p: any[] = [];
+        const sc = companyWhere('t', u, p);
+        return pool.query(
+          `WITH days AS (
+             SELECT generate_series(date_trunc('day', NOW()) - interval '6 days',
+                                    date_trunc('day', NOW()), interval '1 day') AS day
+           )
+           SELECT to_char(d.day AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS day,
+                  COUNT(t.id) FILTER (WHERE ${sc})::int AS trips,
+                  COUNT(t.id) FILTER (WHERE ${sc} AND t.status IN ('COMPLETED','CLOSED'))::int AS completed
+             FROM days d
+             LEFT JOIN transit_trips t ON t.opened_at >= d.day AND t.opened_at < d.day + interval '1 day'
+            GROUP BY d.day ORDER BY d.day`, p);
+      })(),
+    ]);
+
+    const counts: Record<string, number> = {};
+    for (const r of statusRes.rows) counts[r.status] = r.count;
+
+    const deviceOnline = deviceRes.rows.reduce((s: number, r: any) => s + (r.online || 0), 0);
+    const deviceTotal = deviceRes.rows.reduce((s: number, r: any) => s + (r.total || 0), 0);
+    const staff = {
+      drivers: (staffRes.rows.find((r: any) => r.role === 'DRIVER') || { total: 0 }).total as number,
+      conductors: (staffRes.rows.find((r: any) => r.role === 'CONDUCTOR') || { total: 0 }).total as number,
+    };
+
+    res.json({
+      company: companyRes.rows[0] || null,
+      fleet: {
+        vehicles: vehicleRes.rows.length,
+        fleet: vehicleRes.rows,
+        deviceOnline,
+        deviceTotal,
+        openShifts: shiftRes.rows[0]?.open || 0,
+        totalShifts: shiftRes.rows[0]?.total || 0,
+        activeTemplates: templateRes.rows[0]?.active || 0,
+        transitUsers: userRes.rows[0]?.total || 0,
+        drivers: staff.drivers,
+        conductors: staff.conductors,
+      },
+      status: {
+        scheduled: counts['SCHEDULED'] || 0,
+        open: counts['OPEN'] || 0,
+        active: counts['ACTIVE'] || 0,
+        completed: counts['COMPLETED'] || 0,
+        cancelled: counts['CANCELLED'] || 0,
+        closed: counts['CLOSED'] || 0,
+      },
+      today: todayRes.rows[0] || { tickets: 0, gross: 0, cash: 0 },
+      period: {
+        week: weekRes.rows[0] || { tickets: 0, gross: 0 },
+        month: monthRes.rows[0] || { tickets: 0, gross: 0 },
+      },
+      routes: routeRes.rows,
+      recentTrips: tripRes.rows,
+      history24h: historyRes.rows,
+      history7d: history7dRes.rows,
+    });
+  } catch (err: any) {
+    console.error('Transit dashboard error:', err.message, err.query);
+    res.status(500).json({ error: 'Transit dashboard query failed' });
+  }
+});
+
 // ── Trip schedules ──────────────────────────────────────────────────────
 
 transitWebRouter.get('/trips', requirePermission(PERMISSIONS.COMPANY_ADMIN, PERMISSIONS.OPERATIONS_MANAGE), async (req: Request, res: Response) => {

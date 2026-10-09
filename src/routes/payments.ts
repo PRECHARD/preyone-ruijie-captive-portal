@@ -22,6 +22,8 @@ import {
 import type { PesepayCurrency, PesepayRail } from '../services/pesepayService';
 import { RuijieApiError } from '../services/ruijieCloud';
 import { isRuijieCloudConfigured, findRuijieProfile, mintRuijieVoucherForTier } from '../services/ruijieMint';
+import { requireStarlinkAuth } from '../middleware/starlinkAuth';
+import { createStarlinkInvoice, applyStarlinkPayment, getStarlinkKit } from '../db/starlink';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'preyone-jwt-secret-change-in-production';
 let _jwtSecretWarned = false;
@@ -98,7 +100,7 @@ async function getOrCreateUserByPhone(phone: string, fullName?: string): Promise
 
 function uniqueVoucherCode(): string {
   // Base32-ish (no 0,1,O,I) so codes are easy to read out loud
-  const alphabet = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  const alphabet = 'abcdefghjkmnpqrstuvwxyz23456789';
   const bytes = randomBytes(8);
   let code = 'CT-';
   for (const b of bytes) code += alphabet[b % alphabet.length];
@@ -938,7 +940,9 @@ interface PesepayIntentRow {
   amount: number;
   currency: string;
   payment_method: PesepayRail;
-  target_type: PesepayTargetType;
+  /** 'starlink' is written only by /pese/checkout (portal customers); the
+   *  admin-initiated /pesepay/initiate validation list stays unchanged. */
+  target_type: PesepayTargetType | 'starlink';
   target_id: string | null;
   shift_id: string | null;
   subscription_module: string | null;
@@ -1446,7 +1450,9 @@ paymentsRouter.post('/pesepay/callback', async (req: Request, res: Response) => 
       }
 
       const applied =
-        intent.target_type === 'subscription'
+        intent.target_type === 'starlink'
+          ? await applyStarlinkPayment(client, { target_id: intent.target_id, amount: Number(intent.amount), provider_reference: undefined }, reference)
+          : intent.target_type === 'subscription'
           ? await applySubscriptionPayment(client, intent)
           : await applyDocumentPayment(client, intent, reference);
 
@@ -1469,7 +1475,7 @@ paymentsRouter.post('/pesepay/callback', async (req: Request, res: Response) => 
               SET status = CASE WHEN $2 = 'paid' THEN 'success' ELSE status END,
                   updated_at = NOW()
             WHERE intent_id = $1`,
-          [intent.id, String(applied.status ?? '')]
+          [intent.id, String((applied as Record<string, unknown>).status ?? '')]
         );
       }
 
@@ -1494,5 +1500,198 @@ paymentsRouter.post('/pesepay/callback', async (req: Request, res: Response) => 
   } catch (err) {
     console.error('Pesepay callback error:', err);
     res.status(500).json({ error: 'Callback processing failed' });
+  }
+});
+
+// ===========================================================================
+// Starlink portal � Pese checkout (POST /api/payments/pese/checkout)
+//
+// Serves the three portal actions: Wallet Top Up, Data Top Up and Kit
+// Purchase. Authenticated with the starlink-customer JWT (never the admin
+// session), so a subscriber can only ever charge their own account. Each
+// checkout creates a starlink_invoices row (PENDING) plus a pesepay_intents
+// row with target_type = 'starlink'; the existing /pesepay/callback webhook
+// settles it (invoice -> PAID, wallet/kit credited) via applyStarlinkPayment.
+// ===========================================================================
+
+interface StarlinkCheckoutBody {
+  kind: 'wallet_topup' | 'data_topup' | 'kit_purchase';
+  amount: number;
+  paymentMethod?: string;
+  phone?: string;
+  returnUrl?: string;
+  kitId?: string;
+  gb?: number;
+  bundleName?: string;
+  kitNumber?: string;
+  nickname?: string;
+}
+
+const STARLINK_KINDS = ['wallet_topup', 'data_topup', 'kit_purchase'] as const;
+
+/** Return URLs must stay inside the Preyone ecosystem (open-redirect guard). */
+function safeStarlinkReturnUrl(raw: unknown): string | null {
+  if (typeof raw !== 'string' || !raw.trim()) return null;
+  try {
+    const url = new URL(raw.trim());
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;
+    const host = url.hostname.toLowerCase();
+    const allowed =
+      host === 'localhost' ||
+      host === '127.0.0.1' ||
+      host === 'starlink.preyone.com' ||
+      host.endsWith('.preyone.com');
+    return allowed ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+function starlinkDefaultReturnUrl(): string {
+  const base = process.env.STARLINK_BASE_URL || process.env.BASE_URL || 'https://starlink.preyone.com';
+  return `${base.replace(/\/$/, '')}/starlink/portal`;
+}
+
+paymentsRouter.post('/pese/checkout', requireStarlinkAuth, async (req: Request, res: Response) => {
+  const customer = req.starlinkCustomer!;
+  const body = req.body as StarlinkCheckoutBody;
+
+  const kind = body.kind;
+  if (!STARLINK_KINDS.includes(kind)) {
+    res.status(400).json({ error: 'kind must be wallet_topup, data_topup or kit_purchase' });
+    return;
+  }
+
+  const amount = Number(body.amount);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    res.status(400).json({ error: 'Enter a valid amount' });
+    return;
+  }
+  if (amount > 2000) {
+    res.status(400).json({ error: 'Maximum checkout amount is $2,000.00' });
+    return;
+  }
+
+  const paymentMethod: PesepayRail = body.paymentMethod ? (body.paymentMethod.toLowerCase() as PesepayRail) : 'ecocash';
+  if (!isPesepayRail(paymentMethod)) {
+    res.status(400).json({ error: 'Unsupported payment method' });
+    return;
+  }
+
+  // EcoCash / Omari need the payer MSISDN; default to the account's own number.
+  const phone = String(body.phone || customer.phone || '').trim();
+
+  let description = '';
+  let meta: Record<string, unknown> = {};
+
+  if (kind === 'data_topup') {
+    const kitId = String(body.kitId || '');
+    const gb = Number(body.gb);
+    if (!kitId || !Number.isFinite(gb) || gb <= 0) {
+      res.status(400).json({ error: 'Select a kit and a data bundle' });
+      return;
+    }
+    const kit = await getStarlinkKit(kitId, customer.id);
+    if (!kit) { res.status(404).json({ error: 'Kit not found on your account' }); return; }
+    meta = { kit_id: kit.id, kit_number: kit.kit_number, gb, bundle: body.bundleName || `${gb}GB` };
+    description = `Monthly Starlink ${gb}GB Top-Up`;
+  } else if (kind === 'kit_purchase') {
+    const kitNumber = String(body.kitNumber || '').trim();
+    const nickname = String(body.nickname || '').trim();
+    meta = kitNumber ? { kit_number: kitNumber, nickname } : { nickname };
+    description = kitNumber ? `Starlink Kit Purchase - ${kitNumber}` : 'Starlink Kit Purchase';
+  } else {
+    description = 'Starlink Wallet Top-Up';
+  }
+
+  const returnUrl = safeStarlinkReturnUrl(body.returnUrl) || starlinkDefaultReturnUrl();
+
+  // Tenant: the portal company (same singleton rule as /pesepay/initiate) �
+  // never taken from the request body.
+  const { rows: companyRows } = await pool.query('SELECT id FROM companies ORDER BY created_at LIMIT 1');
+  const tenantId = companyRows[0]?.id ?? null;
+  if (!tenantId) {
+    res.status(403).json({ error: 'Online payments are not configured' });
+    return;
+  }
+
+  const reference = `PREYONE-${uuidv4().substring(0, 8).toUpperCase()}-${Date.now()}`;
+  let intentId: string | null = null;
+  let invoiceNumber = '';
+
+  try {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const invoice = await createStarlinkInvoice({
+        customerId: customer.id,
+        amount,
+        description,
+        kind,
+        meta,
+        client,
+      });
+      invoiceNumber = invoice.invoice_number;
+      const { rows } = await client.query(
+        `INSERT INTO pesepay_intents
+           (reference, tenant_id, amount, currency, payment_method, purpose, reason_for_payment,
+            target_type, target_id)
+         VALUES ($1,$2,$3,'USD',$4,$5,$6,'starlink',$7)
+         RETURNING id`,
+        [reference, tenantId, amount, paymentMethod, kind, description, invoice.id]
+      );
+      intentId = rows[0].id;
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+
+    const pesepayResponse = await initiatePesepayPayment({
+      amount,
+      currencyCode: 'USD',
+      paymentMethod,
+      reasonForPayment: `${description} (${invoiceNumber})`,
+      reference,
+      phone,
+      email: customer.email,
+      fullName: customer.full_name,
+      returnUrl,
+    });
+
+    if (!pesepayResponse.success) {
+      await pool.query(`UPDATE pesepay_intents SET status = 'failed' WHERE reference = $1`, [reference]);
+      await pool.query(`UPDATE starlink_invoices SET status = 'FAILED' WHERE invoice_number = $1`, [invoiceNumber]);
+      res.status(400).json({ error: pesepayResponse.error || 'Failed to initiate payment', invoiceNumber });
+      return;
+    }
+
+    await pool.query(
+      `UPDATE pesepay_intents
+          SET provider_reference = $2, redirect_url = $3, poll_url = $4
+        WHERE reference = $1`,
+      [reference, pesepayResponse.referenceNumber || null, pesepayResponse.redirectUrl || null, pesepayResponse.pollUrl || null]
+    );
+
+    res.json({
+      success: true,
+      invoiceNumber,
+      referenceNumber: reference,
+      pesepayReference: pesepayResponse.referenceNumber || reference,
+      intentId,
+      statusToken: intentId ? signPesepayStatusToken(intentId, reference) : null,
+      redirectUrl: pesepayResponse.redirectUrl,
+      pollUrl: pesepayResponse.pollUrl,
+      instructions: pesepayResponse.instructions,
+      amount,
+      currencyCode: 'USD',
+      paymentMethod,
+      kind,
+    });
+  } catch (error) {
+    console.error('Starlink Pese checkout error:', error);
+    res.status(500).json({ error: 'Payment initiation failed' });
   }
 });

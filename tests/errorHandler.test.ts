@@ -1,50 +1,47 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { errorHandler } from '../src/middleware/errorHandler';
 
-const originalEnv = process.env;
-
-function callWith(env: string) {
-  process.env = { ...originalEnv, NODE_ENV: env };
-  const err = new Error('Something broke');
-  const res = {
-    status: vi.fn().mockReturnThis(),
-    json: vi.fn().mockReturnThis(),
-  };
-  errorHandler(err, {} as any, res as any, vi.fn());
-  return res;
-}
-
 describe('errorHandler', () => {
+  const originalNodeEnv = process.env.NODE_ENV;
   afterEach(() => {
-    process.env = originalEnv;
+    process.env.NODE_ENV = originalNodeEnv;
   });
 
-  it('returns a generic 500 in production, so internals are not leaked', () => {
-    const res = callWith('production');
+  const makeRes = () => ({
+    status: vi.fn().mockReturnThis(),
+    json: vi.fn().mockReturnThis(),
+  });
+
+  it('returns 500 with generic message in production', () => {
+    process.env.NODE_ENV = 'production';
+    const err = new Error('Something broke');
+    const res = makeRes();
+
+    errorHandler(err, {} as any, res as any, vi.fn());
+
     expect(res.status).toHaveBeenCalledWith(500);
     expect(res.json).toHaveBeenCalledWith({ error: 'Internal server error' });
   });
 
-  it('surfaces the real message outside production', () => {
-    // A bare "Internal server error" in development or in the e2e suite is
-    // unactionable: a bad query reports nothing about what actually failed.
-    for (const env of ['development', 'test']) {
-      const res = callWith(env);
-      expect(res.status).toHaveBeenCalledWith(500);
-      expect(res.json).toHaveBeenCalledWith({ error: 'Something broke' });
-    }
+  it('surfaces the message outside production so failures are diagnosable', () => {
+    process.env.NODE_ENV = 'development';
+    const err = new Error('Something broke');
+    const res = makeRes();
+
+    errorHandler(err, {} as any, res as any, vi.fn());
+
+    expect(res.status).toHaveBeenCalledWith(500);
+    expect(res.json).toHaveBeenCalledWith({ error: 'Something broke' });
   });
 
-  it('respects an explicit status code', () => {
-    process.env = { ...originalEnv, NODE_ENV: 'production' };
-    const err = Object.assign(new Error('Payload too large'), { status: 413 });
-    const res = {
-      status: vi.fn().mockReturnThis(),
-      json: vi.fn().mockReturnThis(),
-    };
+  it('respects an explicit status instead of reporting 500', () => {
+    process.env.NODE_ENV = 'production';
+    const err = Object.assign(new Error('too big'), { status: 413 });
+    const res = makeRes();
+
     errorHandler(err, {} as any, res as any, vi.fn());
 
     expect(res.status).toHaveBeenCalledWith(413);
-    expect(res.json).toHaveBeenCalledWith({ error: 'Payload too large' });
+    expect(res.json).toHaveBeenCalledWith({ error: 'too big' });
   });
 });

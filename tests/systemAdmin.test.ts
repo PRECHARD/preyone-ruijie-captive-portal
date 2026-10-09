@@ -70,13 +70,16 @@ describe('Level 0 vs Level 1 isolation (/api/v1/admin)', () => {
     expect(res.status).toBe(403);
   });
 
-  it('rejects a Level 1 company admin holding CEO/system.developer reaching level-0 endpoints (403)', async () => {
+  it('allows a company-bound system.developer to reach platform endpoints', async () => {
     mockAuth({ id: 'l1-ceo', role: 'CEO', permissions: ['system.developer', 'company.admin'], companyId: 'comp-1' });
+    mockPoolQuery.mockResolvedValue({ rows: [] });
 
     const res = await request(createApp()).get('/api/v1/admin/companies');
 
-    expect(res.status).toBe(403);
-    expect(mockPoolQuery).not.toHaveBeenCalled();
+    // system.developer is authoritative: the platform owner holds a transit
+    // company binding, so companyId alone must not block level-0 access.
+    expect(res.status).toBe(200);
+    expect(mockPoolQuery).toHaveBeenCalled();
   });
 
   it('allows a Level 0 developer to create a company and seed its SUPER_ADMIN', async () => {

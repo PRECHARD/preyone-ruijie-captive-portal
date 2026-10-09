@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { api } from '../api/client';
+import { api, ruijieApi } from '../api/client';
 import { showToast } from '../utils/toast';
 import Spinner from '../components/Spinner';
 import EmptyState from '../components/EmptyState';
@@ -11,6 +11,72 @@ export default function Reports() {
   const [staffSales, setStaffSales] = useState<any>(null);
   const [pending, setPending] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // ── Ruijie accounting sub-tab ──
+  const [acctStatus, setAcctStatus] = useState<any>(null);
+  const [acctVouchers, setAcctVouchers] = useState<any[]>([]);
+  const [syncing, setSyncing] = useState(false);
+
+  const loadAccounting = useCallback(() => {
+    ruijieApi.get('/status').then(setAcctStatus).catch(() => {});
+    api.get<{ vouchers: any[] }>('/vouchers')
+      .then((d) => setAcctVouchers((d.vouchers || []).filter((v) => v.data_consumed_mb != null)))
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => { if (tab === 'accounting') loadAccounting(); }, [tab, loadAccounting]);
+
+  const runAccountingSync = async () => {
+    setSyncing(true);
+    try {
+      const r = await ruijieApi.post<{
+        skipped?: boolean; reason?: string; onlineUsers?: number;
+        accountingRecords?: number; matchedVouchers?: number; updated?: number; errors?: string[];
+      }>('/accounting/sync');
+      if (r?.skipped) {
+        showToast({ title: 'Sync Skipped', message: r.reason || 'Ruijie Cloud not configured', type: 'warning' });
+      } else if (r?.errors?.length) {
+        showToast({ title: 'Sync Finished With Errors', message: `${r.updated ?? 0} updated · ${r.errors[0]}`, type: 'warning' });
+      } else {
+        showToast({
+          title: 'Accounting Synced',
+          message: `${r.updated ?? 0} voucher(s) updated from ${r.accountingRecords ?? 0} cloud records`,
+          type: 'success',
+        });
+      }
+    } catch (e: any) {
+      showToast({ title: 'Sync Failed', message: e.message || 'Accounting sync failed', type: 'error' });
+    } finally {
+      setSyncing(false);
+      loadAccounting();
+    }
+  };
+
+  // Client-side CSV — no backend round-trip, works while offline.
+  const exportAccountingCsv = () => {
+    if (acctVouchers.length === 0) {
+      showToast({ title: 'Nothing To Export', message: 'No vouchers have usage data yet', type: 'warning' });
+      return;
+    }
+    const esc = (x: any) => `"${String(x ?? '').replace(/"/g, '""')}"`;
+    const header = ['Code', 'Holder', 'Phone', 'Package', 'Price USD', 'Data Used MB', 'Last Sync', 'Sync Status'];
+    const lines = [
+      header.map(esc).join(','),
+      ...acctVouchers.map((v) => [
+        v.code, v.holder_name, v.holder_phone, v.package_tier, v.price_amount,
+        v.data_consumed_mb, v.last_accounting_sync, v.ruijie_sync_status,
+      ].map(esc).join(',')),
+    ];
+    const blob = new Blob([lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Preyone_Accounting_${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
 
   const loadData = useCallback(async () => {
     try { setRevenue(await api.get('/revenue')); } catch { /* ignore */ }
@@ -71,6 +137,7 @@ export default function Reports() {
         <button className={`auth-tab ${tab === 'revenue' ? 'active' : ''}`} onClick={() => setTab('revenue')}>Revenue</button>
         <button className={`auth-tab ${tab === 'sales' ? 'active' : ''}`} onClick={() => setTab('sales')}>Staff Sales</button>
         <button className={`auth-tab ${tab === 'handovers' ? 'active' : ''}`} onClick={() => setTab('handovers')}>Handovers ({pending.length})</button>
+        <button className={`auth-tab ${tab === 'accounting' ? 'active' : ''}`} onClick={() => setTab('accounting')}>Accounting</button>
       </div>
 
       {tab === 'revenue' && revenue && (
@@ -213,6 +280,76 @@ export default function Reports() {
             ))}
           </div>
         )
+      )}
+      {tab === 'accounting' && (
+        <>
+          <div className="stats-grid stats-grid--compact" style={{ marginBottom: 20 }}>
+            <div className="stat-card stat-blue">
+              <span className="stat-label">Vouchers With Usage</span>
+              <span className="stat-number">{acctStatus?.vouchers?.withUsage ?? '—'}</span>
+            </div>
+            <div className="stat-card stat-green">
+              <span className="stat-label">Synced To Cloud</span>
+              <span className="stat-number">{acctStatus?.vouchers?.bySyncStatus?.synced ?? '—'}</span>
+            </div>
+            <div className="stat-card stat-orange">
+              <span className="stat-label">Missing / Pending</span>
+              <span className="stat-number">
+                {acctStatus ? `${acctStatus.vouchers.bySyncStatus.missing} / ${acctStatus.vouchers.bySyncStatus.pending}` : '—'}
+              </span>
+            </div>
+            <div className="stat-card">
+              <span className="stat-label">Last Accounting Sync</span>
+              <span className="stat-number" style={{ fontSize: 15 }}>
+                {acctStatus?.lastAccountingSync ? new Date(acctStatus.lastAccountingSync).toLocaleString() : 'never'}
+              </span>
+            </div>
+          </div>
+
+          <div className="card" style={{ marginBottom: 20 }}>
+            <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', fontWeight: 600, fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ flex: 1 }}>Ruijie Accounting Reconciliation</span>
+              <button className="btn-sm" onClick={exportAccountingCsv} title="Download usage CSV">Export CSV</button>
+              <button
+                className="btn-sm btn-approve"
+                onClick={runAccountingSync}
+                disabled={syncing}
+                title="Pull live usage from Ruijie Cloud into voucher records"
+              >
+                {syncing ? 'Syncing…' : 'Sync Now'}
+              </button>
+            </div>
+            <div style={{ padding: '10px 16px', fontSize: 11.5, color: 'var(--text-dim)' }}>
+              Reconciles cumulative data usage from Ruijie Cloud into local vouchers (never touches expiry, PIN or uses).
+              Auto-sync runs every {acctStatus?.pollingIntervalMin ?? '5'} min when cloud credentials are configured.
+              {!acctStatus?.configured && <strong style={{ color: 'var(--orange)' }}> Cloud is not configured — sync will be skipped.</strong>}
+            </div>
+            {acctVouchers.length === 0 ? (
+              <div className="table-empty"><p>No vouchers have usage data yet.</p></div>
+            ) : (
+              <div className="card-table">
+                <table className="data-table">
+                  <thead><tr><th>Voucher</th><th>Holder</th><th>Data Used</th><th>Last Sync</th><th>Status</th></tr></thead>
+                  <tbody>
+                    {acctVouchers.map((v: any) => (
+                      <tr key={v.id}>
+                        <td><span className="code-cell">{v.code}</span></td>
+                        <td>{v.holder_name || '—'}{v.holder_phone && <span className="muted" style={{ display: 'block', fontSize: 11 }}>{v.holder_phone}</span>}</td>
+                        <td><span className="money money--sm">{v.data_consumed_mb >= 1024 ? (v.data_consumed_mb / 1024).toFixed(1) + ' GB' : Number(v.data_consumed_mb).toFixed(1) + ' MB'}</span></td>
+                        <td className="muted" style={{ fontSize: 12 }}>{v.last_accounting_sync ? new Date(v.last_accounting_sync).toLocaleString() : '—'}</td>
+                        <td>
+                          <Badge variant={v.ruijie_sync_status === 'synced' ? 'approved' : v.ruijie_sync_status === 'missing' ? 'rejected' : 'pending'}>
+                            {v.ruijie_sync_status || 'never'}
+                          </Badge>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </>
       )}
     </div>
   );

@@ -20,6 +20,8 @@ export const posApi = {
   post: <T = any>(path: string, body?: any) => request<T>(path, { method: 'POST', body: body ? JSON.stringify(body) : undefined }),
   put: <T = any>(path: string, body?: any) => request<T>(path, { method: 'PUT', body: body ? JSON.stringify(body) : undefined }),
   del: <T = any>(path: string) => request<T>(path, { method: 'DELETE' }),
+  /** Turn an owned quotation into a fresh invoice (new INV- number). */
+  convertToInvoice: <T = any>(id: string) => request<T>(`/documents/${id}/convert-to-invoice`, { method: 'POST' }),
 };
 
 export const money = (n: any): string =>

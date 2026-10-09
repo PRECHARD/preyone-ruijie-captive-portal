@@ -2,11 +2,10 @@ import { useState, useEffect, useCallback, useRef, Fragment } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../api/client';
 import { showToast } from '../utils/toast';
-import { fmtUsage, formatMac, formatSpeed, fmtDurationMin, fmtDateTime } from '../utils/format';
-import Badge from '../components/Badge';
 import jsPDF from 'jspdf';
 import { playVoucherSound, playAlertSound } from '../utils/sound';
 import EmptyState from '../components/EmptyState';
+import Modal from '../components/Modal';
 import './Vouchers.css';
 
 interface Package {
@@ -21,55 +20,59 @@ interface Package {
   is_uncapped: boolean;
 }
 
-type VoucherStatus = 'Unused' | 'Active' | 'Expired' | 'Disabled';
-
-interface Voucher {
-  id: string;
-  code: string;
-  price_amount: string;
-  duration_min: number;
-  bandwidth_mbps_up: number;
-  bandwidth_mbps_down: number;
-  data_limit_gb: number | null;
-  is_uncapped: boolean;
-  max_uses: number;
-  used_count: number;
-  created_at: string;
-  package_tier: string | null;
-  sold_by: string | null;
-  max_devices: number | null;
-  // Derived server-side from used_count / expires_at / is_disabled. Never stored
-  // on the row, so it cannot drift from what RADIUS actually enforces.
-  status: VoucherStatus;
-  is_disabled: boolean;
-  expires_at: string | null;
-  // Stored activated_at when set, otherwise derived from the first redemption.
-  first_redeemed_at: string | null;
-  // Subscriber, joined from the most recent users row for this code.
-  first_name: string | null;
-  last_name: string | null;
-  alias: string | null;
-  phone: string | null;
-  mac_address: string | null;
-  device_count: number;
-  bound_macs: string[] | null;
-  traffic_used_bytes: string;
-  traffic_total_bytes: string | null;
-}
-
-interface VoucherListResponse {
-  vouchers: Voucher[];
-  total: number;
-  page: number;
-  pageSize: number;
-}
-
-const STATUS_BADGE: Record<VoucherStatus, string> = {
-  Active: 'active',
-  Unused: 'default',
-  Expired: 'inactive',
-  Disabled: 'inactive',
-};
+  interface Voucher {
+    id: string;
+    code: string;
+    price_amount: string;
+    duration_min: number;
+    bandwidth_mbps_up: number;
+    bandwidth_mbps_down: number;
+    data_limit_gb: number | null;
+    is_uncapped: boolean;
+    max_uses: number;
+    used_count: number;
+    expires_at: string;
+    created_at: string;
+    package_tier: string | null;
+    // Returned by GET /admin/vouchers (admin.ts, the LATERAL joins) but not part
+    // of the core row. Optional so the create/bulk flows, which build partial
+    // voucher objects, stay type-compatible.
+    status?: string | null;
+    first_redeemed_at?: string | null;
+    activated_at?: string | null;
+    max_devices?: number | null;
+    device_count?: number;
+    bound_macs?: string[] | null;
+    devices?: Array<{
+      mac_address: string;
+      label: string | null;
+      is_active: boolean;
+      bound_at: string | null;
+      last_seen_at: string | null;
+      unbound_at: string | null;
+    }> | null;
+    phone?: string | null;
+    mac_address?: string | null;
+    first_name?: string | null;
+    last_name?: string | null;
+    alias?: string | null;
+    redemption_name?: string | null;
+    redemption_mac?: string | null;
+    redemption_ip?: string | null;
+    redemption_at?: string | null;
+    redemptions?: Array<{
+      full_name: string | null;
+      mac_address: string | null;
+      ip_address: string | null;
+      redeemed_at: string;
+    }> | null;
+    traffic_used_bytes?: number;
+    traffic_total_bytes?: number | null;
+    // Captured by the >=$4.99 holder modal (POST /vouchers) and editable via
+    // PATCH /vouchers/:id. Rendered on the voucher canvas when present.
+    holder_name?: string | null;
+    holder_phone?: string | null;
+  }
 
 interface ApprovalRequest {
   id: string;
@@ -109,6 +112,7 @@ function fmtDate(d: string): string {
 
 const PAYMENT_METHODS = ['Cash', 'EcoCash', 'OneMoney', 'Omari', 'InnBucks'];
 const IS_MOBILE_MONEY = (m: string) => m !== 'Cash';
+const lc = (s?: string) => (s || '').toLowerCase();
 
 export default function Vouchers() {
   const { user } = useAuth();
@@ -125,16 +129,6 @@ export default function Vouchers() {
   const [vPayMethod, setVPayMethod] = useState('Cash');
   const [vPayRef, setVPayRef] = useState('');
   const [vouchers, setVouchers] = useState<Voucher[]>([]);
-  const [vTotal, setVTotal] = useState(0);
-  const [vPage, setVPage] = useState(1);
-  const [vSearch, setVSearch] = useState('');
-  const [vStatusFilter, setVStatusFilter] = useState<'' | VoucherStatus>('');
-  const [vTierFilter, setVTierFilter] = useState('');
-  const [vSort, setVSort] = useState('created_at');
-  const [vSortDir, setVSortDir] = useState<'asc' | 'desc'>('desc');
-  const [vLoading, setVLoading] = useState(false);
-  const [busyVoucherId, setBusyVoucherId] = useState<string | null>(null);
-  const PAGE_SIZE = 25;
   const [vStatus, setVStatus] = useState<{ type: string; msg: string } | null>(null);
   const [creating, setCreating] = useState(false);
 
@@ -154,6 +148,24 @@ export default function Vouchers() {
 
   const [voucherCardData, setVoucherCardData] = useState<any>(null);
   const [expandedApproval, setExpandedApproval] = useState<string | null>(null);
+  const [detailVoucher, setDetailVoucher] = useState<Voucher | null>(null);
+  const [releasingMac, setReleasingMac] = useState(false);
+
+  // ── High-stakes (>= $4.99) customer capture + inline holder editing ──
+  // The modal intercepts generation so no >=$4.99 voucher can be created
+  // without a customer name; Edit Holder patches holder_name/holder_phone via
+  // PATCH /vouchers/:id (backend allowlists those two fields only).
+  const HOLDER_THRESHOLD = 4.99;
+  const [holderModal, setHolderModal] = useState<'single' | 'bulk' | null>(null);
+  const [holderName, setHolderName] = useState('');
+  const [holderPhone, setHolderPhone] = useState('');
+  const [holderSaving, setHolderSaving] = useState(false);
+  const [holderError, setHolderError] = useState('');
+  const [editHolderVoucher, setEditHolderVoucher] = useState<Voucher | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editPhone, setEditPhone] = useState('');
+  const [editSaving, setEditSaving] = useState(false);
+  const [editError, setEditError] = useState('');
 
   const loadClockStatus = useCallback(() => {
     if (needsClockIn) {
@@ -167,47 +179,9 @@ export default function Vouchers() {
     return () => clearInterval(interval);
   }, [loadClockStatus]);
 
-  const [searchInput, setSearchInput] = useState('');
-
-  // Debounce the search box so typing does not fire a request per keystroke.
-  useEffect(() => {
-    const t = setTimeout(() => {
-      setVSearch(searchInput);
-      setVPage(1);
-    }, 300);
-    return () => clearTimeout(t);
-  }, [searchInput]);
-
-  const loadVouchers = useCallback(() => {
-    setVLoading(true);
-    const q = new URLSearchParams();
-    q.set('page', String(vPage));
-    q.set('pageSize', String(PAGE_SIZE));
-    q.set('sort', vSort);
-    q.set('dir', vSortDir);
-    if (vSearch) q.set('search', vSearch);
-    if (vStatusFilter) q.set('status', vStatusFilter);
-    if (vTierFilter) q.set('tier', vTierFilter);
-    return api
-      .get<VoucherListResponse>(`/vouchers?${q.toString()}`)
-      .then(res => {
-        setVouchers(res.vouchers);
-        setVTotal(res.total);
-        // A narrowing filter can leave us past the last page; step back rather
-        // than rendering an empty table.
-        const last = Math.max(1, Math.ceil(res.total / (res.pageSize || PAGE_SIZE)));
-        if (vPage > last) setVPage(last);
-      })
-      .catch(() => {})
-      .finally(() => setVLoading(false));
-  }, [vPage, vSearch, vStatusFilter, vTierFilter, vSort, vSortDir]);
-
-  useEffect(() => {
-    loadVouchers();
-  }, [loadVouchers]);
-
   useEffect(() => {
     api.get<Package[]>('/packages').then(setPackages).catch(() => {});
+    api.get<{ vouchers: Voucher[] }>('/vouchers').then(data => setVouchers(data.vouchers)).catch(() => {});
     if (isMgmt) {
       api.get<ApprovalRequest[]>('/vouchers/pending-approvals').then(setPendingApprovals).catch(() => {});
     }
@@ -229,12 +203,12 @@ export default function Vouchers() {
         for (const a of approvals) {
           if (a.status === 'approved' && !processedApprovalIds.current.has(a.id)) {
             processedApprovalIds.current.add(a.id);
-            const codes = a.voucher_data?.codes;
-            const code = a.voucher_data?.code;
-            if (a.request_type === 'single' && (code || codes?.[0])) {
-              const pkg = packages.find(p => p.tier_name === a.package_tier);
-              setVoucherCardData({
-                code: code || codes?.[0],
+const codes = a.voucher_data?.codes;
+              const code = a.voucher_data?.code;
+              if (a.request_type === 'single' && (code || codes?.[0])) {
+                const pkg = packages.find(p => p.tier_name === a.package_tier);
+                setVoucherCardData({
+                  code: lc(code || codes?.[0]),
                 package_tier: a.package_tier,
                 price_amount: a.price_amount?.toString() || '',
                 max_uses: a.max_uses,
@@ -244,7 +218,7 @@ export default function Vouchers() {
                 data_limit_gb: pkg?.data_limit_gb ?? null,
                 is_uncapped: pkg?.is_uncapped ?? false,
               });
-              showToast({ title: 'Voucher Approved', message: `"${code || codes?.[0]}" is ready to share`, type: 'success' });
+              showToast({ title: 'Voucher Approved', message: `"${lc(code || codes?.[0])}" is ready to share`, type: 'success' });
               playVoucherSound();
             } else if (a.request_type === 'bulk' && codes?.length) {
               const pkg = packages.find(p => p.tier_name === a.package_tier);
@@ -270,9 +244,9 @@ export default function Vouchers() {
   }, [packages]);
 
   const generateCode = useCallback((tier: string) => {
-    const prefix = tier.slice(0, 4).toUpperCase();
-    const rand = Math.random().toString(36).substring(2, 8).toUpperCase();
-    return prefix + '-' + rand;
+    const prefix = tier.slice(0, 4);
+    const rand = Math.random().toString(36).substring(2, 8);
+    return (prefix + '-' + rand).toLowerCase();
   }, []);
 
   const selectPackage = useCallback((tier: string) => {
@@ -315,6 +289,20 @@ export default function Vouchers() {
     if (vUses < 1) { setVStatus({ type: 'error', msg: 'Max uses must be at least 1' }); return; }
     if (needsClockIn && !isClockedIn) { setVStatus({ type: 'error', msg: 'You must clock in before selling vouchers.' }); return; }
 
+    // High-stakes gate: >= $4.99 intercepts and demands customer details
+    // BEFORE the voucher is generated.
+    if (parseFloat(vPrice) >= HOLDER_THRESHOLD) {
+      setHolderError('');
+      setHolderModal('single');
+      return;
+    }
+    await submitCreate('', '');
+  };
+
+  // Generation half of handleCreate — runs only after the holder gate (or for
+  // sub-threshold sales, which skip the modal entirely).
+  const submitCreate = async (hName: string, hPhone: string): Promise<boolean> => {
+    if (!selectedPkg) return false;
     setCreating(true);
     setVStatus(null);
     try {
@@ -325,8 +313,10 @@ export default function Vouchers() {
         priceAmount: parseFloat(vPrice),
         paymentMethod: vPayMethod,
         paymentReference: IS_MOBILE_MONEY(vPayMethod) ? vPayRef.trim() : undefined,
+        holderName: hName.trim() || undefined,
+        holderPhone: hPhone.trim() || undefined,
       });
-      setVStatus({ type: 'success', msg: `Voucher "${data.code}" created successfully.` });
+      setVStatus({ type: 'success', msg: `Voucher "${lc(data.code)}" created successfully.` });
       setVoucherCardData(data);
       setSelectedPkg(null);
       setVCode('');
@@ -334,17 +324,61 @@ export default function Vouchers() {
       setVUses(1);
       setVPayMethod('Cash');
       setVPayRef('');
-      loadVouchers();
-      showToast({ title: 'Voucher Created', message: `"${data.code}" created successfully`, type: 'success' });
+      api.get<{ vouchers: Voucher[] }>('/vouchers').then(data => setVouchers(data.vouchers)).catch(() => {});
+      showToast({ title: 'Voucher Created', message: `"${lc(data.code)}" created successfully`, type: 'success' });
       playVoucherSound();
+      return true;
     } catch (err: any) {
       if (err.requiresApproval) {
         setVStatus({ type: 'approval', msg: err.message || 'Approval required' });
       } else {
         setVStatus({ type: 'error', msg: err.message || 'Failed to create voucher' });
       }
+      return false;
     } finally {
       setCreating(false);
+    }
+  };
+
+  // Modal confirm: validates, then generates with the captured customer.
+  const submitHolderModal = async () => {
+    if (!holderName.trim()) { setHolderError('Customer full name is required for this sale.'); return; }
+    if (holderPhone.trim() && !/^\+?[0-9\s-]{7,20}$/.test(holderPhone.trim())) {
+      setHolderError('Enter a valid phone number, e.g. +263771234567.');
+      return;
+    }
+    setHolderSaving(true);
+    setHolderError('');
+    const ok = holderModal === 'single'
+      ? await submitCreate(holderName, holderPhone)
+      : await submitBulk(holderName, holderPhone);
+    setHolderSaving(false);
+    if (ok) {
+      setHolderModal(null);
+      setHolderName('');
+      setHolderPhone('');
+    }
+  };
+
+  // Inline holder edit — PATCH allowlists holderName/holderPhone server-side,
+  // so PIN, price and expiry can never be touched from here.
+  const saveEditHolder = async () => {
+    if (!editHolderVoucher) return;
+    setEditSaving(true);
+    setEditError('');
+    try {
+      const id = editHolderVoucher.id;
+      const name = editName.trim();
+      const phone = editPhone.trim();
+      await api.patch(`/vouchers/${id}`, { holderName: name, holderPhone: phone });
+      setEditHolderVoucher(null);
+      setVouchers(prev => prev.map(x => (x.id === id ? { ...x, holder_name: name || null, holder_phone: phone || null } : x)));
+      setDetailVoucher(prev => (prev && prev.id === id ? { ...prev, holder_name: name || null, holder_phone: phone || null } : prev));
+      showToast({ title: 'Holder Updated', message: `"${lc(editHolderVoucher.code)}" holder details saved`, type: 'success' });
+    } catch (err: any) {
+      setEditError(err.message || 'Failed to update holder');
+    } finally {
+      setEditSaving(false);
     }
   };
 
@@ -373,6 +407,18 @@ export default function Vouchers() {
     if (bulkCount < 1 || bulkCount > 100) { setBulkStatus({ type: 'error', msg: 'Count must be 1-100' }); return; }
     if (needsClockIn && !isClockedIn) { setBulkStatus({ type: 'error', msg: 'You must clock in before selling vouchers.' }); return; }
 
+    // High-stakes gate (unit price: custom price, else package price)
+    const bulkPkg = packages.find(p => p.tier_name === bulkTier);
+    const unitPrice = bulkPrice ? parseFloat(bulkPrice) : parseFloat(bulkPkg?.price_amount || '0');
+    if (unitPrice >= HOLDER_THRESHOLD) {
+      setHolderError('');
+      setHolderModal('bulk');
+      return;
+    }
+    await submitBulk('', '');
+  };
+
+  const submitBulk = async (hName: string, hPhone: string): Promise<boolean> => {
     setBulkCreating(true);
     setBulkStatus(null);
     try {
@@ -382,18 +428,22 @@ export default function Vouchers() {
         priceAmount: bulkPrice ? parseFloat(bulkPrice) : undefined,
         paymentMethod: bulkPayMethod,
         paymentReference: IS_MOBILE_MONEY(bulkPayMethod) ? bulkPayRef.trim() : undefined,
+        holderName: hName.trim() || undefined,
+        holderPhone: hPhone.trim() || undefined,
       });
       setBulkStatus({ type: 'success', msg: data.message });
       setBulkResults(data.vouchers);
-      loadVouchers();
+      api.get<{ vouchers: Voucher[] }>('/vouchers').then(data => setVouchers(data.vouchers)).catch(() => {});
       showToast({ title: 'Bulk Vouchers', message: data.message, type: 'success' });
       playVoucherSound();
+      return true;
     } catch (err: any) {
       if (err.requiresApproval) {
         setBulkStatus({ type: 'approval', msg: err.message || 'Approval required' });
       } else {
         setBulkStatus({ type: 'error', msg: err.message || 'Failed to generate bulk' });
       }
+      return false;
     } finally {
       setBulkCreating(false);
     }
@@ -421,7 +471,7 @@ export default function Vouchers() {
       const data = await api.post<any>(`/vouchers/approvals/${id}/approve`);
       setPendingApprovals(prev => prev.filter(a => a.id !== id));
       setVStatus({ type: 'success', msg: data.message || 'Approved' });
-      loadVouchers();
+      api.get<{ vouchers: Voucher[] }>('/vouchers').then(data => setVouchers(data.vouchers)).catch(() => {});
       showToast({ title: 'Approved', message: data.message || 'Voucher request approved', type: 'success' });
       playAlertSound();
     } catch (err: any) {
@@ -441,18 +491,42 @@ export default function Vouchers() {
     }
   };
 
+  // Releases every active device binding. The endpoint deactivates rather than
+  // deletes, so the redemption history survives and re-binding the same MAC later
+  // stays idempotent. It is gated on COMPANY_ADMIN server-side -- a 403 lands in
+  // the catch below rather than failing silently.
+  const handleReleaseMac = async (voucher: Voucher) => {
+    if (releasingMac) return;
+    setReleasingMac(true);
+    try {
+      const data = await api.post<any>(`/vouchers/${voucher.id}/reset-mac`);
+      const released = Number(data?.released ?? 0);
+      showToast({
+        title: 'MAC bindings released',
+        message: data?.message || `Released ${released} device slot(s) on ${lc(voucher.code)}`,
+        type: 'success',
+      });
+      setDetailVoucher(prev => (prev ? { ...prev, bound_macs: [], device_count: 0, devices: [] } : prev));
+      api.get<{ vouchers: Voucher[] }>('/vouchers').then(data => setVouchers(data.vouchers)).catch(() => {});
+    } catch (err: any) {
+      showToast({ title: 'Could not release bindings', message: err.message || 'Please try again.', type: 'error' });
+    } finally {
+      setReleasingMac(false);
+    }
+  };
+
   function voucherSerial(code: string) {
     var d = new Date();
     return (code || 'PREYONE').slice(0, 3).toUpperCase() + d.getFullYear() + ('0' + (d.getMonth() + 1)).slice(-2) + ('0' + d.getDate()).slice(-2) + '-' + String(Math.floor(Math.random() * 9000) + 1000);
   }
 
-  const downloadVoucherPNG = () => {
+  const downloadVoucherJPEG = () => {
     if (!voucherCardData) return;
-    renderVoucherPNG(voucherCardData, user?.fullName || 'Preyone UltraNet');
+    renderVoucherJPEG(voucherCardData, user?.fullName || 'Preyone UltraNet');
   };
 
   const drawVoucherCanvas = async (c: HTMLCanvasElement, data: any, issuedByName: string) => {
-    const code = data.code || 'PREYONE-XXXX';
+    const code = (data.code || 'PREYONE-XXXX').toLowerCase();
     const tierText = data.package_tier || 'Custom';
     const priceText = data.price_amount ? '$' + parseFloat(data.price_amount).toFixed(2) : '';
     const durShort = fmtDurShort(data.duration_min);
@@ -506,6 +580,20 @@ export default function Vouchers() {
     nGrad.addColorStop(0, '#71ff2f'); nGrad.addColorStop(0.5, '#13d8ff'); nGrad.addColorStop(1, '#8b4dff');
     ctx.fillStyle = nGrad; ctx.beginPath(); ctx.roundRect(115, 132, 200, 3, 2); ctx.fill();
 
+    // ── Holder (customer) name — printed between the header rule and the
+    // spec columns when the sale captured one. Auto-skips otherwise, so
+    // legacy vouchers render byte-identical to before.
+    var holderName = String(data.holder_name || '').trim();
+    if (holderName) {
+      ctx.fillStyle = 'rgba(255,255,255,0.45)'; ctx.font = '600 8px Montserrat, sans-serif'; ctx.textAlign = 'left';
+      ctx.fillText('ISSUED FOR', 115, 152);
+      ctx.fillStyle = '#ffffff'; ctx.font = '700 14px Montserrat, sans-serif';
+      var hn = holderName;
+      while (ctx.measureText(hn).width > 232 && hn.length > 2) { hn = hn.slice(0, -1); }
+      if (hn !== holderName) hn += '..';
+      ctx.fillText(hn, 115, 170);
+    }
+
     // ── RIGHT: Voucher Code Box ──
     var cpX = 370, cpY = 28, cpW = 400, codeBoxH = 84;
     var codeBoxY = cpY + 24;
@@ -522,10 +610,10 @@ export default function Vouchers() {
     ctx.fillStyle = '#0f172a'; ctx.font = '600 10px Montserrat, sans-serif'; ctx.textAlign = 'center';
     ctx.fillText('ACCESS VOUCHER PIN', cpX + cpW / 2, codeBoxY + 14);
     ctx.fillStyle = '#0f172a';
-    ctx.font = '42px "Bebas Neue", sans-serif';
+    ctx.font = '800 42px Montserrat, sans-serif';
     ctx.textAlign = 'center';
     var cfSize = 42;
-    while (ctx.measureText(code).width > cpW - 24 && cfSize > 22) { cfSize -= 2; ctx.font = cfSize + 'px "Bebas Neue", sans-serif'; }
+    while (ctx.measureText(code).width > cpW - 24 && cfSize > 22) { cfSize -= 2; ctx.font = cfSize + 'px Montserrat, sans-serif'; }
     ctx.shadowColor = 'rgba(15,23,42,0.1)'; ctx.shadowBlur = 3;
     ctx.fillText(code, cpX + cpW / 2, codeBoxY + codeBoxH / 2 + cfSize / 3 + 2);
     ctx.shadowBlur = 0;
@@ -648,13 +736,75 @@ export default function Vouchers() {
     ctx.fillText('SN: ' + serial, W - 14, H - 10);
   };
 
-  const renderVoucherPNG = async (data: any, issuedByName: string) => {
+  const renderVoucherJPEG = async (data: any, issuedByName: string) => {
     const c = document.createElement('canvas');
+    c.width = 800; c.height = 450;
     await drawVoucherCanvas(c, data, issuedByName);
-    var link = document.createElement('a');
-    link.download = 'preyone-voucher-' + data.code + '.png';
-    link.href = c.toDataURL('image/png');
+    const blob = await new Promise<Blob | null>(resolve => c.toBlob(resolve, 'image/jpeg', 0.95));
+    if (!blob) return;
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.download = 'voucher-' + lc(data.code) + '.jpeg';
+    link.href = url;
+    document.body.appendChild(link);
     link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 3000);
+    setVStatus({ type: 'success', msg: `Downloaded ${lc(data.code) || 'voucher'}.jpeg` });
+    setTimeout(() => setVStatus(null), 2000);
+  };
+
+  // High-quality JPEG export of a single voucher's canvas card. The PIN is
+  // lowercased inside drawVoucherCanvas, so the filename uses the lowercased
+  // code to keep them strict and consistent.
+  const generateVoucherJpegBlob = async (voucher: Voucher): Promise<{ url: string; blob: Blob; fileName: string }> => {
+    const c = document.createElement('canvas');
+    c.width = 800; c.height = 450;
+    await drawVoucherCanvas(c, voucher, user?.fullName || 'Preyone UltraNet');
+    const blob = await new Promise<Blob | null>(resolve => c.toBlob(resolve, 'image/jpeg', 0.95));
+    if (!blob) throw new Error('Could not render voucher image');
+    return { url: URL.createObjectURL(blob), blob, fileName: 'voucher-' + (voucher.code || 'PREYONE-XXXX').toLowerCase() + '.jpeg' };
+  };
+
+  const handleDownloadJpeg = async (voucher: Voucher) => {
+    try {
+      const { url, fileName } = await generateVoucherJpegBlob(voucher);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 3000);
+    } catch (err: any) {
+      showToast({ title: 'Download failed', message: err?.message || 'Could not create the voucher JPEG.', type: 'error' });
+    }
+  };
+
+  const printVoucherPdf = async (voucher: Voucher) => {
+    const c = document.createElement('canvas');
+    c.width = 800; c.height = 450;
+    await drawVoucherCanvas(c, voucher, user?.fullName || 'Preyone UltraNet');
+    const doc = new jsPDF('portrait', 'mm', 'a4');
+    const imgData = c.toDataURL('image/jpeg', 0.95);
+    const pw = 210, ph = 297, m = 10;
+    const iw = pw - m * 2, ih = iw * 450 / 800;
+    doc.addImage(imgData, 'JPEG', (pw - iw) / 2, (ph - ih) / 2, iw, ih);
+    const url = URL.createObjectURL(doc.output('blob'));
+    const w = window.open('', '_blank', 'width=900,height=600');
+    if (!w) {
+      URL.revokeObjectURL(url);
+      showToast({ title: 'Pop-up blocked', message: 'Allow pop-ups, then try printing again.', type: 'error' });
+      return;
+    }
+    w.document.write(
+      '<!doctype html><html><head><title>Preyone Voucher</title>' +
+      '<style>html,body{margin:0;padding:0;height:100%;}embed{display:block;width:100%;height:100%;border:0;}</style>' +
+      '</head><body><embed src="' + url + '" type="application/pdf" />' +
+      '<script>window.addEventListener("load",function(){setTimeout(function(){window.focus();window.print();},500);});</scr' + 'ipt>' +
+      '</body></html>'
+    );
+    w.document.close();
   };
 
   const printVoucherPDF = async () => {
@@ -663,11 +813,11 @@ export default function Vouchers() {
     c.width = 800; c.height = 450;
     await drawVoucherCanvas(c, voucherCardData, user?.fullName || 'Preyone UltraNet');
     const doc = new jsPDF('portrait', 'mm', 'a4');
-    const imgData = c.toDataURL('image/png');
+    const imgData = c.toDataURL('image/jpeg', 0.95);
     const pw = 210, ph = 297, m = 10;
     const iw = pw - m * 2, ih = iw * 450 / 800;
-    doc.addImage(imgData, 'PNG', (pw - iw) / 2, (ph - ih) / 2, iw, ih);
-    doc.save('preyone-voucher-' + voucherCardData.code + '.pdf');
+    doc.addImage(imgData, 'JPEG', (pw - iw) / 2, (ph - ih) / 2, iw, ih);
+    doc.save('preyone-voucher-' + (voucherCardData.code || '').toLowerCase() + '.pdf');
   };
 
   const printBulkPDFs = async () => {
@@ -680,7 +830,7 @@ export default function Vouchers() {
       const c = document.createElement('canvas');
       c.width = 800; c.height = 450;
       await drawVoucherCanvas(c, bulkResults[i], user?.fullName || 'Preyone UltraNet');
-      const imgData = c.toDataURL('image/png');
+      const imgData = c.toDataURL('image/jpeg', 0.95);
       const col = i % cols, row = Math.floor(i / cols) % rows;
       const pad = 3;
       let iw = cw - pad * 2, ih = iw * 450 / 800;
@@ -690,7 +840,7 @@ export default function Vouchers() {
       doc.setDrawColor(210, 210, 210);
       doc.setLineWidth(0.2);
       doc.rect(m + col * cw + 1, m + row * ch + 1, cw - 2, ch - 2, 'S');
-      doc.addImage(imgData, 'PNG', x, y, iw, ih);
+      doc.addImage(imgData, 'JPEG', x, y, iw, ih);
     }
     doc.save('preyone-bulk-vouchers.pdf');
   };
@@ -701,107 +851,15 @@ export default function Vouchers() {
     setTimeout(() => setVStatus(null), 2000);
   };
 
-  // Lifecycle actions. Each guards on busyVoucherId so a slow request cannot be
-  // double-fired, and refreshes through loadVouchers so the derived status badge
-  // reflects the change without a manual reload.
-  const runVoucherAction = async (
-    id: string,
-    fn: () => Promise<any>,
-    successMsg: (res: any) => string
-  ) => {
-    setBusyVoucherId(id);
-    try {
-      const res = await fn();
-      showToast({ title: 'Done', message: successMsg(res), type: 'success' });
-      await loadVouchers();
-    } catch (err: any) {
-      showToast({
-        title: 'Action failed',
-        message: err?.message || 'The voucher could not be updated.',
-        type: 'error',
-      });
-    } finally {
-      setBusyVoucherId(null);
-    }
-  };
-
-  const toggleDisable = (v: Voucher) =>
-    runVoucherAction(
-      v.id,
-      () => api.post(`/vouchers/${v.id}/disable`, { disabled: !v.is_disabled }),
-      () => `Voucher ${v.code} ${v.is_disabled ? 'enabled' : 'disabled'}`
-    );
-
-  const resetMacBinding = (v: Voucher) => {
-    if (!window.confirm(
-      `Release all ${v.device_count} device slot(s) bound to ${v.code}?\n\n` +
-      'Currently connected devices will be able to sign in again, and the slots ' +
-      'become free for other devices.'
-    )) return;
-    runVoucherAction(
-      v.id,
-      () => api.post(`/vouchers/${v.id}/reset-mac`),
-      (res) => res?.message || `Device bindings cleared for ${v.code}`
-    );
-  };
-
-  const extendExpiry = (v: Voucher) => {
-    const raw = window.prompt(
-      `Extend voucher ${v.code} by how many minutes?\n\n` +
-      'This moves the code\'s own expiry. Live subscriber sessions are NOT touched ' +
-      'unless you confirm below.',
-      '1440'
-    );
-    if (raw === null) return;
-    const minutes = parseInt(raw, 10);
-    if (!Number.isFinite(minutes) || minutes <= 0) {
-      showToast({ title: 'Invalid', message: 'Enter a positive number of minutes.', type: 'warning' });
-      return;
-    }
-    const extendSessions = window.confirm(
-      minutes >= 60
-        ? `Also push ${v.used_count} live subscriber session(s) out by the same amount?`
-        : 'Also push live subscriber sessions out by the same amount?'
-    );
-    runVoucherAction(
-      v.id,
-      () => api.post(`/vouchers/${v.id}/extend`, { minutes, extendSessions }),
-      () => `Voucher ${v.code} extended by ${minutes} minutes`
-    );
-  };
-
-  const deleteVoucher = (v: Voucher) => {
-    if (!window.confirm(
-      `Delete voucher ${v.code}?\n\n` +
-      'The code stops working immediately. Redemption history is kept for audit, ' +
-      'so this can be reversed by re-enabling it in the database.'
-    )) return;
-    runVoucherAction(
-      v.id,
-      () => api.del(`/vouchers/${v.id}`),
-      (res) => res?.message || `Voucher ${v.code} deleted`
-    );
-  };
-
-  const toggleSort = (key: string) => {
-    if (vSort === key) setVSortDir(d => (d === 'asc' ? 'desc' : 'asc'));
-    else { setVSort(key); setVSortDir('asc'); }
-    setVPage(1);
-  };
-
-  const sortIndicator = (key: string) =>
-    vSort === key ? (vSortDir === 'asc' ? ' ▲' : ' ▼') : '';
-
-  const totalPages = Math.max(1, Math.ceil(vTotal / PAGE_SIZE));
-
-  const shareWhatsApp = async () => {
-    if (!voucherCardData) return;
+  const shareWhatsApp = async (target?: Voucher) => {
+    const data = target || voucherCardData;
+    if (!data) return;
     const c = document.createElement('canvas');
     c.width = 800; c.height = 450;
-    await drawVoucherCanvas(c, voucherCardData, user?.fullName || 'Preyone UltraNet');
-    const blob = await new Promise<Blob | null>(resolve => c.toBlob(resolve, 'image/png'));
+    await drawVoucherCanvas(c, data, user?.fullName || 'Preyone UltraNet');
+    const blob = await new Promise<Blob | null>(resolve => c.toBlob(resolve, 'image/jpeg', 0.95));
     if (!blob) return;
-    const file = new File([blob], 'preyone-voucher-' + voucherCardData.code + '.png', { type: 'image/png' });
+    const file = new File([blob], 'voucher-' + (data.code || 'PREYONE-XXXX').toLowerCase() + '.jpeg', { type: 'image/jpeg' });
     if (navigator.canShare?.({ files: [file] })) {
       try { await navigator.share({ files: [file], title: 'Preyone Voucher' }); return; } catch {}
     }
@@ -894,7 +952,7 @@ export default function Vouchers() {
             <div className="vcb-code">
               <label>Voucher Code</label>
               <div className="input-with-btn">
-                <input type="text" value={vCode} onChange={e => setVCode(e.target.value)} placeholder="Select a package" readOnly={!selectedPkg} />
+                <input type="text" value={vCode} onChange={e => setVCode(e.target.value.toLowerCase())} placeholder="Select a package" readOnly={!selectedPkg} />
                 {selectedPkg && (
                   <button type="button" className="btn-icon" onClick={() => setVCode(generateCode(selectedPkg.tier_name))} title="Generate new code">
                     <svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 10a7 7 0 1 1-2-5" /><polyline points="17 3 17 7 13 7" /></svg>
@@ -930,7 +988,7 @@ export default function Vouchers() {
             </div>
             {IS_MOBILE_MONEY(vPayMethod) && (
               <div className="vcb-meta" style={{ minWidth: 150 }}>
-                <label>ContiPay Reference</label>
+                <label>Pesepay Reference</label>
                 <input type="text" className="stepper-input" value={vPayRef} placeholder="e.g. MP2609... or txn id" onChange={e => setVPayRef(e.target.value)} />
               </div>
             )}
@@ -977,8 +1035,8 @@ export default function Vouchers() {
               <div className="token-container">
                 <span className="token-title" style={{ color: '#64748b' }}>WI-FI VOUCHER PIN</span>
                 <div className="token-box" style={{ background: '#f8fafc', borderColor: '#cbd5e1' }}>
-                  <span className="token-string" style={{ color: '#0284c7', cursor: 'pointer' }} onClick={() => copyCode(voucherCardData.code)}>
-                    {voucherCardData.code}
+                  <span className="token-string" style={{ color: '#0284c7', cursor: 'pointer' }} onClick={() => copyCode(lc(voucherCardData.code))}>
+                    {lc(voucherCardData.code)}
                   </span>
                 </div>
               </div>
@@ -996,7 +1054,7 @@ export default function Vouchers() {
       </div>
 
       <div className="voucher-card-actions-bar">
-            <button className="btn-action btn-action--wa" onClick={shareWhatsApp}>
+            <button className="btn-action btn-action--wa" onClick={() => shareWhatsApp()}>
               <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
               WhatsApp
             </button>
@@ -1004,7 +1062,7 @@ export default function Vouchers() {
               <svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2"><rect x="5" y="2" width="13" height="15" rx="2"/><polyline points="2 5 2 18 15 18"/></svg>
               Copy All
             </button>
-            <button className="btn-action btn-action--download" onClick={downloadVoucherPNG}>
+            <button className="btn-action btn-action--download" onClick={downloadVoucherJPEG}>
               <svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10 3v12M5 10l5 5 5-5" /><path d="M3 16v1a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-1" /></svg>
               Download Voucher
             </button>
@@ -1058,7 +1116,7 @@ export default function Vouchers() {
             </div>
             {IS_MOBILE_MONEY(bulkPayMethod) && (
               <div className="form-field" style={{ maxWidth: 200 }}>
-                <label>ContiPay Reference</label>
+                <label>Pesepay Reference</label>
                 <input type="text" className="stepper-input" value={bulkPayRef} placeholder="e.g. MP2609... or txn id" onChange={e => setBulkPayRef(e.target.value)} />
               </div>
             )}
@@ -1084,7 +1142,7 @@ export default function Vouchers() {
             <div className="card" style={{ padding: '1rem', marginTop: '1rem' }}>
               <div style={{ display: 'flex', gap: '0.3rem', flexWrap: 'wrap' }}>
                 {bulkResults.map((v: any, i: number) => (
-                  <span key={i} className="bulk-code-chip" onClick={() => copyCode(v.code)} title="Click to copy">{v.code}</span>
+                  <span key={i} className="bulk-code-chip" onClick={() => copyCode(lc(v.code))} title="Click to copy">{lc(v.code)}</span>
                 ))}
               </div>
               <div className="voucher-card-actions-bar" style={{ marginTop: '0.75rem' }}>
@@ -1092,7 +1150,7 @@ export default function Vouchers() {
                   const msg = bulkResults.map((v: any) => {
                     const tier = v.package_tier || 'Custom';
                     const price = v.price_amount ? ' $' + parseFloat(v.price_amount).toFixed(2) : '';
-                    return 'Code: ' + v.code + ' | ' + tier + price;
+                    return 'Code: ' + lc(v.code) + ' | ' + tier + price;
                   }).join('%0A');
                   window.open('https://wa.me/?text=' + '*Preyone Bulk Vouchers*%0A%0A' + msg + '%0A%0A_Thank you for choosing Preyone_', '_blank');
                 }}>
@@ -1109,7 +1167,7 @@ export default function Vouchers() {
                 </button>
                 <button className="btn-action btn-action--download" onClick={() => {
                   bulkResults.forEach((v: any, i: number) => {
-                    setTimeout(() => renderVoucherPNG(v, user?.fullName || 'Preyone UltraNet'), i * 500);
+                    setTimeout(() => renderVoucherJPEG(v, user?.fullName || 'Preyone UltraNet'), i * 500);
                   });
                   setBulkStatus({ type: 'success', msg: 'Downloading ' + bulkResults.length + ' vouchers...' });
                 }}>
@@ -1134,7 +1192,7 @@ export default function Vouchers() {
             <p className="section-head-desc">Staff requests awaiting your authorization</p>
           </div>
           {pendingApprovals.length > 0 ? (
-            <div className="card card-table">
+            <div className="card card-table approvals-scroll">
               <table className="data-table">
                 <thead><tr><th>Staff</th><th>Type</th><th>Package</th><th>Amount</th><th>Count</th><th>Requested</th><th>Actions</th></tr></thead>
                 <tbody>
@@ -1180,7 +1238,7 @@ export default function Vouchers() {
               <tbody>
                 {myApprovals.map((a: ApprovalRequest) => {
                   const isExpanded = expandedApproval === a.id;
-                  const codes = a.voucher_data?.codes || (a.voucher_data?.code ? [a.voucher_data.code] : []);
+                  const codes = (a.voucher_data?.codes || (a.voucher_data?.code ? [a.voucher_data.code] : [])).map(c => lc(c));
                   const isApproved = a.status === 'approved' && codes.length > 0;
                   const pkg = packages.find(p => p.tier_name === a.package_tier);
                   return (
@@ -1192,7 +1250,7 @@ export default function Vouchers() {
                               {codes.length === 1 ? codes[0] : codes[0] + ' +' + (codes.length - 1) + ' more'}
                             </span>
                           ) : (
-                            <span className="code-cell">{a.voucher_data?.code || '—'}</span>
+                            <span className="code-cell">{lc(a.voucher_data?.code) || '—'}</span>
                           )}
                         </td>
                         <td>{a.package_tier || '—'}</td>
@@ -1234,7 +1292,7 @@ export default function Vouchers() {
                                 </button>
                                 <button className="btn-action btn-action--download" onClick={() => {
                                   codes.forEach((c: string, i: number) => {
-                                    setTimeout(() => renderVoucherPNG({
+                                    setTimeout(() => renderVoucherJPEG({
                                       code: c,
                                       package_tier: a.package_tier,
                                       price_amount: a.price_amount?.toString() || '',
@@ -1271,173 +1329,289 @@ export default function Vouchers() {
       {/* Voucher List */}
       <div className="section-head" style={{ marginTop: '2rem' }}>
         <h2 className="section-head-title">Voucher List</h2>
-        <span className="section-head-desc">{vTotal} total</span>
       </div>
-
-      {/* Toolbar — search, filters. Every change resets to page 1 so a narrowed
-          result set never lands the user on an empty page. */}
-      <div className="voucher-toolbar">
-        <input
-          type="search"
-          className="input voucher-toolbar__search"
-          placeholder="Search by code…"
-          value={searchInput}
-          onChange={e => setSearchInput(e.target.value)}
-          aria-label="Search vouchers by code"
-        />
-        <select
-          className="input voucher-toolbar__filter"
-          value={vStatusFilter}
-          onChange={e => { setVStatusFilter(e.target.value as '' | VoucherStatus); setVPage(1); }}
-          aria-label="Filter by status"
-        >
-          <option value="">All statuses</option>
-          <option value="Unused">Unused</option>
-          <option value="Active">Active</option>
-          <option value="Expired">Expired</option>
-          <option value="Disabled">Disabled</option>
-        </select>
-        <select
-          className="input voucher-toolbar__filter"
-          value={vTierFilter}
-          onChange={e => { setVTierFilter(e.target.value); setVPage(1); }}
-          aria-label="Filter by user group"
-        >
-          <option value="">All packages</option>
-          {packages.map(p => (
-            <option key={p.tier_name} value={p.tier_name}>{p.display_name || p.tier_name}</option>
-          ))}
-        </select>
-      </div>
-
       <div className="card card-table">
-        {vLoading && vouchers.length === 0 ? (
-          <div className="table-empty"><p>Loading…</p></div>
-        ) : vouchers.length === 0 ? (
-          <div className="table-empty">
-            <p>No vouchers match.</p>
-          </div>
+        {vouchers.length === 0 ? (
+          <div className="table-empty"><p>No vouchers created yet.</p></div>
         ) : (
-          <table className="data-table voucher-table">
-            <thead>
-              <tr>
-                <th onClick={() => toggleSort('code')} className="voucher-th-sortable">Code{sortIndicator('code')}</th>
-                <th onClick={() => toggleSort('status')} className="voucher-th-sortable">Status{sortIndicator('status')}</th>
-                <th onClick={() => toggleSort('price')} className="voucher-th-sortable">Price / Period{sortIndicator('price')}</th>
-                <th>Subscriber</th>
-                <th>Timeline</th>
-                <th>Devices</th>
-                <th>Usage / Speed</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
+          <table className="data-table">
+            <thead><tr><th>Code</th><th>Price</th><th>Duration</th><th>Bandwidth</th><th>Data</th><th>Max Uses</th><th>Used</th><th>Devices</th><th>Package</th><th>Created</th><th>Actions</th></tr></thead>
             <tbody>
-              {vouchers.map(v => {
-                const busy = busyVoucherId === v.id;
-                const name = [v.first_name, v.last_name].filter(Boolean).join(' ')
-                  || v.mac_address
-                  || null;
-                return (
-                  <tr key={v.id} className={busy ? 'voucher-row--busy' : undefined}>
-                    <td>
-                      <span className="code-cell" onClick={() => copyCode(v.code)} title="Click to copy">{v.code}</span>
-                      {v.package_tier && <div className="muted voucher-sub">{v.package_tier}</div>}
-                    </td>
-                    <td>
-                      <Badge variant={STATUS_BADGE[v.status] ?? 'default'}>{v.status}</Badge>
-                    </td>
-                    <td>
-                      <span className="money money--sm">{v.price_amount ? '$' + parseFloat(v.price_amount).toFixed(2) : '—'}</span>
-                      <div className="muted voucher-sub">{fmtDurationMin(v.duration_min)}</div>
-                    </td>
-                    <td>
-                      {name ? (
-                        <>
-                          <div>{name}{v.alias ? <span className="muted"> ({v.alias})</span> : null}</div>
-                          {v.phone && <div className="muted voucher-sub">{v.phone}</div>}
-                        </>
-                      ) : (
-                        <span className="muted">—</span>
-                      )}
-                    </td>
-                    <td>
-                      <div className="voucher-sub">Created {fmtDateTime(v.created_at)}</div>
-                      <div className="voucher-sub">Activated {fmtDateTime(v.first_redeemed_at)}</div>
-                      <div className="voucher-sub">Expires {fmtDateTime(v.expires_at)}</div>
-                    </td>
-                    <td>
-                      <div>{v.max_devices ?? v.device_count} max</div>
-                      <div className="muted voucher-sub">
-                        {v.bound_macs && v.bound_macs.length > 0
-                          ? v.bound_macs.map(formatMac).join(', ')
-                          : 'Unbound'}
-                      </div>
-                    </td>
-                    <td>
-                      <div>{fmtUsage(v.traffic_used_bytes, v.is_uncapped ? null : v.traffic_total_bytes)}</div>
-                      <div className="muted voucher-sub">
-                        {formatSpeed(v.bandwidth_mbps_up, v.bandwidth_mbps_down)}
-                      </div>
-                    </td>
-                    <td>
-                      <div className="voucher-actions">
-                        <button
-                          className="btn-action"
-                          disabled={busy}
-                          onClick={() => toggleDisable(v)}
-                          title={v.is_disabled ? 'Re-enable this voucher' : 'Disable this voucher'}
-                        >
-                          {v.is_disabled ? 'Enable' : 'Disable'}
-                        </button>
-                        <button className="btn-action" disabled={busy} onClick={() => extendExpiry(v)} title="Extend expiry">
-                          Extend
-                        </button>
-                        <button
-                          className="btn-action"
-                          disabled={busy || v.device_count === 0}
-                          onClick={() => resetMacBinding(v)}
-                          title="Reset MAC binding"
-                        >
-                          Reset MAC
-                        </button>
-                        <button
-                          className="btn-action btn-action--danger"
-                          disabled={busy}
-                          onClick={() => deleteVoucher(v)}
-                          title="Delete voucher"
-                        >
-                          Delete
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
+              {vouchers.map(v => (
+                <tr key={v.id}>
+                  <td><span className="code-cell" onClick={() => copyCode(lc(v.code))} title="Click to copy">{lc(v.code)}</span></td>
+                  <td><span className="money money--sm">{v.price_amount ? '$' + parseFloat(v.price_amount).toFixed(2) : '—'}</span></td>
+                  <td>{fmtDur(v.duration_min)}</td>
+                  <td>{v.bandwidth_mbps_up}/{v.bandwidth_mbps_down} Mbps</td>
+                  <td>{v.is_uncapped ? 'Unlimited' : (v.data_limit_gb ?? 'Unlimited') + ' GB'}</td>
+                  <td>{v.max_uses}</td>
+                  <td>{v.used_count}/{v.max_uses}</td>
+                  <td>{v.device_count ?? 0}/{v.max_devices ?? '—'}</td>
+                  <td>{v.package_tier || <span className="muted">—</span>}</td>
+                  <td>{fmtDate(v.created_at)}</td>
+                  <td>
+                    <div className="row-actions">
+                      <button
+                        className="btn-sm"
+                        onClick={() => setDetailVoucher(v)}
+                        aria-label={`View details for voucher ${lc(v.code)}`}
+                      >
+                        Details
+                      </button>
+                      <button
+                        className="btn-sm"
+                        onClick={() => {
+                          setEditHolderVoucher(v);
+                          setEditName(v.holder_name || '');
+                          setEditPhone(v.holder_phone || '');
+                          setEditError('');
+                        }}
+                        aria-label={`Edit holder for voucher ${lc(v.code)}`}
+                      >
+                        Edit Holder
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         )}
       </div>
 
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="voucher-pager">
-          <button
-            className="btn-action"
-            disabled={vPage <= 1 || vLoading}
-            onClick={() => setVPage(p => Math.max(1, p - 1))}
+      {/* ── High-stakes (>= $4.99) customer capture — gates generation ── */}
+      {holderModal && (() => {
+        const gatePrice = holderModal === 'single'
+          ? parseFloat(vPrice || '0')
+          : (bulkPrice ? parseFloat(bulkPrice) : parseFloat(packages.find(p => p.tier_name === bulkTier)?.price_amount || '0'));
+        return (
+          <Modal
+            open
+            onClose={() => { if (!holderSaving) setHolderModal(null); }}
+            title={holderModal === 'single' ? 'Customer Details Required' : 'Batch Customer Details'}
           >
-            Previous
-          </button>
-          <span className="muted">Page {vPage} of {totalPages}</span>
-          <button
-            className="btn-action"
-            disabled={vPage >= totalPages || vLoading}
-            onClick={() => setVPage(p => Math.min(totalPages, p + 1))}
-          >
-            Next
-          </button>
-        </div>
+            <div className="holder-capture">
+              <p className="holder-capture__lead">
+                This sale is <strong>${gatePrice.toFixed(2)}</strong>{holderModal === 'bulk' ? ' per voucher' : ''} — record the customer before the voucher{holderModal === 'bulk' ? 's are' : ' is'} generated.
+              </p>
+              <label className="holder-capture__label" htmlFor="holder-name-input">Customer Full Name / Holder Name *</label>
+              <input
+                id="holder-name-input"
+                className="holder-capture__input"
+                value={holderName}
+                onChange={e => setHolderName(e.target.value)}
+                placeholder="e.g. Tendai Moyo"
+                maxLength={120}
+                autoFocus
+              />
+              <label className="holder-capture__label" htmlFor="holder-phone-input">Phone Number</label>
+              <input
+                id="holder-phone-input"
+                className="holder-capture__input"
+                value={holderPhone}
+                onChange={e => setHolderPhone(e.target.value)}
+                placeholder="+263 77 123 4567"
+                inputMode="tel"
+                maxLength={32}
+              />
+              {holderError && <p className="holder-capture__error" role="alert">{holderError}</p>}
+              <div className="holder-capture__actions">
+                <button className="btn-sm" onClick={() => setHolderModal(null)} disabled={holderSaving}>Cancel</button>
+                <button
+                  className="btn-action btn-action--download"
+                  onClick={submitHolderModal}
+                  disabled={holderSaving || !holderName.trim()}
+                >
+                  {holderSaving ? 'Generating…' : 'Confirm & Generate'}
+                </button>
+              </div>
+            </div>
+          </Modal>
+        );
+      })()}
+
+      {/* ── Edit Holder (row action → PATCH /vouchers/:id) ── */}
+      {editHolderVoucher && (
+        <Modal
+          open
+          onClose={() => { if (!editSaving) setEditHolderVoucher(null); }}
+          title={`Edit Holder — ${lc(editHolderVoucher.code)}`}
+        >
+          <div className="holder-capture">
+            <p className="holder-capture__lead">
+              Updates <strong>holder name</strong> and <strong>phone</strong> only. PIN, price, expiry and uses stay locked.
+            </p>
+            <label className="holder-capture__label" htmlFor="edit-holder-name">Customer Full Name / Holder Name</label>
+            <input
+              id="edit-holder-name"
+              className="holder-capture__input"
+              value={editName}
+              onChange={e => setEditName(e.target.value)}
+              placeholder="e.g. Tendai Moyo"
+              maxLength={120}
+              autoFocus
+            />
+            <label className="holder-capture__label" htmlFor="edit-holder-phone">Phone Number</label>
+            <input
+              id="edit-holder-phone"
+              className="holder-capture__input"
+              value={editPhone}
+              onChange={e => setEditPhone(e.target.value)}
+              placeholder="+263 77 123 4567"
+              inputMode="tel"
+              maxLength={32}
+            />
+            {editError && <p className="holder-capture__error" role="alert">{editError}</p>}
+            <div className="holder-capture__actions">
+              <button className="btn-sm" onClick={() => setEditHolderVoucher(null)} disabled={editSaving}>Cancel</button>
+              <button
+                className="btn-action btn-action--download"
+                onClick={saveEditHolder}
+                disabled={editSaving || (!editName.trim() && !editPhone.trim())}
+              >
+                {editSaving ? 'Saving…' : 'Save Holder'}
+              </button>
+            </div>
+          </div>
+        </Modal>
       )}
+
+      {detailVoucher && (() => {
+        const v = detailVoucher;
+        const statusTone = v.status === 'Active' ? 'yes' : v.status === 'Unused' ? 'warn' : 'no';
+        const macs = Array.isArray(v.bound_macs) ? v.bound_macs : [];
+        const gb = (b?: number | null) => (b == null ? null : (b / (1024 ** 3)).toFixed(2) + ' GB');
+        const trafficUsed = gb(v.traffic_used_bytes);
+        const trafficTotal = v.traffic_total_bytes == null ? null : gb(v.traffic_total_bytes);
+        const holderName = [v.first_name, v.last_name].filter(Boolean).join(' ') || v.alias || null;
+        // Redemption row is the source of truth for the person + MAC + login time;
+        // the users account (if any) only supplements it.
+        const redemptionName = v.redemption_name || holderName || null;
+        const redemptionMac = v.redemption_mac || v.mac_address || null;
+        const redemptionAt = v.redemption_at || v.first_redeemed_at || null;
+        const theRedemptions = Array.isArray(v.redemptions) ? v.redemptions : [];
+        const devices = (Array.isArray(v.devices) && v.devices.length > 0)
+          ? v.devices
+          : macs.map(m => ({ mac_address: m, label: null, is_active: true, bound_at: null, last_seen_at: null, unbound_at: null }));
+
+        // Real triggers only: code + terms the customer needs. There is no
+        // message-template schema in this build, so nothing here is invented.
+        const waText = [
+          '*Preyone Voucher*',
+          '',
+          `Code: ${lc(v.code)}`,
+          `Package: ${v.package_tier || 'Standard'}`,
+          `Price: ${v.price_amount ? '$' + parseFloat(v.price_amount).toFixed(2) : '—'}`,
+          `Duration: ${fmtDur(v.duration_min)}`,
+          `Speed: ${v.bandwidth_mbps_up}/${v.bandwidth_mbps_down} Mbps`,
+          `Data: ${v.is_uncapped ? 'Unlimited' : (v.data_limit_gb ?? 'Unlimited') + ' GB'}`,
+          `Valid until: ${fmtDate(v.expires_at)}`,
+          '',
+          '_Thank you for choosing Preyone_',
+        ].join('\n');
+
+        return (
+          <Modal open onClose={() => setDetailVoucher(null)} title={`Voucher ${lc(v.code)}`}>
+            <div className="voucher-detail">
+              <div className="vd-head">
+                <div className="vd-code" onClick={() => copyCode(lc(v.code))} title="Click to copy">{lc(v.code)}</div>
+                <span className={`badge badge--${statusTone}`}>{v.status || 'Unknown'}</span>
+              </div>
+
+              <div className="vd-grid">
+                <div className="vd-cell"><span className="vd-label">Price</span><span className="vd-value">{v.price_amount ? '$' + parseFloat(v.price_amount).toFixed(2) : '—'}</span></div>
+                <div className="vd-cell"><span className="vd-label">Duration</span><span className="vd-value">{fmtDur(v.duration_min)}</span></div>
+                <div className="vd-cell"><span className="vd-label">Bandwidth</span><span className="vd-value">{v.bandwidth_mbps_up}/{v.bandwidth_mbps_down} Mbps</span></div>
+                <div className="vd-cell"><span className="vd-label">Data</span><span className="vd-value">{v.is_uncapped ? 'Unlimited' : (v.data_limit_gb ?? 'Unlimited') + ' GB'}</span></div>
+                <div className="vd-cell"><span className="vd-label">Uses</span><span className="vd-value">{v.used_count}/{v.max_uses}</span></div>
+                <div className="vd-cell"><span className="vd-label">Devices</span><span className="vd-value">{(v.device_count ?? 0)}/{v.max_devices ?? '—'}</span></div>
+                <div className="vd-cell"><span className="vd-label">Package</span><span className="vd-value">{v.package_tier || '—'}</span></div>
+                <div className="vd-cell"><span className="vd-label">Created</span><span className="vd-value">{fmtDate(v.created_at)}</span></div>
+                <div className="vd-cell"><span className="vd-label">Activated</span><span className="vd-value">{v.activated_at ? fmtDate(v.activated_at) : '—'}</span></div>
+                <div className="vd-cell"><span className="vd-label">First redeemed</span><span className="vd-value">{v.first_redeemed_at ? fmtDate(v.first_redeemed_at) : '—'}</span></div>
+                <div className="vd-cell"><span className="vd-label">Expires</span><span className="vd-value">{fmtDate(v.expires_at)}</span></div>
+              </div>
+
+              {(redemptionName || v.phone || redemptionMac || redemptionAt || trafficUsed || theRedemptions.length > 0) && (
+                <section className="vd-section">
+                  <h4 className="vd-section-title">Redemption</h4>
+                  <div className="vd-grid">
+                    <div className="vd-cell"><span className="vd-label">Holder</span><span className="vd-value">{redemptionName || '—'}</span></div>
+                    <div className="vd-cell"><span className="vd-label">Phone</span><span className="vd-value">{v.phone || '—'}</span></div>
+                    <div className="vd-cell"><span className="vd-label">MAC</span><span className="vd-value vd-mono">{redemptionMac || '—'}</span></div>
+                    <div className="vd-cell"><span className="vd-label">Redeemed on</span><span className="vd-value">{redemptionAt ? fmtDate(redemptionAt) : '—'}</span></div>
+                    <div className="vd-cell"><span className="vd-label">Traffic</span><span className="vd-value">{trafficUsed ? `${trafficUsed}${trafficTotal ? ' / ' + trafficTotal : ''}` : '—'}</span></div>
+                  </div>
+                  {theRedemptions.length > 0 && (
+                    <>
+                      <p className="vd-count">{theRedemptions.length} activation{theRedemptions.length === 1 ? '' : 's'} recorded</p>
+                      <ul className="vd-macs">
+                        {theRedemptions.map((red, i) => (
+                          <li key={i}>
+                            {red.full_name || 'Unknown person'}
+                            {red.mac_address ? ` · ${red.mac_address}` : ''}
+                            {red.ip_address ? ` · ${red.ip_address}` : ''}
+                            {red.redeemed_at ? ` · ${fmtDate(red.redeemed_at)}` : ''}
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  )}
+                </section>
+              )}
+
+              <section className="vd-section">
+                <h4 className="vd-section-title">Device bindings</h4>
+                <p className="vd-count">{(v.device_count ?? macs.length)} of {v.max_devices ?? '—'} device slot{(v.max_devices ?? 2) === 1 ? '' : 's'} in use</p>
+                {devices.length > 0 ? (
+                  <ul className="vd-macs">
+                    {devices.map(d => (
+                      <li key={d.mac_address}>
+                        <span className="vd-mono">{d.mac_address}</span>
+                        {d.label ? ` · ${d.label}` : ''}
+                        {d.bound_at ? ` · bound ${fmtDate(d.bound_at)}` : ''}
+                        {d.last_seen_at ? ` · last seen ${fmtDate(d.last_seen_at)}` : ''}
+                        {!d.is_active ? ' · released' : ''}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="muted">No devices currently bound.</p>
+                )}
+                <button
+                  className="btn-sm btn-reject"
+                  onClick={() => handleReleaseMac(v)}
+                  disabled={releasingMac || (v.device_count ?? macs.length) === 0}
+                >
+                  {releasingMac ? 'Releasing…' : 'Release all bindings'}
+                </button>
+              </section>
+
+              <section className="vd-section">
+                <h4 className="vd-section-title">Share &amp; Notify</h4>
+                <p className="vd-count">Download, print, or send this voucher as an image.</p>
+                <div className="vd-actions">
+                  <button className="btn-sm" onClick={() => copyCode(waText)}>
+                    Copy All
+                  </button>
+                  <button className="btn-action btn-action--download" onClick={() => handleDownloadJpeg(v)}>
+                    <svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10 3v12M5 10l5 5 5-5" /><path d="M3 16v1a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-1" /></svg>
+                    Download JPEG
+                  </button>
+                  <button className="btn-action btn-action--print" onClick={() => printVoucherPdf(v)}>
+                    <svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 4h12v12H4z" /><path d="M7 10h6M10 7v6" /></svg>
+                    Print
+                  </button>
+                  <button className="btn-action btn-action--wa" onClick={() => shareWhatsApp(v)}>
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+                    Send via WhatsApp
+                  </button>
+                </div>
+              </section>
+            </div>
+          </Modal>
+        );
+      })()}
     </div>
   );
 }
