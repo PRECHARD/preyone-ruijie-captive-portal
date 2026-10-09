@@ -638,6 +638,43 @@ describe('Cash handover routes', () => {
 
       expect(res.status).toBe(400);
     });
+
+    it('alerts the staff member they can now clock out when nothing remains pending', async () => {
+      mockAuth({ id: 'mgr-1', role: 'Manager', fullName: 'Manager' });
+      mockPoolQuery
+        .mockResolvedValueOnce({ rows: [{ id: 'h-1', status: 'pending', staff_id: 'staff-1', staff_name: 'Staff Jane', total_amount: '40.00', sale_count: 2 }] })
+        .mockResolvedValueOnce(undefined) // UPDATE cash_handovers
+        .mockResolvedValueOnce(undefined) // recordAuditLog
+        .mockResolvedValueOnce(undefined) // management insertAlert
+        .mockResolvedValueOnce({ rows: [{ cnt: 0, total: '0' }] }) // remaining pending cash sales
+        .mockResolvedValueOnce(undefined); // targeted staff insertAlert
+
+      const res = await request(createApp()).post('/api/admin/cash-handovers/h-1/approve');
+
+      expect(res.status).toBe(200);
+      const staffAlert = (mockPoolQuery as any).mock.calls[5];
+      expect(staffAlert[0]).toContain('INSERT INTO alerts');
+      expect(staffAlert[1][6]).toBe('staff-1'); // admin_id targets the staff member
+      expect(staffAlert[1][3]).toContain('you can now clock out');
+    });
+
+    it('tells the staff member when sales still remain pending after approval', async () => {
+      mockAuth({ id: 'mgr-1', role: 'Manager', fullName: 'Manager' });
+      mockPoolQuery
+        .mockResolvedValueOnce({ rows: [{ id: 'h-1', status: 'pending', staff_id: 'staff-1', staff_name: 'Staff Jane', total_amount: '40.00', sale_count: 2 }] })
+        .mockResolvedValueOnce(undefined) // UPDATE cash_handovers
+        .mockResolvedValueOnce(undefined) // recordAuditLog
+        .mockResolvedValueOnce(undefined) // management insertAlert
+        .mockResolvedValueOnce({ rows: [{ cnt: 2, total: '3.00' }] }) // still pending
+        .mockResolvedValueOnce(undefined); // targeted staff insertAlert
+
+      const res = await request(createApp()).post('/api/admin/cash-handovers/h-1/approve');
+
+      expect(res.status).toBe(200);
+      const staffAlert = (mockPoolQuery as any).mock.calls[5];
+      expect(staffAlert[1][3]).toContain('2 pending cash sale(s)');
+      expect(staffAlert[1][3]).toContain('before you can clock out');
+    });
   });
 
   describe('POST /api/admin/cash-handovers/:id/reject', () => {
@@ -667,6 +704,30 @@ describe('Cash handover routes', () => {
       const res = await request(createApp()).post('/api/admin/cash-handovers/nonexistent/reject');
 
       expect(res.status).toBe(404);
+    });
+
+    it('alerts the staff member that their handover was rejected', async () => {
+      mockAuth({ id: 'mgr-1', role: 'Manager', fullName: 'Manager' });
+      mockPoolQuery
+        .mockResolvedValueOnce({ rows: [{ id: 'h-1', status: 'pending', staff_id: 'staff-1', staff_name: 'Staff Jane', total_amount: '40.00', sale_count: 2 }] })
+        .mockResolvedValueOnce(undefined) // recordAuditLog
+        .mockResolvedValueOnce(undefined) // management insertAlert
+        .mockResolvedValueOnce(undefined); // targeted staff insertAlert
+
+      mockClientQuery
+        .mockResolvedValueOnce(undefined) // BEGIN
+        .mockResolvedValueOnce(undefined) // UPDATE cash_handovers
+        .mockResolvedValueOnce(undefined) // UPDATE sales
+        .mockResolvedValueOnce(undefined); // COMMIT
+
+      const res = await request(createApp()).post('/api/admin/cash-handovers/h-1/reject');
+
+      expect(res.status).toBe(200);
+      const staffAlert = (mockPoolQuery as any).mock.calls[3];
+      expect(staffAlert[0]).toContain('INSERT INTO alerts');
+      expect(staffAlert[1][6]).toBe('staff-1');
+      expect(staffAlert[1][3]).toContain('rejected');
+      expect(staffAlert[1][3]).toContain('back to pending');
     });
   });
 
