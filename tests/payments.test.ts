@@ -320,6 +320,19 @@ describe('Payments routes', () => {
 
     const MERCHANT_REF = 'PREY-ABCDEF0123456789';
 
+    // Dispatches by SQL rather than by position: the completion path now runs
+    // several more statements (owner lookup, voucher ensure, sale insert), so a
+    // positional mockResolvedValueOnce chain silently drifts out of step.
+    const accountingDispatcher = () =>
+      vi.fn((sql: string) => {
+        const s = String(sql);
+        if (s.includes('admin_users')) return Promise.resolve({ rows: [{ id: 'ceo-1', full_name: 'Prechard Muvirimi' }] });
+        if (s.includes('UPDATE payments')) return Promise.resolve({ rows: [{ completed_at: new Date('2026-10-06T13:45:00Z') }] });
+        if (s.includes('FOR UPDATE')) return Promise.resolve({ rows: [paidRow] });
+        if (s.includes('RETURNING id, code')) return Promise.resolve({ rows: [{ id: 'v-1', code: 'CT-ABC12345' }] });
+        return Promise.resolve({ rows: [] });
+      });
+
     it('completes a paid payment: mints a voucher and records the transaction', async () => {
       // completePayment runs inside a connection-level transaction
       // (pool.connect → BEGIN → SELECT…FOR UPDATE → mint → COMMIT).
@@ -378,6 +391,87 @@ describe('Payments routes', () => {
       ]) {
         expect(lockSql).toContain(`pk.${col}`);
       }
+    });
+
+    // Regression for the 2026-10-06 gap: the Ruijie Cloud path mints the code
+    // remotely, so `mintRuijieVoucherForTier` created NO local `vouchers` row and
+    // nothing ever wrote a `sales` row. A customer paid 1.00 by EcoCash and the
+    // voucher was invisible in both the voucher list and Sales — it was not
+    // attributed to anyone. Both rows must now be written inside the same
+    // transaction as the payment completion.
+    it('accounts for a Ruijie-minted payment: local voucher row + sale under the CEO', async () => {
+      const clientQuery = accountingDispatcher();
+      (pool.connect as any).mockResolvedValue({ query: clientQuery, release: vi.fn() });
+      (pool.query as any).mockResolvedValueOnce({ rows: [paidRow] });
+
+      vi.mocked(isRuijieCloudConfigured).mockReturnValue(true);
+      vi.mocked(mintRuijieVoucherForTier).mockResolvedValue({
+        codeNo: 'kmrg48', profile: 'prof-1', userGroupId: 'grp-1', expiryTime: null, comment: 'Payment pay-1',
+      });
+
+      const res = await request(createApp())
+        .post('/api/payments/webhook?token=' + CB_TOKEN)
+        .send(callbackBody({ merchantReference: MERCHANT_REF, transactionStatus: 'SUCCESS', amount: 9.99 }));
+
+      expect(res.status).toBe(200);
+      expect(res.body.voucherCode).toBe('kmrg48');
+
+      // The local voucher row the admin list reads, guarded so a replay cannot
+      // duplicate an existing code.
+      const ensure = clientQuery.mock.calls.find((c: any[]) => String(c[0]).includes('INSERT INTO vouchers'));
+      expect(ensure).toBeDefined();
+      expect(String(ensure![0])).toContain('NOT EXISTS');
+      expect(ensure![1][0]).toBe('kmrg48');
+
+      // Attributed to the CEO, carrying the package the payment actually bought.
+      const owner = clientQuery.mock.calls.find((c: any[]) => String(c[0]).includes('FROM admin_users'));
+      expect(owner).toBeDefined();
+
+      // Every value here was previously never written at all.
+      const sale = clientQuery.mock.calls.find((c: any[]) => String(c[0]).includes('INSERT INTO sales'));
+      expect(sale).toBeDefined();
+      const params = sale![1];
+      expect(params[0]).toBe('kmrg48');            // voucher_code   $1
+      expect(params[1]).toBe('ceo-1');             // sold_by        $2
+      expect(params[2]).toBe('Prechard Muvirimi'); // sold_by_name   $3
+      expect(params[3]).toBe('9.99');              // amount         $4
+      expect(params[4]).toBe('USD');               // currency       $5
+      // 'EcoCash (Pesepay)' must be reduced to the option the admin UI renders.
+      expect(params[5]).toBe('EcoCash');           // payment_method $6
+      expect(params[6]).toBeNull();                // reference      $7 (none here)
+      expect(params[7]).toBeInstanceOf(Date);      // sold_at        $8
+
+      // The sale must be written before COMMIT, inside the transaction.
+      const commitIdx = clientQuery.mock.calls.findIndex((c: any[]) => String(c[0]).trim() === 'COMMIT');
+      const saleIdx = clientQuery.mock.calls.indexOf(sale!);
+      expect(saleIdx).toBeGreaterThan(-1);
+      expect(commitIdx).toBeGreaterThan(saleIdx);
+    });
+
+    // The legacy local mint already inserts a `vouchers` row — but with
+    // sold_by NULL, which would leave it unattributed in the staff split.
+    // The accounting step must adopt it rather than duplicate it.
+    it('attributes the legacy-minted voucher instead of duplicating it', async () => {
+      const clientQuery = accountingDispatcher();
+      (pool.connect as any).mockResolvedValue({ query: clientQuery, release: vi.fn() });
+      (pool.query as any).mockResolvedValueOnce({ rows: [paidRow] });
+
+      const res = await request(createApp())
+        .post('/api/payments/webhook?token=' + CB_TOKEN)
+        .send(callbackBody({ merchantReference: MERCHANT_REF, transactionStatus: 'SUCCESS', amount: 9.99 }));
+
+      expect(res.status).toBe(200);
+
+      const adopt = clientQuery.mock.calls.find(
+        (c: any[]) => String(c[0]).includes('UPDATE vouchers') && String(c[0]).includes('sold_by IS NULL')
+      );
+      expect(adopt).toBeDefined();
+      expect(adopt![1][1]).toBe('ceo-1');
+
+      const sale = clientQuery.mock.calls.find((c: any[]) => String(c[0]).includes('INSERT INTO sales'));
+      expect(sale).toBeDefined();
+      expect(sale![1][5]).toBe('EcoCash'); // payment_method is $6 → index 5
+      expect(sale![1][0]).toBe('CT-ABC12345'); // voucher_code is $1 → index 0
     });
 
     it('completes on a valid encrypted payload even when no token came back', async () => {

@@ -41,6 +41,14 @@ body,
   line-height: 1.6;
 }
 
+body {
+  background:
+    radial-gradient(1000px 600px at 15% -10%, rgba(168, 85, 247, 0.07), transparent 60%),
+    radial-gradient(900px 550px at 100% 0%, rgba(0, 229, 255, 0.06), transparent 55%),
+    radial-gradient(800px 700px at 50% 120%, rgba(255, 0, 255, 0.05), transparent 60%),
+    var(--bg);
+}
+
 ::-webkit-scrollbar {
   width: 8px;
 }
@@ -48,16 +56,21 @@ body,
   background: var(--bg);
 }
 ::-webkit-scrollbar-thumb {
-  background: #555;
+  background: linear-gradient(180deg, var(--purple), var(--purple-glow));
   border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #777;
-  box-shadow: 0 0 10px rgba(150, 150, 150, 0.4);
+  background: linear-gradient(180deg, var(--purple-glow), var(--cyan));
+  box-shadow: 0 0 10px rgba(255, 0, 255, 0.4);
 }
 * {
-  scrollbar-color: #555 #050505;
+  scrollbar-color: var(--purple) #050505;
   scrollbar-width: thin;
+}
+
+::selection {
+  background: rgba(255, 0, 255, 0.25);
+  color: #fff;
 }
 
 input,
@@ -69,8 +82,8 @@ button {
 input:focus,
 select:focus,
 textarea:focus {
-  box-shadow: 0 0 0 2px rgba(255, 0, 255, 0.12), 0 0 20px rgba(255, 0, 255, 0.08);
-  border-color: var(--purple-glow);
+  box-shadow: 0 0 0 2px rgba(0, 213, 255, 0.18), 0 0 24px rgba(0, 213, 255, 0.12);
+  border-color: var(--cyan);
 }
 
 a {
@@ -79,6 +92,7 @@ a {
 }
 a:hover {
   color: var(--pink);
+  text-shadow: 0 0 8px rgba(255, 0, 127, 0.4);
 }
 
 .hidden {
@@ -117,10 +131,11 @@ body.role-ceo .admin-nav {
 
 /* ── Glassmorphism utility ── */
 .glass {
-  background: rgba(10, 10, 10, 0.7);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: linear-gradient(160deg, rgba(20, 20, 40, 0.65), rgba(8, 8, 16, 0.8));
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
 }
 
 /* ── Glow ring ── */
@@ -131,5 +146,37 @@ body.role-ceo .admin-nav {
   }
   50% {
     box-shadow: 0 0 20px rgba(255, 0, 255, 0.35);
+  }
+}
+
+/* ── Responsive base (phones & tablets) ── */
+html,
+body,
+#root {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+@media (max-width: 1024px) {
+  :root {
+    --sidebar-width: 240px;
+  }
+  html,
+  body,
+  #root {
+    font-size: 16px;
+  }
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
+
+@media (max-width: 480px) {
+  html,
+  body,
+  #root {
+    font-size: 15px;
   }
 }

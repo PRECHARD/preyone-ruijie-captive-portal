@@ -70,20 +70,21 @@ WISPr XML (`/hotspot-detect.html`) already advertises
 
 | Setting | Value |
 |---------|-------|
-| RADIUS Server IP | `173.249.7.190` |
+| RADIUS Server IP | `158.220.118.91` |
 | Auth Port | `1812` |
 | Shared Secret | `preyone@radius2024` |
 | Protocol | PAP |
 | Interim Update Interval | `300` seconds |
 
-> Enter these on the gateway, but note section 0: the server does not yet
-> recognise this gateway as a client.
+> The bridge is live and verified (2026-10-04): both Access-Reject (unknown MAC) and
+> Access-Accept (live voucher MAC) proven via `radclient`. The gateway still needs its WAN
+> public IP added to `clients.conf` before it will be recognised as a client.
 
 ## 4. RADIUS Accounting
 
 | Setting | Value |
 |---------|-------|
-| Accounting Server IP | `173.249.7.190` |
+| Accounting Server IP | `158.220.118.91` |
 | Acct Port | `1813` |
 | Shared Secret | `preyone@radius2024` |
 | Interim Update | Enabled, `300` seconds |
@@ -184,5 +185,5 @@ Tell me and I will implement it. The work is:
 **Devices connect without authenticating**
 1. SSID auth mode must be External Portal, not built-in or disabled.
 2. RADIUS server reachable from the gateway (try from a LAN device:
-   `nc -vzu 173.249.7.190 1812`).
+   `nc -vzu 158.220.118.91 1812`).
 3. Return `control:Auth-Type: Accept` from RADIUS, not just `Auth-Type: Accept`.

@@ -95,3 +95,20 @@ config/staging.js
 
 # ZIP backup
 *.zip
+
+# Signed APKs and deploy tarballs - build artifacts, never source
+*.apk
+*.aab
+storage/
+admin/public/downloads/
+admin/dist/downloads/
+deploy-*.tar.gz
+build-out.txt
+deploy.sh
+
+# Bus ticket app (Flutter) - heavy build artifacts only
+bus-ticket-app/build/
+bus-ticket-app/.dart_tool/
+bus-ticket-app/android/.gradle/
+bus-ticket-app/android/app/build/
+bus-ticket-app/android/local.properties

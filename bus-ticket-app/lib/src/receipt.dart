@@ -102,41 +102,6 @@ const String kTicketValidityNote = 'Please keep your ticket safe. '
 const String kLuggageNote = 'Please check luggage taken out of compartments '
     'at every destination stop. Thank You!';
 
-/// Minimum physical length (mm) every printed job must reach on the 58mm roll.
-/// The auto-cutter shears whatever sits at the blade when `cut()` fires — when
-/// a short ticket's trailing feed is too small the footer branding ("Preyone
-/// Technologies" / "www.preyone.com") is cut off the page. Padding the feed so
-/// the roll-out always exceeds 12 cm keeps the full footer visible.
-const double kMinPrintLengthMm = 120.0;
-
-/// Approximate line-pitch on a 58mm thermal roll (30 dots @ 203 DPI = ESC 3
-/// default line feed). Used to size the min-length feed padding.
-const double _kLinePitchMm = 30.0 / (203.0 / 25.4);
-
-/// Approximate printed height (mm) of one [PreviewLine] on the roll, used by
-/// [_excessFeed] to estimate whether a job rolls out past [kMinPrintLengthMm].
-double _lineHeightMm(PreviewLine l) {
-  if (l.qrData != null) return 24.0;
-  if (l.barcodeData != null) return 3.6;
-  return l.big ? 6.1 : (l.small ? 2.1 : 3.2);
-}
-
-/// Extra trailing feed lines required (beyond [baseFeed]) so the entire job
-/// printed from [lines] physically reaches [kMinPrintLengthMm]. Guarantees the
-/// cut never shears the footer branding on short tickets.
-int _excessFeed(List<PreviewLine> lines, int baseFeed) {
-  var heightMm = 0.0;
-  for (final l in lines) {
-    heightMm += _lineHeightMm(l);
-    if (l.feedAfter > 0) heightMm += l.feedAfter * _kLinePitchMm;
-  }
-  heightMm += baseFeed * _kLinePitchMm;
-  if (heightMm >= kMinPrintLengthMm) return 0;
-  final missing = (kMinPrintLengthMm - heightMm) / _kLinePitchMm;
-  final extra = missing.ceil();
-  return extra > 200 ? 200 : extra;
-}
-
 class PreviewLine {
   const PreviewLine(
     this.text, {
@@ -331,10 +296,9 @@ String barcodeDataFor(TicketData d) {
 /// the dedicated luggage statement on luggage tickets, each wrapped to the full
 /// width in the smaller font with no trailing words dropped. Under the
 /// statement a divider feeds one blank line before the footer, which prints
-/// ONLY the platform disclaimer + website. A QR code carrying the same
-/// payload as the preview code, a compact CODE128 barcode, then a 3-line
-/// tear-off feed end the job before the cut. No hardcoded address /
-/// customer-care / sample text is ever printed.
+/// ONLY the platform disclaimer + website. The website is the last thing on
+/// the ticket; the job then ends with the single trailing feed before the cut.
+/// No hardcoded address / customer-care / sample text is ever printed.
 List<PreviewLine> buildTicketLines(TicketData d) {
   final lines = <PreviewLine>[];
   final route = routeParts(up(d.routeName));
@@ -458,22 +422,18 @@ List<PreviewLine> buildTicketLines(TicketData d) {
   // statement, then one blank line before the footer.
   lines.add(PreviewLine(EscPos.divider(), center: true));
   final noteLines = wrap(d.note.trim(), _fontBCols);
-  for (var i = 0; i < noteLines.length; i++) {
-    lines.add(PreviewLine(noteLines[i],
-        center: true,
-        small: true,
-        feedAfter: i == noteLines.length - 1 ? 1 : 0));
+  for (final note in noteLines) {
+    lines.add(PreviewLine(note, center: true, small: true));
   }
   // Footer — exactly the app preview: "Powered by" / brand (bold) / website.
   lines.add(PreviewLine(EscPos.center('Powered by'), center: true));
   lines.add(PreviewLine(EscPos.center(up(kPlatformProvider)),
       center: true, bold: true));
-  final website = d.website.trim().isEmpty ? kPlatformUrl : d.website.trim();
+final website = d.website.trim().isEmpty ? kPlatformUrl : d.website.trim();
   lines.add(PreviewLine(EscPos.center(website), center: true));
-  // CODE128 barcode (height stays well under the 1 cm print spec) — centered,
-  // then a 3-line tear-off feed so the driver gets a clean perforation.
-  lines.add(PreviewLine('',
-      center: true, barcodeData: barcodeDataFor(d), feedAfter: 3));
+  // The website is the last thing on the ticket. The CODE128 that used to sit
+  // below it (and its 3-line tear-off feed) has been removed at the operator's
+  // request, so the job now runs website -> the single trailing feed -> cut.
 
   return lines;
 }
@@ -565,11 +525,11 @@ String _manifestPayShort(String method) {
   }
 }
 
-/// Fixed trailing blank feed before the cut — strictly one line. The old
-/// configurable 8-line per-company default was wasteful on the roll; a single
-/// line keeps the cutter clear of the last printed row. [_excessFeed] still
-/// tops short jobs up to [kMinPrintLengthMm] so the footer branding is never
-/// sheared by the blade.
+/// Fixed trailing blank feed before the cut — strictly one line, after all
+/// printing has finished. The old configurable 8-line per-company default was
+/// wasteful on the roll, and the 12 cm min-length padding that briefly replaced
+/// it has now been dropped as well: every job simply ends with this single
+/// feed, then the cut.
 const int kTrailingFeedLines = 1;
 
 List<int> _toBytes(List<PreviewLine> lines) {
@@ -599,8 +559,7 @@ List<int> _toBytes(List<PreviewLine> lines) {
     b.addAll(EscPos.bold(false));
     if (l.feedAfter > 0) b.addAll(EscPos.feed(l.feedAfter));
   }
-  b.addAll(
-      EscPos.feed(kTrailingFeedLines + _excessFeed(lines, kTrailingFeedLines)));
+  b.addAll(EscPos.feed(kTrailingFeedLines));
   b.addAll(EscPos.cut());
   return b;
 }

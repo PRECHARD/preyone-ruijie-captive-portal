@@ -24,6 +24,7 @@ import { errorHandler } from './middleware/errorHandler';
 import { maintenanceCheck } from './middleware/maintenanceMode';
 import { scheduleSessionCleanup } from './services/sessionCleanup';
 import { scheduleAccessLogCleanup } from './services/accessLogCleanup';
+import { scheduleHandoverReminders } from './services/handoverReminder';
 
 const app = express();
 const PORT = process.env.PORT ?? 3000;
@@ -377,6 +378,12 @@ app.listen(PORT, () => {
     const retentionDays = Number(process.env.ACCESS_LOG_RETENTION_DAYS ?? 30);
     scheduleAccessLogCleanup(intervalMinutes, retentionDays);
     console.log(`Access log cleanup scheduled every ${intervalMinutes} minute(s), retaining ${retentionDays} day(s).`);
+  }
+
+  if (process.env.ENABLE_HANDOVER_REMINDERS !== 'false') {
+    const intervalMinutes = Number(process.env.HANDOVER_REMINDER_INTERVAL_MIN ?? 60);
+    scheduleHandoverReminders(intervalMinutes);
+    console.log(`Handover reminders scheduled every ${intervalMinutes} minute(s).`);
   }
 });
 

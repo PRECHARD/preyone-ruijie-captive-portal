@@ -64,19 +64,51 @@ RUIJIE_PASSWORD=PreyoneNetAccess
 
 JWT_SECRET=generate-a-strong-random-secret
 
-PESEPAY_API_KEY=
-PESEPAY_API_ID=
-PESEPAY_MERCHANT_ID=
+PESEPAY_INTEGRATION_KEY=
+# Shared AES key: exactly 16, 24 or 32 bytes. First 16 chars are the IV.
 PESEPAY_ENCRYPTION_KEY=
-PESEPAY_BASE_URL=https://api.pesepay.com
 ```
 
 ### Key Variables
 
-- `JWT_SECRET` — **required** in production. Used for admin JWT tokens. Generate with `openssl rand -hex 48`.
+- `JWT_SECRET` — **required** in production. Used for admin JWT tokens and payment status tokens. Generate with `openssl rand -hex 48`.
 - `NODE_ENV` — set to `production` for production deployment.
-- `BASE_URL` — the public-facing URL of the captive portal (used for Pesepay return URLs).
+- `BASE_URL` — the public-facing URL of the captive portal (used to build the Pesepay `resultUrl` and `returnUrl`).
 - `RUIJIE_SUCCESS_URL` — where users are redirected after signup. Defaults to `/success.html`.
+- `PESEPAY_INTEGRATION_KEY` / `PESEPAY_ENCRYPTION_KEY` — leave blank to disable online payments entirely; `/api/payments/initiate` then returns `422`.
+
+### How the payment flow works
+
+> Full operational reference (API quirks, payload shape, reconciliation, troubleshooting):
+> **`docs/PESEPAY-INTEGRATION.md`**
+
+1. `POST /api/payments/initiate` validates the package and phone, creates a `pending`
+   payment with a `merchant_reference` (`PREY-…`) and a 32-byte `webhook_token`, and
+   calls Pesepay's `make-payment` endpoint. The request payload is AES-CBC encrypted
+   with `PESEPAY_ENCRYPTION_KEY`.
+2. This is a **seamless EcoCash** transaction: the push goes straight to the customer's
+   phone — there is **no hosted page to redirect to** (`pollUrl` is a JSON status
+   endpoint, not a page). The modal tells the customer to approve on their phone and
+   polls `GET /api/payments/status/:id` in place.
+3. Completion happens via up to three redundant paths, all minting through one guarded
+   `completePayment()`: Pesepay's webhook POST to `resultUrl`
+   (`BASE_URL/api/payments/webhook`), the legacy `returnUrl` flow
+   (`BASE_URL/api/payments/return`), and the `/status` poll which reconciles pending
+   payments directly against the gateway (`check-payment`).
+
+### How Pesepay callbacks are authenticated
+
+Pesepay encrypts the callback payload with the shared `PESEPAY_ENCRYPTION_KEY`, so a
+payload that decrypts cleanly **is** from Pesepay. That decryption is the primary
+authentication step; an undecryptable payload is rejected with `400` before any
+database lookup.
+
+A per-payment 32-byte token is also embedded in the `resultUrl` handed to Pesepay and
+verified whenever Pesepay echoes it back. It is deliberately **not** mandatory: an
+earlier implementation required an out-of-band credential and rejected every genuine
+callback (24 retries on 2026-09-22, all `401`), leaving customers charged with no
+voucher issued. The token is only an additional check, because rejecting callbacks is
+strictly worse than accepting a forged one we can decrypt.
 
 ## Installation
 

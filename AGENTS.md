@@ -12,11 +12,19 @@ The following files and flows are confirmed working and MUST NOT be changed with
   - Voucher validation, user creation, session creation, WISPr profile creation
   - Phone/email are optional for quick voucher signup
   - Returns JSON with `redirectUrl` pointing to ext_login
+  - Gateway params (`client_mac`, `login_url`, `ssid`, `nas_ip`, `nas_mac`, `url`) are read from
+    **`req.query`**, NOT `req.body` — a POST that puts them in the body silently loses them
+- User INSERTs (lines 131 and 360) MUST keep the partial-index predicate:
+  `ON CONFLICT (email) WHERE email IS NOT NULL AND email != '' DO NOTHING`.
+  A bare `ON CONFLICT (email)` cannot be inferred against the partial index
+  `idx_users_email_unique` and makes **every** signup fail with `42P10`. This broke all
+  redemption in production on 2026-10-04; see `tests/partialIndexConflict.test.ts`.
 
 ### Gateway Redirect Logic
 - **`src/utils/redirect.ts`** — `buildRuijieSuccessUrl()` function (lines 38-112)
   - Redirects DIRECTLY to ext_login URL (not through /api/auth/extauth)
   - Sets `url`/`redirect` params to originalUrl (the URL user was trying to visit)
+  - Also sets `next_url` (required by Ruijie WISPr), same value as `url`/`redirect`
   - DO NOT change this to redirect to success.html or any other URL
 
 ### CSP Configuration
@@ -25,31 +33,38 @@ The following files and flows are confirmed working and MUST NOT be changed with
   - DO NOT change to `'self'` — it will silently break internet access
 
 ### FreeRADIUS Config (on VPS)
-- **NOT WIRED UP (verified 2026-10-02).** The claims below were aspirational, not real:
-  - ~~`/etc/freeradius/3.0/mods-enabled/rest` — REST module pointing to localhost:3000~~ — the `rest` module is **not enabled**; no `rest` reference exists in `sites-enabled` or `policy.d`
-  - ~~`/etc/freeradius/3.0/clients.conf` — gateway client with secret `preyone@radius2024`~~ — `clients.conf` has only `localhost`/`localhost_ipv6` with secret `testing123`; **no gateway client**
-- Container `preyone-radius` runs `/usr/sbin/freeradius` (not `radiusd`); its healthcheck calls `radiusd` and so reports `unhealthy` permanently — a false alarm, not a service fault
-- `mods-available/rest` has `connect_uri = "http://127.0.0.1/"` with URIs like
-  `/user/%{User-Name}/mac/%{Called-Station-ID}?action=authorize`, which do **not** match the
-  portal's `GET /api/radius/auth?username=&mac=` — enabling it needs an nginx rewrite or new URIs
-- Radiusd log shows only rejected internet-scanner requests; the gateway has never authenticated
-- Portal is reachable from FreeRADIUS: nginx :80 → portal :5000
-- Firewall `1812/udp` + `1813/udp` ALLOW — correct
-- See `docs/EG105G-P-Gateway-Config.md` section 7 to wire it up
-- DO NOT modify without testing RADIUS auth end-to-end
+- **WIRED UP AND VERIFIED (2026-10-04).** Both RADIUS paths proven end-to-end via `radclient`:
+  - Unknown MAC → portal `404 session not found` → **Access-Reject**
+  - Live voucher MAC → portal `200` → **Access-Accept**
+- Config lives on the HOST at `/opt/preyone-infra/radius-config/` and is **bind-mounted** into the
+  container (`clients.conf`, `mods-available/rest`, `mods-enabled/rest`, `sites-available/default`).
+  Edit the host files, then `docker compose restart freeradius` from `/opt/preyone-infra`.
+- `rlm_rest` requires the `freeradius-rest` package (Debian ships it separately from `freeradius`).
+  It is now in `freeradius/Dockerfile` — without it radiusd fails with `Failed to link to module 'rlm_rest'`.
+- `mods-available/rest` uses `connect_uri = "https://wifi.preyone.com"` (HTTPS; the container cannot
+  reach the portal via `127.0.0.1` or port 5000). Authorize URI is
+  `${..connect_uri}/api/radius/auth?username=%{User-Name}&mac=%{Called-Station-ID}`;
+  accounting URI is `${..connect_uri}/api/radius/acct?mac=...&status=...&input=...&output=...&session=...`
+- `rest` is the first module in the `authorize` section of `sites-available/default` (before `pap`,
+  so it is not pre-empted). Gateway clients are still **commented out** pending the gateway WAN IP.
+- Container runs `/usr/sbin/freeradius` (no `radiusd` binary exists); the healthcheck was fixed to
+  `/usr/sbin/freeradius -C` and the container now reports `healthy`.
+- Backups: `/opt/preyone-infra/backups/radius-20261004-090227/`
+- Verify with `freeradius -C` (must exit 0) before restarting
 
 ### Gateway Config (EG105G-P)
 - Auth Mode: External Portal / Web Authentication
-- RADIUS: 173.249.7.190:1812 (auth), :1813 (acct)
+- RADIUS: **158.220.118.91**:1812 (auth), :1813 (acct)  ← changed from stale `173.249.7.190`
 - ext_login: port 2060
 - Gateway must be rebooted after RADIUS config changes
+- Gateway is currently still in **WiFiDog** mode (sends no `login_url`); WISPr not yet selected
 
 ## Architecture
 
 ```
-Phone → Ruijie AP (WiFi) → EG105G-P Gateway → VPS (173.249.7.190)
+Phone → Ruijie AP (WiFi) → EG105G-P Gateway → VPS (158.220.118.91)
                                     |
-                              FreeRADIUS 3.2.5
+                              FreeRADIUS 3.2.1
                                     |
                               Node.js Portal (PM2)
                                     |

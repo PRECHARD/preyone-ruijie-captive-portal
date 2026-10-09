@@ -153,6 +153,46 @@ async function mintLegacyVoucher(client: PoolClient, pay: LegacyMintContext): Pr
   throw new Error('Could not generate a unique voucher code');
 }
 
+type SaleOwner = { id: string; fullName: string };
+
+// A sale must always be attributable to a person, exactly like a staff-created
+// voucher is. Portal/gateway payments belong to the CEO by default; the
+// ONLINE_SALE_OWNER_ID override lets ops reassign them without a redeploy.
+async function resolveOnlineSaleOwner(client: PoolClient): Promise<SaleOwner | null> {
+  const override = process.env.ONLINE_SALE_OWNER_ID;
+  if (override) {
+    const hit = await client.query(
+      `SELECT id, full_name FROM admin_users WHERE id = $1 AND status = 'active'`,
+      [override]
+    );
+    if (hit.rows.length > 0) return { id: hit.rows[0].id, fullName: hit.rows[0].full_name };
+  }
+  const owner = await client.query(
+    `SELECT id, full_name FROM admin_users
+     WHERE status = 'active' AND role = 'CEO'
+     ORDER BY created_at ASC LIMIT 1`
+  );
+  return owner.rows.length > 0
+    ? { id: owner.rows[0].id, fullName: owner.rows[0].full_name }
+    : null;
+}
+
+// The admin voucher form and the sales list share one fixed set of methods.
+// Gateways return their own labels ('EcoCash (Pesepay)'), which would otherwise
+// land next to 'Cash' as an option the UI cannot render.
+// Order matters: 'ecocash' contains 'cash', so EcoCash must be tested first.
+function normalizeSaleMethod(raw?: string | null): string {
+  const value = (raw || '').trim();
+  if (!value) return 'Cash';
+  const lower = value.toLowerCase();
+  if (lower.includes('ecocash')) return 'EcoCash';
+  if (lower.includes('onemoney') || lower.includes('one money')) return 'OneMoney';
+  if (lower.includes('omari')) return 'Omari';
+  if (lower.includes('innbucks') || lower.includes('inn bucks')) return 'InnBucks';
+  if (lower.includes('cash')) return 'Cash';
+  return value;
+}
+
 // Record an operations alert when a Ruijie Cloud voucher could not be minted for
 // a payment that HAS already been charged by Pesepay. Without this the failure is
 // invisible: the transaction rolls back, the payment stays 'pending', and the
@@ -310,18 +350,81 @@ async function completePayment(paymentId: string): Promise<string> {
       );
     }
 
-    await client.query(
+    // RETURNING: `pay` was read before this UPDATE, so its completed_at is still
+    // NULL — the voucher and sale rows must carry the real completion time, not
+    // a stale one, or the sale lands on the wrong day in the revenue report.
+    const { rows: completedRows } = await client.query(
       `UPDATE payments
        SET status = 'completed', completed_at = NOW(), voucher_code = $2, error_message = NULL
-       WHERE id = $1`,
+       WHERE id = $1
+       RETURNING completed_at`,
       [paymentId, code]
     );
+    const completedAt: Date = completedRows[0]?.completed_at ?? new Date();
 
     await client.query(
       `INSERT INTO transactions
         (payment_id, user_id, package_tier, amount, currency, payment_method, voucher_code, status, completed_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, 'completed', NOW())`,
       [paymentId, pay.user_id, pay.tier_name, pay.amount, pay.currency, pay.payment_method, code]
+    );
+
+    // ── Account for the sale ────────────────────────────────────────────────
+    // The Ruijie Cloud path mints the code remotely and never created a local
+    // `vouchers` row, so a paid voucher was invisible to the admin voucher list
+    // and no `sales` row was ever written — the customer paid and nobody could
+    // see it. Both writes happen here, inside this transaction, so a completed
+    // payment is always attributed to a seller.
+    const owner = await resolveOnlineSaleOwner(client);
+
+    await client.query(
+      `INSERT INTO vouchers
+         (code, duration_min, max_uses, expires_at, data_limit_gb, is_uncapped,
+          bandwidth_mbps_up, bandwidth_mbps_down, sold_by, price_amount, package_tier,
+          max_devices, created_at)
+       SELECT $1, $2, 1, NULL, $3, $4, $5, $6, $7, $8, $9, $10, $11
+       WHERE NOT EXISTS (SELECT 1 FROM vouchers WHERE code = $1)`,
+      [
+        code,
+        pay.duration_min,
+        pay.data_limit_gb,
+        pay.is_uncapped,
+        pay.bandwidth_mbps_up,
+        pay.bandwidth_mbps_down,
+        owner?.id ?? null,
+        pay.amount,
+        pay.tier_name,
+        pay.max_devices,
+        completedAt,
+      ]
+    );
+
+    // The legacy local mint already inserted the row with sold_by NULL; the
+    // statement above skips it, so attribute it here instead.
+    await client.query(
+      `UPDATE vouchers SET sold_by = $2
+       WHERE code = $1 AND sold_by IS NULL AND $2 IS NOT NULL`,
+      [code, owner?.id ?? null]
+    );
+
+    await client.query(
+      `INSERT INTO sales
+         (voucher_id, voucher_code, sold_by, sold_by_name, amount, currency,
+          payment_method, payment_reference, sold_at)
+       SELECT v.id, v.code, $2, $3, $4, $5, $6, $7, $8
+       FROM vouchers v
+       WHERE v.code = $1
+         AND NOT EXISTS (SELECT 1 FROM sales WHERE voucher_code = $1)`,
+      [
+        code,
+        owner?.id ?? null,
+        owner?.fullName ?? null,
+        pay.amount,
+        pay.currency || 'USD',
+        normalizeSaleMethod(pay.payment_method),
+        pay.pesepay_reference || null,
+        completedAt,
+      ]
     );
 
     await client.query('COMMIT');

@@ -2,15 +2,20 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../api/client';
 import { playAlertSound } from '../utils/sound';
+import { FiMenu } from 'react-icons/fi';
 import Sidebar from './Sidebar';
+import WorkspaceSwitcher from './WorkspaceSwitcher';
+import Navbar from './Navbar';
 import ErrorBoundary from './ErrorBoundary';
 import ApWarningBanner from './ApWarningBanner';
-import { FiLogOut } from 'react-icons/fi';
+import type { Workspace } from '../workspace';
 import './Layout.css';
 
 interface LayoutProps {
   activeSection: string;
   onNavigate: (section: string) => void;
+  workspace: Workspace;
+  onWorkspaceChange: (workspace: Workspace) => void;
   children: React.ReactNode;
 }
 
@@ -22,9 +27,10 @@ interface ToastItem {
   section?: string;
 }
 
-export default function Layout({ activeSection, onNavigate, children }: LayoutProps) {
-  const { user, logout } = useAuth();
+export default function Layout({ activeSection, onNavigate, workspace, onWorkspaceChange, children }: LayoutProps) {
+  const { user } = useAuth();
   const role = user?.role || 'Staff';
+  const [navOpen, setNavOpen] = useState(false);
   const [notifCounts, setNotifCounts] = useState({ unreadBroadcasts: 0, pendingApprovals: 0, pendingHandovers: 0, pendingStaff: 0, total: 0 });
   const [alertsUnack, setAlertsUnack] = useState(0);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
@@ -94,26 +100,32 @@ export default function Layout({ activeSection, onNavigate, children }: LayoutPr
   }, [addToast]);
 
   return (
-    <div className={'admin-root' + (role === 'CEO' ? ' role-ceo' : '')}>
+    <div className={'admin-root' + (role === 'CEO' ? ' role-ceo' : '') + (navOpen ? ' nav-open' : '')}>
       <nav className="admin-nav">
         <div className="admin-nav-inner">
+          <button className="nav-hamburger" onClick={() => setNavOpen(o => !o)} aria-label="Toggle navigation menu" aria-expanded={navOpen}>
+            <FiMenu />
+          </button>
           <div className="admin-nav-brand">
-            <img src="/images/preyone-plan-white-outline@4x.png" alt="Preyone" className="admin-logo" />
+            <img src="/images/preyonenoneglow-logo-zoom.png" alt="Preyone" className="admin-logo" />
+            <span className="admin-brand-label">Command</span>
           </div>
-          <span className="admin-nav-title">Admin Console</span>
-          <div className="nav-user">
-            <span className="nav-user-dot" />
-            <span className="nav-user-name">{user?.fullName}</span>
-            <span className={'nav-role-badge ' + role.toLowerCase()}>{role}</span>
-            <button className="nav-signout-btn" onClick={logout}>
-              <FiLogOut /> Sign Out
-            </button>
+          <div className="admin-nav-center">
+            <WorkspaceSwitcher workspace={workspace} onChange={onWorkspaceChange} />
           </div>
+          <Navbar />
         </div>
       </nav>
+      <div className={'sidebar-overlay' + (navOpen ? ' visible' : '')} onClick={() => setNavOpen(false)} />
       <ApWarningBanner onNavigate={onNavigate} />
       <div className="admin-layout">
-        <Sidebar activeSection={activeSection} onNavigate={onNavigate} notifCounts={notifCounts} alertsUnack={alertsUnack} />
+        <Sidebar
+          activeSection={activeSection}
+          onNavigate={(s) => { setNavOpen(false); onNavigate(s); }}
+          workspace={workspace}
+          notifCounts={notifCounts}
+          alertsUnack={alertsUnack}
+        />
         <main className="admin-main"><ErrorBoundary section={activeSection} onNavigate={onNavigate}>{children}</ErrorBoundary></main>
       </div>
 

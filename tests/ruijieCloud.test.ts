@@ -243,6 +243,32 @@ describe('createRuijieVoucher', () => {
     // token call + failed create + token refresh + successful create
     expect(mocks.post.mock.calls[2][1]).toEqual({ appid: APPID, secret: SECRET });
   });
+
+  it('refreshes token and retries when API returns code 3 "Login timeout"', async () => {
+    // Observed live 2026-10-08: HTTP 200, code=3, msg="Login timeout" for a
+    // stale cached token — not covered by AUTH_ERROR_CODES (4010/4011/4013).
+    mocks.post.mockResolvedValueOnce({ status: 200, data: { code: 0, accessToken: 'stale' } });
+    mocks.post.mockResolvedValueOnce({ status: 200, data: { code: 3, msg: 'Login timeout' } });
+    mocks.post.mockResolvedValueOnce({ status: 200, data: { code: 0, accessToken: 'fresh' } });
+    mocks.post.mockResolvedValueOnce({
+      status: 200,
+      data: { code: 0, voucherData: { code: 0, list: [{ codeNo: 'RETRY2' }] } },
+    });
+
+    const v = await createRuijieVoucher({ profile, userGroupId });
+    expect(v.codeNo).toBe('RETRY2');
+    // stale create attempt + token refresh + successful create
+    expect(mocks.post).toHaveBeenCalledTimes(4);
+    expect(mocks.post.mock.calls[2][1]).toEqual({ appid: APPID, secret: SECRET });
+  });
+
+  it('does not retry code 3 when the message is unrelated (no retry loop)', async () => {
+    mocks.post.mockResolvedValueOnce({ status: 200, data: { code: 0, accessToken: 'tok' } });
+    mocks.post.mockResolvedValueOnce({ status: 200, data: { code: 3, msg: 'Some other error' } });
+
+    await expect(createRuijieVoucher({ profile, userGroupId })).rejects.toThrow(RuijieApiError);
+    expect(mocks.post).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe('getRuijieVouchers', () => {

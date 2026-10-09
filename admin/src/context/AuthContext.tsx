@@ -1,15 +1,17 @@
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
-import { api } from '../api/client';
+import { getToken, setToken, clearToken } from '../api/client';
 
-interface User {
+export interface AuthUser {
   id: string;
   fullName: string;
   email: string;
-  role: 'Staff' | 'Manager' | 'CEO';
+  role: string;
+  companyId?: string | null;
+  permissions?: string[];
 }
 
 interface AuthContextValue {
-  user: User | null;
+  user: AuthUser | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
   signup: (data: { fullName: string; email: string; phone: string; role: string; password: string }) => Promise<{ pendingApproval?: boolean; message?: string }>;
@@ -18,26 +20,30 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+async function fetchMe(): Promise<AuthUser | null> {
+  const token = getToken();
+  if (!token) return null;
+  const res = await fetch('/api/admin/auth/me', { headers: { Authorization: `Bearer ${token}` } });
+  const data = await res.json();
+  if (!data.id) return null;
+  return {
+    id: data.id,
+    fullName: data.full_name || data.fullName,
+    email: data.email,
+    role: data.role,
+    companyId: data.company_id ?? null,
+    permissions: data.permissions ?? [],
+  };
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const token = api.getToken();
-    if (!token) { setLoading(false); return; }
-    // Validate token by fetching /me
-    fetch('/api/admin/auth/me', {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then(r => r.json())
-      .then(data => {
-        if (data.id) {
-          setUser({ id: data.id, fullName: data.full_name || data.fullName, email: data.email, role: data.role });
-        } else {
-          api.clearToken();
-        }
-      })
-      .catch(() => api.clearToken())
+    fetchMe()
+      .then(setUser)
+      .catch(() => clearToken())
       .finally(() => setLoading(false));
   }, []);
 
@@ -49,8 +55,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Login failed');
-    api.setToken(data.token);
-    setUser({ id: data.user.id, fullName: data.user.fullName, email: data.user.email, role: data.user.role });
+    setToken(data.token);
+    const me = await fetchMe();
+    setUser(me || { id: data.user.id, fullName: data.user.fullName, email: data.user.email, role: data.user.role, companyId: null, permissions: [] });
   }, []);
 
   const signup = useCallback(async (body: { fullName: string; email: string; phone: string; role: string; password: string }) => {
@@ -65,8 +72,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const logout = useCallback(() => {
-    api.clearToken();
+    clearToken();
     localStorage.removeItem('admin_user');
+    localStorage.removeItem('admin_token');
     setUser(null);
   }, []);
 

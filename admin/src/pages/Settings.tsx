@@ -247,7 +247,7 @@ export default function Settings() {
           {schedules.length === 0 ? (
             <p style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 20 }}>No scheduled reports configured.</p>
           ) : (
-            <table className="data-table" style={{ width: '100%' }}>
+            <div className="card-table"><table className="data-table" style={{ width: '100%' }}>
               <thead>
                 <tr>
                   <th style={{ textAlign: 'left' }}>Frequency</th>
@@ -273,7 +273,7 @@ export default function Settings() {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </table></div>
           )}
         </div>
       )}

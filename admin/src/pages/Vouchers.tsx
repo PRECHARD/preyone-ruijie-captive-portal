@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback, useRef, Fragment } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../api/client';
 import { showToast } from '../utils/toast';
+import { fmtUsage, formatMac, formatSpeed, fmtDurationMin, fmtDateTime } from '../utils/format';
+import Badge from '../components/Badge';
 import jsPDF from 'jspdf';
 import { playVoucherSound, playAlertSound } from '../utils/sound';
 import EmptyState from '../components/EmptyState';
@@ -19,6 +21,8 @@ interface Package {
   is_uncapped: boolean;
 }
 
+type VoucherStatus = 'Unused' | 'Active' | 'Expired' | 'Disabled';
+
 interface Voucher {
   id: string;
   code: string;
@@ -30,10 +34,42 @@ interface Voucher {
   is_uncapped: boolean;
   max_uses: number;
   used_count: number;
-  expires_at: string;
   created_at: string;
   package_tier: string | null;
+  sold_by: string | null;
+  max_devices: number | null;
+  // Derived server-side from used_count / expires_at / is_disabled. Never stored
+  // on the row, so it cannot drift from what RADIUS actually enforces.
+  status: VoucherStatus;
+  is_disabled: boolean;
+  expires_at: string | null;
+  // Stored activated_at when set, otherwise derived from the first redemption.
+  first_redeemed_at: string | null;
+  // Subscriber, joined from the most recent users row for this code.
+  first_name: string | null;
+  last_name: string | null;
+  alias: string | null;
+  phone: string | null;
+  mac_address: string | null;
+  device_count: number;
+  bound_macs: string[] | null;
+  traffic_used_bytes: string;
+  traffic_total_bytes: string | null;
 }
+
+interface VoucherListResponse {
+  vouchers: Voucher[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+const STATUS_BADGE: Record<VoucherStatus, string> = {
+  Active: 'active',
+  Unused: 'default',
+  Expired: 'inactive',
+  Disabled: 'inactive',
+};
 
 interface ApprovalRequest {
   id: string;
@@ -57,7 +93,7 @@ interface ClockStatus {
   log: { clock_in: string } | null;
 }
 
-const APPROVAL_TIERS = ['PreMAX', 'PreULTRA', 'PreEXECUTIVE'];
+const APPROVAL_TIERS = ['PreMax', 'PreUltra', 'PreExecutive'];
 
 function fmtDur(m: number): string {
   if (!m) return '—';
@@ -71,6 +107,9 @@ function fmtDate(d: string): string {
   try { return new Date(d).toLocaleString(); } catch { return d || '—'; }
 }
 
+const PAYMENT_METHODS = ['Cash', 'EcoCash', 'OneMoney', 'Omari', 'InnBucks'];
+const IS_MOBILE_MONEY = (m: string) => m !== 'Cash';
+
 export default function Vouchers() {
   const { user } = useAuth();
   const role = user?.role || 'Staff';
@@ -83,13 +122,27 @@ export default function Vouchers() {
   const [vCode, setVCode] = useState('');
   const [vPrice, setVPrice] = useState('');
   const [vUses, setVUses] = useState(1);
+  const [vPayMethod, setVPayMethod] = useState('Cash');
+  const [vPayRef, setVPayRef] = useState('');
   const [vouchers, setVouchers] = useState<Voucher[]>([]);
+  const [vTotal, setVTotal] = useState(0);
+  const [vPage, setVPage] = useState(1);
+  const [vSearch, setVSearch] = useState('');
+  const [vStatusFilter, setVStatusFilter] = useState<'' | VoucherStatus>('');
+  const [vTierFilter, setVTierFilter] = useState('');
+  const [vSort, setVSort] = useState('created_at');
+  const [vSortDir, setVSortDir] = useState<'asc' | 'desc'>('desc');
+  const [vLoading, setVLoading] = useState(false);
+  const [busyVoucherId, setBusyVoucherId] = useState<string | null>(null);
+  const PAGE_SIZE = 25;
   const [vStatus, setVStatus] = useState<{ type: string; msg: string } | null>(null);
   const [creating, setCreating] = useState(false);
 
   const [bulkTier, setBulkTier] = useState('');
   const [bulkCount, setBulkCount] = useState(10);
   const [bulkPrice, setBulkPrice] = useState('');
+  const [bulkPayMethod, setBulkPayMethod] = useState('Cash');
+  const [bulkPayRef, setBulkPayRef] = useState('');
   const [bulkStatus, setBulkStatus] = useState<{ type: string; msg: string } | null>(null);
   const [bulkCreating, setBulkCreating] = useState(false);
   const [bulkResults, setBulkResults] = useState<any>(null);
@@ -114,9 +167,47 @@ export default function Vouchers() {
     return () => clearInterval(interval);
   }, [loadClockStatus]);
 
+  const [searchInput, setSearchInput] = useState('');
+
+  // Debounce the search box so typing does not fire a request per keystroke.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setVSearch(searchInput);
+      setVPage(1);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [searchInput]);
+
+  const loadVouchers = useCallback(() => {
+    setVLoading(true);
+    const q = new URLSearchParams();
+    q.set('page', String(vPage));
+    q.set('pageSize', String(PAGE_SIZE));
+    q.set('sort', vSort);
+    q.set('dir', vSortDir);
+    if (vSearch) q.set('search', vSearch);
+    if (vStatusFilter) q.set('status', vStatusFilter);
+    if (vTierFilter) q.set('tier', vTierFilter);
+    return api
+      .get<VoucherListResponse>(`/vouchers?${q.toString()}`)
+      .then(res => {
+        setVouchers(res.vouchers);
+        setVTotal(res.total);
+        // A narrowing filter can leave us past the last page; step back rather
+        // than rendering an empty table.
+        const last = Math.max(1, Math.ceil(res.total / (res.pageSize || PAGE_SIZE)));
+        if (vPage > last) setVPage(last);
+      })
+      .catch(() => {})
+      .finally(() => setVLoading(false));
+  }, [vPage, vSearch, vStatusFilter, vTierFilter, vSort, vSortDir]);
+
+  useEffect(() => {
+    loadVouchers();
+  }, [loadVouchers]);
+
   useEffect(() => {
     api.get<Package[]>('/packages').then(setPackages).catch(() => {});
-    api.get<Voucher[]>('/vouchers').then(setVouchers).catch(() => {});
     if (isMgmt) {
       api.get<ApprovalRequest[]>('/vouchers/pending-approvals').then(setPendingApprovals).catch(() => {});
     }
@@ -190,7 +281,7 @@ export default function Vouchers() {
     if (pkg) {
       setVCode(generateCode(pkg.tier_name));
       setVPrice(pkg.price_amount);
-      if (!['PreBIZ', 'PreMAX', 'PreULTRA', 'PreEXECUTIVE'].includes(pkg.tier_name)) setVUses(1);
+      if (!['PreCore', 'PreBizPlus', 'PreFam', 'PreBizPro', 'PreMax', 'PreUltra', 'PreExecutive'].includes(pkg.tier_name)) setVUses(1);
     }
   }, [packages, generateCode]);
 
@@ -232,6 +323,8 @@ export default function Vouchers() {
         maxUses: vUses,
         packageTier: selectedPkg.tier_name,
         priceAmount: parseFloat(vPrice),
+        paymentMethod: vPayMethod,
+        paymentReference: IS_MOBILE_MONEY(vPayMethod) ? vPayRef.trim() : undefined,
       });
       setVStatus({ type: 'success', msg: `Voucher "${data.code}" created successfully.` });
       setVoucherCardData(data);
@@ -239,7 +332,9 @@ export default function Vouchers() {
       setVCode('');
       setVPrice('');
       setVUses(1);
-      api.get<Voucher[]>('/vouchers').then(setVouchers).catch(() => {});
+      setVPayMethod('Cash');
+      setVPayRef('');
+      loadVouchers();
       showToast({ title: 'Voucher Created', message: `"${data.code}" created successfully`, type: 'success' });
       playVoucherSound();
     } catch (err: any) {
@@ -262,6 +357,8 @@ export default function Vouchers() {
         priceAmount: vPrice ? parseFloat(vPrice) : undefined,
         code: vCode,
         maxUses: vUses,
+        paymentMethod: vPayMethod,
+        paymentReference: IS_MOBILE_MONEY(vPayMethod) ? vPayRef.trim() : undefined,
       });
       setVStatus({ type: 'success', msg: '✓ ' + data.message });
       api.get<ApprovalRequest[]>('/vouchers/my-approvals').then(setMyApprovals).catch(() => {});
@@ -283,10 +380,12 @@ export default function Vouchers() {
         count: bulkCount,
         packageTier: bulkTier,
         priceAmount: bulkPrice ? parseFloat(bulkPrice) : undefined,
+        paymentMethod: bulkPayMethod,
+        paymentReference: IS_MOBILE_MONEY(bulkPayMethod) ? bulkPayRef.trim() : undefined,
       });
       setBulkStatus({ type: 'success', msg: data.message });
       setBulkResults(data.vouchers);
-      api.get<Voucher[]>('/vouchers').then(setVouchers).catch(() => {});
+      loadVouchers();
       showToast({ title: 'Bulk Vouchers', message: data.message, type: 'success' });
       playVoucherSound();
     } catch (err: any) {
@@ -307,6 +406,8 @@ export default function Vouchers() {
         packageTier: bulkTier,
         priceAmount: bulkPrice ? parseFloat(bulkPrice) : undefined,
         count: bulkCount,
+        paymentMethod: bulkPayMethod,
+        paymentReference: IS_MOBILE_MONEY(bulkPayMethod) ? bulkPayRef.trim() : undefined,
       });
       setBulkStatus({ type: 'success', msg: '✓ ' + data.message });
       api.get<ApprovalRequest[]>('/vouchers/my-approvals').then(setMyApprovals).catch(() => {});
@@ -320,7 +421,7 @@ export default function Vouchers() {
       const data = await api.post<any>(`/vouchers/approvals/${id}/approve`);
       setPendingApprovals(prev => prev.filter(a => a.id !== id));
       setVStatus({ type: 'success', msg: data.message || 'Approved' });
-      api.get<Voucher[]>('/vouchers').then(setVouchers).catch(() => {});
+      loadVouchers();
       showToast({ title: 'Approved', message: data.message || 'Voucher request approved', type: 'success' });
       playAlertSound();
     } catch (err: any) {
@@ -600,6 +701,99 @@ export default function Vouchers() {
     setTimeout(() => setVStatus(null), 2000);
   };
 
+  // Lifecycle actions. Each guards on busyVoucherId so a slow request cannot be
+  // double-fired, and refreshes through loadVouchers so the derived status badge
+  // reflects the change without a manual reload.
+  const runVoucherAction = async (
+    id: string,
+    fn: () => Promise<any>,
+    successMsg: (res: any) => string
+  ) => {
+    setBusyVoucherId(id);
+    try {
+      const res = await fn();
+      showToast({ title: 'Done', message: successMsg(res), type: 'success' });
+      await loadVouchers();
+    } catch (err: any) {
+      showToast({
+        title: 'Action failed',
+        message: err?.message || 'The voucher could not be updated.',
+        type: 'error',
+      });
+    } finally {
+      setBusyVoucherId(null);
+    }
+  };
+
+  const toggleDisable = (v: Voucher) =>
+    runVoucherAction(
+      v.id,
+      () => api.post(`/vouchers/${v.id}/disable`, { disabled: !v.is_disabled }),
+      () => `Voucher ${v.code} ${v.is_disabled ? 'enabled' : 'disabled'}`
+    );
+
+  const resetMacBinding = (v: Voucher) => {
+    if (!window.confirm(
+      `Release all ${v.device_count} device slot(s) bound to ${v.code}?\n\n` +
+      'Currently connected devices will be able to sign in again, and the slots ' +
+      'become free for other devices.'
+    )) return;
+    runVoucherAction(
+      v.id,
+      () => api.post(`/vouchers/${v.id}/reset-mac`),
+      (res) => res?.message || `Device bindings cleared for ${v.code}`
+    );
+  };
+
+  const extendExpiry = (v: Voucher) => {
+    const raw = window.prompt(
+      `Extend voucher ${v.code} by how many minutes?\n\n` +
+      'This moves the code\'s own expiry. Live subscriber sessions are NOT touched ' +
+      'unless you confirm below.',
+      '1440'
+    );
+    if (raw === null) return;
+    const minutes = parseInt(raw, 10);
+    if (!Number.isFinite(minutes) || minutes <= 0) {
+      showToast({ title: 'Invalid', message: 'Enter a positive number of minutes.', type: 'warning' });
+      return;
+    }
+    const extendSessions = window.confirm(
+      minutes >= 60
+        ? `Also push ${v.used_count} live subscriber session(s) out by the same amount?`
+        : 'Also push live subscriber sessions out by the same amount?'
+    );
+    runVoucherAction(
+      v.id,
+      () => api.post(`/vouchers/${v.id}/extend`, { minutes, extendSessions }),
+      () => `Voucher ${v.code} extended by ${minutes} minutes`
+    );
+  };
+
+  const deleteVoucher = (v: Voucher) => {
+    if (!window.confirm(
+      `Delete voucher ${v.code}?\n\n` +
+      'The code stops working immediately. Redemption history is kept for audit, ' +
+      'so this can be reversed by re-enabling it in the database.'
+    )) return;
+    runVoucherAction(
+      v.id,
+      () => api.del(`/vouchers/${v.id}`),
+      (res) => res?.message || `Voucher ${v.code} deleted`
+    );
+  };
+
+  const toggleSort = (key: string) => {
+    if (vSort === key) setVSortDir(d => (d === 'asc' ? 'desc' : 'asc'));
+    else { setVSort(key); setVSortDir('asc'); }
+    setVPage(1);
+  };
+
+  const sortIndicator = (key: string) =>
+    vSort === key ? (vSortDir === 'asc' ? ' ▲' : ' ▼') : '';
+
+  const totalPages = Math.max(1, Math.ceil(vTotal / PAGE_SIZE));
+
   const shareWhatsApp = async () => {
     if (!voucherCardData) return;
     const c = document.createElement('canvas');
@@ -720,14 +914,26 @@ export default function Vouchers() {
               <label>Max Users</label>
               <div className="stepper">
                 <button type="button" className="stepper-btn" onClick={() => setVUses(u => Math.max(1, u - 1))}
-                  disabled={!!(selectedPkg && !['PreBIZ', 'PreMAX', 'PreULTRA', 'PreEXECUTIVE'].includes(selectedPkg.tier_name))}>&minus;</button>
+                  disabled={!!(selectedPkg && !['PreCore', 'PreBizPlus', 'PreFam', 'PreBizPro', 'PreMax', 'PreUltra', 'PreExecutive'].includes(selectedPkg.tier_name))}>&minus;</button>
                 <input type="number" className="stepper-input" value={vUses} min="1" max="100"
                   onChange={e => { const n = parseInt(e.target.value); if (!isNaN(n)) setVUses(Math.max(1, Math.min(100, n))); }}
-                  disabled={!!(selectedPkg && !['PreBIZ', 'PreMAX', 'PreULTRA', 'PreEXECUTIVE'].includes(selectedPkg.tier_name))} />
+                  disabled={!!(selectedPkg && !['PreCore', 'PreBizPlus', 'PreFam', 'PreBizPro', 'PreMax', 'PreUltra', 'PreExecutive'].includes(selectedPkg.tier_name))} />
                 <button type="button" className="stepper-btn" onClick={() => setVUses(u => Math.min(100, u + 1))}
-                  disabled={!!(selectedPkg && !['PreBIZ', 'PreMAX', 'PreULTRA', 'PreEXECUTIVE'].includes(selectedPkg.tier_name))} >+</button>
+                  disabled={!!(selectedPkg && !['PreCore', 'PreBizPlus', 'PreFam', 'PreBizPro', 'PreMax', 'PreUltra', 'PreExecutive'].includes(selectedPkg.tier_name))} >+</button>
               </div>
             </div>
+            <div className="vcb-meta">
+              <label>Payment Method</label>
+              <select className="form-select" style={{ height: '2.3rem', padding: '0 0.6rem' }} value={vPayMethod} onChange={e => { setVPayMethod(e.target.value); if (e.target.value === 'Cash') setVPayRef(''); }} disabled={createDisabled || !selectedPkg}>
+                {PAYMENT_METHODS.map(m => <option key={m} value={m}>{m}</option>)}
+              </select>
+            </div>
+            {IS_MOBILE_MONEY(vPayMethod) && (
+              <div className="vcb-meta" style={{ minWidth: 150 }}>
+                <label>ContiPay Reference</label>
+                <input type="text" className="stepper-input" value={vPayRef} placeholder="e.g. MP2609... or txn id" onChange={e => setVPayRef(e.target.value)} />
+              </div>
+            )}
             <button type="submit" className="btn-primary" disabled={createDisabled}>
               {creating ? 'Creating...' : 'Create'}
             </button>
@@ -844,6 +1050,18 @@ export default function Vouchers() {
                 <button type="button" className="stepper-btn" onClick={() => setBulkCount(c => Math.min(100, c + 5))} disabled={bulkCreating}>+</button>
               </div>
             </div>
+            <div className="form-field" style={{ maxWidth: 190 }}>
+              <label>Payment Method</label>
+              <select className="form-select" value={bulkPayMethod} onChange={e => { setBulkPayMethod(e.target.value); if (e.target.value === 'Cash') setBulkPayRef(''); }} disabled={bulkCreating}>
+                {PAYMENT_METHODS.map(m => <option key={m} value={m}>{m}</option>)}
+              </select>
+            </div>
+            {IS_MOBILE_MONEY(bulkPayMethod) && (
+              <div className="form-field" style={{ maxWidth: 200 }}>
+                <label>ContiPay Reference</label>
+                <input type="text" className="stepper-input" value={bulkPayRef} placeholder="e.g. MP2609... or txn id" onChange={e => setBulkPayRef(e.target.value)} />
+              </div>
+            )}
             <button type="submit" className="btn-primary" disabled={bulkCreating || (needsClockIn && !isClockedIn && !bulkTier)} style={{ flexShrink: 0, height: '2.3rem' }}>
               {bulkCreating ? 'Generating...' : 'Generate Bulk'}
             </button>
@@ -1053,31 +1271,173 @@ export default function Vouchers() {
       {/* Voucher List */}
       <div className="section-head" style={{ marginTop: '2rem' }}>
         <h2 className="section-head-title">Voucher List</h2>
+        <span className="section-head-desc">{vTotal} total</span>
       </div>
+
+      {/* Toolbar — search, filters. Every change resets to page 1 so a narrowed
+          result set never lands the user on an empty page. */}
+      <div className="voucher-toolbar">
+        <input
+          type="search"
+          className="input voucher-toolbar__search"
+          placeholder="Search by code…"
+          value={searchInput}
+          onChange={e => setSearchInput(e.target.value)}
+          aria-label="Search vouchers by code"
+        />
+        <select
+          className="input voucher-toolbar__filter"
+          value={vStatusFilter}
+          onChange={e => { setVStatusFilter(e.target.value as '' | VoucherStatus); setVPage(1); }}
+          aria-label="Filter by status"
+        >
+          <option value="">All statuses</option>
+          <option value="Unused">Unused</option>
+          <option value="Active">Active</option>
+          <option value="Expired">Expired</option>
+          <option value="Disabled">Disabled</option>
+        </select>
+        <select
+          className="input voucher-toolbar__filter"
+          value={vTierFilter}
+          onChange={e => { setVTierFilter(e.target.value); setVPage(1); }}
+          aria-label="Filter by user group"
+        >
+          <option value="">All packages</option>
+          {packages.map(p => (
+            <option key={p.tier_name} value={p.tier_name}>{p.display_name || p.tier_name}</option>
+          ))}
+        </select>
+      </div>
+
       <div className="card card-table">
-        {vouchers.length === 0 ? (
-          <div className="table-empty"><p>No vouchers created yet.</p></div>
+        {vLoading && vouchers.length === 0 ? (
+          <div className="table-empty"><p>Loading…</p></div>
+        ) : vouchers.length === 0 ? (
+          <div className="table-empty">
+            <p>No vouchers match.</p>
+          </div>
         ) : (
-          <table className="data-table">
-            <thead><tr><th>Code</th><th>Price</th><th>Duration</th><th>Bandwidth</th><th>Data</th><th>Max Uses</th><th>Used</th><th>Package</th><th>Created</th></tr></thead>
+          <table className="data-table voucher-table">
+            <thead>
+              <tr>
+                <th onClick={() => toggleSort('code')} className="voucher-th-sortable">Code{sortIndicator('code')}</th>
+                <th onClick={() => toggleSort('status')} className="voucher-th-sortable">Status{sortIndicator('status')}</th>
+                <th onClick={() => toggleSort('price')} className="voucher-th-sortable">Price / Period{sortIndicator('price')}</th>
+                <th>Subscriber</th>
+                <th>Timeline</th>
+                <th>Devices</th>
+                <th>Usage / Speed</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
             <tbody>
-              {vouchers.map(v => (
-                <tr key={v.id}>
-                  <td><span className="code-cell" onClick={() => copyCode(v.code)} title="Click to copy">{v.code}</span></td>
-                  <td><span className="money money--sm">{v.price_amount ? '$' + parseFloat(v.price_amount).toFixed(2) : '—'}</span></td>
-                  <td>{fmtDur(v.duration_min)}</td>
-                  <td>{v.bandwidth_mbps_up}/{v.bandwidth_mbps_down} Mbps</td>
-                  <td>{v.is_uncapped ? 'Unlimited' : (v.data_limit_gb ?? 'Unlimited') + ' GB'}</td>
-                  <td>{v.max_uses}</td>
-                  <td>{v.used_count}/{v.max_uses}</td>
-                  <td>{v.package_tier || <span className="muted">—</span>}</td>
-                  <td>{fmtDate(v.created_at)}</td>
-                </tr>
-              ))}
+              {vouchers.map(v => {
+                const busy = busyVoucherId === v.id;
+                const name = [v.first_name, v.last_name].filter(Boolean).join(' ')
+                  || v.mac_address
+                  || null;
+                return (
+                  <tr key={v.id} className={busy ? 'voucher-row--busy' : undefined}>
+                    <td>
+                      <span className="code-cell" onClick={() => copyCode(v.code)} title="Click to copy">{v.code}</span>
+                      {v.package_tier && <div className="muted voucher-sub">{v.package_tier}</div>}
+                    </td>
+                    <td>
+                      <Badge variant={STATUS_BADGE[v.status] ?? 'default'}>{v.status}</Badge>
+                    </td>
+                    <td>
+                      <span className="money money--sm">{v.price_amount ? '$' + parseFloat(v.price_amount).toFixed(2) : '—'}</span>
+                      <div className="muted voucher-sub">{fmtDurationMin(v.duration_min)}</div>
+                    </td>
+                    <td>
+                      {name ? (
+                        <>
+                          <div>{name}{v.alias ? <span className="muted"> ({v.alias})</span> : null}</div>
+                          {v.phone && <div className="muted voucher-sub">{v.phone}</div>}
+                        </>
+                      ) : (
+                        <span className="muted">—</span>
+                      )}
+                    </td>
+                    <td>
+                      <div className="voucher-sub">Created {fmtDateTime(v.created_at)}</div>
+                      <div className="voucher-sub">Activated {fmtDateTime(v.first_redeemed_at)}</div>
+                      <div className="voucher-sub">Expires {fmtDateTime(v.expires_at)}</div>
+                    </td>
+                    <td>
+                      <div>{v.max_devices ?? v.device_count} max</div>
+                      <div className="muted voucher-sub">
+                        {v.bound_macs && v.bound_macs.length > 0
+                          ? v.bound_macs.map(formatMac).join(', ')
+                          : 'Unbound'}
+                      </div>
+                    </td>
+                    <td>
+                      <div>{fmtUsage(v.traffic_used_bytes, v.is_uncapped ? null : v.traffic_total_bytes)}</div>
+                      <div className="muted voucher-sub">
+                        {formatSpeed(v.bandwidth_mbps_up, v.bandwidth_mbps_down)}
+                      </div>
+                    </td>
+                    <td>
+                      <div className="voucher-actions">
+                        <button
+                          className="btn-action"
+                          disabled={busy}
+                          onClick={() => toggleDisable(v)}
+                          title={v.is_disabled ? 'Re-enable this voucher' : 'Disable this voucher'}
+                        >
+                          {v.is_disabled ? 'Enable' : 'Disable'}
+                        </button>
+                        <button className="btn-action" disabled={busy} onClick={() => extendExpiry(v)} title="Extend expiry">
+                          Extend
+                        </button>
+                        <button
+                          className="btn-action"
+                          disabled={busy || v.device_count === 0}
+                          onClick={() => resetMacBinding(v)}
+                          title="Reset MAC binding"
+                        >
+                          Reset MAC
+                        </button>
+                        <button
+                          className="btn-action btn-action--danger"
+                          disabled={busy}
+                          onClick={() => deleteVoucher(v)}
+                          title="Delete voucher"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}
       </div>
+
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="voucher-pager">
+          <button
+            className="btn-action"
+            disabled={vPage <= 1 || vLoading}
+            onClick={() => setVPage(p => Math.max(1, p - 1))}
+          >
+            Previous
+          </button>
+          <span className="muted">Page {vPage} of {totalPages}</span>
+          <button
+            className="btn-action"
+            disabled={vPage >= totalPages || vLoading}
+            onClick={() => setVPage(p => Math.min(totalPages, p + 1))}
+          >
+            Next
+          </button>
+        </div>
+      )}
     </div>
   );
 }

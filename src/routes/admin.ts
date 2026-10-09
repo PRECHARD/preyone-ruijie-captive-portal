@@ -252,19 +252,56 @@ adminRouter.get('/vouchers', async (req: Request, res: Response) => {
   const dataFrom = `
     FROM vouchers v
     LEFT JOIN voucher_status vs ON vs.id = v.id
+    -- Redemption source of truth: every activation writes a row here with the
+    -- person's name, the device MAC and the login time, so any redeemed code
+    -- (cloud or local) can be accounted for even when no users account exists.
+    LEFT JOIN LATERAL (
+      SELECT vr.full_name AS redemption_name,
+             vr.mac_address AS redemption_mac,
+             vr.ip_address AS redemption_ip,
+             vr.created_at AS redemption_at
+      FROM voucher_redemptions vr
+      WHERE vr.voucher_id = v.id
+      ORDER BY vr.created_at DESC
+      LIMIT 1
+    ) sub ON TRUE
     LEFT JOIN LATERAL (
       SELECT u.first_name, u.last_name, u.alias, u.phone, u.mac_address
       FROM users u
       WHERE u.voucher_code = v.code
       ORDER BY u.created_at DESC
       LIMIT 1
-    ) sub ON TRUE
+    ) usr ON TRUE
     LEFT JOIN LATERAL (
-      SELECT count(*)::int AS device_count,
-             array_agg(vd.mac_address ORDER BY vd.bound_at) FILTER (WHERE vd.is_active) AS bound_macs
+      SELECT count(*) FILTER (WHERE vd.is_active)::int AS device_count,
+             array_agg(vd.mac_address ORDER BY vd.bound_at) FILTER (WHERE vd.is_active) AS bound_macs,
+             COALESCE(
+               json_agg(json_build_object(
+                 'mac_address', vd.mac_address,
+                 'label', vd.label,
+                 'is_active', vd.is_active,
+                 'bound_at', vd.bound_at,
+                 'last_seen_at', vd.last_seen_at,
+                 'unbound_at', vd.unbound_at
+               ) ORDER BY vd.bound_at) FILTER (WHERE vd.is_active),
+               '[]'::json
+             ) AS devices
       FROM voucher_devices vd
       WHERE vd.voucher_id = v.id
     ) dev ON TRUE
+    LEFT JOIN LATERAL (
+      SELECT COALESCE(
+               json_agg(json_build_object(
+                 'full_name', vr.full_name,
+                 'mac_address', vr.mac_address,
+                 'ip_address', vr.ip_address,
+                 'redeemed_at', vr.created_at
+               ) ORDER BY vr.created_at),
+               '[]'::json
+             ) AS redemptions
+      FROM voucher_redemptions vr
+      WHERE vr.voucher_id = v.id
+    ) red ON TRUE
     LEFT JOIN LATERAL (
       SELECT COALESCE(SUM(w.data_used_bytes), 0)::bigint AS used_bytes
       FROM wispr_profiles w
@@ -280,7 +317,8 @@ adminRouter.get('/vouchers', async (req: Request, res: Response) => {
   const { rows } = await pool.query(
     `SELECT v.*,
             vs.status,
-            sub.first_name, sub.last_name, sub.alias, sub.phone, sub.mac_address,
+            sub.redemption_name, sub.redemption_mac, sub.redemption_ip, sub.redemption_at,
+            usr.first_name, usr.last_name, usr.alias, usr.phone, usr.mac_address,
             -- Prefer the stored column (backfilled, and staff-editable) but fall
             -- back to the first redemption row. Deriving it here means codes
             -- redeemed from now on get an activation time WITHOUT adding a write
@@ -291,6 +329,8 @@ adminRouter.get('/vouchers', async (req: Request, res: Response) => {
             ) AS first_redeemed_at,
             COALESCE(dev.device_count, 0) AS device_count,
             dev.bound_macs,
+            dev.devices,
+            red.redemptions,
             COALESCE(traffic.used_bytes, 0) AS traffic_used_bytes,
             CASE WHEN v.is_uncapped OR v.data_limit_gb IS NULL THEN NULL
                  ELSE (v.data_limit_gb * 1073741824)::bigint END AS traffic_total_bytes
@@ -858,6 +898,106 @@ adminRouter.get('/dashboard', requirePermission(PERMISSIONS.COMPANY_ADMIN), asyn
   }
 });
 
+// ── UltraNet WiFi sector dashboard ─────────────────────────────────
+// Aggregates ACCESS-POINT / gateway / captive-portal session state ONLY.
+// No transit or POS tables are read here (sector isolation).
+adminRouter.get('/dashboard/wifi', async (_req: Request, res: Response) => {
+  try {
+    const [apRes, gwRes, clientRes, voucherRes, logRes, redemptionRes] = await Promise.all([
+      pool.query(
+        `SELECT name, model, mac_address, ip_address, location, status,
+                firmware_version, uptime_seconds, clients_count, last_seen
+         FROM ap_devices ORDER BY name`
+      ),
+      pool.query(
+        `SELECT dev_model,
+                COUNT(*) FILTER (WHERE last_seen >= NOW() - interval '3 minutes')::int AS online,
+                COUNT(*)::int AS total
+         FROM gateway_heartbeats GROUP BY dev_model ORDER BY total DESC`
+      ),
+      pool.query(
+        `SELECT u.id AS user_id, u.full_name, u.mac_address, u.ip_address,
+                u.created_at AS connected_at, u.session_expires_at,
+                u.voucher_code, u.user_agent, v.package_tier,
+                wp.bandwidth_up_kbps, wp.bandwidth_down_kbps,
+                wp.data_used_bytes, wp.data_quota_bytes, wp.session_start
+         FROM users u
+         LEFT JOIN vouchers v ON UPPER(u.voucher_code) = UPPER(v.code)
+         LEFT JOIN LATERAL (
+           SELECT bandwidth_up_kbps, bandwidth_down_kbps, data_used_bytes,
+                  data_quota_bytes, session_start
+           FROM wispr_profiles wp2
+           WHERE wp2.user_id = u.id AND wp2.session_end IS NULL
+           ORDER BY wp2.session_start DESC LIMIT 1
+         ) wp ON TRUE
+         WHERE u.session_expires_at > NOW()
+         ORDER BY wp.session_start DESC NULLS LAST
+         LIMIT 200`
+      ),
+      pool.query(
+        `SELECT
+           (SELECT COUNT(*)::int FROM users WHERE session_expires_at > NOW()) AS active_sessions,
+           (SELECT COUNT(DISTINCT voucher_code)::int FROM users WHERE session_expires_at > NOW() AND voucher_code IS NOT NULL) AS active_vouchers,
+           (SELECT COUNT(*)::int FROM voucher_redemptions WHERE created_at >= date_trunc('day', NOW())) AS redeemed_today,
+           (SELECT COUNT(*)::int FROM vouchers WHERE created_at >= date_trunc('day', NOW()) AND deleted_at IS NULL) AS created_today,
+           (SELECT COUNT(*)::int FROM voucher_approvals WHERE status = 'pending') AS pending_approvals,
+           (SELECT COUNT(*)::int FROM access_log WHERE created_at >= date_trunc('day', NOW())) AS connections_today,
+           (SELECT COUNT(*)::int FROM users WHERE created_at >= date_trunc('day', NOW())) AS signups_today`
+      ),
+      pool.query(
+        `SELECT al.id, al.event, al.mac_address, al.ip_address, al.detail,
+                al.created_at, u.voucher_code
+         FROM access_log al
+         LEFT JOIN users u ON u.id = al.user_id
+         ORDER BY al.created_at DESC LIMIT 25`
+      ),
+      pool.query(
+        `SELECT vr.voucher_code, vr.full_name AS redeemed_by, vr.mac_address,
+                vr.ip_address, vr.created_at AS redeemed_at,
+                u.full_name AS holder_name, u.alias, u.phone, u.user_agent,
+                v.package_tier, v.price_amount
+         FROM voucher_redemptions vr
+         LEFT JOIN users u ON u.id = vr.user_id
+         LEFT JOIN vouchers v ON v.id = vr.voucher_id
+         ORDER BY vr.created_at DESC LIMIT 50`
+      ),
+    ]);
+
+    const aps = apRes.rows;
+    const vouchers = voucherRes.rows[0] || {};
+    const authRate = vouchers.connections_today > 0
+      ? Math.round((vouchers.redeemed_today / vouchers.connections_today) * 100)
+      : 0;
+
+    res.json({
+      aps: {
+        total: aps.length,
+        online: aps.filter((a: any) => a.status === 'online').length,
+        offline: aps.filter((a: any) => a.status === 'offline').length,
+        clients: aps.reduce((s: number, a: any) => s + (a.clients_count || 0), 0),
+        gateways: { total: gwRes.rows.reduce((s: number, g: any) => s + g.total, 0), online: gwRes.rows.reduce((s: number, g: any) => s + g.online, 0), byModel: gwRes.rows },
+      },
+      apsList: aps,
+      clients: clientRes.rows,
+      vouchers: {
+        activeSessions: vouchers.active_sessions || 0,
+        activeVouchers: vouchers.active_vouchers || 0,
+        redeemedToday: vouchers.redeemed_today || 0,
+        createdToday: vouchers.created_today || 0,
+        pendingApprovals: vouchers.pending_approvals || 0,
+        connectionsToday: vouchers.connections_today || 0,
+        signupsToday: vouchers.signups_today || 0,
+        authSuccessRate: authRate,
+      },
+      connectionLog: logRes.rows,
+      voucherUsage: redemptionRes.rows,
+    });
+  } catch (err: any) {
+    console.error('WiFi dashboard error:', err.message, err.query);
+    res.status(500).json({ error: 'WiFi dashboard query failed' });
+  }
+});
+
 adminRouter.get('/revenue', requirePermission(PERMISSIONS.COMPANY_ADMIN), async (_req: Request, res: Response) => {
   const { rows: revenue } = await pool.query(`
     SELECT COALESCE(SUM(amount), 0)::float AS total_revenue
@@ -964,13 +1104,22 @@ adminRouter.post('/clock-out', async (req: Request, res: Response) => {
     return;
   }
 
-  // Enforce handover: check for unhanded sales
+  // Enforce handover: check for unhanded CASH sales. Must match the
+  // available-sales/submit filter exactly, otherwise a non-cash pending sale
+  // (e.g. EcoCash) would block clock-out forever with no way to hand it over.
   const { rows: unhanded } = await pool.query(
-    `SELECT COUNT(*)::int AS cnt FROM sales
-     WHERE sold_by = $1 AND (handover_status IS NULL OR handover_status = 'pending')`,
+    `SELECT COUNT(*)::int AS cnt, COALESCE(SUM(amount), 0)::numeric AS total FROM sales
+     WHERE sold_by = $1 AND (handover_status IS NULL OR handover_status = 'pending')
+       AND (payment_method IS NULL OR payment_method = 'Cash')`,
     [req.adminUser!.id]
   );
   if (unhanded[0].cnt > 0) {
+    await insertHandoverReminder(
+      req.adminUser!.id,
+      req.adminUser!.fullName,
+      unhanded[0].cnt,
+      parseFloat(String(unhanded[0].total))
+    );
     res.status(409).json({
       error: `You have ${unhanded[0].cnt} unhanded sale(s). Please submit a cash handover before clocking out.`,
       requiresHandover: true,
@@ -1772,6 +1921,24 @@ async function insertAlert(type: string, severity: string, title: string, messag
   } catch (_) { /* alert logging is best-effort */ }
 }
 
+// Targeted reminder to ONE staff member about pending cash handover(s).
+// Deduped: if an unacknowledged reminder of this type already exists for the
+// staff member, do not insert another (staff see only their own alerts).
+async function insertHandoverReminder(adminId: string, fullName: string, count: number, total: number) {
+  try {
+    await pool.query(
+      `INSERT INTO alerts (type, severity, title, message, target_type, target_id, admin_id)
+       SELECT 'cash_handover_reminder', 'warning', 'Cash Handover Required',
+              $1, 'cash_handover', NULL, $2
+       WHERE NOT EXISTS (
+         SELECT 1 FROM alerts
+         WHERE type = 'cash_handover_reminder' AND admin_id = $2 AND acknowledged = FALSE
+       )`,
+      [`You have ${count} pending cash sale(s) totalling $${total.toFixed(2)}. Submit your handover in My Sales before clocking out.`, adminId]
+    );
+  } catch (_) { /* alert logging is best-effort */ }
+}
+
 // Helper: check if user is clocked in (for Staff/Manager voucher creation)
 async function requireClockedIn(adminId: string): Promise<boolean> {
   const { rows } = await pool.query(
@@ -2070,6 +2237,17 @@ adminRouter.post('/cash-handovers', async (req: Request, res: Response) => {
       `${req.adminUser!.fullName} handed over $${totalAmount.toFixed(2)} from ${sales.length} sale(s) for approval`,
       'cash_handover', handover.id);
 
+    // The staff member acted on their reminder(s) — clear them so the next
+    // pending sale (if any) raises a fresh, accurate reminder instead of
+    // being hidden behind a stale unacknowledged one.
+    try {
+      await pool.query(
+        `UPDATE alerts SET acknowledged = TRUE
+         WHERE type = 'cash_handover_reminder' AND admin_id = $1 AND acknowledged = FALSE`,
+        [req.adminUser!.id]
+      );
+    } catch (_) { /* best-effort */ }
+
     res.status(201).json({ message: `Handover of $${totalAmount.toFixed(2)} submitted for approval`, handover });
   } catch (err) {
     await client.query('ROLLBACK');
@@ -2119,6 +2297,28 @@ adminRouter.post('/cash-handovers/:id/approve', requirePermission(PERMISSIONS.CO
     `${existing[0].staff_name}'s cash handover of $${parseFloat(existing[0].total_amount).toFixed(2)} was approved by ${req.adminUser!.fullName}`,
     'cash_handover', id);
 
+  // Targeted follow-up for the staff member: tell them whether they are now
+  // clear to clock out (pending CASH sales must all be handed over first).
+  if (existing[0].staff_id) {
+    let remaining = 0;
+    let remainingTotal = 0;
+    try {
+      const { rows: rem } = await pool.query(
+        `SELECT COUNT(*)::int AS cnt, COALESCE(SUM(amount), 0)::numeric AS total
+         FROM sales
+         WHERE sold_by = $1 AND (handover_status IS NULL OR handover_status = 'pending')
+           AND (payment_method IS NULL OR payment_method = 'Cash')`,
+        [existing[0].staff_id]
+      );
+      remaining = rem[0]?.cnt ?? 0;
+      remainingTotal = parseFloat(String(rem[0]?.total ?? 0));
+    } catch (_) { /* best-effort */ }
+    const msg = remaining > 0
+      ? `Your handover of $${parseFloat(existing[0].total_amount).toFixed(2)} was approved by ${req.adminUser!.fullName}. You still have ${remaining} pending cash sale(s) ($${remainingTotal.toFixed(2)}) to hand over before you can clock out.`
+      : `Your handover of $${parseFloat(existing[0].total_amount).toFixed(2)} was approved by ${req.adminUser!.fullName}. Your sales are fully handed over — you can now clock out.`;
+    await insertAlert('cash_handover_approved', 'success', 'Handover Approved', msg, 'cash_handover', id, existing[0].staff_id);
+  }
+
   res.json({ message: 'Cash handover approved' });
 });
 
@@ -2154,6 +2354,13 @@ adminRouter.post('/cash-handovers/:id/reject', requirePermission(PERMISSIONS.COM
     await insertAlert('cash_handover_rejected', 'warning', 'Cash Handover Rejected',
       `${existing[0].staff_name}'s cash handover of $${parseFloat(existing[0].total_amount).toFixed(2)} was rejected by ${req.adminUser!.fullName}. Sales returned to pending.`,
       'cash_handover', id);
+
+    // Targeted follow-up: the staff member must fix and resubmit.
+    if (existing[0].staff_id) {
+      await insertAlert('cash_handover_rejected', 'warning', 'Handover Rejected',
+        `Your handover of $${parseFloat(existing[0].total_amount).toFixed(2)} was rejected by ${req.adminUser!.fullName}. The ${existing[0].sale_count} sale(s) are back to pending — submit a new handover before clocking out.`,
+        'cash_handover', id, existing[0].staff_id);
+    }
 
     res.json({ message: 'Cash handover rejected. Sales returned to pending.' });
   } catch (err) {

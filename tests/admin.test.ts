@@ -302,6 +302,27 @@ describe('Admin routes', () => {
 
       expect(res.status).toBe(409);
     });
+
+    it('POST /api/admin/clock-out returns 409 requiresHandover and inserts a deduped reminder', async () => {
+      (pool.query as any)
+        .mockResolvedValueOnce({ rows: [{ id: 1, clock_in: new Date(Date.now() - 3600000).toISOString() }] })
+        .mockResolvedValueOnce({ rows: [{ cnt: 3, total: '3.00' }] })
+        .mockResolvedValueOnce({ rows: [], rowCount: 0 }); // reminder INSERT (deduped: no existing)
+
+      const res = await request(createApp()).post('/api/admin/clock-out');
+
+      expect(res.status).toBe(409);
+      expect(res.body.requiresHandover).toBe(true);
+      expect(res.body.unhandedCount).toBe(3);
+      expect(res.body.error).toContain('3 unhanded sale(s)');
+
+      const countCall = (pool.query as any).mock.calls[1];
+      expect(countCall[0]).toContain('payment_method'); // cash-only gate
+
+      const reminderCall = (pool.query as any).mock.calls[2];
+      expect(reminderCall[0]).toContain(`'cash_handover_reminder'`);
+      expect(reminderCall[0]).toContain('NOT EXISTS');
+    });
   });
 
   describe('GET /api/admin/active-sessions', () => {

@@ -7,9 +7,9 @@
 ## System Architecture
 
 ```
-[Phone] → [Ruijie AP (WiFi)] → [EG105G-P Gateway] → [VPS (173.249.7.190)]
+[Phone] → [Ruijie AP (WiFi)] → [EG105G-P Gateway] → [VPS (158.220.118.91)]
                                          |
-                                   FreeRADIUS 3.2.5
+                                   FreeRADIUS 3.2.1
                                          |
                                    Node.js Portal (PM2: preyone-portal)
                                          |
@@ -19,7 +19,7 @@
 ### Components
 - **Ruijie APs**: RAP-6262G-Outdoor, RAP-2262G — WiFi access points with ext_login on port 2060
 - **EG105G-P Gateway**: Main router/gateway at LAN IP `192.168.1.216`, runs captive portal + FreeRADIUS client
-- **VPS**: Hetzner VPS at `173.249.7.190`, runs Node.js portal + FreeRADIUS 3.2.5 + PostgreSQL
+- **VPS**: Hetzner VPS at `158.220.118.91`, runs Node.js portal + FreeRADIUS 3.2.1 + PostgreSQL
 - **FreeRADIUS**: Handles RADIUS accounting (Acct-Port 1813) and auth (Auth-Port 1812) via REST module
 
 ---
@@ -94,8 +94,8 @@ After configuring RADIUS auth settings on the EG105G-P gateway, a **reboot is re
 | Auth Mode | External Portal / Web Authentication |
 | Portal URL | `http://wifi.preyone.com/login` |
 | Success URL | `https://wifi.preyone.com/success.html` |
-| RADIUS Auth | `173.249.7.190:1812`, secret `preyone@radius2024`, PAP |
-| RADIUS Acct | `173.249.7.190:1813`, same secret |
+| RADIUS Auth | `158.220.118.91:1812`, secret `preyone@radius2024`, PAP |
+| RADIUS Acct | `158.220.118.91:1813`, same secret |
 | ext_login | `http://192.168.1.216:2060/ext_login` |
 | DHCP DNS | `192.168.1.216` (gateway itself, NOT 8.8.8.8) |
 | DNS Proxy | Enabled |
@@ -140,7 +140,7 @@ client preyone-gateway {
 
 ## Deployment
 
-- **VPS**: `173.249.7.190`, SSH key: `~/.ssh/id_opencode`
+- **VPS**: `158.220.118.91`, SSH key: `~/.ssh/id_opencode`
 - **Process**: PM2 process `preyone-portal` (pid varies)
 - **Build**: `npm run build` → uploads `dist/` to VPS via `scp -r`
 - **Restart**: `pm2 restart preyone-portal`

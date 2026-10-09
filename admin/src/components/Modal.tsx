@@ -10,24 +10,33 @@ export default function Modal({ open, onClose, title, children, wide }: { open: 
     return () => { document.body.style.overflow = ''; };
   }, [open]);
 
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open, onClose]);
+
   if (!open) return null;
 
   return (
-    <div style={{
-      position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center',
-      background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)', padding: 20,
-    }} onClick={onClose}>
-      <div style={{
-        background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12,
-        width: wide ? 700 : 480, maxWidth: '100%', maxHeight: '90vh', overflow: 'auto',
-      }} onClick={e => e.stopPropagation()}>
+    <div className={'modal-overlay' + (wide ? ' modal-overlay--wide' : '')} onClick={onClose} role="presentation">
+      <div
+        className={'modal-card' + (wide ? ' modal-card--wide' : '')}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        onClick={e => e.stopPropagation()}
+      >
         {title && (
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 20px', borderBottom: '1px solid var(--border)' }}>
-            <h3 style={{ fontFamily: 'var(--font-display)', fontSize: '1.1rem', letterSpacing: 1 }}>{title}</h3>
-            <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 18, lineHeight: 1 }}>✕</button>
+          <div className="modal-header">
+            <h3 className="modal-title">{title}</h3>
+            <button className="modal-close" onClick={onClose} aria-label="Close">✕</button>
           </div>
         )}
-        <div style={{ padding: 20 }}>
+        <div className="modal-body">
           {children}
         </div>
       </div>

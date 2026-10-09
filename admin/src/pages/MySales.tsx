@@ -176,6 +176,12 @@ export default function MySales() {
                   { key: 'package_tier', label: 'Package', width: '100px', render: (r: any) => r.package_tier || '—' },
                   { key: 'price_amount', label: 'Price', width: '110px', render: (r: any) => r.price_amount ? <span className="money money--sm">{'$' + Number(r.price_amount).toFixed(2) + ' USD'}</span> : '—' },
                   { key: 'used_count', label: 'Used', width: '70px', render: (r: any) => `${r.used_count || 0}/${r.max_uses || 1}` },
+                  { key: 'payment_method', label: 'Paid Via', width: '110px', render: (r: any) => {
+                    const m = r.payment_method || 'Cash';
+                    return m === 'Cash'
+                      ? <Badge variant="approved">Cash</Badge>
+                      : <Badge variant="pending">📱 {m}</Badge>;
+                  } },
                   { key: 'created_at', label: 'Created', width: '160px', render: (r: any) => r.created_at ? new Date(r.created_at).toLocaleString() : '—' },
                   { key: 'handover', label: 'Handover', width: '90px', render: (r: any) =>
                     r.handover_status === 'approved' ? <Badge variant="approved">Approved</Badge> :

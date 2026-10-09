@@ -8,9 +8,12 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "migrate": "node -r ts-node/register src/db/migrate.ts",
+    "optimize:portal": "node scripts/optimize-portal-images.mjs",
     "cleanup": "node -r ts-node/register src/cleanup.ts",
     "cleanup-logs": "node -r ts-node/register src/cleanup-logs.ts",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:e2e": "vitest run --config vitest.e2e.config.ts",
+    "verify:route-templates": "ts-node -T scripts/verify-route-templates.ts"
   },
   "dependencies": {
     "axios": "^1.18.1",
@@ -27,7 +30,6 @@
     "express-rate-limit": "^7.3.1",
     "express-validator": "^7.1.0",
     "helmet": "^7.1.0",
-    "http-proxy-middleware": "^4.0.0",
     "jsonwebtoken": "^9.0.3",
     "morgan": "^1.10.0",
     "nodemailer": "^8.0.10",
@@ -50,7 +52,9 @@
     "@types/pg": "^8.11.6",
     "@types/supertest": "^2.0.13",
     "@types/uuid": "^10.0.0",
+    "http-proxy-middleware": "^4.0.0",
     "jsdom": "^29.1.1",
+    "sharp": "^0.35.5",
     "supertest": "^7.0.0",
     "typescript": "^5.5.3",
     "vitest": "^1.0.0"

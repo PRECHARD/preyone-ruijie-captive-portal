@@ -2,7 +2,7 @@
   width: 100%;
 }
 
-.card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.card { background: linear-gradient(160deg, rgba(20, 20, 40, 0.55), rgba(8, 8, 16, 0.72)); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border: 1px solid rgba(148, 163, 184, 0.14); border-radius: 10px; overflow: hidden; box-shadow: 0 4px 24px rgba(0, 0, 0, 0.25); }
 
 .segmented {
   display: inline-flex;
@@ -30,9 +30,9 @@
   white-space: nowrap;
   text-align: center;
 }
-.segmented-option:hover { color: var(--text); background: rgba(255, 255, 255, 0.03); }
-.segmented-option.active { background: rgba(255, 0, 255, 0.08); color: var(--pink); }
-.role-ceo .segmented-option.active { background: rgba(255, 215, 0, 0.08); color: #ffd700; }
+.segmented-option:hover { color: var(--text); background: rgba(0, 229, 255, 0.05); }
+.segmented-option.active { background: rgba(255, 0, 255, 0.12); color: var(--pink); text-shadow: 0 0 10px rgba(255, 0, 127, 0.4); }
+.role-ceo .segmented-option.active { background: rgba(255, 215, 0, 0.12); color: #ffd700; text-shadow: 0 0 10px rgba(255, 215, 0, 0.4); }
 .card-table { overflow-x: auto; }
 
 .package-grid {
@@ -44,8 +44,10 @@
 
 .package-card {
   position: relative;
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: linear-gradient(160deg, rgba(20, 20, 40, 0.45), rgba(8, 8, 16, 0.6));
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  border: 1px solid rgba(148, 163, 184, 0.14);
   border-radius: 12px;
   padding: 0.9rem 1rem 0.8rem;
   cursor: pointer;
@@ -68,10 +70,10 @@
 }
 
 .package-card:hover {
-  background: rgba(255, 255, 255, 0.04);
-  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 0, 255, 0.25);
   transform: translateY(-1px);
-  box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+  box-shadow: 0 6px 24px rgba(0,0,0,0.35), 0 0 14px rgba(255,0,255,0.06);
 }
 
 .package-card:hover::before { opacity: 0.5; }
@@ -292,18 +294,19 @@
   padding: 10px 18px;
   background: linear-gradient(135deg, var(--purple), var(--pink));
   border: none;
-  border-radius: 6px;
+  border-radius: 8px;
   color: #fff;
   font-family: var(--font-body);
   font-size: 13px;
   font-weight: 700;
   cursor: pointer;
   white-space: nowrap;
-  transition: opacity 0.2s;
+  transition: opacity 0.2s, box-shadow 0.2s;
+  box-shadow: 0 4px 18px rgba(255, 0, 127, 0.25);
 }
 
-.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
-.btn-primary:hover:not(:disabled) { opacity: 0.9; }
+.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; box-shadow: none; }
+.btn-primary:hover:not(:disabled) { opacity: 0.95; box-shadow: 0 0 24px rgba(255, 0, 127, 0.45); }
 
 .btn-sm {
   padding: 6px 12px;
@@ -338,6 +341,23 @@
   align-items: flex-end;
   gap: 0.75rem;
   flex-wrap: nowrap;
+}
+
+@media (max-width: 900px) {
+  .bulk-form {
+    flex-wrap: wrap;
+  }
+  .bulk-form .form-field,
+  .bulk-form .input-with-btn {
+    flex: 1 1 180px;
+    min-width: 140px;
+    max-width: 100%;
+  }
+  .bulk-form > .mt-8,
+  .bulk-form > button,
+  .bulk-form > .btn-primary {
+    flex: 0 0 auto;
+  }
 }
 
 .form-field { display: flex; flex-direction: column; gap: 4px; flex: 1; }
@@ -415,36 +435,81 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  color: var(--text-muted);
-  background: var(--surface2);
-  border-bottom: 1px solid var(--border);
+  color: var(--cyan);
+  text-shadow: 0 0 10px rgba(0, 229, 255, 0.25);
+  background: linear-gradient(180deg, rgba(0, 229, 255, 0.06), transparent);
+  border-bottom: 1px solid rgba(0, 229, 255, 0.18);
 }
 
 .data-table td {
   padding: 10px 12px;
   color: var(--text);
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.08);
 }
 
 .data-table tr:last-child td { border-bottom: none; }
-.data-table tr:hover td { background: rgba(255,255,255,0.02); }
+.data-table tr:hover td { background: rgba(0, 229, 255, 0.035); }
 
 .table-empty { padding: 40px; text-align: center; color: var(--text-muted); }
 
 .badge {
   display: inline-block;
   padding: 2px 8px;
-  border-radius: 4px;
+  border-radius: 5px;
   font-size: 0.65rem;
   font-weight: 600;
   text-transform: uppercase;
+  letter-spacing: 0.02em;
 }
 
-.badge--yes { background: rgba(0,230,118,0.15); color: var(--green); }
-.badge--no { background: rgba(255,23,68,0.15); color: var(--red); }
-.badge--warn { background: rgba(255,145,0,0.15); color: var(--orange); }
+.badge--yes { background: rgba(0,230,118,0.15); color: var(--green); box-shadow: 0 0 8px rgba(0,230,118,0.15); }
+.badge--no { background: rgba(255,23,68,0.15); color: var(--red); box-shadow: 0 0 8px rgba(255,23,68,0.12); }
+.badge--warn { background: rgba(255,145,0,0.15); color: var(--orange); box-shadow: 0 0 8px rgba(255,145,0,0.15); }
 
 .muted { color: var(--text-muted); }
+
+/* ── Voucher List: toolbar, sortable headers, row actions, pager ── */
+
+.voucher-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.voucher-toolbar__search { flex: 1 1 240px; min-width: 180px; }
+.voucher-toolbar__filter { flex: 0 1 auto; min-width: 150px; }
+
+.voucher-th-sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+.voucher-th-sortable:hover { color: var(--cyan); }
+
+.voucher-sub {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  margin-top: 2px;
+  /* Usage and timeline cells stack three lines; keep the row readable without
+     forcing every other table on the page to grow. */
+  line-height: 1.35;
+}
+
+/* Word-wrap MACs and phone numbers instead of stretching the table. */
+.voucher-table td { max-width: 220px; overflow-wrap: anywhere; }
+
+.voucher-row--busy { opacity: 0.5; pointer-events: none; }
+
+.voucher-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.voucher-pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  margin-top: 14px;
+}
+.voucher-pager .btn-action:disabled { opacity: 0.4; cursor: not-allowed; }
 
 /* Voucher Card */
 .voucher-card-wrap {
@@ -465,9 +530,9 @@
   align-items: center;
   gap: 6px;
   padding: 8px 16px;
-  background: var(--surface2);
-  border: 1px solid var(--border);
-  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 8px;
   color: var(--text);
   font-family: var(--font-body);
   font-size: 12px;
@@ -476,7 +541,7 @@
   transition: all 0.2s;
 }
 
-.btn-action:hover { border-color: var(--purple-glow); }
+.btn-action:hover { border-color: var(--purple-glow); box-shadow: 0 0 12px rgba(255,0,255,0.08); }
 
 .btn-action--download { color: var(--green); }
 .btn-action--download:hover { border-color: var(--green); background: rgba(0,230,118,0.05); }
@@ -762,4 +827,70 @@
 }
 .role-ceo .row-selected td {
   background: rgba(255, 215, 0, 0.03);
+}
+
+/* ── Responsive Vouchers (phones & tablets) ── */
+@media (max-width: 1024px) {
+  .package-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 768px) {
+  .package-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.5rem;
+  }
+  .package-card {
+    padding: 0.75rem;
+  }
+  .segmented {
+    max-width: 100%;
+  }
+  .vcb-code,
+  .vcb-meta,
+  .vcb-meta--price,
+  .vcb-meta--uses {
+    min-width: 0;
+    flex: 1 1 100%;
+  }
+  .voucher-code-bar {
+    flex-wrap: wrap;
+    gap: 0.6rem;
+  }
+  .specs-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+  .voucher-card-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .preyone-voucher {
+    min-width: 360px;
+    width: 100%;
+  }
+  .data-table th,
+  .data-table td {
+    padding: 8px 10px;
+    white-space: nowrap;
+  }
+  .section-head {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+}
+
+@media (max-width: 480px) {
+  .package-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+  .specs-grid {
+    grid-template-columns: 1fr;
+  }
+  .pkg-price {
+    font-size: 1.2rem;
+  }
+  .voucher-card-actions-bar {
+    flex-wrap: wrap;
+  }
 }

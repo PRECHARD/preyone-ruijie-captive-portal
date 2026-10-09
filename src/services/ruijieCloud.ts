@@ -16,6 +16,11 @@ const TOKEN_TTL_MS = 50 * 60 * 1000;
 
 const AUTH_ERROR_CODES = [4010, 4011, 4013];
 
+// Ruijie returns HTTP 200 { code: 3, msg: "Login timeout" } when the cached
+// access token has expired server-side (observed 2026-10-08 on voucher/create).
+// code=3 alone is too generic to force-refresh on, so also require the message.
+const AUTH_ERROR_MESSAGE = /login timeout/i;
+
 export class RuijieApiError extends Error {
   readonly code: string | number;
   readonly status: number = 502;
@@ -24,6 +29,11 @@ export class RuijieApiError extends Error {
     this.name = 'RuijieApiError';
     this.code = code;
   }
+}
+
+function isAuthError(err: unknown): err is RuijieApiError {
+  if (!(err instanceof RuijieApiError)) return false;
+  return AUTH_ERROR_CODES.includes(Number(err.code)) || AUTH_ERROR_MESSAGE.test(err.message);
 }
 
 export interface RuijieUserGroup {
@@ -128,7 +138,7 @@ async function withTokenRefresh<T>(fn: (accessToken: string) => Promise<T>): Pro
     const token = await getRuijieAccessToken();
     return await fn(token);
   } catch (err) {
-    if (err instanceof RuijieApiError && AUTH_ERROR_CODES.includes(Number(err.code))) {
+    if (isAuthError(err)) {
       const fresh = await getRuijieAccessToken(true);
       return await fn(fresh);
     }
