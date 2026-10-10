@@ -192,13 +192,7 @@ export default function Login() {
     <div className="auth-screen">
       <div className="auth-card">
         <div className="auth-nav">
-          <div className="auth-nav-inner">
-            <div className="auth-brand">
-              <img src="/images/preyonenoneglow-logo-zoom-800.webp" alt="Preyone" className="auth-logo" />
-              <span className="auth-brand-title">Admin Console</span>
-            </div>
-            <span className="auth-brand-badge">Secure · SSO</span>
-          </div>
+          <img src="/images/preyonenoneglow-logo-zoom-800.webp" alt="Preyone" className="auth-logo" />
         </div>
         <div className="auth-body">
           {view === 'gate' && (
@@ -218,8 +212,8 @@ export default function Login() {
               </div>
               <p className="auth-tagline">
                 {view === 'login'
-                  ? 'Secure command-center access — one identity across every Preyone product.'
-                  : 'Join the console — your account activates instantly or after Manager approval.'}
+                  ? 'One identity across every Preyone product.'
+                  : 'Your account activates instantly or after Manager approval.'}
               </p>
             </>
           )}
@@ -249,13 +243,16 @@ export default function Login() {
 
           {!signedUp && view === 'login' && challenge && (
             <form onSubmit={handleVerifyOtp} className="auth-form">
-              <h3 style={{ margin: 0, fontSize: 16, color: 'var(--text)' }}>Two-Factor Verification</h3>
-              <p style={{ margin: 0, fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.5 }}>
-                We emailed a 6-digit code to <strong>{challenge.maskedEmail}</strong>. It expires in 5 minutes.
-              </p>
+              <div className="auth-step-head">
+                <h3 className="auth-step-title">Verification</h3>
+                <p className="auth-step-desc">
+                  We emailed a 6-digit code to <strong>{challenge.maskedEmail}</strong>. It expires in 5 minutes.
+                </p>
+              </div>
               <div className="auth-field">
-                <label>Verification Code</label>
+                <label htmlFor="otp">Verification Code</label>
                 <input
+                  id="otp"
                   type="text"
                   inputMode="numeric"
                   autoComplete="one-time-code"
@@ -263,9 +260,9 @@ export default function Login() {
                   value={otp}
                   onChange={e => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
                   placeholder="000000"
+                  className="auth-otp"
                   autoFocus
                   required
-                  style={{ letterSpacing: '0.5em', fontSize: 20, textAlign: 'center', fontWeight: 700 }}
                 />
               </div>
               {error && <div className="auth-error" role="alert">{error}</div>}
@@ -284,14 +281,18 @@ export default function Login() {
 
           {!signedUp && view === 'login' && !challenge && (
             <form onSubmit={handleLogin} className="auth-form">
-              <div className="auth-field">
-                <label>Email</label>
-                <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="admin@preyone.com" required />
+              <div className="auth-step-head">
+                <h1 className="auth-step-title">Welcome back</h1>
+                <p className="auth-step-desc">Sign in to your Preyone account.</p>
               </div>
               <div className="auth-field">
-                <label>Password</label>
+                <label htmlFor="login-email">Email</label>
+                <input id="login-email" type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="admin@preyone.com" required />
+              </div>
+              <div className="auth-field">
+                <label htmlFor="login-password">Password</label>
                 <div className="password-wrapper">
-                  <input type={showPassword ? 'text' : 'password'} value={password} onChange={e => setPassword(e.target.value)} placeholder="Enter your password" required />
+                  <input id="login-password" type={showPassword ? 'text' : 'password'} value={password} onChange={e => setPassword(e.target.value)} placeholder="Enter your password" required />
                   <button type="button" className="password-toggle" onClick={() => setShowPassword(!showPassword)} tabIndex={-1} aria-label={showPassword ? 'Hide password' : 'Show password'}>
                     {showPassword ? (
                       <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/><path d="M14.12 14.12a3 3 0 1 1-4.24-4.24"/></svg>
@@ -311,30 +312,34 @@ export default function Login() {
 
           {!signedUp && view === 'signup' && (
             <form onSubmit={handleSignup} className="auth-form">
-              <div className="auth-field">
-                <label>Full Name</label>
-                <input type="text" value={sName} onChange={e => setSName(e.target.value)} placeholder="Your full name" required />
+              <div className="auth-step-head">
+                <h1 className="auth-step-title">Create account</h1>
+                <p className="auth-step-desc">Join the Preyone console.</p>
               </div>
               <div className="auth-field">
-                <label>Email</label>
-                <input type="email" value={sEmail} onChange={e => setSEmail(e.target.value)} placeholder="you@preyone.com" required />
+                <label htmlFor="su-name">Full Name</label>
+                <input id="su-name" type="text" value={sName} onChange={e => setSName(e.target.value)} placeholder="Your full name" required />
               </div>
               <div className="auth-field">
-                <label>Phone Number</label>
-                <input type="tel" value={sPhone} onChange={e => setSPhone(e.target.value)} placeholder="+263 7XX XXX XXX" required />
+                <label htmlFor="su-email">Email</label>
+                <input id="su-email" type="email" value={sEmail} onChange={e => setSEmail(e.target.value)} placeholder="you@preyone.com" required />
+              </div>
+              <div className="auth-field">
+                <label htmlFor="su-phone">Phone Number</label>
+                <input id="su-phone" type="tel" value={sPhone} onChange={e => setSPhone(e.target.value)} placeholder="+263 7XX XXX XXX" required />
               </div>
               <div className="auth-field">
                 <label>User Role</label>
-                <div className="segmented">
+                <div className="segmented" role="radiogroup" aria-label="User role">
                   {['Staff', 'Manager', 'CEO'].map(r => (
-                    <button key={r} type="button" className={'segmented-option' + (sRole === r ? ' active' : '')} onClick={() => setSRole(r)}>{r}</button>
+                    <button key={r} type="button" role="radio" aria-checked={sRole === r} className={'segmented-option' + (sRole === r ? ' active' : '')} onClick={() => setSRole(r)}>{r}</button>
                   ))}
                 </div>
               </div>
               <div className="auth-field">
-                <label>Password</label>
+                <label htmlFor="su-password">Password</label>
                 <div className="password-wrapper">
-                  <input type={showSPassword ? 'text' : 'password'} value={sPassword} onChange={e => setSPassword(e.target.value)} placeholder="Create a strong password" required minLength={6} />
+                  <input id="su-password" type={showSPassword ? 'text' : 'password'} value={sPassword} onChange={e => setSPassword(e.target.value)} placeholder="Create a strong password" required minLength={6} />
                   <button type="button" className="password-toggle" onClick={() => setShowSPassword(!showSPassword)} tabIndex={-1} aria-label={showSPassword ? 'Hide password' : 'Show password'}>
                     {showSPassword ? (
                       <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/><path d="M14.12 14.12a3 3 0 1 1-4.24-4.24"/></svg>
@@ -345,9 +350,9 @@ export default function Login() {
                 </div>
               </div>
               <div className="auth-field">
-                <label>Confirm Password</label>
+                <label htmlFor="su-confirm">Confirm Password</label>
                 <div className="password-wrapper">
-                  <input type={showSPassword ? 'text' : 'password'} value={sConfirmPassword} onChange={e => setSConfirmPassword(e.target.value)} placeholder="Re-enter your password" required minLength={6} />
+                  <input id="su-confirm" type={showSPassword ? 'text' : 'password'} value={sConfirmPassword} onChange={e => setSConfirmPassword(e.target.value)} placeholder="Re-enter your password" required minLength={6} />
                 </div>
               </div>
               {error && <div className="auth-error" role="alert">{error}</div>}
@@ -360,11 +365,13 @@ export default function Login() {
 
           {view === 'forgot' && (
             <form onSubmit={handleForgotPassword} className="auth-form">
-              <h3 style={{margin:0,fontSize:16,color:'var(--text)'}}>Reset Password</h3>
-              <p style={{margin:0,fontSize:13,color:'var(--text-muted)',lineHeight:1.5}}>Enter your email and we'll send you a password reset link.</p>
+              <div className="auth-step-head">
+                <h3 className="auth-step-title">Reset Password</h3>
+                <p className="auth-step-desc">Enter your email and we'll send you a password reset link.</p>
+              </div>
               <div className="auth-field">
-                <label>Email</label>
-                <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="admin@preyone.com" required />
+                <label htmlFor="forgot-email">Email</label>
+                <input id="forgot-email" type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="admin@preyone.com" required />
               </div>
               {error && <div className="auth-error">{error}</div>}
               {successMsg && <div className="auth-success">{successMsg}</div>}
@@ -375,12 +382,14 @@ export default function Login() {
 
           {view === 'reset' && (
             <form onSubmit={handleResetPassword} className="auth-form">
-              <h3 style={{margin:0,fontSize:16,color:'var(--text)'}}>Set New Password</h3>
-              <p style={{margin:0,fontSize:13,color:'var(--text-muted)',lineHeight:1.5}}>Enter your new password below.</p>
+              <div className="auth-step-head">
+                <h3 className="auth-step-title">Set New Password</h3>
+                <p className="auth-step-desc">Enter your new password below.</p>
+              </div>
               <div className="auth-field">
-                <label>New Password</label>
+                <label htmlFor="reset-password">New Password</label>
                 <div className="password-wrapper">
-                  <input type={showNewPassword ? 'text' : 'password'} value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder="New password" required minLength={6} />
+                  <input id="reset-password" type={showNewPassword ? 'text' : 'password'} value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder="New password" required minLength={6} />
                   <button type="button" className="password-toggle" onClick={() => setShowNewPassword(!showNewPassword)} tabIndex={-1}>
                     {showNewPassword ? (
                       <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/><path d="M14.12 14.12a3 3 0 1 1-4.24-4.24"/></svg>
@@ -391,9 +400,9 @@ export default function Login() {
                 </div>
               </div>
               <div className="auth-field">
-                <label>Confirm Password</label>
+                <label htmlFor="reset-confirm">Confirm Password</label>
                 <div className="password-wrapper">
-                  <input type={showNewPassword ? 'text' : 'password'} value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} placeholder="Confirm new password" required minLength={6} />
+                  <input id="reset-confirm" type={showNewPassword ? 'text' : 'password'} value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} placeholder="Confirm new password" required minLength={6} />
                 </div>
               </div>
               {error && <div className="auth-error">{error}</div>}

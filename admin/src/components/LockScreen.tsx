@@ -63,7 +63,6 @@ export default function LockScreen() {
       <div className="lock-card">
         <div className="lock-brand">
           <img src="/images/preyonenoneglow-logo-zoom-800.webp" alt="Preyone" className="lock-logo" />
-          <span className="lock-brand-title">Admin Console</span>
         </div>
 
         <div className="lock-avatar" aria-hidden="true">{initials}</div>

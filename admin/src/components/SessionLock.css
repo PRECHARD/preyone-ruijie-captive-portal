@@ -13,9 +13,7 @@
   padding: 20px;
   overflow: hidden;
   background:
-    radial-gradient(1000px 600px at 15% -10%, rgba(168, 85, 247, 0.16), transparent 60%),
-    radial-gradient(900px 550px at 100% 0%, rgba(0, 229, 255, 0.13), transparent 55%),
-    radial-gradient(800px 700px at 50% 120%, rgba(255, 0, 127, 0.11), transparent 60%),
+    radial-gradient(900px 520px at 50% -8%, rgba(106, 13, 173, 0.16), transparent 62%),
     rgba(5, 5, 5, 0.94);
   backdrop-filter: blur(22px) saturate(130%);
   -webkit-backdrop-filter: blur(22px) saturate(130%);
@@ -49,10 +47,10 @@
   width: 100%;
   max-width: 420px;
   padding: 28px 30px 24px;
-  background: linear-gradient(160deg, rgba(24, 20, 48, 0.88), rgba(8, 8, 18, 0.95));
-  border: 1px solid rgba(148, 163, 184, 0.16);
-  border-radius: 18px;
-  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.6), 0 0 46px rgba(168, 85, 247, 0.12);
+  background: linear-gradient(180deg, rgba(16, 21, 38, 0.92), rgba(8, 10, 20, 0.96));
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 20px;
+  box-shadow: 0 32px 64px rgba(0, 0, 0, 0.55);
   text-align: center;
   animation: lockCardIn 0.3s ease;
 }
@@ -70,25 +68,15 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
   margin-bottom: 18px;
 }
 
 .lock-logo {
-  height: 34px;
+  display: block;
+  height: 44px;
   width: auto;
-  border-radius: 8px;
-  filter: drop-shadow(0 0 8px rgba(0, 229, 255, 0.4));
-}
-
-.lock-brand-title {
-  font-family: var(--font-display);
-  font-size: 1.35rem;
-  letter-spacing: 0.06em;
-  color: transparent;
-  background: linear-gradient(90deg, #7be0ff, #a855f7, #ff5fa4);
-  -webkit-background-clip: text;
-  background-clip: text;
+  max-width: 100%;
+  object-fit: contain;
 }
 
 .lock-avatar {
@@ -103,9 +91,8 @@
   font-size: 1.6rem;
   letter-spacing: 0.04em;
   color: #fff;
-  background: linear-gradient(135deg, rgba(168, 85, 247, 0.35), rgba(0, 229, 255, 0.28));
+  background: linear-gradient(135deg, rgba(106, 13, 173, 0.4), rgba(139, 24, 201, 0.28));
   border: 1px solid rgba(148, 163, 184, 0.22);
-  box-shadow: 0 0 26px rgba(168, 85, 247, 0.32);
 }
 
 .lock-title {
@@ -188,8 +175,10 @@
 }
 
 .lock-pw input:focus {
-  border-color: var(--cyan);
-  box-shadow: 0 0 0 2px rgba(0, 229, 255, 0.16), 0 0 22px rgba(0, 229, 255, 0.12);
+  outline: none;
+  background: rgba(5, 7, 16, 0.92);
+  border-color: #6a0dad;
+  box-shadow: 0 0 0 3px rgba(106, 13, 173, 0.22);
 }
 
 .lock-eye {
@@ -221,30 +210,35 @@
 
 .lock-btn {
   position: relative;
-  overflow: hidden;
   width: 100%;
   padding: 13px;
-  background: linear-gradient(120deg, var(--purple) 0%, var(--pink) 52%, var(--cyan) 130%);
-  background-size: 170% 100%;
-  border: none;
-  border-radius: 10px;
+  background: linear-gradient(135deg, #6a0dad, #8b18c9);
+  border: 1px solid rgba(255, 0, 255, 0.22);
+  border-radius: 11px;
   color: #fff;
   font-family: var(--font-body);
-  font-size: 14.5px;
-  font-weight: 800;
+  font-size: 14px;
+  font-weight: 700;
   cursor: pointer;
-  transition: background-position 0.4s ease, box-shadow 0.3s ease, opacity 0.2s ease;
-  box-shadow: 0 6px 24px rgba(168, 85, 247, 0.32);
+  transition: transform 0.15s ease, box-shadow 0.2s ease, filter 0.2s ease;
+  box-shadow: 0 8px 22px rgba(106, 13, 173, 0.34);
 }
 
 .lock-btn:hover:not(:disabled) {
-  background-position: 100% 50%;
-  box-shadow: 0 8px 30px rgba(0, 229, 255, 0.3);
+  filter: brightness(1.08);
+  transform: translateY(-1px);
+  box-shadow: 0 12px 28px rgba(106, 13, 173, 0.42);
 }
 
+.lock-btn:active:not(:disabled) { transform: translateY(0); }
+
+.lock-btn:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+
 .lock-btn:disabled {
-  opacity: 0.5;
+  opacity: 0.6;
   cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
 }
 
 .lock-spinner {
@@ -321,10 +315,10 @@
   width: 100%;
   max-width: 640px;
   padding: 16px 18px;
-  background: linear-gradient(160deg, rgba(24, 20, 48, 0.95), rgba(8, 8, 18, 0.97));
+  background: linear-gradient(180deg, rgba(16, 21, 38, 0.95), rgba(8, 10, 20, 0.97));
   border: 1px solid rgba(255, 145, 0, 0.28);
-  border-radius: 14px;
-  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55), 0 0 34px rgba(255, 145, 0, 0.12);
+  border-radius: 16px;
+  box-shadow: 0 24px 56px rgba(0, 0, 0, 0.55);
   animation: lockCardIn 0.28s ease;
 }
 
