@@ -448,45 +448,136 @@ export async function sendPasswordResetEmail(email: string, resetToken: string, 
 
 // ── Admin 2FA login code ─────────────────────────────────────────────
 export async function sendAdminLoginCode(email: string, fullName: string, code: string): Promise<boolean> {
-  // Inline-clipboard copy is the only way a "copy" affordance can exist in
-  // email — there is no script execution. It works in Apple Mail and most
-  // webmail that permit inline handlers; everywhere else the code is rendered
-  // as large, monospace, user-selectable text so a manual copy is one gesture.
-  const copyAttrs =
-    `onclick="try{navigator.clipboard.writeText('${code}');this.innerHTML='&#10003; Copied';return false;}catch(e){return false;}"`;
+  // Self-contained template: the shared emailHeader()/emailFooter() helpers
+  // are styled for the older green skin and are reused by a dozen other
+  // transactional emails. Restyling them here would silently change all of
+  // them, so this OTP mail carries its own markup in the preyone.com palette
+  // (ink #050505, panel #0a0d17, brand #6a0dad, magenta #ff00ff, frost
+  // #f8fbff). PNG only — Gmail and Outlook do not render WebP.
+  const baseUrl = (process.env.BASE_URL || 'http://localhost:3000').replace(/\/$/, '');
+  const logo = `${baseUrl}/images/preyonenoneglow-logo-zoom-800.png`;
+  const footerMark = `${baseUrl}/images/preyonelogomainzw-email.png`;
+  const sans = "'Segoe UI',-apple-system,BlinkMacSystemFont,Roboto,Arial,sans-serif";
+  const mono = "'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace";
 
   return sendMail(
     email,
-    'Your Preyone Sign-In Code',
-    `<div style="font-family:'Segoe UI',Arial,sans-serif;max-width:560px;margin:32px auto;background:#0a0a0a;border-radius:16px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.12),0 0 40px rgba(113,255,47,0.08)">
-      ${emailHeader('Your Sign-In Code')}
-      <div style="padding:24px 32px;text-align:center">
-        <div style="width:64px;height:64px;border-radius:50%;background:linear-gradient(135deg,rgba(113,255,47,0.12),rgba(19,216,255,0.12));display:flex;align-items:center;justify-content:center;margin:0 auto 16px;box-shadow:0 0 20px rgba(113,255,47,0.12)">
-          <span style="font-size:28px">🔐</span>
-        </div>
-        <p style="margin:0 0 8px;font-size:15px;color:#cbd5e1;line-height:1.6">Hi <strong style="color:#ffffff">${fullName}</strong>,</p>
-        <p style="margin:0 0 20px;font-size:15px;color:#cbd5e1;line-height:1.6">
-          Use this code to finish signing in to the Preyone Admin Console. It expires in
-          <strong style="color:#71ff2f">5 minutes</strong>.
-        </p>
+    'Your Preyone sign-in code',
+    `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="supported-color-schemes" content="dark">
+  <title>Your Preyone sign-in code</title>
+</head>
+<body style="margin:0;padding:0;background:#050505;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#050505">
+    <tr>
+      <td align="center" style="padding:40px 16px">
+        <!--[if mso]><table role="presentation" width="520" cellspacing="0" cellpadding="0" border="0" align="center"><tr><td><![endif]-->
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width:520px;width:100%">
+          <tr>
+            <td style="background:#0a0d17;border:1px solid #1c2438;border-radius:16px;overflow:hidden">
 
-        <div style="background:#12101d;border:1px solid rgba(113,255,47,0.45);border-radius:14px;padding:22px 20px 18px;margin:0 0 14px;box-shadow:0 0 26px rgba(113,255,47,0.1)">
-          <div style="font-size:11px;font-weight:700;letter-spacing:0.18em;text-transform:uppercase;color:#64748b;margin-bottom:10px">Verification Code</div>
-          <div id="preyone-otp" style="font-size:40px;font-weight:800;letter-spacing:14px;padding-left:14px;color:#ffffff;font-family:'SFMono-Regular',Consolas,'Liberation Mono',monospace;user-select:all;-webkit-user-select:all;-moz-user-select:all">${code}</div>
-          <div style="margin-top:16px">
-            <a href="#preyone-otp" ${copyAttrs} style="display:inline-block;background:linear-gradient(135deg,rgba(113,255,47,0.14),rgba(19,216,255,0.14));color:#71ff2f;border:1px solid rgba(113,255,47,0.4);padding:9px 26px;border-radius:8px;text-decoration:none;font-weight:700;font-size:13px;letter-spacing:0.04em">Copy Code</a>
-          </div>
-        </div>
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                <tr><td style="height:3px;background:linear-gradient(90deg,#6a0dad,#ff00ff);font-size:1px;line-height:1px">&nbsp;</td></tr>
+              </table>
 
-        <p style="margin:0 0 4px;font-size:13px;color:#64748b;line-height:1.5">
-          On a device that blocks the copy button, tap and hold the code above to select it.
-        </p>
-        <p style="margin:14px 0 0;font-size:13px;color:#64748b;line-height:1.5">
-          Didn't request this? Ignore this email and change your password — someone may have yours.
-        </p>
-        ${emailFooter()}
-      </div>
-    </div>`,
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                <tr>
+                  <td align="center" style="padding:34px 32px 4px">
+                    <img src="${logo}" width="190" alt="Preyone" style="display:block;width:190px;max-width:100%;height:auto;border:0;outline:none;text-decoration:none">
+                  </td>
+                </tr>
+                <tr>
+                  <td align="center" style="padding:22px 32px 0">
+                    <h1 style="margin:0;font-family:${sans};font-size:24px;line-height:1.3;font-weight:700;color:#f8fbff;letter-spacing:-0.2px">Your sign-in code</h1>
+                  </td>
+                </tr>
+              </table>
+
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                <tr>
+                  <td style="padding:22px 32px 0;font-family:${sans};font-size:15px;line-height:1.6;color:#94a3b8">
+                    <p style="margin:0 0 10px">Hi <strong style="color:#f8fbff;font-weight:600">${fullName}</strong>,</p>
+                    <p style="margin:0">Use the code below to finish signing in to the Preyone Admin Console.</p>
+                  </td>
+                </tr>
+              </table>
+
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                <tr>
+                  <td style="padding:24px 32px 0">
+                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#111827;border:1px solid #263049;border-radius:12px">
+                      <tr>
+                        <td align="center" style="padding:24px 16px 22px">
+                          <div style="font-family:${mono};font-size:38px;line-height:1;font-weight:700;letter-spacing:12px;padding-left:12px;color:#f8fbff;user-select:all;-webkit-user-select:all;-moz-user-select:all;mso-user-select:all">${code}</div>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                <tr>
+                  <td style="padding:18px 32px 0;font-family:${sans};font-size:13px;line-height:1.6;color:#64748b" align="center">
+                    This code expires in <strong style="color:#7be0ff;font-weight:600">5 minutes</strong>. It can only be used once.
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:16px 32px 0;font-family:${sans};font-size:13px;line-height:1.6;color:#64748b" align="center">
+                    Didn&rsquo;t request this? You can safely ignore this email &mdash; and we recommend changing your password.
+                  </td>
+                </tr>
+              </table>
+
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                <tr>
+                  <td style="padding:30px 32px 0">
+                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                      <tr><td style="border-top:1px solid #1c2438;font-size:1px;line-height:1px">&nbsp;</td></tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                <tr>
+                  <td align="center" style="padding:26px 32px 8px">
+                    <img src="${footerMark}" width="150" alt="Preyone Enterprises" style="display:block;width:150px;max-width:100%;height:auto;border:0;outline:none;text-decoration:none">
+                  </td>
+                </tr>
+                <tr>
+                  <td align="center" style="padding:14px 32px 0">
+                    <a href="https://wa.me/263771327202" style="display:inline-block;background:#6a0dad;color:#ffffff;padding:11px 26px;border-radius:8px;text-decoration:none;font-family:${sans};font-size:13px;font-weight:700;letter-spacing:0.02em;border:1px solid #8b18c9">Chat on WhatsApp</a>
+                  </td>
+                </tr>
+                <tr>
+                  <td align="center" style="padding:18px 32px 0;font-family:${sans};font-size:12px;line-height:1.7;color:#64748b">
+                    <a href="mailto:support@preyone.com" style="color:#7be0ff;text-decoration:none">support@preyone.com</a>
+                    <span style="color:#263049">&nbsp;&nbsp;|&nbsp;&nbsp;</span>
+                    <a href="tel:+263771327202" style="color:#7be0ff;text-decoration:none">+263 771 327 202</a>
+                  </td>
+                </tr>
+                <tr>
+                  <td align="center" style="padding:16px 32px 30px;font-family:${sans};font-size:11px;line-height:1.6;color:#475569">
+                    &copy; ${new Date().getFullYear()} Preyone Enterprises. All rights reserved.
+                  </td>
+                </tr>
+              </table>
+
+            </td>
+          </tr>
+        </table>
+        <!--[if mso]></td></tr></table><![endif]-->
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`,
     'Preyone', 'admin@preyone.com'
   );
 }
