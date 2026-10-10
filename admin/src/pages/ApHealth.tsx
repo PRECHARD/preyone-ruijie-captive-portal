@@ -4,7 +4,9 @@ import Spinner from '../components/Spinner';
 import EmptyState from '../components/EmptyState';
 import Badge from '../components/Badge';
 
-export default function ApHealth() {
+type Props = { onNavigate?: (s: string) => void; canManageDevices?: boolean };
+
+export default function ApHealth({ onNavigate, canManageDevices }: Props = {}) {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
@@ -25,8 +27,11 @@ export default function ApHealth() {
       <div className="page-header">
         <div>
           <h2 className="page-title">AP Health</h2>
-          <p className="page-desc">{data.total || 0} total · {data.online || 0} online · {data.offline || 0} offline</p>
+          <p className="page-desc">{data.total || 0} total A? {data.online || 0} online A? {data.offline || 0} offline</p>
         </div>
+        {canManageDevices && onNavigate && (
+          <button className="btn-sm" onClick={() => onNavigate('ap-devices')}>AP Devices</button>
+        )}
       </div>
 
       <div className="stats-grid stats-grid--compact" style={{ marginBottom: 20 }}>

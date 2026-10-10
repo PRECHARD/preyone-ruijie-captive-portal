@@ -5,7 +5,9 @@ import Spinner from '../components/Spinner';
 import EmptyState from '../components/EmptyState';
 import Badge from '../components/Badge';
 
-export default function Reports() {
+type Props = { onNavigate?: (s: string) => void; canPeakHours?: boolean };
+
+export default function Reports({ onNavigate, canPeakHours }: Props = {}) {
   const [tab, setTab] = useState('revenue');
   const [revenue, setRevenue] = useState<any>(null);
   const [staffSales, setStaffSales] = useState<any>(null);
@@ -131,6 +133,11 @@ export default function Reports() {
           <h2 className="page-title">Reports</h2>
           <p className="page-desc">Revenue, Sales & Handover Management</p>
         </div>
+        {canPeakHours && onNavigate && (
+          <div className="page-header-extra">
+            <button className="btn-sm" onClick={() => onNavigate('peak-hours')}>Peak Hours</button>
+          </div>
+        )}
       </div>
 
       <div className="auth-tabs" style={{ marginBottom: 16 }}>

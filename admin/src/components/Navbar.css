@@ -129,6 +129,17 @@
   animation: navMenuIn 0.15s ease-out;
 }
 
+/* Right-anchored variant. The account dropdown always opens flush against the
+   profile trigger's right edge, and is capped to the viewport so it can never
+   spill off-screen on narrow phones (the media queries below still re-inset it
+   at small widths, where .navbar-right drops its own padding). */
+.navbar-menu--right {
+  right: 18px;
+  left: auto;
+  max-width: calc(100vw - 24px);
+  transform-origin: top right;
+}
+
 .navbar-menu-item {
   display: flex;
   align-items: center;
@@ -226,6 +237,11 @@
 @media (max-width: 480px) {
   .navbar-right {
     padding: 0;
+  }
+  /* Free ~45px for the workspace tab strip on narrow phones — the Starlink
+     portal is still reachable from the sidebar/switcher at wider widths. */
+  .navbar-portal {
+    display: none;
   }
   .navbar-profile-name {
     max-width: 80px;

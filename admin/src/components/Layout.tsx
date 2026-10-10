@@ -107,8 +107,15 @@ export default function Layout({ activeSection, onNavigate, workspace, onWorkspa
             <FiMenu />
           </button>
           <div className="admin-nav-brand">
-            <img src="/images/preyonenoneglow-logo-zoom.png" alt="Preyone" className="admin-logo" />
-            <span className="admin-brand-label">Command</span>
+            <img
+              src="/images/preyonenoneglow-logo-zoom-800.webp"
+              alt="Preyone"
+              className="admin-logo"
+              width={800}
+              height={400}
+              fetchPriority="high"
+              decoding="async"
+            />
           </div>
           <div className="admin-nav-center">
             <WorkspaceSwitcher workspace={workspace} onChange={onWorkspaceChange} />

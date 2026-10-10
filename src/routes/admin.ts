@@ -1004,7 +1004,11 @@ adminRouter.get('/dashboard/wifi', async (_req: Request, res: Response) => {
            (SELECT COUNT(*)::int FROM vouchers WHERE created_at >= date_trunc('day', NOW()) AND deleted_at IS NULL) AS created_today,
            (SELECT COUNT(*)::int FROM voucher_approvals WHERE status = 'pending') AS pending_approvals,
            (SELECT COUNT(*)::int FROM access_log WHERE created_at >= date_trunc('day', NOW())) AS connections_today,
-           (SELECT COUNT(*)::int FROM users WHERE created_at >= date_trunc('day', NOW())) AS signups_today`
+           (SELECT COUNT(*)::int FROM users WHERE created_at >= date_trunc('day', NOW())) AS signups_today,
+           (SELECT COUNT(*)::int FROM access_log WHERE created_at >= date_trunc('day', NOW()) AND event = 'radius_accept') AS auth_accepts,
+           (SELECT COUNT(*)::int FROM access_log WHERE created_at >= date_trunc('day', NOW()) AND event = 'radius_reject') AS auth_rejects,
+           (SELECT COALESCE(SUM(data_used_bytes), 0)::bigint FROM wispr_profiles WHERE session_end IS NULL) AS quota_used_bytes,
+           (SELECT COALESCE(SUM(data_quota_bytes), 0)::bigint FROM wispr_profiles WHERE session_end IS NULL) AS quota_total_bytes`
       ),
       pool.query(
         `SELECT al.id, al.event, al.mac_address, al.ip_address, al.detail,
@@ -1027,9 +1031,15 @@ adminRouter.get('/dashboard/wifi', async (_req: Request, res: Response) => {
 
     const aps = apRes.rows;
     const vouchers = voucherRes.rows[0] || {};
-    const authRate = vouchers.connections_today > 0
-      ? Math.round((vouchers.redeemed_today / vouchers.connections_today) * 100)
-      : 0;
+    // Real authentication outcomes (RADIUS accept/reject, written by
+    // gateway.ts). Falls back to the legacy redemption/connections proxy only
+    // while no radius decision has been recorded yet (fresh install / pre-deploy).
+    const radiusToday = (vouchers.auth_accepts || 0) + (vouchers.auth_rejects || 0);
+    const authRate = radiusToday > 0
+      ? Math.round((vouchers.auth_accepts / radiusToday) * 100)
+      : vouchers.connections_today > 0
+        ? Math.round((vouchers.redeemed_today / vouchers.connections_today) * 100)
+        : 0;
 
     res.json({
       aps: {
@@ -1050,6 +1060,10 @@ adminRouter.get('/dashboard/wifi', async (_req: Request, res: Response) => {
         connectionsToday: vouchers.connections_today || 0,
         signupsToday: vouchers.signups_today || 0,
         authSuccessRate: authRate,
+        authAccepts: vouchers.auth_accepts || 0,
+        authRejects: vouchers.auth_rejects || 0,
+        quotaUsedBytes: Number(vouchers.quota_used_bytes || 0),
+        quotaTotalBytes: Number(vouchers.quota_total_bytes || 0),
       },
       connectionLog: logRes.rows,
       voucherUsage: redemptionRes.rows,

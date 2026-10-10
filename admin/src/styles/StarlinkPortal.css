@@ -908,6 +908,9 @@
 }
 .sp-toast--ok { border-left-color: var(--sp-green); }
 .sp-toast--err { border-left-color: var(--sp-red); }
+/* `info` (e.g. "payment still processing") is a real Toast kind — pinned
+   explicitly so it keeps the cyan rail even if the base .sp-toast changes. */
+.sp-toast--info { border-left-color: var(--sp-cyan); }
 .sp-toast b { display: block; font-size: 13.5px; margin-bottom: 2px; }
 .sp-toast span { color: var(--sp-mut); font-size: 12.5px; }
 

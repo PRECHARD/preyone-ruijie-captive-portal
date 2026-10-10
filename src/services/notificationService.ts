@@ -446,7 +446,51 @@ export async function sendPasswordResetEmail(email: string, resetToken: string, 
   );
 }
 
-// ── Portal email verification ─────────────────────────────────────────
+// ── Admin 2FA login code ─────────────────────────────────────────────
+export async function sendAdminLoginCode(email: string, fullName: string, code: string): Promise<boolean> {
+  // Inline-clipboard copy is the only way a "copy" affordance can exist in
+  // email — there is no script execution. It works in Apple Mail and most
+  // webmail that permit inline handlers; everywhere else the code is rendered
+  // as large, monospace, user-selectable text so a manual copy is one gesture.
+  const copyAttrs =
+    `onclick="try{navigator.clipboard.writeText('${code}');this.innerHTML='&#10003; Copied';return false;}catch(e){return false;}"`;
+
+  return sendMail(
+    email,
+    'Your Preyone Sign-In Code',
+    `<div style="font-family:'Segoe UI',Arial,sans-serif;max-width:560px;margin:32px auto;background:#0a0a0a;border-radius:16px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.12),0 0 40px rgba(113,255,47,0.08)">
+      ${emailHeader('Your Sign-In Code')}
+      <div style="padding:24px 32px;text-align:center">
+        <div style="width:64px;height:64px;border-radius:50%;background:linear-gradient(135deg,rgba(113,255,47,0.12),rgba(19,216,255,0.12));display:flex;align-items:center;justify-content:center;margin:0 auto 16px;box-shadow:0 0 20px rgba(113,255,47,0.12)">
+          <span style="font-size:28px">🔐</span>
+        </div>
+        <p style="margin:0 0 8px;font-size:15px;color:#cbd5e1;line-height:1.6">Hi <strong style="color:#ffffff">${fullName}</strong>,</p>
+        <p style="margin:0 0 20px;font-size:15px;color:#cbd5e1;line-height:1.6">
+          Use this code to finish signing in to the Preyone Admin Console. It expires in
+          <strong style="color:#71ff2f">5 minutes</strong>.
+        </p>
+
+        <div style="background:#12101d;border:1px solid rgba(113,255,47,0.45);border-radius:14px;padding:22px 20px 18px;margin:0 0 14px;box-shadow:0 0 26px rgba(113,255,47,0.1)">
+          <div style="font-size:11px;font-weight:700;letter-spacing:0.18em;text-transform:uppercase;color:#64748b;margin-bottom:10px">Verification Code</div>
+          <div id="preyone-otp" style="font-size:40px;font-weight:800;letter-spacing:14px;padding-left:14px;color:#ffffff;font-family:'SFMono-Regular',Consolas,'Liberation Mono',monospace;user-select:all;-webkit-user-select:all;-moz-user-select:all">${code}</div>
+          <div style="margin-top:16px">
+            <a href="#preyone-otp" ${copyAttrs} style="display:inline-block;background:linear-gradient(135deg,rgba(113,255,47,0.14),rgba(19,216,255,0.14));color:#71ff2f;border:1px solid rgba(113,255,47,0.4);padding:9px 26px;border-radius:8px;text-decoration:none;font-weight:700;font-size:13px;letter-spacing:0.04em">Copy Code</a>
+          </div>
+        </div>
+
+        <p style="margin:0 0 4px;font-size:13px;color:#64748b;line-height:1.5">
+          On a device that blocks the copy button, tap and hold the code above to select it.
+        </p>
+        <p style="margin:14px 0 0;font-size:13px;color:#64748b;line-height:1.5">
+          Didn't request this? Ignore this email and change your password — someone may have yours.
+        </p>
+        ${emailFooter()}
+      </div>
+    </div>`,
+    'Preyone', 'admin@preyone.com'
+  );
+}
+
 export async function sendPortalEmailVerification(email: string, token: string, fullName: string): Promise<boolean> {
   // Must hit the MOUNTED portal route (authRouter -> /api/auth/verify-email),
   // which reads users.email_verification_token. A bare /verify-email path is
@@ -597,7 +641,7 @@ export async function sendPortalSignupConfirmation(
   );
 }
 
-// Starlink portal: customer password reset link (additive � admin/WiFi flows untouched)
+// Starlink portal: customer password reset link (additive � admin/WiFi flows untouched)
 export async function sendStarlinkPasswordReset(email: string, resetToken: string, fullName: string): Promise<boolean> {
   const baseUrl = process.env.STARLINK_BASE_URL || process.env.BASE_URL || 'https://starlink.preyone.com';
   const resetUrl = `${baseUrl.replace(/\/$/, '')}/starlink/portal?mode=reset&token=${resetToken}`;

@@ -46,6 +46,8 @@ interface WifiDashboardData {
   vouchers: {
     activeSessions: number; activeVouchers: number; redeemedToday: number; createdToday: number;
     pendingApprovals: number; connectionsToday: number; signupsToday: number; authSuccessRate: number;
+    authAccepts: number; authRejects: number;
+    quotaUsedBytes: number; quotaTotalBytes: number;
   };
   connectionLog: {
     id: number; event: string; mac_address: string | null; ip_address: string | null;
@@ -303,6 +305,20 @@ export default function WifiDashboard({ onNavigate }: { onNavigate?: (s: string)
   const gwHealth = data && data.aps.gateways.total > 0 ? Math.round((data.aps.gateways.online / data.aps.gateways.total) * 100) : 0;
   const monthPct = sales && sales.target > 0 ? Math.min(100, (sales.monthly / sales.target) * 100) : 0;
 
+  // Live truth from Ruijie Cloud when it is linked and answering; the local
+  // portal figures stay as the fallback so the cards never go blank.
+  const cloudLive = !rgNote && !!rgStatus?.configured;
+  const cloudVoucherCount = cloudLive
+    ? new Set(rgSessions.map((s) => (s.code || '').toLowerCase()).filter(Boolean)).size
+    : 0;
+  const radiusToday = (v?.authAccepts ?? 0) + (v?.authRejects ?? 0);
+  const fmtGb = (bytes: number) => {
+    const gb = bytes / 1073741824;
+    if (gb >= 100) return `${Math.round(gb)} GB`;
+    if (gb >= 10) return `${gb.toFixed(0)} GB`;
+    return `${gb.toFixed(1)} GB`;
+  };
+
   return (
     <div className="dashboard sector-dashboard un-shell">
       {/* ── Hero command header ── */}
@@ -333,8 +349,10 @@ export default function WifiDashboard({ onNavigate }: { onNavigate?: (s: string)
           </div>
           <div className="un-stat">
             <span className="un-stat-label">Live Sessions</span>
-            <span className="un-stat-value un-green">{v?.activeSessions ?? '—'}</span>
-            <span className="un-stat-sub">{v?.signupsToday ?? 0} signups today</span>
+            <span className="un-stat-value un-green">{cloudLive ? rgSessions.length : (v?.activeSessions ?? '—')}</span>
+            <span className="un-stat-sub">
+              {cloudLive ? `${v?.activeSessions ?? 0} portal sessions` : `${v?.signupsToday ?? 0} signups today`}
+            </span>
           </div>
           <div className="un-stat">
             <span className="un-stat-label">Today Revenue</span>
@@ -346,12 +364,23 @@ export default function WifiDashboard({ onNavigate }: { onNavigate?: (s: string)
           <div className="un-stat">
             <span className="un-stat-label">Auth Success</span>
             <span className="un-stat-value un-cyan">{v?.authSuccessRate ?? 0}%</span>
-            <span className="un-stat-sub">{v?.connectionsToday ?? 0} connections</span>
+            <span className="un-stat-sub">
+              {v ? (radiusToday > 0 ? `${v.authAccepts} ok · ${v.authRejects} failed` : `${v.connectionsToday} connections`) : 'loading'}
+            </span>
           </div>
           <div className="un-stat">
             <span className="un-stat-label">Vouchers Live</span>
-            <span className="un-stat-value un-purple">{v?.activeVouchers ?? '—'}</span>
-            <span className="un-stat-sub">{v?.redeemedToday ?? 0} redeemed today</span>
+            <span className="un-stat-value un-purple">{cloudLive ? cloudVoucherCount : (v?.activeVouchers ?? '—')}</span>
+            <span className="un-stat-sub">
+              {cloudLive
+                ? `${rgSessions.length} devices online · ${v?.redeemedToday ?? 0} redeemed today`
+                : `${v?.redeemedToday ?? 0} redeemed today`}
+            </span>
+          </div>
+          <div className="un-stat">
+            <span className="un-stat-label">Data Quota</span>
+            <span className="un-stat-value un-gold">{v ? fmtGb(v.quotaUsedBytes) : '—'}</span>
+            <span className="un-stat-sub">{v ? `of ${fmtGb(v.quotaTotalBytes)} active` : 'loading'}</span>
           </div>
         </div>
 
@@ -824,13 +853,13 @@ export default function WifiDashboard({ onNavigate }: { onNavigate?: (s: string)
             <>
               <div className="hud-grid">
                 <div className="hud-card hud-card--cyan"><div className="hud-label">Connections Today</div><div className="hud-value">{v?.connectionsToday ?? 0}</div></div>
-                <div className="hud-card"><div className="hud-label">Auth Success</div><div className="hud-value">{v?.authSuccessRate ?? 0}%</div></div>
+                <div className="hud-card"><div className="hud-label">Auth Success</div><div className="hud-value">{v?.authSuccessRate ?? 0}%</div><div className="hud-meta">{v ? `${v.authAccepts} accept · ${v.authRejects} reject (RADIUS)` : '—'}</div></div>
                 <div className="hud-card"><div className="hud-label">Signups Today</div><div className="hud-value">{v?.signupsToday ?? 0}</div></div>
                 <div className="hud-card"><div className="hud-label">Log Entries</div><div className="hud-value">{data.connectionLog.length}</div></div>
               </div>
 
               <div className="un-panel">
-                <SectionTitle title="Connections &amp; Authentication" sub="Live captive-portal access log" />
+                <SectionTitle title="Connections &amp; Authentication" sub="Portal signups + live RADIUS accept/reject decisions" />
                 {data.connectionLog.length === 0 ? (
                   <div className="table-empty"><p>No connection activity yet.</p></div>
                 ) : (

@@ -3,9 +3,9 @@ import { useAuth } from '../context/AuthContext';
 import type { Workspace } from '../workspace';
 import {
   FiGrid, FiCreditCard, FiUsers, FiMonitor, FiDollarSign, FiClock,
-  FiFileText, FiShield, FiBell, FiWifi, FiActivity, FiBarChart2,
-  FiUserCheck, FiPieChart, FiUserPlus, FiPackage, FiServer,
-  FiMessageSquare, FiAlertTriangle, FiDownload, FiSettings,
+  FiFileText, FiShield, FiBell, FiWifi, FiActivity,
+  FiUserCheck, FiPieChart, FiPackage,
+  FiMessageSquare, FiDownload, FiSettings,
   FiChevronLeft, FiChevronRight,
   FiCalendar, FiSmartphone, FiGlobe, FiTrendingUp, FiRadio, FiImage,
   FiShoppingCart, FiBox, FiBookOpen, FiBriefcase,
@@ -64,12 +64,9 @@ const groups: LinkGroup[] = [
     label: 'Access Points & Gateways',
     workspace: 'ultranet',
     links: [
-      { label: 'AP Health', section: 'ap-health', roles: ['Staff', 'Manager', 'CEO'], icon: <FiWifi /> },
+      { label: 'Access Points', section: 'ap-health', roles: ['Staff', 'Manager', 'CEO'], icon: <FiWifi /> },
       { label: 'Bandwidth', section: 'bandwidth', roles: ['Staff', 'Manager', 'CEO'], icon: <FiActivity /> },
-      { label: 'Peak Hours', section: 'peak-hours', roles: ['Manager', 'CEO'], icon: <FiBarChart2 /> },
-      { label: 'AP Devices', section: 'ap-devices', roles: ['CEO'], icon: <FiServer /> },
-      { label: 'MAC Mgmt', section: 'mac-mgmt', roles: ['CEO'], icon: <FiShield /> },
-      { label: 'Gateway & RADIUS', section: 'gateway-settings', roles: ['CEO'], icon: <FiRadio /> },
+      { label: 'Network Security', section: 'mac-mgmt', roles: ['CEO'], icon: <FiShield /> },
     ],
   },
   {
@@ -160,7 +157,6 @@ const groups: LinkGroup[] = [
     system: true,
     links: [
       { label: 'Settings (API Keys & Email)', section: 'settings', roles: ['CEO'], icon: <FiSettings /> },
-      { label: 'Admin Users', section: 'admin-users', roles: ['Manager', 'CEO'], icon: <FiUserPlus /> },
       { label: 'Staff Management', section: 'staff', roles: ['Manager', 'CEO'], icon: <FiUserCheck />, badgeKey: 'pendingStaff' },
       { label: 'Time & Attendance', section: 'time', roles: ['Staff', 'Manager', 'CEO'], icon: <FiClock /> },
     ],
@@ -173,8 +169,7 @@ const groups: LinkGroup[] = [
       { label: 'Alerts', section: 'alerts', roles: ['Staff', 'Manager', 'CEO'], icon: <FiBell /> },
       { label: 'Broadcasts', section: 'broadcasts', roles: ['Staff', 'Manager', 'CEO'], icon: <FiMessageSquare />, badgeKey: 'unreadBroadcasts' },
       { label: 'System Health', section: 'system-health', roles: ['CEO'], icon: <FiActivity /> },
-      { label: 'Platform Audit', section: 'platform-audit', roles: ['CEO'], icon: <FiAlertTriangle /> },
-      { label: 'Audit Log', section: 'audit-log', roles: ['CEO'], icon: <FiFileText /> },
+      { label: 'Audit', section: 'audit-log', roles: ['CEO'], icon: <FiFileText /> },
       { label: 'Backup', section: 'backup', roles: ['CEO'], icon: <FiDownload /> },
     ],
   },

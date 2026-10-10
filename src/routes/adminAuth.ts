@@ -4,8 +4,17 @@ import jwt from 'jsonwebtoken';
 import rateLimit from 'express-rate-limit';
 import { pool } from '../db/pool';
 import { loadPermissions } from '../middleware/rbac';
-import { sendAdminSignupConfirmation, sendAdminSignupNotification, sendPasswordResetEmail } from '../services/notificationService';
+import {
+  requireAdminAuth,
+  requireAdminAuthAllowLocked,
+  INACTIVITY_TIMEOUT_SEC,
+  SESSION_EXPIRED_CODE,
+  SESSION_LOCKED_CODE,
+  SESSION_REVOKED_CODE,
+} from '../middleware/adminAuth';
+import { sendAdminSignupConfirmation, sendAdminSignupNotification, sendPasswordResetEmail, sendAdminLoginCode } from '../services/notificationService';
 import { setPreyoneCookie, clearPreyoneCookie, resolveAuthToken } from '../utils/ssoCookie';
+import { SESSION_POLICY } from '../sessionPolicy';
 import crypto from 'crypto';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'preyone-jwt-secret-change-in-production';
@@ -35,6 +44,90 @@ const authLimiter = rateLimit({
   legacyHeaders: false,
   message: { error: 'Too many attempts. Try again in 15 minutes.' },
 });
+
+/** SHA-256 of the 6-digit code, peppered with the JWT secret. Cheap by design:
+ *  brute force is bounded by 5 attempts per challenge + the rate limiters. */
+function hashTwoFaCode(code: string): string {
+  return crypto.createHash('sha256').update(`${code}:${getJwtSecret()}`).digest('hex');
+}
+
+/** a***@domain.com — enough for the user to recognise their inbox. */
+function maskEmail(email: string): string {
+  const [local, domain] = email.split('@');
+  if (!local || !domain) return '***';
+  return `${local[0]}${'*'.repeat(Math.max(2, local.length - 1))}@${domain}`;
+}
+
+function newTwoFaCode(): string {
+  return crypto.randomInt(0, 1000000).toString().padStart(6, '0');
+}
+
+/** Sentinel stored in active_sid on logout. No JWT can present it as its `sid`
+ *  claim (a real sid is always a UUID), so every outstanding bearer token dies. */
+const REVOKED_SID = '__revoked__';
+
+/**
+ * Issue the access token and arm BOTH session clocks:
+ *   auth_time      — immutable, stamped now, anchors the 10-hour absolute cap.
+ *   last_activity  — slides on user interaction, anchors the 15-minute lock.
+ * active_sid is rotated so a later logout can revoke this specific token.
+ */
+async function startAdminSession(req: Request, res: Response, user: any): Promise<{ token: string; authTime: Date }> {
+  const sid = crypto.randomUUID();
+
+  // Detect a live session being replaced: single-session-per-user means the
+  // previous token dies here, and without an audit trail the victim cannot
+  // tell their own second login apart from a stolen token being used.
+  const { rows: prevRows } = await pool.query(
+    'SELECT active_sid, last_activity FROM admin_users WHERE id = $1',
+    [user.id]
+  );
+  const prevSid: string | null = prevRows[0]?.active_sid ?? null;
+  if (prevSid && prevSid !== REVOKED_SID) {
+    await recordAuditLog(
+      user.id,
+      user.full_name,
+      'session_superseded',
+      'admin_user',
+      user.id,
+      `New sign-in from ${req.ip ?? 'unknown'} replaced a session last active ${prevRows[0]?.last_activity ?? 'at an unknown time'}`
+    );
+  }
+
+  const { rows } = await pool.query(
+    `UPDATE admin_users
+        SET auth_time         = NOW(),
+            last_activity     = NOW(),
+            session_expires_at = NOW() + make_interval(secs => $1),
+            active_sid        = $2
+      WHERE id = $3
+      RETURNING auth_time, last_activity`,
+    [INACTIVITY_TIMEOUT_SEC, sid, user.id]
+  );
+  const authTime: Date = rows[0]?.auth_time ?? new Date();
+  const token = jwt.sign(
+    {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+      fullName: user.full_name,
+      company_id: user.company_id ?? null,
+      sid,
+    },
+    getJwtSecret(),
+    { expiresIn: '7d' }
+  );
+  // Cross-subdomain SSO: expose the session to every *.preyone.com app via a
+  // wildcard HTTP-Only cookie (read by /me, never by client JS).
+  setPreyoneCookie(res, token);
+  res.json({
+    token,
+    user: { id: user.id, fullName: user.full_name, email: user.email, phone: user.phone, role: user.role, company_id: user.company_id ?? null },
+    sessionPolicy: SESSION_POLICY,
+    authTime,
+  });
+  return { token, authTime };
+}
 
 export const adminAuthRouter = Router();
 
@@ -261,32 +354,254 @@ adminAuthRouter.post('/login', authLimiter, async (req: Request, res: Response) 
     return;
   }
 
-  // Record audit log
+  // Email OTP step-up: a valid password alone no longer signs the session in.
+  // The challenge lives 5 minutes; the code itself allows 5 wrong attempts.
+  if (user.email) {
+    const code = newTwoFaCode();
+    await pool.query('DELETE FROM admin_2fa_challenges WHERE admin_user_id = $1', [user.id]);
+    await pool.query(
+      `INSERT INTO admin_2fa_challenges (admin_user_id, code_hash, expires_at)
+       VALUES ($1, $2, NOW() + interval '5 minutes')`,
+      [user.id, hashTwoFaCode(code)]
+    );
+    const challengeToken = jwt.sign({ id: user.id, purpose: '2fa' }, getJwtSecret(), { expiresIn: '10m' });
+    await recordAuditLog(user.id, user.full_name, 'login_challenge', 'admin_user', user.id, '2FA code emailed');
+    sendAdminLoginCode(user.email, user.full_name, code);
+    if (process.env.NODE_ENV !== 'production') console.log(`[2FA] code for ${user.email}: ${code}`);
+    res.json({ requires2fa: true, challengeToken, maskedEmail: maskEmail(user.email) });
+    return;
+  }
+
+  // No email on file: fall back to password-only sign-in (cannot receive a code).
   await recordAuditLog(user.id, user.full_name, 'login', 'admin_user', user.id);
+  await startAdminSession(req, res, user);
+});
 
-  const token = jwt.sign(
-    { id: user.id, email: user.email, role: user.role, fullName: user.full_name, company_id: user.company_id ?? null },
-    getJwtSecret(),
-    { expiresIn: '7d' }
+// Verify the emailed OTP and complete sign-in.
+adminAuthRouter.post('/verify-2fa', authLimiter, async (req: Request, res: Response) => {
+  const { challengeToken, code } = req.body as { challengeToken?: string; code?: string };
+  if (!challengeToken || !code) {
+    res.status(422).json({ error: 'challengeToken and code are required' });
+    return;
+  }
+
+  let decoded: any;
+  try {
+    decoded = jwt.verify(challengeToken, getJwtSecret(), { algorithms: ['HS256'] });
+  } catch {
+    res.status(401).json({ error: 'Verification code expired. Please sign in again.' });
+    return;
+  }
+  if (decoded.purpose !== '2fa') {
+    res.status(401).json({ error: 'Invalid verification challenge' });
+    return;
+  }
+
+  const { rows } = await pool.query(
+    `SELECT id, code_hash, attempts FROM admin_2fa_challenges
+      WHERE admin_user_id = $1 AND consumed_at IS NULL AND expires_at > NOW()
+      ORDER BY created_at DESC LIMIT 1`,
+    [decoded.id]
   );
+  const challenge = rows[0];
+  if (!challenge) {
+    res.status(401).json({ error: 'Verification code expired. Please sign in again.' });
+    return;
+  }
 
-  // Cross-subdomain SSO: expose the session to every *.preyone.com app via a
-  // wildcard HTTP-Only cookie (read by /me, never by client JS).
-  setPreyoneCookie(res, token);
+  if (hashTwoFaCode(String(code).trim()) !== challenge.code_hash) {
+    const attempts = (challenge.attempts || 0) + 1;
+    if (attempts >= 5) {
+      await pool.query('DELETE FROM admin_2fa_challenges WHERE id = $1', [challenge.id]);
+      res.status(401).json({ error: 'Too many incorrect attempts. Please sign in again.' });
+      return;
+    }
+    await pool.query('UPDATE admin_2fa_challenges SET attempts = $1 WHERE id = $2', [attempts, challenge.id]);
+    res.status(401).json({ error: `Incorrect code. ${5 - attempts} attempt(s) remaining.` });
+    return;
+  }
 
+  const { rows: userRows } = await pool.query(
+    `SELECT id, full_name, email, phone, role, approved, company_id
+       FROM admin_users WHERE id = $1`,
+    [decoded.id]
+  );
+  const user = userRows[0];
+  if (!user || !user.approved) {
+    await pool.query('DELETE FROM admin_2fa_challenges WHERE admin_user_id = $1', [decoded.id]);
+    res.status(401).json({ error: 'Account is no longer active' });
+    return;
+  }
+
+  await pool.query('UPDATE admin_2fa_challenges SET consumed_at = NOW() WHERE id = $1', [challenge.id]);
+  await recordAuditLog(user.id, user.full_name, 'login', 'admin_user', user.id, '2FA verified');
+  await startAdminSession(req, res, user);
+});
+
+// Issue a fresh OTP for an in-progress challenge (user didn't receive the mail).
+adminAuthRouter.post('/resend-2fa', resendLimiter, async (req: Request, res: Response) => {
+  const { challengeToken } = req.body as { challengeToken?: string };
+  if (!challengeToken) {
+    res.status(422).json({ error: 'challengeToken is required' });
+    return;
+  }
+
+  let decoded: any;
+  try {
+    decoded = jwt.verify(challengeToken, getJwtSecret(), { algorithms: ['HS256'] });
+  } catch {
+    res.status(401).json({ error: 'Verification session expired. Please sign in again.' });
+    return;
+  }
+  if (decoded.purpose !== '2fa') {
+    res.status(401).json({ error: 'Invalid verification challenge' });
+    return;
+  }
+
+  try {
+    const { rows } = await pool.query(
+      'SELECT id, full_name, email FROM admin_users WHERE id = $1',
+      [decoded.id]
+    );
+    const user = rows[0];
+    if (!user?.email) {
+      res.json({ message: 'If that sign-in is still in progress, a new code has been sent.' });
+      return;
+    }
+    const code = newTwoFaCode();
+    await pool.query('DELETE FROM admin_2fa_challenges WHERE admin_user_id = $1', [user.id]);
+    await pool.query(
+      `INSERT INTO admin_2fa_challenges (admin_user_id, code_hash, expires_at)
+       VALUES ($1, $2, NOW() + interval '5 minutes')`,
+      [user.id, hashTwoFaCode(code)]
+    );
+    sendAdminLoginCode(user.email, user.full_name, code);
+    if (process.env.NODE_ENV !== 'production') console.log(`[2FA] code for ${user.email}: ${code}`);
+    res.json({ message: 'A new code has been sent.', maskedEmail: maskEmail(user.email) });
+  } catch (err) {
+    console.error('Resend 2FA error:', err);
+    res.json({ message: 'If that sign-in is still in progress, a new code has been sent.' });
+  }
+});
+
+// Sliding-window refresh: called by the SPA only on real user activity events.
+// requireAdminAuth already rejects a locked (423) or absolutely-expired (401)
+// session, so an abandoned session cannot be revived here. Deliberately writes
+// ONLY last_activity — auth_time is the 10-hour anchor and must never move.
+adminAuthRouter.post('/refresh', requireAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const { rows } = await pool.query(
+      `UPDATE admin_users
+          SET last_activity      = NOW(),
+              session_expires_at = NOW() + make_interval(secs => $1)
+        WHERE id = $2
+        RETURNING last_activity, auth_time, session_expires_at`,
+      [INACTIVITY_TIMEOUT_SEC, req.adminUser!.id]
+    );
+    const row = rows[0] ?? null;
+    res.json({
+      ok: true,
+      lastActivity: row?.last_activity ?? null,
+      authTime: row?.auth_time ?? null,
+      expiresAt: row?.session_expires_at ?? null,
+      sessionPolicy: SESSION_POLICY,
+    });
+  } catch (err) {
+    console.error('Session refresh error:', err);
+    res.status(500).json({ error: 'Failed to refresh session' });
+  }
+});
+
+/**
+ * State A recovery: password-only unlock of an inactivity-locked console.
+ * Session context is preserved (no new sid, no new auth_time) so 2FA is not
+ * re-triggered — but only while the 10-hour absolute cap still has budget,
+ * which requireAdminAuthAllowLocked already enforced (401 SESSION_EXPIRED).
+ */
+adminAuthRouter.post('/unlock', authLimiter, requireAdminAuthAllowLocked, async (req: Request, res: Response) => {
+  const { password } = req.body as { password?: string };
+  if (!password || typeof password !== 'string') {
+    res.status(422).json({ error: 'Password is required' });
+    return;
+  }
+
+  const { rows } = await pool.query(
+    'SELECT id, full_name, email, password_hash FROM admin_users WHERE id = $1',
+    [req.adminUser!.id]
+  );
+  const user = rows[0];
+  if (!user) {
+    res.status(401).json({ error: 'Account deactivated or removed' });
+    return;
+  }
+
+  const valid = await bcrypt.compare(password, user.password_hash);
+  if (!valid) {
+    // Same generic message on purpose: the endpoint must not confirm that the
+    // session exists, or it becomes an oracle for the 7-day bearer token.
+    res.status(401).json({ error: 'Incorrect password.', code: 'UNLOCK_FAILED' });
+    return;
+  }
+
+  const { rows: updated } = await pool.query(
+    `UPDATE admin_users
+        SET last_activity      = NOW(),
+            session_expires_at = NOW() + make_interval(secs => $1)
+      WHERE id = $2
+      RETURNING last_activity, auth_time`,
+    [INACTIVITY_TIMEOUT_SEC, req.adminUser!.id]
+  );
+  await recordAuditLog(user.id, user.full_name, 'session_unlock', 'admin_user', user.id, 'Console unlocked after inactivity lock');
+  const row = updated[0] ?? null;
   res.json({
-    token,
-    user: { id: user.id, fullName: user.full_name, email: user.email, phone: user.phone, role: user.role, company_id: user.company_id ?? null },
+    ok: true,
+    lastActivity: row?.last_activity ?? null,
+    authTime: row?.auth_time ?? null,
+    sessionPolicy: SESSION_POLICY,
   });
 });
 
+/**
+ * Public, unauthenticated policy readout so both SPAs drive their timers from
+ * the same constants the server enforces (no duplicated 900/36000 literals).
+ */
+adminAuthRouter.get('/policy', (_req: Request, res: Response) => {
+  res.json(SESSION_POLICY);
+});
+
 // ── Logout ───────────────────────────────────────────────────────────
-// Clears the wildcard SSO cookie. JWT is stateless so this only drops the cookie.
-adminAuthRouter.post('/logout', (_req: Request, res: Response) => {
+// Clears the wildcard SSO cookie AND revokes the session server-side. JWTs are
+// stateless, so the real revocation is rotating active_sid to a sentinel value
+// that no token can present as its `sid` claim — every outstanding bearer token
+// (this browser, other tabs, other devices, any SSO copy) dies at once.
+adminAuthRouter.post('/logout', async (req: Request, res: Response) => {
+  try {
+    const token = resolveAuthToken(req);
+    if (token) {
+      const decoded = jwt.verify(token, getJwtSecret()) as any;
+      if (decoded?.id) {
+        await pool.query(
+          `UPDATE admin_users
+              SET active_sid        = $1,
+                  last_activity     = NOW(),
+                  session_expires_at = NOW()
+            WHERE id = $2`,
+          [REVOKED_SID, decoded.id]
+        );
+      }
+    }
+  } catch { /* invalid/expired tokens have nothing to revoke */ }
   clearPreyoneCookie(res);
   res.json({ message: 'Signed out' });
 });
 
+/**
+ * Session bootstrap for both SPAs. Enforces BOTH clocks — this closes the old
+ * gap where /me only checked the JWT signature, so a browser that had been idle
+ * past the limit still rendered as authenticated on reload.
+ *   401 SESSION_EXPIRED  → State B: full re-auth (password + email OTP).
+ *   423 SESSION_LOCKED   → State A: offer the password unlock screen.
+ */
 adminAuthRouter.get('/me', async (req: Request, res: Response) => {
   const token = resolveAuthToken(req);
   if (!token) {
@@ -297,7 +612,9 @@ adminAuthRouter.get('/me', async (req: Request, res: Response) => {
   try {
     const decoded = jwt.verify(token, getJwtSecret()) as any;
     const { rows } = await pool.query(
-      'SELECT id, full_name, email, phone, role, company_id, portal_company_id, created_at, email_verified FROM admin_users WHERE id = $1',
+      `SELECT id, full_name, email, phone, role, company_id, portal_company_id, created_at,
+              email_verified, approved, last_activity, auth_time, active_sid
+         FROM admin_users WHERE id = $1`,
       [decoded.id]
     );
     if (rows.length === 0) {
@@ -305,6 +622,47 @@ adminAuthRouter.get('/me', async (req: Request, res: Response) => {
       return;
     }
     const user = rows[0];
+
+    // ── Session clock enforcement (mirrors requireAdminAuth) ────────────
+    if (user.active_sid != null && user.active_sid !== decoded.sid) {
+      res.status(401).json({ error: 'Session revoked. Please sign in again.', code: SESSION_REVOKED_CODE, sessionPolicy: SESSION_POLICY });
+      return;
+    }
+    if (!user.approved) {
+      res.status(401).json({ error: 'Account deactivated or removed' });
+      return;
+    }
+    const now = Date.now();
+    const authTimeMs = user.auth_time ? new Date(user.auth_time).getTime() : null;
+    const lastActivityMs = user.last_activity ? new Date(user.last_activity).getTime() : null;
+    const sessionState = {
+      authTime: user.auth_time ?? null,
+      lastActivity: user.last_activity ?? null,
+      locked: false,
+    };
+    if (authTimeMs !== null && authTimeMs + SESSION_POLICY.maxSessionLifetimeSec * 1000 <= now) {
+      res.status(401).json({
+        error: 'Your session reached its maximum duration. Please sign in again.',
+        code: SESSION_EXPIRED_CODE,
+        session: sessionState,
+        sessionPolicy: SESSION_POLICY,
+      });
+      return;
+    }
+    if (lastActivityMs !== null && lastActivityMs + SESSION_POLICY.inactivityTimeoutSec * 1000 <= now) {
+      sessionState.locked = true;
+      res.status(423).json({
+        error: 'Session locked after inactivity. Enter your password to continue.',
+        code: SESSION_LOCKED_CODE,
+        // Minimal identity so the lock screen can greet the user after a
+        // reload straight into the locked state (no token in JS, but the
+        // SSO cookie still resolved the account).
+        user: user.id ? { id: user.id, fullName: user.full_name, email: user.email, role: user.role } : null,
+        session: sessionState,
+        sessionPolicy: SESSION_POLICY,
+      });
+      return;
+    }
 
     // Tenant + subscribed modules (SSO session payload)
     // Company is either the user's assigned company or the singleton profile company.
@@ -328,7 +686,17 @@ adminAuthRouter.get('/me', async (req: Request, res: Response) => {
 // whose companyId was set.
 const permissions = await loadPermissions(user.role, user.id, user.company_id ?? null);
 
-res.json({ ...user, tenant_id: tenantId, subscribed_modules, permissions });
+const { active_sid: _activeSid, approved: _approved, ...publicUser } = user;
+void _activeSid;
+void _approved;
+res.json({
+  ...publicUser,
+  tenant_id: tenantId,
+  subscribed_modules,
+  permissions,
+  session: sessionState,
+  sessionPolicy: SESSION_POLICY,
+});
   } catch {
     res.status(401).json({ error: 'Invalid token' });
   }

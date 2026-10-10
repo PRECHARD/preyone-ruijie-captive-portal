@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAuth } from './context/AuthContext';
 import Layout from './components/Layout';
+import LockScreen from './components/LockScreen';
+import IdleWarningDialog from './components/IdleWarningDialog';
 import Login from './pages/Login';
 import WifiDashboard from './pages/WifiDashboard';
 import TransitOperationsDashboard from './pages/TransitOperationsDashboard';
@@ -131,7 +133,7 @@ function FieldStaffGate({ onLogout }: { onLogout: () => void }) {
 }
 
 export default function App() {
-  const { user, loading, logout } = useAuth();
+  const { user, loading, logout, locked } = useAuth();
   // A deep link wins over the persisted workspace: arriving at
   // #/transit/tenants must land on Transit regardless of what this browser
   // last used, otherwise the page stays unreachable by URL.
@@ -229,7 +231,12 @@ export default function App() {
   if (safeSection !== section) setSection('overview');
 
   return (
-    <Layout activeSection={safeSection} onNavigate={go} workspace={workspace} onWorkspaceChange={changeWorkspace}>
+    <>
+      {/* Session policy overlays. The console stays MOUNTED underneath both so
+          in-progress forms keep their state across a lock/unlock cycle. */}
+      <IdleWarningDialog />
+      {locked && <LockScreen />}
+      <Layout activeSection={safeSection} onNavigate={go} workspace={workspace} onWorkspaceChange={changeWorkspace}>
       {safeSection === 'overview' && (
         workspace === 'transit' ? <TransitOperationsDashboard onNavigate={setSection} />
         : workspace === 'pos' ? <PosDashboard onNavigate={setSection} />
@@ -241,18 +248,28 @@ export default function App() {
       {safeSection === 'my-sales' && <MySales />}
       {safeSection === 'time' && <TimeAttendance />}
       {safeSection === 'access-log' && <AccessLog />}
-      {safeSection === 'mac-mgmt' && <MacMgmt />}
+      {safeSection === 'mac-mgmt' && (
+        <MacMgmt onNavigate={go} canGateway={sectionAllowed(user, 'gateway-settings')} />
+      )}
       {safeSection === 'alerts' && <Alerts />}
-      {safeSection === 'ap-health' && <ApHealth />}
+      {safeSection === 'ap-health' && (
+        <ApHealth onNavigate={go} canManageDevices={sectionAllowed(user, 'ap-devices')} />
+      )}
       {safeSection === 'bandwidth' && <Bandwidth />}
       {safeSection === 'peak-hours' && <PeakHours />}
-      {safeSection === 'staff' && <StaffManagement />}
-      {safeSection === 'reports' && <Reports />}
+      {safeSection === 'staff' && (
+        <StaffManagement onNavigate={go} canAdminUsers={sectionAllowed(user, 'admin-users')} />
+      )}
+      {safeSection === 'reports' && (
+        <Reports onNavigate={go} canPeakHours={sectionAllowed(user, 'peak-hours')} />
+      )}
       {safeSection === 'admin-users' && <AdminUsers />}
       {safeSection === 'packages' && <Packages />}
       {safeSection === 'ap-devices' && <ApDevices />}
       {safeSection === 'broadcasts' && <Broadcasts />}
-      {safeSection === 'audit-log' && <AuditLog />}
+      {safeSection === 'audit-log' && (
+        <AuditLog onNavigate={go} canPlatform={sectionAllowed(user, 'platform-audit')} />
+      )}
       {safeSection === 'backup' && <Backup />}
       {safeSection === 'settings' && <Settings />}
       {safeSection === 'system-health' && <SystemHealth />}
@@ -273,6 +290,7 @@ export default function App() {
       {safeSection === 'pos-reports' && <PosReports />}
       {safeSection === 'pos-devices' && <PosDevices />}
       {safeSection === 'pos-company' && <PosCompanyProfile />}
-    </Layout>
+      </Layout>
+    </>
   );
 }

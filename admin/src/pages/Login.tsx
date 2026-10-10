@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { useAuth } from '../context/AuthContext';
+import { useAuth, type LoginChallenge } from '../context/AuthContext';
+import { SESSION_EXPIRED_KEY } from '../sessionPolicy';
 import { FiAlertOctagon } from 'react-icons/fi';
 import './Login.css';
 import '../styles/transit.css';
@@ -7,7 +8,7 @@ import '../styles/transit.css';
 type View = 'login' | 'signup' | 'forgot' | 'reset' | 'gate';
 
 export default function Login() {
-  const { login, signup } = useAuth();
+  const { login, verify2fa, signup } = useAuth();
   const [view, setView] = useState<View>('login');
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
@@ -35,6 +36,11 @@ export default function Login() {
   const [resetting, setResetting] = useState(false);
   const [sendingReset, setSendingReset] = useState(false);
 
+  // 2FA step: set once the password is accepted and an emailed OTP is pending.
+  const [challenge, setChallenge] = useState<LoginChallenge | null>(null);
+  const [otp, setOtp] = useState('');
+  const [resendIn, setResendIn] = useState(0);
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const token = params.get('token');
@@ -42,14 +48,29 @@ export default function Login() {
       setResetToken(token);
       setView('reset');
     }
+    if (localStorage.getItem(SESSION_EXPIRED_KEY)) {
+      localStorage.removeItem(SESSION_EXPIRED_KEY);
+      setError('Your session reached the 10-hour limit. Sign in again with your password and email code.');
+    }
   }, []);
+
+  useEffect(() => {
+    if (!challenge || resendIn <= 0) return;
+    const t = window.setInterval(() => setResendIn((s) => (s > 0 ? s - 1 : 0)), 1000);
+    return () => window.clearInterval(t);
+  }, [challenge, resendIn]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setBusy(true);
     try {
-      await login(email, password);
+      const pending = await login(email, password);
+      if (pending) {
+        setChallenge(pending);
+        setOtp('');
+        setResendIn(60);
+      }
     } catch (err: any) {
       // Field staff (DRIVER / CONDUCTOR) are blocked with a high-visibility gate.
       if (err?.message && /field staff/i.test(err.message)) {
@@ -59,6 +80,45 @@ export default function Login() {
       setError(err.message);
     } finally {
       setBusy(false);
+    }
+  };
+
+  const handleVerifyOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!challenge || otp.length !== 6) return;
+    setError('');
+    setBusy(true);
+    try {
+      await verify2fa(challenge.challengeToken, otp);
+    } catch (err: any) {
+      const msg = err?.message || 'Verification failed';
+      setError(msg);
+      // Dead challenge: drop back to the password form for a clean retry.
+      if (/expired|sign in again|no longer active|too many/i.test(msg)) {
+        setChallenge(null);
+        setOtp('');
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleResendOtp = async () => {
+    if (!challenge || resendIn > 0) return;
+    setError('');
+    setSuccessMsg('');
+    try {
+      const res = await fetch('/api/admin/auth/resend-2fa', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ challengeToken: challenge.challengeToken }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not resend the code');
+      setResendIn(60);
+      setSuccessMsg('A new code is on its way.');
+    } catch (err: any) {
+      setError(err.message);
     }
   };
 
@@ -150,7 +210,7 @@ export default function Login() {
             </div>
           )}
 
-          {view !== 'forgot' && view !== 'reset' && view !== 'gate' && (
+          {!challenge && view !== 'forgot' && view !== 'reset' && view !== 'gate' && (
             <>
               <div className="auth-tabs" role="tablist">
                 <button className={'auth-tab' + (view === 'login' ? ' active' : '')} onClick={() => { switchView('login'); setSignedUp(null); }}>Sign In</button>
@@ -187,7 +247,42 @@ export default function Login() {
             </div>
           )}
 
-          {!signedUp && view === 'login' && (
+          {!signedUp && view === 'login' && challenge && (
+            <form onSubmit={handleVerifyOtp} className="auth-form">
+              <h3 style={{ margin: 0, fontSize: 16, color: 'var(--text)' }}>Two-Factor Verification</h3>
+              <p style={{ margin: 0, fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+                We emailed a 6-digit code to <strong>{challenge.maskedEmail}</strong>. It expires in 5 minutes.
+              </p>
+              <div className="auth-field">
+                <label>Verification Code</label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  maxLength={6}
+                  value={otp}
+                  onChange={e => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  placeholder="000000"
+                  autoFocus
+                  required
+                  style={{ letterSpacing: '0.5em', fontSize: 20, textAlign: 'center', fontWeight: 700 }}
+                />
+              </div>
+              {error && <div className="auth-error" role="alert">{error}</div>}
+              {successMsg && <div className="auth-success">{successMsg}</div>}
+              <button type="submit" className="auth-btn" disabled={busy || otp.length !== 6}>
+                {busy ? (<><span className="auth-btn-spinner" aria-hidden="true" />Verifying…</>) : 'Verify & Sign In'}
+              </button>
+              <button type="button" className="auth-link-btn" onClick={handleResendOtp} disabled={resendIn > 0}>
+                {resendIn > 0 ? `Resend code in ${resendIn}s` : 'Resend Code'}
+              </button>
+              <button type="button" className="auth-link-btn" onClick={() => { setChallenge(null); setOtp(''); setError(''); setSuccessMsg(''); }}>
+                Back to Sign In
+              </button>
+            </form>
+          )}
+
+          {!signedUp && view === 'login' && !challenge && (
             <form onSubmit={handleLogin} className="auth-form">
               <div className="auth-field">
                 <label>Email</label>

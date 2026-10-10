@@ -5,7 +5,9 @@ import EmptyState from '../components/EmptyState';
 import Table from '../components/Table';
 import Badge from '../components/Badge';
 
-export default function AuditLog() {
+type Props = { onNavigate?: (s: string) => void; canPlatform?: boolean };
+
+export default function AuditLog({ onNavigate, canPlatform }: Props = {}) {
   const [logs, setLogs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -25,6 +27,11 @@ export default function AuditLog() {
           <h2 className="page-title">Audit Log</h2>
           <p className="page-desc">{logs.length} entries (last 500)</p>
         </div>
+        {canPlatform && onNavigate && (
+          <div className="page-header-extra">
+            <button className="btn-sm" onClick={() => onNavigate('platform-audit')}>Platform Audit</button>
+          </div>
+        )}
       </div>
       {logs.length === 0 ? (
         <EmptyState icon="📝" title="No Audit Log Entries" message="No administrative actions recorded yet." />

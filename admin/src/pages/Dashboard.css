@@ -203,6 +203,20 @@
   background: linear-gradient(90deg, rgba(106, 13, 173, 0.25), transparent);
 }
 
+/* Heading inside .card-header — the header's uppercase/letterspaced styles are
+   inherited, so the title only needs to neutralise them back for readability. */
+.card-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  text-transform: none;
+  color: var(--text);
+}
+
 .chart-card {
   padding: 18px;
 }

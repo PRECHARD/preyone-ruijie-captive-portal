@@ -18,10 +18,11 @@ vi.mock('../src/db/pool', () => ({
   pool: { query: mockPoolQuery, connect: mockPoolConnect },
 }));
 
-vi.mock('../src/middleware/adminAuth', () => ({
-  requireAdminAuth: vi.fn(),
-  requireRole: () => vi.fn((_req: any, _res: any, next: any) => next()),
-}));
+  vi.mock('../src/middleware/adminAuth', () => ({
+    requireAdminAuth: vi.fn(),
+    requireAdminAuthAllowLocked: vi.fn(),
+    requireRole: () => vi.fn((_req: any, _res: any, next: any) => next()),
+  }));
 
 // Cash handover approval is gated by requirePermission(COMPANY_ADMIN). Left
 // unmocked it would run the real loader against the stub pool, find no granted

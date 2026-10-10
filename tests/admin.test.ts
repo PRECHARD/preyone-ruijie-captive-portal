@@ -6,10 +6,11 @@ vi.mock('../src/db/pool', () => ({
   pool: { query: vi.fn() },
 }));
 
-vi.mock('../src/middleware/adminAuth', () => ({
-  requireAdminAuth: vi.fn((_req: any, _res: any, next: any) => { (_req as any).adminUser = { id: 'test', email: 'test@test', role: 'CEO', fullName: 'Test' }; next(); }),
-  requireRole: () => vi.fn((_req: any, _res: any, next: any) => next()),
-}));
+  vi.mock('../src/middleware/adminAuth', () => ({
+    requireAdminAuth: vi.fn((_req: any, _res: any, next: any) => { (_req as any).adminUser = { id: 'test', email: 'test@test', role: 'CEO', fullName: 'Test' }; next(); }),
+    requireAdminAuthAllowLocked: vi.fn((_req: any, _res: any, next: any) => { (_req as any).adminUser = { id: 'test', email: 'test@test', role: 'CEO', fullName: 'Test' }; next(); }),
+    requireRole: () => vi.fn((_req: any, _res: any, next: any) => next()),
+  }));
 
 // Most admin routes are gated by requirePermission(...). Unmocked, the real
 // loader queries the stub pool, grants nothing and 403s before the handler

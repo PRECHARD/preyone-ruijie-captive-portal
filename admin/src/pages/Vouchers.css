@@ -658,6 +658,15 @@
   font-weight: 600;
 }
 
+/* Right-hand column of the voucher header: keeps the access badge pinned to
+   the top-right corner regardless of how tall the logo group grows. */
+.badge-container {
+  display: flex;
+  justify-content: flex-end;
+  align-items: flex-start;
+  flex-shrink: 0;
+}
+
 .access-badge {
   background: linear-gradient(135deg, var(--purple), var(--pink));
   color: #fff;

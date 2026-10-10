@@ -6,7 +6,9 @@ import EmptyState from '../components/EmptyState';
 import Table from '../components/Table';
 import Badge from '../components/Badge';
 
-export default function StaffManagement() {
+type Props = { onNavigate?: (s: string) => void; canAdminUsers?: boolean };
+
+export default function StaffManagement({ onNavigate, canAdminUsers }: Props = {}) {
   const { user } = useAuth();
   const isCEO = user?.role === 'CEO';
   const [tab, setTab] = useState<'active' | 'pending' | 'managers'>('active');
@@ -63,11 +65,16 @@ export default function StaffManagement() {
           <h2 className="page-title">Staff Management</h2>
           <p className="page-desc">{statuses?.onlineCount || 0} online · {statuses?.totalStaff || staff.length} total</p>
         </div>
-        {isCEO && (
-          <div className="page-header-extra">
-            <Badge variant={managerCount >= maxManagers ? 'inactive' : 'active'}>
-              Managers: {managerCount}/{maxManagers}
-            </Badge>
+        {(isCEO || (canAdminUsers && onNavigate)) && (
+          <div className="page-header-extra" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            {isCEO && (
+              <Badge variant={managerCount >= maxManagers ? 'inactive' : 'active'}>
+                Managers: {managerCount}/{maxManagers}
+              </Badge>
+            )}
+            {canAdminUsers && onNavigate && (
+              <button className="btn-sm" onClick={() => onNavigate('admin-users')}>Admin Users</button>
+            )}
           </div>
         )}
       </div>

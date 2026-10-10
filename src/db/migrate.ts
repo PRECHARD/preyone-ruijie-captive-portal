@@ -193,6 +193,42 @@ const SQL = `
   ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT FALSE;
   ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS email_verification_token TEXT;
 
+  -- Admin console session policy: session_expires_at is a DERIVED cache of
+  -- (last_activity + INACTIVITY_TIMEOUT_SEC) kept for legacy readers. The two
+  -- authoritative clocks are last_activity (slides on interaction) and
+  -- auth_time (immutable, stamped when 2FA succeeds).
+  ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS session_expires_at TIMESTAMPTZ;
+  ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS last_activity TIMESTAMPTZ;
+  ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS auth_time TIMESTAMPTZ;
+  -- Rotated on every sign-in and carried as the JWT "sid" claim. Logout points
+  -- it at a value no token can present, so outstanding bearer tokens die even
+  -- though JWTs are stateless. NULL means "not yet rotated" (pre-upgrade rows)
+  -- and skips the binding check.
+  ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS active_sid TEXT;
+
+  -- Backfill once: convert the old 60s idle deadline into a last_activity
+  -- stamp, then give every account an absolute-session start so the 10-hour
+  -- cap is enforced from the first request after this migration ships.
+  UPDATE admin_users
+     SET last_activity = session_expires_at - interval '60 seconds'
+   WHERE last_activity IS NULL AND session_expires_at IS NOT NULL;
+  UPDATE admin_users
+     SET auth_time = COALESCE(last_activity, created_at, NOW())
+   WHERE auth_time IS NULL;
+
+  -- Email OTP challenge for admin console 2FA (login step-up verification).
+  CREATE TABLE IF NOT EXISTS admin_2fa_challenges (
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    admin_user_id UUID NOT NULL REFERENCES admin_users(id) ON DELETE CASCADE,
+    code_hash     TEXT NOT NULL,
+    expires_at    TIMESTAMPTZ NOT NULL,
+    attempts      INTEGER NOT NULL DEFAULT 0,
+    consumed_at   TIMESTAMPTZ,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+  CREATE INDEX IF NOT EXISTS idx_admin_2fa_challenges_user
+    ON admin_2fa_challenges (admin_user_id, created_at DESC);
+
   CREATE UNIQUE INDEX IF NOT EXISTS idx_admin_users_email ON admin_users (email);
 
   CREATE TABLE IF NOT EXISTS transactions (

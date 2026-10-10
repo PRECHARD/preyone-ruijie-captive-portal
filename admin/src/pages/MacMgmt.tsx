@@ -5,7 +5,9 @@ import EmptyState from '../components/EmptyState';
 import Table from '../components/Table';
 import Modal from '../components/Modal';
 
-export default function MacMgmt() {
+type Props = { onNavigate?: (s: string) => void; canGateway?: boolean };
+
+export default function MacMgmt({ onNavigate, canGateway }: Props = {}) {
   const [tab, setTab] = useState<'blacklist' | 'whitelist'>('blacklist');
   const [blacklist, setBlacklist] = useState<any[]>([]);
   const [whitelist, setWhitelist] = useState<any[]>([]);
@@ -57,7 +59,12 @@ export default function MacMgmt() {
           <h2 className="page-title">MAC Management</h2>
           <p className="page-desc">{blacklist.length} blacklisted · {whitelist.length} whitelisted</p>
         </div>
-        <button className="btn-primary" onClick={() => setShowAdd(true)}>Add MAC</button>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {canGateway && onNavigate && (
+            <button className="btn-sm" onClick={() => onNavigate('gateway-settings')}>Gateway & RADIUS</button>
+          )}
+          <button className="btn-primary" onClick={() => setShowAdd(true)}>Add MAC</button>
+        </div>
       </div>
 
       <div className="auth-tabs" style={{ marginBottom: 16 }}>

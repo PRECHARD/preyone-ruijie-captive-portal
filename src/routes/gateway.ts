@@ -53,6 +53,29 @@ function isOverQuota(row: any): boolean {
 
 export const gatewayRouter = Router();
 
+/**
+ * Persist a RADIUS authentication decision so the dashboard's "Auth Success"
+ * card reports real accept/reject outcomes instead of a derived placeholder.
+ *
+ * Never throws: failing to record an auth decision must not change what
+ * FreeRADIUS is told. Awaited so tests and crash-dumps see the write.
+ */
+async function recordRadiusAuth(
+  event: 'radius_accept' | 'radius_reject',
+  detail: string,
+  mac: string,
+  userId?: string | null
+): Promise<void> {
+  try {
+    await pool.query(
+      `INSERT INTO access_log (user_id, event, mac_address, detail) VALUES ($1, $2, $3, $4)`,
+      [userId ?? null, event, mac || null, detail]
+    );
+  } catch (err) {
+    console.error('RADIUS auth log write failed:', (err as Error).message);
+  }
+}
+
 // ── RADIUS auth endpoint (called by FreeRADIUS rest module) ──
 // FreeRADIUS sends GET /api/radius/auth?mac=<Calling-Station-Id>&username=<User-Name>
 // Returns JSON with Auth-Type and session attributes if active session found.
@@ -72,7 +95,7 @@ gatewayRouter.get('/api/radius/auth', async (req: Request, res: Response) => {
     // Check sessions by mac address (format-agnostic) or username
     // Strip all non-hex chars from mac_address for comparison
     const { rows } = await pool.query(
-      `SELECT u.session_expires_at, u.mac_address, w.bandwidth_up_kbps, w.bandwidth_down_kbps,
+      `SELECT u.id AS user_id, u.session_expires_at, u.mac_address, w.bandwidth_up_kbps, w.bandwidth_down_kbps,
               w.data_quota_bytes, w.data_used_bytes, w.is_uncapped, w.session_end
        FROM users u
        LEFT JOIN wispr_profiles w ON w.user_id = u.id
@@ -96,6 +119,7 @@ gatewayRouter.get('/api/radius/auth', async (req: Request, res: Response) => {
           `RADIUS: rejected ${macClean} — data quota exhausted ` +
           `(${row.data_used_bytes}/${row.data_quota_bytes} bytes)`
         );
+        await recordRadiusAuth('radius_reject', 'quota_exhausted', rawMac || macClean, row.user_id);
         // 403 makes rlm_rest emit an explicit reject. 404 would mean "no such
         // session" and would be indistinguishable from an unknown MAC.
         return res.status(403).json({
@@ -104,6 +128,7 @@ gatewayRouter.get('/api/radius/auth', async (req: Request, res: Response) => {
         });
       }
 
+      await recordRadiusAuth('radius_accept', 'mac_session', rawMac || macClean, row.user_id);
       return res.json(buildRadAttrs(row));
     }
 
@@ -155,6 +180,7 @@ gatewayRouter.get('/api/radius/auth', async (req: Request, res: Response) => {
               `RADIUS: rejected ${deviceMac} for voucher ${v.code} — ` +
               `data quota exhausted (${v.data_used_bytes}/${v.data_quota_bytes} bytes)`
             );
+            await recordRadiusAuth('radius_reject', 'quota_exhausted', rawMac || deviceMac, v.user_id);
             return res.status(403).json({
               error: 'data quota exhausted',
               'control:Auth-Type': 'Reject',
@@ -165,6 +191,7 @@ gatewayRouter.get('/api/radius/auth', async (req: Request, res: Response) => {
             `RADIUS: device ${deviceMac} authorized via voucher ${v.code} ` +
             `(${outcome.activeDevices}/${outcome.limit} devices${outcome.bound ? ', newly bound' : ''})`
           );
+          await recordRadiusAuth('radius_accept', 'voucher_code', rawMac || deviceMac, v.user_id);
           return res.json(buildRadAttrs(v));
         }
 
@@ -175,10 +202,12 @@ gatewayRouter.get('/api/radius/auth', async (req: Request, res: Response) => {
             `RADIUS: rejected ${deviceMac} for voucher ${v.code} — ` +
             `device limit ${outcome.limit} reached`
           );
+          await recordRadiusAuth('radius_reject', 'device_limit', rawMac || deviceMac, v.user_id);
         }
       }
     }
 
+    await recordRadiusAuth('radius_reject', 'no_session', rawMac || macClean, null);
     return res.status(404).json({ error: 'session not found' });
   } catch (err) {
     console.error('RADIUS auth error:', err);

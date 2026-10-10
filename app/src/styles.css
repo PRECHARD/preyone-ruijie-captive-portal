@@ -505,6 +505,26 @@ body {
   margin-bottom: 16px;
 }
 
+/* Per-module accents so the four workspace tiles are told apart at a glance
+   instead of all reading as the same magenta tile. */
+.gw-icon--pos {
+  background: linear-gradient(135deg, #0f7a3d, #22c55e);
+  box-shadow: 0 8px 24px rgba(34, 197, 94, 0.35);
+}
+.gw-icon--invoice {
+  background: linear-gradient(135deg, #0b5f73, var(--cyan));
+  box-shadow: 0 8px 24px rgba(0, 229, 255, 0.35);
+}
+.gw-icon--wifi {
+  background: linear-gradient(135deg, var(--magenta), var(--pink));
+  box-shadow: 0 8px 24px rgba(168, 85, 247, 0.42);
+}
+.gw-icon--admin {
+  background: linear-gradient(135deg, #8a6a00, #fbbf24);
+  box-shadow: 0 8px 24px rgba(251, 191, 36, 0.32);
+  color: #1a1200;
+}
+
 .gw-card-title {
   font-family: var(--font-display);
   font-size: 24px;
