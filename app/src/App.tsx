@@ -152,7 +152,7 @@ function LoginScreen({
     <div className="login-wrap">
       <div className="login-card">
         <span className="login-brow">✦ Secure Gateway</span>
-        <img className="login-logo" src="/favicon.svg" alt="Preyone" />
+        <img className="login-logo" src="/preyonenoneglow-logo-zoom-800.webp" alt="Preyone" />
         <h1 className="login-title">Preyone Enterprise</h1>
         <p className="login-tag">Connecting People. Powering Business.</p>
 
@@ -271,7 +271,7 @@ function LockOverlay({
   return (
     <div className="gw-lock" role="dialog" aria-modal="true" aria-labelledby="gw-lock-title">
       <div className="gw-lock-card">
-        <img className="gw-lock-logo" src="/favicon.svg" alt="Preyone" />
+        <img className="gw-lock-logo" src="/preyonenoneglow-logo-zoom-800.webp" alt="Preyone" />
         <h2 id="gw-lock-title" className="gw-lock-title">Session Locked</h2>
         <p className="gw-lock-sub">
           You were inactive for a while. Enter your password to pick up where you left off.

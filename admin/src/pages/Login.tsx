@@ -194,7 +194,7 @@ export default function Login() {
         <div className="auth-nav">
           <div className="auth-nav-inner">
             <div className="auth-brand">
-              <img src="/images/preyone-plan-white-outline@4x.png" alt="Preyone" className="auth-logo" />
+              <img src="/images/preyonenoneglow-logo-zoom-800.webp" alt="Preyone" className="auth-logo" />
               <span className="auth-brand-title">Admin Console</span>
             </div>
             <span className="auth-brand-badge">Secure · SSO</span>

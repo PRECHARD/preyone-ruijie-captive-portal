@@ -62,7 +62,7 @@ export default function LockScreen() {
     <div className="lock-overlay" role="dialog" aria-modal="true" aria-labelledby="lock-title">
       <div className="lock-card">
         <div className="lock-brand">
-          <img src="/images/preyone-plan-white-outline@4x.png" alt="Preyone" className="lock-logo" />
+          <img src="/images/preyonenoneglow-logo-zoom-800.webp" alt="Preyone" className="lock-logo" />
           <span className="lock-brand-title">Admin Console</span>
         </div>
 
