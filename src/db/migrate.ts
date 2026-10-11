@@ -89,7 +89,7 @@ const SQL = `
     error_message           TEXT
   );
 
-  -- ════════════════ ContiPay → Pesepay rollback ════════════════
+  -- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• ContiPay â†’ Pesepay rollback â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   -- ContiPay was not approved, so the online gateway is Pesepay again. A brief
   -- ContiPay deployment renamed pesepay_reference to contipay_transaction_index
   -- and dropped pesepay_poll_url, so put both back.
@@ -266,7 +266,7 @@ const SQL = `
   CREATE INDEX IF NOT EXISTS idx_staff_time_logs_user_id ON staff_time_logs (admin_user_id);
   CREATE INDEX IF NOT EXISTS idx_staff_time_logs_clock_in ON staff_time_logs (clock_in);
 
-  -- ── AP Devices (for Ruijie hardware monitoring) ──
+  -- â”€â”€ AP Devices (for Ruijie hardware monitoring) â”€â”€
   CREATE TABLE IF NOT EXISTS ap_devices (
     id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name              TEXT NOT NULL,
@@ -282,7 +282,7 @@ const SQL = `
     created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
 
-  -- ── Alerts / Notifications ──
+  -- â”€â”€ Alerts / Notifications â”€â”€
   CREATE TABLE IF NOT EXISTS alerts (
     id              BIGSERIAL PRIMARY KEY,
     type            TEXT NOT NULL,
@@ -302,7 +302,7 @@ const SQL = `
   CREATE INDEX IF NOT EXISTS idx_alerts_created_at ON alerts (created_at);
   CREATE INDEX IF NOT EXISTS idx_alerts_admin_id ON alerts (admin_id);
 
-  -- ── MAC Blacklist / Whitelist ──
+  -- â”€â”€ MAC Blacklist / Whitelist â”€â”€
   CREATE TABLE IF NOT EXISTS mac_blacklist (
     id          BIGSERIAL PRIMARY KEY,
     mac_address TEXT NOT NULL,
@@ -323,7 +323,7 @@ const SQL = `
 
   CREATE UNIQUE INDEX IF NOT EXISTS idx_mac_whitelist_mac ON mac_whitelist (mac_address);
 
-  -- ── AP Bandwidth Snapshots (for real-time bandwidth monitor) ──
+  -- â”€â”€ AP Bandwidth Snapshots (for real-time bandwidth monitor) â”€â”€
   CREATE TABLE IF NOT EXISTS ap_bandwidth_snapshots (
     id              BIGSERIAL PRIMARY KEY,
     ap_id           UUID REFERENCES ap_devices(id) ON DELETE CASCADE,
@@ -336,7 +336,7 @@ const SQL = `
   CREATE INDEX IF NOT EXISTS idx_ap_bw_snapshots_ap_id ON ap_bandwidth_snapshots (ap_id);
   CREATE INDEX IF NOT EXISTS idx_ap_bw_snapshots_recorded_at ON ap_bandwidth_snapshots (recorded_at);
 
-  -- ── Gateway Heartbeats (EG105G-P health check tracking) ──
+  -- â”€â”€ Gateway Heartbeats (EG105G-P health check tracking) â”€â”€
   CREATE TABLE IF NOT EXISTS gateway_heartbeats (
     id              BIGSERIAL PRIMARY KEY,
     gw_sn           TEXT UNIQUE NOT NULL,
@@ -352,7 +352,7 @@ const SQL = `
   -- Ensure package_tier column on vouchers
   ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS package_tier TEXT;
 
-  -- Voucher approval requests (Staff → Manager/CEO)
+  -- Voucher approval requests (Staff â†’ Manager/CEO)
   CREATE TABLE IF NOT EXISTS voucher_approvals (
     id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     requested_by      UUID NOT NULL REFERENCES admin_users(id),
@@ -374,7 +374,7 @@ const SQL = `
   CREATE INDEX IF NOT EXISTS idx_voucher_approvals_status ON voucher_approvals (status);
   CREATE INDEX IF NOT EXISTS idx_voucher_approvals_requested_by ON voucher_approvals (requested_by);
 
-  -- Cash handovers (Staff → Manager/CEO)
+  -- Cash handovers (Staff â†’ Manager/CEO)
   CREATE TABLE IF NOT EXISTS cash_handovers (
     id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     staff_id          UUID NOT NULL REFERENCES admin_users(id),
@@ -398,7 +398,7 @@ const SQL = `
   ALTER TABLE sales ADD COLUMN IF NOT EXISTS payment_method TEXT NOT NULL DEFAULT 'Cash';
   ALTER TABLE sales ADD COLUMN IF NOT EXISTS payment_reference TEXT;
 
-  -- ── CEO-only features: Retention Policies ──
+  -- â”€â”€ CEO-only features: Retention Policies â”€â”€
   CREATE TABLE IF NOT EXISTS retention_policies (
     id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     session_days      INTEGER NOT NULL DEFAULT 90,
@@ -410,7 +410,7 @@ const SQL = `
   INSERT INTO retention_policies (session_days, access_log_days, audit_log_days)
   SELECT 90, 30, 365 WHERE NOT EXISTS (SELECT 1 FROM retention_policies);
 
-  -- ── CEO-only features: Staff Commissions ──
+  -- â”€â”€ CEO-only features: Staff Commissions â”€â”€
   CREATE TABLE IF NOT EXISTS staff_commissions (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     staff_id        UUID UNIQUE NOT NULL REFERENCES admin_users(id) ON DELETE CASCADE,
@@ -419,7 +419,7 @@ const SQL = `
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
 
-  -- ── CEO-only features: Broadcast Notifications ──
+  -- â”€â”€ CEO-only features: Broadcast Notifications â”€â”€
   CREATE TABLE IF NOT EXISTS broadcast_notifications (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     title           TEXT NOT NULL,
@@ -431,7 +431,7 @@ const SQL = `
   );
   ALTER TABLE broadcast_notifications ADD COLUMN IF NOT EXISTS read_by JSONB NOT NULL DEFAULT '[]';
 
-  -- ── CEO-only features: Branding ──
+  -- â”€â”€ CEO-only features: Branding â”€â”€
   CREATE TABLE IF NOT EXISTS branding (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     portal_title    TEXT NOT NULL DEFAULT 'Preyone WiFi',
@@ -446,7 +446,7 @@ const SQL = `
   );
   INSERT INTO branding (portal_title) SELECT 'Preyone WiFi' WHERE NOT EXISTS (SELECT 1 FROM branding);
 
-  -- ── CEO-only features: Backup Logs ──
+  -- â”€â”€ CEO-only features: Backup Logs â”€â”€
   CREATE TABLE IF NOT EXISTS backup_logs (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     file_name       TEXT NOT NULL,
@@ -456,7 +456,7 @@ const SQL = `
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
 
-  -- ── CEO-only features: Report Schedules ──
+  -- â”€â”€ CEO-only features: Report Schedules â”€â”€
   CREATE TABLE IF NOT EXISTS report_schedules (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     frequency       TEXT NOT NULL CHECK (frequency IN ('daily', 'weekly', 'monthly')),
@@ -468,7 +468,7 @@ const SQL = `
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
 
-  -- ════════════════ Preyone Transit — Ticketing Platform ════════════════
+  -- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• Preyone Transit â€” Ticketing Platform â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   -- Companies own all transit data (multi-tenant). Everything else scopes to company_id.
 
   CREATE TABLE IF NOT EXISTS transit_companies (
@@ -628,7 +628,7 @@ const SQL = `
   );
   CREATE INDEX IF NOT EXISTS idx_transit_promotions_company ON transit_promotions (company_id, active);
 
-  -- ── Master route templates ────────────────────────────────────────────────
+  -- â”€â”€ Master route templates â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   -- A company-owned, reusable stage list + stage-to-stage fare matrix that a
   -- conductor uses to open an UNSCHEDULED on-the-go run. Deliberately NOT a
   -- trip: it never appears in the trip picker, never receives tickets and is
@@ -738,7 +738,7 @@ const SQL = `
   CREATE INDEX IF NOT EXISTS idx_transit_security_company ON transit_security_events (company_id);
   CREATE INDEX IF NOT EXISTS idx_transit_security_created ON transit_security_events (created_at);
 
-  -- ════════════════ RBAC Engine ════════════════
+  -- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• RBAC Engine â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   CREATE TABLE IF NOT EXISTS permissions (
     id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     code          TEXT UNIQUE NOT NULL,
@@ -800,7 +800,7 @@ const SQL = `
     END IF;
   END $$;
 
-  -- ════════════════ Soft Delete Engine ════════════════
+  -- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• Soft Delete Engine â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
   ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'active';
   ALTER TABLE packages ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
@@ -808,7 +808,7 @@ const SQL = `
   ALTER TABLE transit_companies ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
   ALTER TABLE transit_users ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
 
-  -- ════════════════ Payment / Transaction Constraints ════════════════
+  -- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• Payment / Transaction Constraints â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   DROP INDEX IF EXISTS idx_payments_contipay_txn_index;
   CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_pesepay_ref ON payments (pesepay_reference) WHERE pesepay_reference IS NOT NULL;
   DROP INDEX IF EXISTS idx_payments_merchant_ref;
@@ -819,10 +819,10 @@ const SQL = `
   EXCEPTION WHEN duplicate_object THEN NULL;
   END $$;
 
-  -- ════════════════ Users Email Unique ════════════════
+  -- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• Users Email Unique â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_unique ON users (email) WHERE email IS NOT NULL AND email != '';
 
-  -- ════════════════ Transit Seat Lock ════════════════
+  -- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• Transit Seat Lock â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   -- Seats are locked per TRIP INSTANCE (trip_id) per company so a repeated
   -- label like "600-20260918" across different actual trips never falsely
   -- conflicts. Modern /tickets/sync rows always carry trip_id once resolved.
@@ -830,7 +830,7 @@ const SQL = `
   CREATE UNIQUE INDEX idx_transit_tickets_seat_lock ON transit_tickets
     (company_id, trip_id, seat_number)
     WHERE trip_id IS NOT NULL AND seat_number != '' AND status != 'CANCELLED';
-  -- Legacy /sync inserts (and any old rows) have no trip_id — keep the old
+  -- Legacy /sync inserts (and any old rows) have no trip_id â€” keep the old
   -- trip_no-keyed lock for exactly those so history's behavior is preserved.
   DROP INDEX IF EXISTS idx_transit_tickets_seat_lock_legacy;
   CREATE UNIQUE INDEX idx_transit_tickets_seat_lock_legacy ON transit_tickets
@@ -844,7 +844,7 @@ const SQL = `
   EXCEPTION WHEN duplicate_object THEN NULL;
   END $$;
 
-  -- ════════════════ Transit Ticket Number Uniqueness ════════════════
+  -- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• Transit Ticket Number Uniqueness â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   -- A printed ticket number must identify exactly one sale, otherwise the same
   -- number can be traced back to two different passengers.
   --
@@ -869,7 +869,7 @@ const SQL = `
     WHERE status <> 'CANCELLED'
       AND client_receipt_no ~ '^[A-Z0-9]+-[0-9A-Z]{3}-[0-9]+$';
 
-  -- ════════════════ Transit Ticket Sync (idempotency + origin/destination) ════════════════
+  -- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• Transit Ticket Sync (idempotency + origin/destination) â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   ALTER TABLE transit_tickets ADD COLUMN IF NOT EXISTS ticket_id TEXT;
   ALTER TABLE transit_tickets ADD COLUMN IF NOT EXISTS route_from TEXT NOT NULL DEFAULT '';
   ALTER TABLE transit_tickets ADD COLUMN IF NOT EXISTS route_to TEXT NOT NULL DEFAULT '';
@@ -882,7 +882,7 @@ const SQL = `
   CREATE UNIQUE INDEX IF NOT EXISTS idx_transit_tickets_ticket_id
     ON transit_tickets (ticket_id);
 
-  -- ════════════════ Transit Ticket v3 (manual fare / departure / luggage link) ════════════════
+  -- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• Transit Ticket v3 (manual fare / departure / luggage link) â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   -- custom_fare: total cents charged on manually-overridden fare lines (0 = no override).
   -- departure_time: scheduled departure shown on the receipt (e.g. "06:30").
   -- luggage_linked_ticket_id: for luggage tickets, the bus-fare tx_id they upsell from.
@@ -892,12 +892,12 @@ const SQL = `
   CREATE INDEX IF NOT EXISTS idx_transit_tickets_luggage_link
     ON transit_tickets (luggage_linked_ticket_id) WHERE luggage_linked_ticket_id != '';
 
-  -- ════════════════ Transit Company Profile (receipt branding) ════════════════
+  -- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• Transit Company Profile (receipt branding) â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   ALTER TABLE transit_companies ADD COLUMN IF NOT EXISTS logo_url TEXT NOT NULL DEFAULT '';
   ALTER TABLE transit_companies ADD COLUMN IF NOT EXISTS receipt_header TEXT NOT NULL DEFAULT '';
   ALTER TABLE transit_companies ADD COLUMN IF NOT EXISTS receipt_footer TEXT NOT NULL DEFAULT '';
 
-  -- ════════════════ Transit Driver Shifts ════════════════
+  -- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• Transit Driver Shifts â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   CREATE TABLE IF NOT EXISTS transit_shifts (
     id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     company_id    UUID NOT NULL REFERENCES transit_companies(id) ON DELETE CASCADE,
@@ -932,12 +932,12 @@ const SQL = `
   ALTER TABLE transit_tickets ADD COLUMN IF NOT EXISTS conductor_id TEXT NOT NULL DEFAULT '';
   CREATE INDEX IF NOT EXISTS idx_transit_tickets_shift ON transit_tickets (shift_id);
 
-  -- ════════════════ Company Profile v2 (contact / tax / branding) ════════════════
+  -- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• Company Profile v2 (contact / tax / branding) â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   ALTER TABLE transit_companies ADD COLUMN IF NOT EXISTS contact_phone TEXT NOT NULL DEFAULT '';
   ALTER TABLE transit_companies ADD COLUMN IF NOT EXISTS tax_id TEXT NOT NULL DEFAULT '';
   ALTER TABLE transit_companies ADD COLUMN IF NOT EXISTS reg_no TEXT NOT NULL DEFAULT '';
 
-  -- ════════════════ Transit Staff Registry (driver & conductor profiles) ════════════════
+  -- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• Transit Staff Registry (driver & conductor profiles) â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   -- Web-admin managed profiles (name / phone / licence / status). These drive the
   -- roster the field app pulls so admin-created drivers & conductors appear in
   -- the app's selection drop-downs. Not login accounts (that stays transit_users).
@@ -993,7 +993,7 @@ const SQL = `
   EXCEPTION WHEN duplicate_object THEN NULL;
   END $$;
 
-  -- ════════════════ POS (Preyone Point of Sale) ════════════════
+  -- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• POS (Preyone Point of Sale) â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   -- Allow Cashier role on admin users + PIN login support
   ALTER TABLE admin_users DROP CONSTRAINT IF EXISTS admin_users_role_check;
   ALTER TABLE admin_users ADD CONSTRAINT admin_users_role_check
@@ -1141,6 +1141,81 @@ const SQL = `
   SELECT 'Preyone', 'Connecting People. Powering Business.', 'info@preyone.com', '+263771327202', 'USD', 0
   WHERE NOT EXISTS (SELECT 1 FROM companies);
 
+  -- Company scoping for POS documents and shifts. pos.ts writes company_id on
+  -- every checkout, but the columns were originally added by hand, so they are
+  -- declared here to keep a fresh migrate() in step with the live database
+  -- (both are NOT NULL in production). The singleton company backfills any
+  -- rows created before this ran.
+  ALTER TABLE pos_documents ADD COLUMN IF NOT EXISTS company_id UUID REFERENCES companies(id) ON DELETE SET NULL;
+  ALTER TABLE pos_shifts    ADD COLUMN IF NOT EXISTS company_id UUID REFERENCES companies(id) ON DELETE SET NULL;
+  UPDATE pos_documents SET company_id = (SELECT id FROM companies ORDER BY created_at LIMIT 1) WHERE company_id IS NULL;
+  UPDATE pos_shifts    SET company_id = (SELECT id FROM companies ORDER BY created_at LIMIT 1) WHERE company_id IS NULL;
+  ALTER TABLE pos_documents ALTER COLUMN company_id SET NOT NULL;
+  ALTER TABLE pos_shifts    ALTER COLUMN company_id SET NOT NULL;
+  CREATE INDEX IF NOT EXISTS idx_pos_documents_company ON pos_documents (company_id);
+  CREATE INDEX IF NOT EXISTS idx_pos_shifts_company    ON pos_shifts (company_id);
+
+  -- Pesepay payment intents. Also originally added by hand; the payments
+  -- router writes every column below and the callback settles them.
+  CREATE TABLE IF NOT EXISTS pesepay_intents (
+    id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    reference            TEXT UNIQUE NOT NULL,
+    provider_reference   TEXT,
+    tenant_id            UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    amount               NUMERIC(12,2) NOT NULL CHECK (amount > 0),
+    currency             TEXT NOT NULL,
+    payment_method       TEXT NOT NULL DEFAULT 'ecocash',
+    purpose              TEXT NOT NULL,
+    reason_for_payment   TEXT NOT NULL,
+    target_type          TEXT NOT NULL CHECK (target_type IN ('invoice', 'shift', 'subscription')),
+    target_id            UUID,
+    shift_id             UUID REFERENCES pos_shifts(id) ON DELETE SET NULL,
+    subscription_module  TEXT,
+    plan_tier            TEXT,
+    redirect_url         TEXT,
+    poll_url             TEXT,
+    status               TEXT NOT NULL DEFAULT 'pending',
+    created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    completed_at         TIMESTAMPTZ
+  );
+  CREATE INDEX IF NOT EXISTS idx_pesepay_intents_ref     ON pesepay_intents (reference);
+  CREATE INDEX IF NOT EXISTS idx_pesepay_intents_tenant  ON pesepay_intents (tenant_id);
+  CREATE INDEX IF NOT EXISTS idx_pesepay_intents_status  ON pesepay_intents (status);
+  CREATE INDEX IF NOT EXISTS idx_pesepay_intents_target  ON pesepay_intents (target_type, target_id);
+
+  -- Website Starlink checkout. One row per customer attempt, which makes the
+  -- POST idempotent on idempotency_key and keeps the customer's own details
+  -- (plan, account reference, contact) next to the invoice they triggered.
+  -- The invoice itself lives in pos_documents, and the Pesepay intent points
+  -- back at it, so the gateway callback settles the same document.
+  CREATE TABLE IF NOT EXISTS site_invoices (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    idempotency_key TEXT UNIQUE NOT NULL,
+    company_id      UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    document_id     UUID NOT NULL REFERENCES pos_documents(id) ON DELETE CASCADE,
+    intent_id       UUID REFERENCES pesepay_intents(id) ON DELETE SET NULL,
+    account_ref     TEXT NOT NULL,
+    plan_id         TEXT NOT NULL,
+    plan_label      TEXT NOT NULL,
+    full_name       TEXT NOT NULL,
+    email           TEXT NOT NULL,
+    phone           TEXT,
+    amount          NUMERIC(12,2) NOT NULL CHECK (amount > 0),
+    currency        TEXT NOT NULL DEFAULT 'USD',
+    rail            TEXT NOT NULL,
+    status          TEXT NOT NULL DEFAULT 'pending'
+                    CHECK (status IN ('pending', 'success', 'failed')),
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    completed_at    TIMESTAMPTZ
+  );
+  CREATE INDEX IF NOT EXISTS idx_site_invoices_company  ON site_invoices (company_id);
+  CREATE INDEX IF NOT EXISTS idx_site_invoices_document ON site_invoices (document_id);
+  CREATE INDEX IF NOT EXISTS idx_site_invoices_status   ON site_invoices (status);
+  CREATE INDEX IF NOT EXISTS idx_site_invoices_created  ON site_invoices (created_at);
+  CREATE INDEX IF NOT EXISTS idx_site_invoices_account  ON site_invoices (lower(account_ref));
+  CREATE INDEX IF NOT EXISTS idx_site_invoices_email    ON site_invoices (lower(email));
+
   -- POS devices & endpoints (desktop / web / android)
   CREATE TABLE IF NOT EXISTS pos_devices (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1169,7 +1244,7 @@ const SQL = `
   SELECT 'demo-android-01', 'android', 'Till Tablet (Hall)', 'Hall', '2.4.3', 'active', NOW() - INTERVAL '2 minutes'
   WHERE NOT EXISTS (SELECT 1 FROM pos_devices WHERE device_id = 'demo-android-01');
 
-  -- ════════════════ Ruijie Cloud Voucher Integration ════════════════
+  -- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• Ruijie Cloud Voucher Integration â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   -- Maps sellable package tiers to Ruijie Cloud user groups (seed via
   -- scripts/fetch-ruijie-profiles.ts once RUIJIE_CLOUD credentials exist).
   CREATE TABLE IF NOT EXISTS voucher_profiles (
@@ -1208,7 +1283,7 @@ const SQL = `
   CREATE INDEX IF NOT EXISTS idx_ruijie_vouchers_payment ON ruijie_vouchers (payment_id);
   CREATE INDEX IF NOT EXISTS idx_ruijie_vouchers_tier ON ruijie_vouchers (tier_name);
 
-  -- ════════════════ Multi-device Voucher Binding ════════════════
+  -- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• Multi-device Voucher Binding â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   -- One voucher code can authorize several devices (a phone, a laptop, a TV).
   -- Historically a device could only be attached by redeeming the code again,
   -- which burned another max_uses allocation and created a second user row.
@@ -1273,7 +1348,7 @@ const SQL = `
   UPDATE voucher_redemptions SET voucher_code = lower(voucher_code) WHERE voucher_code <> lower(voucher_code);
   UPDATE voucher_devices SET voucher_code = lower(voucher_code) WHERE voucher_code <> lower(voucher_code);
 
-  -- ════════════════ Voucher Lifecycle: Activation, Disable, Soft Delete ════════════════
+  -- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• Voucher Lifecycle: Activation, Disable, Soft Delete â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   -- The admin console needs to show and manage a voucher's lifecycle, but a stored
   -- status column would be a second copy of facts we can already derive
   -- (used_count, max_uses, expires_at) and would drift the moment RADIUS accounting
@@ -1283,7 +1358,7 @@ const SQL = `
   -- activated_at: when this code was FIRST redeemed. Distinct from expires_at,
   -- which is the staff-set shelf life of the code itself and is frequently NULL
   -- (never expires). Session lifetime is duration_min applied to
-  -- users.session_expires_at — three different clocks, deliberately not merged.
+  -- users.session_expires_at â€” three different clocks, deliberately not merged.
   ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS activated_at TIMESTAMPTZ;
 
   -- is_disabled: manual kill switch. Deliberately separate from deleted_at so a
@@ -1336,7 +1411,7 @@ const SQL = `
   -- Derived status. Recomputed by Postgres on every read, so it can never disagree
   -- with used_count/expires_at. Precedence: a disabled or deleted code is Disabled
   -- regardless of how it was used; then expiry; then whether it has been redeemed.
-  -- Note this deliberately has no "exhausted" state — a fully-redeemed code reads
+  -- Note this deliberately has no "exhausted" state â€” a fully-redeemed code reads
   -- as Active, since the requested enum is Unused/Active/Expired/Disabled.
   CREATE OR REPLACE VIEW voucher_status AS
   SELECT
@@ -1354,6 +1429,7 @@ const SQL = `
   const client = await pool.connect();
   try {
     await client.query(SQL);
+<<<<<<< HEAD
 
     // ── Multi‑currency engine ─────────────────────────────────────────────────
     // 1. Add currency / exchange_rate columns to pos_documents (idempotent)
@@ -1389,6 +1465,10 @@ const SQL = `
       VALUES ('USD', 'ZWG', 26.500000)
       ON CONFLICT (company_id, target_currency) DO NOTHING;
     `);
+=======
+    
+    // Seed packages table (idempotent upsert â€” updates existing tiers, inserts new ones)
+>>>>>>> 090ea86c9c91a0ec6f7605515292e557ea4b21a8
     const packages = [
       // Orange band
       ['PreLite', 'Daily Basic', 1.00, 'USD', 'daily', 1440, 5, false, 5, 5, 1],
@@ -1417,7 +1497,7 @@ const SQL = `
       );
     }
 
-    // Remove tiers no longer offered (best-effort — historical payments may FK-lock them)
+    // Remove tiers no longer offered (best-effort â€” historical payments may FK-lock them)
     const obsoleteTiers = [
       'PreLITE', 'PreLITE PLUS', 'PreLITE Starter',
       'PreLINK', 'PreLINK PLUS', 'PreLINK Student', 'PreLINK Standard',
@@ -1431,7 +1511,7 @@ const SQL = `
       console.warn('Could not remove obsolete tiers (likely referenced by historical payments):', (err as Error).message);
     }
     
-    // ── Preyone Transit seed (idempotent) ──
+    // â”€â”€ Preyone Transit seed (idempotent) â”€â”€
     const companySlug = process.env.TRANSIT_COMPANY_SLUG || 'preyone-transit';
     const companyResult = await client.query(
       `INSERT INTO transit_companies (name, slug, tagline, address, email, website, customer_care, currency)
@@ -1504,7 +1584,7 @@ const SQL = `
       console.log(`Transit seeded: company "${companySlug}", SUPER_ADMIN user "${transitAdminUsername}".`);
     }
 
-    // ── RBAC permission seeds (idempotent) ──
+    // â”€â”€ RBAC permission seeds (idempotent) â”€â”€
     const permissions: Array<[string, string]> = [
       ['system.developer', 'Preyone platform super-admin: tenant creation, gateway keys, global feature flags, all system logs'],
       ['company.admin', 'Company super admin: staff management, approvals, reports, revenue'],
@@ -1566,7 +1646,7 @@ const SQL = `
       );
     }
 
-    // ── Company capability grants (opt-in) ──
+    // â”€â”€ Company capability grants (opt-in) â”€â”€
     // The seeded company's owner is field staff (a conductor who bought the
     // product), so they need route template management via a COMPANY grant
     // rather than by being promoted to COMPANY_ADMIN. Every user of the company
@@ -1575,7 +1655,7 @@ const SQL = `
     // This is OPT-IN and refuses to guess. It previously ran unless
     // TRANSIT_GRANT_ROUTE_TEMPLATES=0, which meant any deployment whose
     // TRANSIT_COMPANY_SLUG was unset silently granted the capability to the
-    // default 'preyone-transit' tenant — on the live VPS that company is
+    // default 'preyone-transit' tenant â€” on the live VPS that company is
     // Preyone Freights, so the migration handed an unrelated company the
     // permission. Two explicit settings are now required: which company, and
     // that the grant is wanted at all. Existing grants are untouched (this only
@@ -1605,7 +1685,7 @@ const SQL = `
       );
     }
 
-    // ════════════════ Data cleanup: customer_care → +263 form ════════════════
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• Data cleanup: customer_care â†’ +263 form â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     // Normalise already-stored Zimbabwe care lines to E.164 (+263) form in
     // place, matching what the server now does on every create/update. Reads
     // every non-empty row once and rewrites only the ones that change, so it

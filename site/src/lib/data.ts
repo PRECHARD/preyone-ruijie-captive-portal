@@ -27,6 +27,7 @@ export const NAV_LINKS: NavLink[] = [
   { label: 'Hardware', to: '/#hardware' },
   { label: 'Services', to: '/services' },
   { label: 'Portfolio', to: '/portfolio' },
+  { label: 'Pay Invoice', to: '/payment' },
   { label: 'Contact', to: '/#contact' },
 ]
 

@@ -338,9 +338,13 @@ describe('Payments routes', () => {
         .mockResolvedValueOnce(undefined)                                    // 3: SAVEPOINT mint_voucher
         .mockResolvedValueOnce({ rows: [{ id: 'v-1', code: 'CT-TESTCODE1' }] }) // 4: INSERT INTO vouchers
         .mockResolvedValueOnce(undefined)                                    // 5: RELEASE SAVEPOINT
-        .mockResolvedValueOnce(undefined)                                    // 6: UPDATE payments completed
+        .mockResolvedValueOnce({ rows: [{ completed_at: new Date('2026-10-09T00:00:00Z') }] }) // 6: UPDATE payments RETURNING
         .mockResolvedValueOnce(undefined)                                    // 7: INSERT INTO transactions
-        .mockResolvedValueOnce(undefined);                                   // 8: COMMIT
+        .mockResolvedValueOnce({ rows: [] })                                 // 8: resolveOnlineSaleOwner (CEO lookup)
+        .mockResolvedValueOnce({ rows: [] })                                 // 9: INSERT INTO vouchers (sale accounting)
+        .mockResolvedValueOnce({ rows: [] })                                 // 10: UPDATE vouchers SET sold_by
+        .mockResolvedValueOnce({ rows: [] })                                 // 11: INSERT INTO sales
+        .mockResolvedValueOnce(undefined);                                   // 12: COMMIT
 
       const res = await request(createApp())
         .post('/api/payments/webhook')

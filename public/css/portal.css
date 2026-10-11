@@ -60,6 +60,16 @@ body.portal-body {
   display: none !important;
 }
 
+::selection {
+  background: rgba(0, 212, 255, 0.35);
+  color: #fff;
+}
+
+::-moz-selection {
+  background: rgba(0, 212, 255, 0.35);
+  color: #fff;
+}
+
 /* ── Loading Overlay (responsive: mobile → desktop) ── */
 .body-loading {
   position: fixed;
@@ -472,10 +482,13 @@ body.portal-body {
   justify-content: center;
 }
 
-.icon-fast { background-image: url('/images/icon-fast.png'); }
-.icon-reliable { background-image: url('/images/icon-reliable.png'); }
-.icon-multi { background-image: url('/images/icon-multi.png'); }
-.icon-support { background-image: url('/images/icon-support.png'); }
+/* Icons were 1024x1024 PNGs (477-632 KB each, ~2.2 MB total) painted into a
+   fixed 80x80 circle. image-set() serves the 160px WebP at 1-2x DPR and falls
+   back to the small PNG where WebP is unsupported. */
+.icon-fast { background-image: image-set(url('/images/icon-fast-160.webp') type('image/webp'), url('/images/icon-fast-160.png') type('image/png')); }
+.icon-reliable { background-image: image-set(url('/images/icon-reliable-160.webp') type('image/webp'), url('/images/icon-reliable-160.png') type('image/png')); }
+.icon-multi { background-image: image-set(url('/images/icon-multi-160.webp') type('image/webp'), url('/images/icon-multi-160.png') type('image/png')); }
+.icon-support { background-image: image-set(url('/images/icon-support-160.webp') type('image/webp'), url('/images/icon-support-160.png') type('image/png')); }
 
 .feature-label strong {
   display: block;
@@ -533,9 +546,51 @@ body.portal-body {
   border: 2px solid rgba(255, 255, 255, 0.1);
   border-radius: var(--radius);
   overflow: hidden;
+  position: relative;
   display: flex;
   flex-direction: column;
   transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275), box-shadow 0.4s ease;
+}
+
+.pkg-popular-badge {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  background: linear-gradient(135deg, #ff3d3d, #d90429);
+  color: #fff;
+  font-size: 0.6rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  padding: 6px 14px;
+  border-radius: 0 12px 0 10px;
+  z-index: 5;
+  box-shadow: 0 4px 15px rgba(255, 45, 45, 0.45);
+  animation: badgeGlow 1.6s ease-in-out infinite;
+}
+
+@keyframes badgeGlow {
+  0%, 100% {
+    box-shadow: 0 4px 15px rgba(255, 45, 45, 0.45), 0 0 24px rgba(255, 45, 45, 0.2);
+  }
+  50% {
+    box-shadow: 0 4px 22px rgba(255, 45, 45, 0.85), 0 0 42px rgba(255, 45, 45, 0.5);
+  }
+}
+
+.package-card--popular {
+  border-color: rgba(255, 60, 60, 0.55);
+  box-shadow: 0 0 30px rgba(255, 60, 60, 0.16);
+}
+
+.package-card--popular:hover {
+  transform: translateY(-15px) scale(1.05);
+  box-shadow: 0 20px 40px rgba(255, 60, 60, 0.32), 0 0 20px rgba(255, 60, 60, 0.22);
+}
+
+/* mobile safety so the badge never covers the price */
+@media screen and (max-width: 600px) {
+  .pkg-popular-badge { font-size: 0.55rem; padding: 5px 10px; }
+  .package-card--popular .pkg-priceband { padding-top: 2.2rem; }
 }
 
 .package-card:hover {
@@ -633,6 +688,33 @@ body.portal-body {
 .package-card--purple .pkg-priceband { background: var(--purple); color: #fff; }
 .package-card--purple .pkg-speed { color: var(--purple); }
 
+.pkg-multi-device {
+  margin-top: 0.4rem;
+  font-family: var(--display);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #71ff2f;
+}
+
+.pkg-devices {
+  margin-top: 0.4rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  color: var(--cyan);
+  font-family: var(--display);
+  font-size: 1.15rem;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.pkg-devices svg {
+  flex-shrink: 0;
+}
+
 .pkg-footer {
   margin-top: auto;
   padding-top: 1rem;
@@ -644,19 +726,6 @@ body.portal-body {
   gap: 0.5rem;
 }
 
-.ecocash-badge {
-  color: var(--cyan);
-  font-size: 1rem;
-  font-weight: 800;
-  border: 1px solid var(--cyan);
-  padding: 2px 6px;
-  border-radius: 4px;
-}
-
-.ecocash-red {
-  color: #ff4444;
-  border-color: #ff4444;
-}
 /* portal/_buttons.css */
 .pkg-action,
 #submit-btn {
@@ -1023,6 +1092,191 @@ body.portal-body {
 
 body.modal-open {
   overflow: hidden;
+}
+/* portal/_modal.css — ContiPay purchase flow additions */
+.modal-form select.field-select {
+  width: 100%;
+  padding: 0.85rem 1rem;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+  font-size: 1rem;
+  font-family: 'Montserrat', sans-serif;
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
+  box-sizing: border-box;
+}
+
+.modal-form select.field-select option {
+  background: #1a1a2e;
+  color: #fff;
+}
+
+.modal-form select.field-select:hover { border-color: rgba(106, 13, 173, 0.4); }
+
+.modal-form select.field-select:focus {
+  outline: none;
+  border-color: var(--pink);
+  background: rgba(255, 0, 255, 0.04);
+  box-shadow: 0 0 0 2px rgba(255, 0, 255, 0.12), 0 0 20px rgba(255, 0, 255, 0.08);
+}
+
+#confirm-payment-btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.btn-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: btnSpinnerSpin 0.7s linear infinite;
+  vertical-align: middle;
+  margin-left: 0.5rem;
+  display: inline-block;
+}
+
+@keyframes btnSpinnerSpin {
+  to { transform: rotate(360deg); }
+}
+
+/* Payment failure state */
+.payment-fail {
+  text-align: center;
+  padding: 1.1rem 1rem 0.5rem;
+}
+
+.payment-fail-icon {
+  width: 54px;
+  height: 54px;
+  margin: 0 auto 0.7rem;
+  display: block;
+  animation: warnPulse 1.6s ease-in-out infinite;
+  filter: drop-shadow(0 0 14px rgba(239, 71, 111, 0.45));
+}
+
+@keyframes warnPulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.08); }
+}
+
+.payment-fail-title {
+  font-size: 1.02rem;
+  font-weight: 700;
+  color: #f5a7b8;
+  margin: 0 0 0.35rem;
+}
+
+.payment-fail-detail {
+  font-size: 0.78rem;
+  color: rgba(255, 255, 255, 0.55);
+  margin: 0 0 1.1rem;
+  line-height: 1.45;
+}
+
+.payment-fail-actions {
+  display: flex;
+  gap: 0.6rem;
+  justify-content: center;
+}
+
+.payment-btn {
+  flex: 1;
+  max-width: 150px;
+  padding: 0.6rem 0.9rem;
+  border-radius: 0.6rem;
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: 1px solid transparent;
+}
+
+/* Paid-but-pending state: money is confirmed, code is still being issued.
+   Deliberately amber, not red - this is a delay, not a failure. */
+.pay-support {
+  text-align: center;
+  padding: 0.9rem 0.2rem 0.4rem;
+}
+
+.pay-support-title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #fbbf24;
+  margin: 0 0 0.4rem;
+}
+
+.pay-support-body {
+  font-size: 0.79rem;
+  color: rgba(255, 255, 255, 0.68);
+  margin: 0 0 0.7rem;
+  line-height: 1.5;
+}
+
+.pay-support-ref {
+  font-size: 0.74rem;
+  color: rgba(255, 255, 255, 0.5);
+  margin: 0 0 0.8rem;
+  word-break: break-all;
+}
+
+.pay-support-ref strong {
+  color: rgba(255, 255, 255, 0.85);
+  font-weight: 600;
+}
+
+.pay-support-wa {
+  display: inline-block;
+  padding: 0.6rem 1.05rem;
+  border-radius: 0.6rem;
+  background: rgba(37, 211, 102, 0.14);
+  border: 1px solid rgba(37, 211, 102, 0.4);
+  color: #4ade80;
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 0.83rem;
+  text-decoration: none;
+  transition: all 0.2s ease;
+}
+
+.pay-support-wa:hover {
+  background: rgba(37, 211, 102, 0.22);
+  transform: translateY(-1px);
+}
+
+.pay-support-note {
+  font-size: 0.7rem;
+  color: rgba(255, 255, 255, 0.38);
+  margin: 0.7rem 0 0;
+}
+
+.payment-btn--try {
+  background: linear-gradient(90deg, #ff00cc, #3333ff);
+  color: #fff;
+  box-shadow: 0 4px 18px rgba(255, 0, 204, 0.35);
+}
+
+.payment-btn--try:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 22px rgba(255, 0, 204, 0.45);
+}
+
+.payment-btn--close {
+  background: rgba(255, 255, 255, 0.06);
+  color: #cbd5e1;
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
+.payment-btn--close:hover {
+  background: rgba(255, 255, 255, 0.12);
 }
 /* portal/_success.css */
 .card--success {
@@ -1445,11 +1699,24 @@ body.modal-open {
 }
 /* portal/_footer.css */
 .main-footer {
-  margin-top: 5rem;
-  padding: 4rem 2rem 2rem;
-  background: rgba(5, 5, 5, 0.8);
-  border-top: 1px solid rgba(0, 212, 255, 0.2);
-  backdrop-filter: blur(10px);
+  position: relative;
+  overflow: hidden;
+  margin-top: 6rem;
+  padding: 5rem 2rem 2rem;
+  background: linear-gradient(180deg, rgba(8, 8, 14, 0.92), rgba(3, 3, 8, 0.96));
+  backdrop-filter: blur(14px);
+}
+
+.main-footer::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 10%;
+  right: 10%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, #00d4ff, #ff00ff, #00d4ff, transparent);
+  box-shadow: 0 0 18px rgba(0, 212, 255, 0.7), 0 0 30px rgba(255, 0, 255, 0.45);
+  opacity: 0.85;
 }
 
 .footer-grid {
@@ -1462,24 +1729,40 @@ body.modal-open {
 
 .footer-col h3 {
   font-family: var(--display);
-  font-size: 1.1rem;
-  letter-spacing: 2px;
-  color: var(--cyan);
+  font-size: 1.15rem;
+  letter-spacing: 3px;
   margin-bottom: 1.5rem;
   text-transform: uppercase;
+  position: relative;
+  background: linear-gradient(135deg, #7be0ff, var(--cyan) 40%, #ff7bfb, var(--pink));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+
+.footer-col h3::after {
+  content: '';
+  display: block;
+  width: 46px;
+  height: 2px;
+  margin-top: 0.65rem;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--cyan), var(--pink));
+  box-shadow: 0 0 12px rgba(0, 212, 255, 0.65);
 }
 
 .footer-brand-mark {
   max-width: 180px;
   height: auto;
   margin-bottom: 1rem;
-  filter: brightness(1.1);
+  filter: brightness(1.15) drop-shadow(0 0 8px rgba(0, 212, 255, 0.25));
 }
 
 .footer-tagline {
-  font-size: 0.85rem;
-  color: var(--text-muted);
-  line-height: 1.6;
+  font-size: 0.875rem;
+  color: rgba(148, 163, 184, 0.9);
+  line-height: 1.65;
   max-width: 300px;
 }
 
@@ -1490,18 +1773,9 @@ body.modal-open {
 
 .footer-links li {
   margin-bottom: 0.8rem;
-}
-
-.footer-links a {
-  color: var(--text-muted);
-  text-decoration: none;
-  font-size: 0.9rem;
-  transition: color 0.3s ease, padding-left 0.3s ease;
-}
-
-.footer-links a:hover {
-  color: var(--pink);
-  padding-left: 5px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
 }
 
 .footer-links li svg.icon {
@@ -1510,17 +1784,35 @@ body.modal-open {
   flex-shrink: 0;
 }
 
-.footer-links li {
-  display: flex;
-  align-items: center;
-  gap: 2px;
+.footer-links a {
+  color: rgba(203, 213, 225, 0.85);
+  text-decoration: none;
+  font-size: 0.9rem;
+  transition: color 0.3s ease, padding-left 0.3s ease, text-shadow 0.3s ease;
+}
+
+.footer-links a:hover {
+  color: var(--pink);
+  padding-left: 6px;
+  text-shadow: 0 0 14px rgba(255, 0, 255, 0.55);
 }
 
 .footer-bottom {
-  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  position: relative;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
   padding-top: 2rem;
   max-width: 1100px;
   margin: 0 auto;
+}
+
+.footer-bottom::before {
+  content: '';
+  position: absolute;
+  top: -1px;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(0, 212, 255, 0.4), rgba(255, 0, 255, 0.4), transparent);
 }
 
 .legal-row {
@@ -1529,15 +1821,87 @@ body.modal-open {
   align-items: center;
   flex-wrap: wrap;
   gap: 1.5rem;
-  font-size: 0.75rem;
-  color: #666;
+  font-size: 0.78rem;
+  color: rgba(148, 163, 184, 0.8);
 }
 
 .payment-badges {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 1rem;
 }
+
+.payment-badges .secure-pay-label {
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--cyan);
+  padding: 6px 14px;
+  border: 1px solid rgba(0, 212, 255, 0.28);
+  border-radius: 999px;
+  background: rgba(0, 212, 255, 0.06);
+  box-shadow: 0 0 14px rgba(0, 212, 255, 0.12);
+}
+
+/* Payment provider logos */
+.secure-pay-label {
+  font-size: 0.66rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.pay-logos {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 0.7rem;
+}
+
+.pay-logo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 0;
+}
+
+.pay-logo--ecocash {
+  line-height: 1;
+  border: 2px solid var(--cyan);
+  border-radius: 999px;
+  padding: 0.42rem 0.9rem 0.5rem;
+  background: rgba(0, 212, 255, 0.07);
+  box-shadow: 0 0 16px rgba(0, 212, 255, 0.35), inset 0 0 12px rgba(0, 212, 255, 0.08);
+}
+
+.ecocash-mark {
+  font-family: var(--display);
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  font-size: 1.1rem;
+}
+
+.ecocash-eco {
+  color: #0d6efd;
+  text-shadow: 0 0 18px rgba(13, 110, 253, 0.45);
+}
+
+.ecocash-cash {
+  color: #f22b3a;
+  text-shadow: 0 0 18px rgba(242, 43, 58, 0.45);
+}
+
+.pkg-footer { flex-wrap: wrap; }
+
+.pkg-footer .ecocash-mark {
+  font-size: 1.1rem;
+}
+
+.pkg-footer .pay-logos { gap: 0.55rem; }
+
+.pkg-footer .pay-logos { gap: 0.55rem; }
 
 .badge {
   background: rgba(255, 255, 255, 0.05);
@@ -1548,22 +1912,37 @@ body.modal-open {
 
 .social-links {
   display: flex;
-  gap: 1rem;
+  gap: 0.9rem;
   margin-top: 1.5rem;
 }
 
 .social-icon {
-  width: 40px;
-  height: 40px;
+  width: 44px;
+  height: 44px;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.12);
   display: flex;
   align-items: center;
   justify-content: center;
   color: var(--text-muted);
   text-decoration: none;
+  position: relative;
   transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.social-icon::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: 50%;
+  padding: 1px;
+  background: linear-gradient(135deg, var(--cyan), var(--pink));
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  opacity: 0;
+  transition: opacity 0.3s ease;
 }
 
 .social-icon svg {
@@ -1571,43 +1950,110 @@ body.modal-open {
 }
 
 .social-icon:hover {
-  transform: translateY(-5px);
+  transform: translateY(-6px) scale(1.08);
   color: #fff;
+  border-color: transparent;
+}
+
+.social-icon:hover::before {
+  opacity: 1;
 }
 
 .social-icon.whatsapp:hover {
   background: #25D366;
-  box-shadow: 0 0 15px rgba(37, 211, 102, 0.5);
-  border-color: #25D366;
+  box-shadow: 0 0 22px rgba(37, 211, 102, 0.6);
 }
 
 .social-icon.facebook:hover {
   background: #1877F2;
-  box-shadow: 0 0 15px rgba(24, 119, 242, 0.5);
-  border-color: #1877F2;
+  box-shadow: 0 0 22px rgba(24, 119, 242, 0.6);
 }
 
 .social-icon.instagram:hover {
   background: linear-gradient(45deg, #f09433, #e6683c, #dc2743, #cc2366, #bc1888);
-  box-shadow: 0 0 15px rgba(220, 39, 67, 0.5);
-  border-color: transparent;
+  box-shadow: 0 0 22px rgba(220, 39, 67, 0.6);
 }
 
 .social-icon.x:hover {
   background: #000;
-  box-shadow: 0 0 15px rgba(255, 255, 255, 0.3);
+  box-shadow: 0 0 18px rgba(255, 255, 255, 0.35);
   border-color: #fff;
 }
 
 .social-icon.youtube:hover {
   background: #FF0000;
-  box-shadow: 0 0 15px rgba(255, 0, 0, 0.5);
-  border-color: #FF0000;
+  box-shadow: 0 0 22px rgba(255, 0, 0, 0.6);
 }
 
 .social-icon:hover svg {
-  transform: scale(1.1);
+  transform: scale(1.12);
 }
+
+@media (max-width: 768px) {
+  .footer-grid {
+    grid-template-columns: 1fr;
+    text-align: center;
+  }
+
+  .footer-col h3 {
+    margin-top: 1rem;
+  }
+
+  .footer-col h3::after {
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  .footer-tagline {
+    margin: 0 auto;
+  }
+
+  .social-links {
+    justify-content: center;
+  }
+
+  .legal-row {
+    justify-content: center;
+    text-align: center;
+  }
+}
+
+@media (max-width: 480px) {
+  .main-footer {
+    padding: 3.5rem 1rem 1.5rem;
+  }
+
+  .footer-col,
+  .footer-links,
+  .footer-links li,
+  .footer-links a {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .footer-links li,
+  .footer-links a {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .legal-row {
+    flex-direction: column;
+    align-items: center;
+    gap: 1rem;
+  }
+
+  .legal-row p {
+    max-width: 100%;
+    line-height: 1.5;
+  }
+
+  .payment-badges {
+    justify-content: center;
+    max-width: 100%;
+  }
+}
+
 /* portal/_responsive.css */
 @media (max-width: 992px) {
   .hero-section {
@@ -1668,9 +2114,65 @@ body.modal-open {
     grid-template-columns: 1fr;
     gap: 0.75rem;
   }
+
+  .brand-eybrow--main {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.75rem;
+  }
+
+  .section-heading {
+    align-items: flex-start;
+    gap: 0.75rem;
+  }
+
+  .section-heading h2 {
+    font-size: clamp(1.3rem, 5vw, 2rem);
+    line-height: 1.05;
+    white-space: nowrap;
+  }
+
+  .section-note {
+    max-width: none;
+    text-align: left;
+  }
 }
 
 @media (max-width: 480px) {
+  .brand-eybrow--main {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.6rem;
+  }
+
+  .package-card {
+    min-width: 0;
+  }
+
+  .pkg-priceband {
+    padding: 0.9rem 0.6rem;
+  }
+
+  .pkg-priceband .amt {
+    font-size: 2rem;
+  }
+
+  .pkg-body {
+    padding: 0.9rem 0.7rem;
+  }
+
+  .pkg-data {
+    font-size: 1.05rem;
+  }
+
+  .pkg-tier {
+    font-size: 1rem;
+    margin-bottom: 0.9rem;
+  }
+
+  .pkg-action {
+    padding: 0.7rem 0.6rem;
+    font-size: 1.05rem;
+  }
+
   .payment-modal {
     padding: 1.5rem;
     border-radius: 16px;

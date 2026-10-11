@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Sign In — Preyone UltraNet Wi‑Fi</title>
+  <title>Sign In â€” Preyone UltraNet Wiâ€‘Fi</title>
   <link rel="icon" type="image/png" href="/favicon/favicon-96x96.png" sizes="96x96" />
   <link rel="icon" type="image/svg+xml" href="/favicon/favicon.svg" />
   <link rel="shortcut icon" href="/favicon/favicon.ico" />
@@ -18,7 +18,11 @@
   <div class="body-loading hidden" id="bodyLoading">
     <div class="loading-spinner">
       <div class="loading-spinner-inner">
-        <img src="/images/faviconloading.svg" alt="Preyone" />
+        <picture>
+          <source srcset="/images/faviconloading-80.avif" type="image/avif" />
+          <source srcset="/images/faviconloading-80.webp" type="image/webp" />
+          <img src="/images/faviconloading-80.png" alt="Preyone" width="40" height="40" decoding="async" />
+        </picture>
       </div>
     </div>
     <div class="loading-text">Signing in...</div>
@@ -27,8 +31,8 @@
   <header class="portal-header">
     <div class="brand-banner">
       <picture class="brand-logo-picture">
-        <source srcset="/images/preyonenoneglow-logo-zoom.png" media="(prefers-contrast: more)" />
-        <img src="/images/preyonenoneglow-logo-zoom.png" alt="Preyone" class="brand-logo-img" width="400" />
+        <source srcset="/images/preyonenoneglow-logo-optimized.png" media="(prefers-contrast: more)" />
+        <img src="/images/preyonenoneglow-logo-optimized.png" alt="Preyone" class="brand-logo-img" width="1200" height="600" decoding="async" />
       </picture>
     </div>
     <div class="brand-eyebrow">
@@ -38,7 +42,7 @@
 
   <main class="portal-shell">
 
-    <!-- ── Sign In Form ── -->
+    <!-- â”€â”€ Sign In Form â”€â”€ -->
     <div id="login-section" style="max-width:480px;margin:2rem auto">
       <div class="glass-card glass-card--hero">
         <div class="brand" style="margin-bottom:1.5rem">
@@ -74,12 +78,12 @@
 
         <p style="text-align:center;font-size:0.8rem;color:var(--text-muted);margin-top:1.5rem">
           Don't have an account?
-          <a href="/" style="color:var(--cyan)">Connect with a voucher first</a>, then sign up on the success page.
+          <a href="/connect" style="color:var(--cyan)">Connect with a voucher first</a>, then sign up on the success page.
         </p>
       </div>
     </div>
 
-    <!-- ── Dashboard (shown after sign-in) ── -->
+    <!-- â”€â”€ Dashboard (shown after sign-in) â”€â”€ -->
     <div id="ma-dashboard" class="hidden" style="max-width:640px;margin:2rem auto">
 
       <!-- Header -->
@@ -103,23 +107,23 @@
         <div class="ma-profile-grid" id="ma-profile">
           <div class="ma-profile-field">
             <span class="ma-label">Full Name</span>
-            <span class="ma-value" id="ma-profile-name">—</span>
+            <span class="ma-value" id="ma-profile-name">â€”</span>
           </div>
           <div class="ma-profile-field">
             <span class="ma-label">Email</span>
-            <span class="ma-value" id="ma-profile-email">—</span>
+            <span class="ma-value" id="ma-profile-email">â€”</span>
           </div>
           <div class="ma-profile-field">
             <span class="ma-label">Phone</span>
-            <span class="ma-value" id="ma-profile-phone">—</span>
+            <span class="ma-value" id="ma-profile-phone">â€”</span>
           </div>
           <div class="ma-profile-field">
             <span class="ma-label">Status</span>
-            <span class="ma-value" id="ma-profile-status">—</span>
+            <span class="ma-value" id="ma-profile-status">â€”</span>
           </div>
           <div class="ma-profile-field">
             <span class="ma-label">Member Since</span>
-            <span class="ma-value" id="ma-profile-joined">—</span>
+            <span class="ma-value" id="ma-profile-joined">â€”</span>
           </div>
         </div>
       </div>
@@ -179,6 +183,6 @@
 
   </main>
 
-  <script src="/js/portal.js?v=3"></script>
+  <script src="/js/portal.js?v=8"></script>
 </body>
 </html>

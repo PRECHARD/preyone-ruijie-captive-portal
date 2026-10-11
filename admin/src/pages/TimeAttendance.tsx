@@ -12,6 +12,9 @@ export default function TimeAttendance() {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [clockStatus, setClockStatus] = useState<any>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [handoverBlocked, setHandoverBlocked] = useState(false);
+  const [busy, setBusy] = useState(false);
 
   const fetch = useCallback(async () => {
     try { setData(await api.get('/time-logs')); } catch { /* ignore */ }
@@ -22,9 +25,24 @@ export default function TimeAttendance() {
   useEffect(() => { fetch(); const t = setInterval(fetch, 30000); return () => clearInterval(t); }, [fetch]);
 
   const toggleClock = async () => {
-    if (clockStatus?.clockedIn) await api.post('/clock-out');
-    else await api.post('/clock-in');
-    fetch();
+    setBusy(true);
+    setActionError(null);
+    setHandoverBlocked(false);
+    try {
+      if (clockStatus?.clockedIn) await api.post('/clock-out');
+      else await api.post('/clock-in');
+    } catch (e: any) {
+      const blocked = Boolean(e?.requiresHandover);
+      setHandoverBlocked(blocked);
+      setActionError(e?.message || 'Clock action failed. Please try again.');
+    } finally {
+      setBusy(false);
+      fetch();
+    }
+  };
+
+  const goToMySales = () => {
+    window.dispatchEvent(new CustomEvent('app-navigate', { detail: 'my-sales' }));
   };
 
   if (loading) return <Spinner />;
@@ -42,11 +60,26 @@ export default function TimeAttendance() {
         <button
           className={clockStatus?.clockedIn ? 'btn-secondary btn-danger' : 'btn-primary'}
           onClick={toggleClock}
+          disabled={busy}
           style={{ minWidth: 130 }}
         >
-          {clockStatus?.clockedIn ? 'Clock Out' : 'Clock In'}
+          {busy ? 'Working...' : clockStatus?.clockedIn ? 'Clock Out' : 'Clock In'}
         </button>
       </div>
+
+      {actionError && (
+        <div className="clock-banner clocked-out" style={{ marginBottom: 16, justifyContent: 'space-between' }}>
+          <span>
+            <span className="clock-status-icon">!</span>
+            <span>{actionError}</span>
+          </span>
+          {handoverBlocked && (
+            <button className="btn-primary" style={{ fontSize: '0.8rem', padding: '0.4rem 1rem' }} onClick={goToMySales}>
+              Submit Handover
+            </button>
+          )}
+        </div>
+      )}
 
       {clockStatus?.clockedIn && (
         <div className="clock-banner clocked-in" style={{ marginBottom: 16 }}>

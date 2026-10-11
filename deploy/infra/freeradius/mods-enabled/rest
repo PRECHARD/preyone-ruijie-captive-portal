@@ -1,0 +1,18 @@
+rest {
+    connect_uri = "http://host.docker.internal:3000"
+    url_encoding = "utf8"
+
+    authenticate {
+        uri = "http://host.docker.internal:3000/api/radius/auth?mac=%{Calling-Station-Id}&username=%{User-Name}"
+        method = "get"
+        body = "none"
+        timeout = 10
+    }
+
+    accounting {
+        uri = "http://host.docker.internal:3000/api/radius/acct?mac=%{Calling-Station-Id}&status=%{Acct-Status-Type}&input=%{Acct-Input-Octets}&output=%{Acct-Output-Octets}&session=%{Acct-Session-Id}"
+        method = "get"
+        body = "none"
+        timeout = 10
+    }
+}

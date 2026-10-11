@@ -116,7 +116,7 @@ export default function Dashboard({ onNavigate }: { onNavigate?: (s: string) => 
     { label: 'Total Users', value: fmtN(m?.totalUsers ?? 0), icon: <FiUsers size={20} />, sub: `${fmtN(m?.activeSessions ?? 0)} active sessions`, color: 'cyan', section: 'sessions' },
     { label: 'Vouchers Created', value: fmtN(m?.vouchersCreated ?? 0), icon: <FiCreditCard size={20} />, sub: `${fmtN(m?.vouchersUsed ?? 0)} redeemed`, color: 'purple' },
     { label: 'Revenue', value: '$' + (m?.totalRevenue ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }), icon: <FiDollarSign size={20} />, sub: 'All-time sales', color: 'green', section: 'reports', money: true },
-    { label: 'Pending Payments', value: '$' + (m?.pendingPayments?.total ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }), icon: <FiClock size={20} />, sub: `${m?.pendingPayments?.count ?? 0} Pesepay pending`, color: 'orange', section: 'reports', money: true },
+    { label: 'Pending Payments', value: '$' + (m?.pendingPayments?.total ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }), icon: <FiClock size={20} />, sub: `${m?.pendingPayments?.count ?? 0} ContiPay pending`, color: 'orange', section: 'reports', money: true },
   ] : staffStats ? [
     { label: 'Active Sessions', value: staffStats.activeSessions.toString(), icon: <FiActivity size={20} />, sub: 'Your clients', color: 'cyan', section: 'sessions' },
     { label: 'Total Users', value: fmtN(staffStats.totalUsers), icon: <FiUsers size={20} />, sub: 'Your referrals', color: 'pink' },

@@ -1,9 +1,22 @@
 .main-footer {
-  margin-top: 5rem;
-  padding: 4rem 2rem 2rem;
-  background: rgba(5, 5, 5, 0.8);
-  border-top: 1px solid rgba(0, 212, 255, 0.2);
-  backdrop-filter: blur(10px);
+  position: relative;
+  overflow: hidden;
+  margin-top: 6rem;
+  padding: 5rem 2rem 2rem;
+  background: linear-gradient(180deg, rgba(8, 8, 14, 0.92), rgba(3, 3, 8, 0.96));
+  backdrop-filter: blur(14px);
+}
+
+.main-footer::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 10%;
+  right: 10%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, #00d4ff, #ff00ff, #00d4ff, transparent);
+  box-shadow: 0 0 18px rgba(0, 212, 255, 0.7), 0 0 30px rgba(255, 0, 255, 0.45);
+  opacity: 0.85;
 }
 
 .footer-grid {
@@ -16,24 +29,40 @@
 
 .footer-col h3 {
   font-family: var(--display);
-  font-size: 1.1rem;
-  letter-spacing: 2px;
-  color: var(--cyan);
+  font-size: 1.15rem;
+  letter-spacing: 3px;
   margin-bottom: 1.5rem;
   text-transform: uppercase;
+  position: relative;
+  background: linear-gradient(135deg, #7be0ff, var(--cyan) 40%, #ff7bfb, var(--pink));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+
+.footer-col h3::after {
+  content: '';
+  display: block;
+  width: 46px;
+  height: 2px;
+  margin-top: 0.65rem;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--cyan), var(--pink));
+  box-shadow: 0 0 12px rgba(0, 212, 255, 0.65);
 }
 
 .footer-brand-mark {
   max-width: 180px;
   height: auto;
   margin-bottom: 1rem;
-  filter: brightness(1.1);
+  filter: brightness(1.15) drop-shadow(0 0 8px rgba(0, 212, 255, 0.25));
 }
 
 .footer-tagline {
-  font-size: 0.85rem;
-  color: var(--text-muted);
-  line-height: 1.6;
+  font-size: 0.875rem;
+  color: rgba(148, 163, 184, 0.9);
+  line-height: 1.65;
   max-width: 300px;
 }
 
@@ -44,18 +73,9 @@
 
 .footer-links li {
   margin-bottom: 0.8rem;
-}
-
-.footer-links a {
-  color: var(--text-muted);
-  text-decoration: none;
-  font-size: 0.9rem;
-  transition: color 0.3s ease, padding-left 0.3s ease;
-}
-
-.footer-links a:hover {
-  color: var(--pink);
-  padding-left: 5px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
 }
 
 .footer-links li svg.icon {
@@ -64,17 +84,35 @@
   flex-shrink: 0;
 }
 
-.footer-links li {
-  display: flex;
-  align-items: center;
-  gap: 2px;
+.footer-links a {
+  color: rgba(203, 213, 225, 0.85);
+  text-decoration: none;
+  font-size: 0.9rem;
+  transition: color 0.3s ease, padding-left 0.3s ease, text-shadow 0.3s ease;
+}
+
+.footer-links a:hover {
+  color: var(--pink);
+  padding-left: 6px;
+  text-shadow: 0 0 14px rgba(255, 0, 255, 0.55);
 }
 
 .footer-bottom {
-  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  position: relative;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
   padding-top: 2rem;
   max-width: 1100px;
   margin: 0 auto;
+}
+
+.footer-bottom::before {
+  content: '';
+  position: absolute;
+  top: -1px;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(0, 212, 255, 0.4), rgba(255, 0, 255, 0.4), transparent);
 }
 
 .legal-row {
@@ -83,15 +121,87 @@
   align-items: center;
   flex-wrap: wrap;
   gap: 1.5rem;
-  font-size: 0.75rem;
-  color: #666;
+  font-size: 0.78rem;
+  color: rgba(148, 163, 184, 0.8);
 }
 
 .payment-badges {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 1rem;
 }
+
+.payment-badges .secure-pay-label {
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--cyan);
+  padding: 6px 14px;
+  border: 1px solid rgba(0, 212, 255, 0.28);
+  border-radius: 999px;
+  background: rgba(0, 212, 255, 0.06);
+  box-shadow: 0 0 14px rgba(0, 212, 255, 0.12);
+}
+
+/* Payment provider logos */
+.secure-pay-label {
+  font-size: 0.66rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.pay-logos {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 0.7rem;
+}
+
+.pay-logo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 0;
+}
+
+.pay-logo--ecocash {
+  line-height: 1;
+  border: 2px solid var(--cyan);
+  border-radius: 999px;
+  padding: 0.42rem 0.9rem 0.5rem;
+  background: rgba(0, 212, 255, 0.07);
+  box-shadow: 0 0 16px rgba(0, 212, 255, 0.35), inset 0 0 12px rgba(0, 212, 255, 0.08);
+}
+
+.ecocash-mark {
+  font-family: var(--display);
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  font-size: 1.1rem;
+}
+
+.ecocash-eco {
+  color: #0d6efd;
+  text-shadow: 0 0 18px rgba(13, 110, 253, 0.45);
+}
+
+.ecocash-cash {
+  color: #f22b3a;
+  text-shadow: 0 0 18px rgba(242, 43, 58, 0.45);
+}
+
+.pkg-footer { flex-wrap: wrap; }
+
+.pkg-footer .ecocash-mark {
+  font-size: 1.1rem;
+}
+
+.pkg-footer .pay-logos { gap: 0.55rem; }
+
+.pkg-footer .pay-logos { gap: 0.55rem; }
 
 .badge {
   background: rgba(255, 255, 255, 0.05);
@@ -102,22 +212,37 @@
 
 .social-links {
   display: flex;
-  gap: 1rem;
+  gap: 0.9rem;
   margin-top: 1.5rem;
 }
 
 .social-icon {
-  width: 40px;
-  height: 40px;
+  width: 44px;
+  height: 44px;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.12);
   display: flex;
   align-items: center;
   justify-content: center;
   color: var(--text-muted);
   text-decoration: none;
+  position: relative;
   transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.social-icon::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: 50%;
+  padding: 1px;
+  background: linear-gradient(135deg, var(--cyan), var(--pink));
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  opacity: 0;
+  transition: opacity 0.3s ease;
 }
 
 .social-icon svg {
@@ -125,40 +250,106 @@
 }
 
 .social-icon:hover {
-  transform: translateY(-5px);
+  transform: translateY(-6px) scale(1.08);
   color: #fff;
+  border-color: transparent;
+}
+
+.social-icon:hover::before {
+  opacity: 1;
 }
 
 .social-icon.whatsapp:hover {
   background: #25D366;
-  box-shadow: 0 0 15px rgba(37, 211, 102, 0.5);
-  border-color: #25D366;
+  box-shadow: 0 0 22px rgba(37, 211, 102, 0.6);
 }
 
 .social-icon.facebook:hover {
   background: #1877F2;
-  box-shadow: 0 0 15px rgba(24, 119, 242, 0.5);
-  border-color: #1877F2;
+  box-shadow: 0 0 22px rgba(24, 119, 242, 0.6);
 }
 
 .social-icon.instagram:hover {
   background: linear-gradient(45deg, #f09433, #e6683c, #dc2743, #cc2366, #bc1888);
-  box-shadow: 0 0 15px rgba(220, 39, 67, 0.5);
-  border-color: transparent;
+  box-shadow: 0 0 22px rgba(220, 39, 67, 0.6);
 }
 
 .social-icon.x:hover {
   background: #000;
-  box-shadow: 0 0 15px rgba(255, 255, 255, 0.3);
+  box-shadow: 0 0 18px rgba(255, 255, 255, 0.35);
   border-color: #fff;
 }
 
 .social-icon.youtube:hover {
   background: #FF0000;
-  box-shadow: 0 0 15px rgba(255, 0, 0, 0.5);
-  border-color: #FF0000;
+  box-shadow: 0 0 22px rgba(255, 0, 0, 0.6);
 }
 
 .social-icon:hover svg {
-  transform: scale(1.1);
+  transform: scale(1.12);
+}
+
+@media (max-width: 768px) {
+  .footer-grid {
+    grid-template-columns: 1fr;
+    text-align: center;
+  }
+
+  .footer-col h3 {
+    margin-top: 1rem;
+  }
+
+  .footer-col h3::after {
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  .footer-tagline {
+    margin: 0 auto;
+  }
+
+  .social-links {
+    justify-content: center;
+  }
+
+  .legal-row {
+    justify-content: center;
+    text-align: center;
+  }
+}
+
+@media (max-width: 480px) {
+  .main-footer {
+    padding: 3.5rem 1rem 1.5rem;
+  }
+
+  .footer-col,
+  .footer-links,
+  .footer-links li,
+  .footer-links a {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .footer-links li,
+  .footer-links a {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .legal-row {
+    flex-direction: column;
+    align-items: center;
+    gap: 1rem;
+  }
+
+  .legal-row p {
+    max-width: 100%;
+    line-height: 1.5;
+  }
+
+  .payment-badges {
+    justify-content: center;
+    max-width: 100%;
+  }
 }

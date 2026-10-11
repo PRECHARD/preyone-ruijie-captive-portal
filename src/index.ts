@@ -15,6 +15,7 @@ import { adminRouter } from './routes/admin';
 import { posRouter } from './routes/pos';
 import { adminAuthRouter } from './routes/adminAuth';
 import { paymentsRouter } from './routes/payments';
+import { siteInvoicesRouter } from './routes/siteInvoices';
 import { gatewayRouter } from './routes/gateway';
 import { transitRouter } from './routes/transit';
 import { transitWebRouter } from './routes/transitWeb';
@@ -27,6 +28,7 @@ import { maintenanceCheck } from './middleware/maintenanceMode';
 import { scheduleSessionCleanup } from './services/sessionCleanup';
 import { ensureVoucherRuijieSchema, startRuijieAccountingPolling } from './services/ruijieService';
 import { scheduleAccessLogCleanup } from './services/accessLogCleanup';
+import { scheduleHandoverReminders } from './services/handoverReminder';
 
 const app = express();
 const PORT = process.env.PORT ?? 3000;
@@ -118,6 +120,8 @@ const SITEMAP_URLS = [
   { loc: 'https://preyone.com/about', changefreq: 'monthly', priority: '0.8' },
   { loc: 'https://preyone.com/services', changefreq: 'monthly', priority: '0.8' },
   { loc: 'https://preyone.com/portfolio', changefreq: 'monthly', priority: '0.8' },
+  { loc: 'https://preyone.com/payment', changefreq: 'monthly', priority: '0.9' },
+
 ];
 
 app.get('/sitemap.xml', (_req, res) => {
@@ -325,6 +329,9 @@ app.use('/api/admin', adminRouter);
 app.use('/api/v1/admin', systemAdminRouter);
 app.use('/api/v1/transit', transitWebRouter);
 app.use('/api/payments', paymentsRouter);
+// Public Starlink checkout for the marketing site. No session: the invoice is
+// created from a server-side plan catalog and settled by the Pesepay callback.
+app.use('/api/site', siteInvoicesRouter);
 app.use('/api/transit', transitRouter);
 app.use('/api/pos', posRouter);
 app.use('/api/starlink', starlinkRouter);
@@ -425,6 +432,12 @@ app.listen(PORT, () => {
     const retentionDays = Number(process.env.ACCESS_LOG_RETENTION_DAYS ?? 30);
     scheduleAccessLogCleanup(intervalMinutes, retentionDays);
     console.log(`Access log cleanup scheduled every ${intervalMinutes} minute(s), retaining ${retentionDays} day(s).`);
+  }
+
+  if (process.env.ENABLE_HANDOVER_REMINDERS !== 'false') {
+    const intervalMinutes = Number(process.env.HANDOVER_REMINDER_INTERVAL_MIN ?? 60);
+    scheduleHandoverReminders(intervalMinutes);
+    console.log(`Handover reminders scheduled every ${intervalMinutes} minute(s).`);
   }
 });
 

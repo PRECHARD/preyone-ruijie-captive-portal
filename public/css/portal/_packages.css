@@ -41,9 +41,109 @@
   border: 2px solid rgba(255, 255, 255, 0.1);
   border-radius: var(--radius);
   overflow: hidden;
+  position: relative;
   display: flex;
   flex-direction: column;
   transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275), box-shadow 0.4s ease;
+}
+
+.pkg-popular-badge {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  background: linear-gradient(135deg, #ff3d3d, #d90429);
+  color: #fff;
+  font-size: 0.6rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  padding: 6px 14px;
+  border-radius: 0 12px 0 10px;
+  z-index: 5;
+  box-shadow: 0 4px 15px rgba(255, 45, 45, 0.45);
+  animation: badgeGlow 1.6s ease-in-out infinite;
+}
+
+@keyframes badgeGlow {
+  0%, 100% {
+    box-shadow: 0 4px 15px rgba(255, 45, 45, 0.45), 0 0 24px rgba(255, 45, 45, 0.2);
+  }
+  50% {
+    box-shadow: 0 4px 22px rgba(255, 45, 45, 0.85), 0 0 42px rgba(255, 45, 45, 0.5);
+  }
+}
+
+.package-card--popular {
+  border-color: rgba(255, 60, 60, 0.55);
+  box-shadow: 0 0 30px rgba(255, 60, 60, 0.16);
+}
+
+.package-card--popular:hover {
+  transform: translateY(-15px) scale(1.05);
+  box-shadow: 0 20px 40px rgba(255, 60, 60, 0.32), 0 0 20px rgba(255, 60, 60, 0.22);
+}
+
+/* mobile safety so the badge never covers the price */
+@media screen and (max-width: 600px) {
+  .pkg-popular-badge { font-size: 0.55rem; padding: 5px 10px; }
+  .package-card--popular .pkg-priceband { padding-top: 2.2rem; }
+
+  .brand-eybrow--main {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.75rem;
+  }
+
+  .section-heading {
+    align-items: flex-start;
+    gap: 0.75rem;
+  }
+
+  .section-heading h2 {
+    font-size: clamp(1.3rem, 5vw, 2rem);
+    line-height: 1.05;
+    white-space: nowrap;
+  }
+
+  .section-note {
+    max-width: none;
+    text-align: left;
+  }
+}
+
+@media (max-width: 480px) {
+  .brand-eybrow--main {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.6rem;
+  }
+
+  .package-card {
+    min-width: 0;
+  }
+
+  .pkg-priceband {
+    padding: 0.9rem 0.6rem;
+  }
+
+  .pkg-priceband .amt {
+    font-size: 2rem;
+  }
+
+  .pkg-body {
+    padding: 0.9rem 0.7rem;
+  }
+
+  .pkg-data {
+    font-size: 1.05rem;
+  }
+
+  .pkg-tier {
+    font-size: 1rem;
+    margin-bottom: 0.9rem;
+  }
+
+  .pkg-action {
+    padding: 0.7rem 0.6rem;
+    font-size: 1.05rem;
+  }
 }
 
 .package-card:hover {
@@ -141,6 +241,33 @@
 .package-card--purple .pkg-priceband { background: var(--purple); color: #fff; }
 .package-card--purple .pkg-speed { color: var(--purple); }
 
+.pkg-multi-device {
+  margin-top: 0.4rem;
+  font-family: var(--display);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #71ff2f;
+}
+
+.pkg-devices {
+  margin-top: 0.4rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  color: var(--cyan);
+  font-family: var(--display);
+  font-size: 1.15rem;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.pkg-devices svg {
+  flex-shrink: 0;
+}
+
 .pkg-footer {
   margin-top: auto;
   padding-top: 1rem;
@@ -150,18 +277,4 @@
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
-}
-
-.ecocash-badge {
-  color: var(--cyan);
-  font-size: 1rem;
-  font-weight: 800;
-  border: 1px solid var(--cyan);
-  padding: 2px 6px;
-  border-radius: 4px;
-}
-
-.ecocash-red {
-  color: #ff4444;
-  border-color: #ff4444;
 }

@@ -3,7 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:bus_ticket_app/src/receipt.dart';
 
 void main() {
-  test('v19 buildTicket emits +263 care, barcode, and >12cm feed', () {
+  test('v19 buildTicket emits +263 care and a clean feed(1)', () {
     final d = TicketData(
       companyName: 'MUPOTA BUS SERVICE',
       slogan: 'Your Satisfaction Is Our Honour !',
@@ -57,16 +57,18 @@ void main() {
     expect(ascii, contains('PREYONE TECHNOLOGIES'));
     expect(ascii, contains('www.preyone.com'));
 
-    // The cut must only fire after a trailing feed (ESC d n) past the tear
-    // buffer: barcode feedAfter 3 + strict feed(1) trailing roll-out (plus the
-    // 12cm min-length padding). The old 8-line default is gone.
+    // The cut must only fire after the strict feed(1) trailing roll-out. The
+    // old 8-line default, the 12cm padding and the barcode's 3-line tear-off
+    // feed are all gone, so feed(1) is now the only feed command in the job.
     final lastFeed = _lastFeedCmd(bytes);
+    expect(_allFeedCmds(bytes), [1],
+        reason: 'exactly one feed command, of one line, precedes the cut');
     expect(lastFeed, greaterThanOrEqualTo(1));
     expect(lastFeed, lessThan(8),
         reason: 'the old 8-line per-company default must not come back');
   });
 
-  test('short tickets are padded past 12cm before the cut', () {
+  test('short tickets also emit only the single feed before the cut', () {
     final d = TicketData(
       companyName: 'MUPOTA BUS SERVICE',
       slogan: 'Your Satisfaction Is Our Honour !',
@@ -102,11 +104,11 @@ void main() {
     );
 
     // Minimal environment (company header + ticket type + metadata + total +
-    // footer) is far under 12cm; _excessFeed MUST subtract its shortfall from
-    // the base feed and add it back as padding so the job still rolls out past
-    // 12cm. Proves the padding engaged with real excess feed lines.
+    // footer) is short, and still emits only feed(1) then the cut — the 12cm
+    // padding and the note's own feed are both removed.
     final bytes = buildTicket(d);
-    expect(_lastFeedCmd(bytes), greaterThan(kTrailingFeedLines));
+    expect(_allFeedCmds(bytes), [1]);
+    expect(_lastFeedCmd(bytes), kTrailingFeedLines);
   });
 }
 
@@ -118,4 +120,13 @@ int _lastFeedCmd(List<int> bytes) {
     }
   }
   return last;
+}
+
+/// Every ESC d n in the job, in emission order.
+List<int> _allFeedCmds(List<int> bytes) {
+  final out = <int>[];
+  for (var i = 0; i < bytes.length - 2; i++) {
+    if (bytes[i] == 0x1B && bytes[i + 1] == 0x64) out.add(bytes[i + 2]);
+  }
+  return out;
 }

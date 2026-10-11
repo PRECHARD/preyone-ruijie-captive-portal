@@ -1166,13 +1166,22 @@ adminRouter.post('/clock-out', async (req: Request, res: Response) => {
     return;
   }
 
-  // Enforce handover: check for unhanded sales
+  // Enforce handover: check for unhanded CASH sales. Must match the
+  // available-sales/submit filter exactly, otherwise a non-cash pending sale
+  // (e.g. EcoCash) would block clock-out forever with no way to hand it over.
   const { rows: unhanded } = await pool.query(
-    `SELECT COUNT(*)::int AS cnt FROM sales
-     WHERE sold_by = $1 AND (handover_status IS NULL OR handover_status = 'pending')`,
+    `SELECT COUNT(*)::int AS cnt, COALESCE(SUM(amount), 0)::numeric AS total FROM sales
+     WHERE sold_by = $1 AND (handover_status IS NULL OR handover_status = 'pending')
+       AND (payment_method IS NULL OR payment_method = 'Cash')`,
     [req.adminUser!.id]
   );
   if (unhanded[0].cnt > 0) {
+    await insertHandoverReminder(
+      req.adminUser!.id,
+      req.adminUser!.fullName,
+      unhanded[0].cnt,
+      parseFloat(String(unhanded[0].total))
+    );
     res.status(409).json({
       error: `You have ${unhanded[0].cnt} unhanded sale(s). Please submit a cash handover before clocking out.`,
       requiresHandover: true,
@@ -1976,6 +1985,24 @@ async function insertAlert(type: string, severity: string, title: string, messag
   } catch (_) { /* alert logging is best-effort */ }
 }
 
+// Targeted reminder to ONE staff member about pending cash handover(s).
+// Deduped: if an unacknowledged reminder of this type already exists for the
+// staff member, do not insert another (staff see only their own alerts).
+async function insertHandoverReminder(adminId: string, fullName: string, count: number, total: number) {
+  try {
+    await pool.query(
+      `INSERT INTO alerts (type, severity, title, message, target_type, target_id, admin_id)
+       SELECT 'cash_handover_reminder', 'warning', 'Cash Handover Required',
+              $1, 'cash_handover', NULL, $2
+       WHERE NOT EXISTS (
+         SELECT 1 FROM alerts
+         WHERE type = 'cash_handover_reminder' AND admin_id = $2 AND acknowledged = FALSE
+       )`,
+      [`You have ${count} pending cash sale(s) totalling $${total.toFixed(2)}. Submit your handover in My Sales before clocking out.`, adminId]
+    );
+  } catch (_) { /* alert logging is best-effort */ }
+}
+
 // Helper: check if user is clocked in (for Staff/Manager voucher creation)
 async function requireClockedIn(adminId: string): Promise<boolean> {
   const { rows } = await pool.query(
@@ -2274,6 +2301,17 @@ adminRouter.post('/cash-handovers', async (req: Request, res: Response) => {
       `${req.adminUser!.fullName} handed over $${totalAmount.toFixed(2)} from ${sales.length} sale(s) for approval`,
       'cash_handover', handover.id);
 
+    // The staff member acted on their reminder(s) — clear them so the next
+    // pending sale (if any) raises a fresh, accurate reminder instead of
+    // being hidden behind a stale unacknowledged one.
+    try {
+      await pool.query(
+        `UPDATE alerts SET acknowledged = TRUE
+         WHERE type = 'cash_handover_reminder' AND admin_id = $1 AND acknowledged = FALSE`,
+        [req.adminUser!.id]
+      );
+    } catch (_) { /* best-effort */ }
+
     res.status(201).json({ message: `Handover of $${totalAmount.toFixed(2)} submitted for approval`, handover });
   } catch (err) {
     await client.query('ROLLBACK');
@@ -2323,6 +2361,28 @@ adminRouter.post('/cash-handovers/:id/approve', requirePermission(PERMISSIONS.CO
     `${existing[0].staff_name}'s cash handover of $${parseFloat(existing[0].total_amount).toFixed(2)} was approved by ${req.adminUser!.fullName}`,
     'cash_handover', id);
 
+  // Targeted follow-up for the staff member: tell them whether they are now
+  // clear to clock out (pending CASH sales must all be handed over first).
+  if (existing[0].staff_id) {
+    let remaining = 0;
+    let remainingTotal = 0;
+    try {
+      const { rows: rem } = await pool.query(
+        `SELECT COUNT(*)::int AS cnt, COALESCE(SUM(amount), 0)::numeric AS total
+         FROM sales
+         WHERE sold_by = $1 AND (handover_status IS NULL OR handover_status = 'pending')
+           AND (payment_method IS NULL OR payment_method = 'Cash')`,
+        [existing[0].staff_id]
+      );
+      remaining = rem[0]?.cnt ?? 0;
+      remainingTotal = parseFloat(String(rem[0]?.total ?? 0));
+    } catch (_) { /* best-effort */ }
+    const msg = remaining > 0
+      ? `Your handover of $${parseFloat(existing[0].total_amount).toFixed(2)} was approved by ${req.adminUser!.fullName}. You still have ${remaining} pending cash sale(s) ($${remainingTotal.toFixed(2)}) to hand over before you can clock out.`
+      : `Your handover of $${parseFloat(existing[0].total_amount).toFixed(2)} was approved by ${req.adminUser!.fullName}. Your sales are fully handed over — you can now clock out.`;
+    await insertAlert('cash_handover_approved', 'success', 'Handover Approved', msg, 'cash_handover', id, existing[0].staff_id);
+  }
+
   res.json({ message: 'Cash handover approved' });
 });
 
@@ -2358,6 +2418,13 @@ adminRouter.post('/cash-handovers/:id/reject', requirePermission(PERMISSIONS.COM
     await insertAlert('cash_handover_rejected', 'warning', 'Cash Handover Rejected',
       `${existing[0].staff_name}'s cash handover of $${parseFloat(existing[0].total_amount).toFixed(2)} was rejected by ${req.adminUser!.fullName}. Sales returned to pending.`,
       'cash_handover', id);
+
+    // Targeted follow-up: the staff member must fix and resubmit.
+    if (existing[0].staff_id) {
+      await insertAlert('cash_handover_rejected', 'warning', 'Handover Rejected',
+        `Your handover of $${parseFloat(existing[0].total_amount).toFixed(2)} was rejected by ${req.adminUser!.fullName}. The ${existing[0].sale_count} sale(s) are back to pending — submit a new handover before clocking out.`,
+        'cash_handover', id, existing[0].staff_id);
+    }
 
     res.json({ message: 'Cash handover rejected. Sales returned to pending.' });
   } catch (err) {

@@ -336,7 +336,7 @@ void main() {
         reason: 'no QR store-data command is emitted');
     final lines = buildTicketLines(_ticket());
     expect(lines.every((l) => l.qrData == null), isTrue,
-        reason: 'the thermal ticket layout keeps only the CODE128 barcode');
+        reason: 'the thermal ticket layout emits no QR code');
   });
 
   test(
@@ -357,19 +357,25 @@ void main() {
         reason: 'the website prints last, exactly as the preview shows it');
   });
 
-  test('buildTicket emits a Code128 barcode followed by a 3-line tear feed',
+  test('the website is the last line printed before the single trailing feed',
       () {
-    final bytes = buildTicket(_ticket());
+    final lines = buildTicketLines(_ticket());
+    // Nothing is emitted after the website: no barcode row, no QR row.
+    expect(lines.every((l) => l.barcodeData == null && l.qrData == null), isTrue,
+        reason: 'no code is printed after the footer website');
+    final texts = lines.map((l) => l.text.trim()).toList();
+    expect(texts.last, 'www.preyone.com',
+        reason: 'the website is the final printed row');
 
-    expect(listContains(bytes, [0x1D, 0x6B, 0x49]), isTrue,
-        reason: 'GS k m=73 selects CODE128');
-    expect(listContains(bytes, [0x1D, 0x68, 0x1C]), isTrue,
-        reason: 'barcode height set to 28 dots (< 1 cm)');
-    expect(listContains(bytes, [0x1B, 0x64, 0x03]), isTrue,
-        reason: 'tear-off feed of exactly 3 lines after the barcode');
-    final ascii = String.fromCharCodes(bytes.where((b) => b >= 32 && b < 127));
-    expect(ascii, contains('R-0001|T-5678|500'));
-    expect(ascii.contains('Route Code'), isFalse);
+    final bytes = buildTicket(_ticket());
+    expect(listContains(bytes, [0x1D, 0x6B, 0x49]), isFalse,
+        reason: 'GS k m=73 CODE128 must no longer reach the printer');
+    expect(listContains(bytes, [0x1D, 0x68, 0x1C]), isFalse,
+        reason: 'no barcode height command is emitted');
+    expect(listContains(bytes, [0x1B, 0x64, 0x03]), isFalse,
+        reason: 'the 3-line tear-off feed is gone');
+    expect(lastFeedCommand(bytes), kTrailingFeedLines,
+        reason: 'only the single trailing feed precedes the cut');
   });
 
   test('website falls back to the platform URL when empty', () {
@@ -678,9 +684,8 @@ void main() {
 
   group('trailing paper feed', () {
     test('long jobs get a strict 1-line feed before the cut', () {
-      // A ticket long enough that the 12cm min-length guard produces no extra
-      // padding must end with exactly ESC d 0x01 before the cut — the old
-      // configurable 4/8-line default is gone.
+      // Every ticket ends with exactly ESC d 0x01 before the cut — the old
+      // configurable 4/8-line default and the later 12cm padding are both gone.
       final longTicket = buildTicket(_ticket(items: [
         for (var i = 0; i < 12; i++)
           SaleItem(name: 'Fare line $i', price: 100, qty: 1, total: 100),
@@ -698,11 +703,9 @@ void main() {
           reason: 'the manifest keeps the same strict feed(1)');
     });
 
-    test('short jobs roll out past 12cm so the footer is never cut', () {
-      // A minimal ticket (empty note, engineer-driver layout) is far under
-      // 12cm; the min-length padding still engages so the cut never shears the
-      // footer branding — but the padding is driven by length, not a bloaty
-      // per-company feed.
+    test('short jobs also end with the strict single feed before the cut', () {
+      // The 12cm min-length padding has been removed: every job, however
+      // short, now simply ends with feed(1) then the cut.
       final bytes = buildReport(
         companyName: 'Mupota Bus',
         currency: 'USD',
@@ -710,7 +713,7 @@ void main() {
         to: DateTime(2026, 9, 22, 23, 59),
         sales: [mkSale()],
       );
-      expect(lastFeedCommand(bytes), greaterThan(kTrailingFeedLines));
+      expect(lastFeedCommand(bytes), kTrailingFeedLines);
     });
   });
 }

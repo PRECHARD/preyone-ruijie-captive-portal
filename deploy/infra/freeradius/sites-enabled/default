@@ -1,0 +1,48 @@
+server default {
+    listen {
+        type = auth
+        ipaddr = *
+        port = 1812
+        limit {
+            max_connections = 16
+            lifetime    = 0
+            idle_timeout = 30
+        }
+    }
+
+    listen {
+        type = acct
+        ipaddr = *
+        port = 1813
+        limit {
+            max_connections = 16
+            lifetime    = 0
+            idle_timeout = 30
+        }
+    }
+
+    authorize {
+        rest
+    }
+
+    authenticate {
+        Auth-Type PAP {
+            pap
+        }
+    }
+
+    preacct {
+    }
+
+    accounting {
+        rest
+    }
+
+    session {
+    }
+
+    post-auth {
+        Post-Auth-Type REJECT {
+        }
+    }
+}
