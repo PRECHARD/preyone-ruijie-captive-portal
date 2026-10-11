@@ -85,6 +85,15 @@ Phone → Ruijie AP (WiFi) → EG105G-P Gateway → VPS (158.220.118.91)
 4. ext_login `url`/`redirect` must be the ORIGINAL URL, not success.html
 5. Ruijie AP `login_url` varies per AP model
 6. FreeRADIUS auth requests come from gateway, not our portal
+7. **VPS `.env` MUST use `DB_HOST=127.0.0.1`, never `localhost`.** `localhost`
+   resolves to `::1` first on that box. A system PostgreSQL 16 was installed
+   on 2026-09-16 and once bound `[::1]:5432`, so the app connected to the
+   *wrong* postgres and every login 500'd with `28P01 password
+   authentication failed`. Fixed 2026-10-11 by pinning `127.0.0.1` (routes
+   through docker-proxy to the real `preyone-db`) **and** masking the system
+   postgres. Do not unmask `postgresql` / `postgresql@16-main` on the VPS; if
+   you ever reinstall it, keep `DB_HOST=127.0.0.1`. Backups of the old value:
+   `/opt/preyone-portal/.env.bak-20261011-124947`.
 
 ## VPS Access (production)
 
@@ -97,7 +106,7 @@ Phone → Ruijie AP (WiFi) → EG105G-P Gateway → VPS (158.220.118.91)
 | Service | Runs where | Port |
 |---------|------------|------|
 | Portal (PM2 `preyone-portal`) | `/opt/preyone-portal` | 5000 |
-| PostgreSQL | Docker `preyone-db` | 5432 |
+| PostgreSQL | Docker `preyone-db` | 5432 (bound to `127.0.0.1` only) |
 | Redis | Docker `preyone-redis` | 6379 |
 | FreeRADIUS | Docker `preyone-radius` | 1812/1813 UDP |
 | nginx | host | 80/443 (HTTPS via Certbot) |
