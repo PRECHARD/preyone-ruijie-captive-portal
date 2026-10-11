@@ -6,6 +6,7 @@ import rateLimit from 'express-rate-limit';
 import { pool } from '../db/pool';
 import { requireAdminAuth, requireRole } from '../middleware/adminAuth';
 import { requireCompany } from '../middleware/company';
+import { requireDeviceAuth } from '../middleware/deviceAuth';
 
 /**
  * Preyone POS module — additive only.
@@ -201,18 +202,18 @@ router.get('/company/subscriptions', (req, res) => {
 router.post('/devices/register', requireAdminAuth, async (req, res) => {
   const hardwareSerial = str(req.body?.hardware_serial);
   const deviceName = str(req.body?.device_name) || 'Unknown Device';
-  const deviceType = str(req.body?.device_type) || 'android';
+  const deviceType = str(req.body?.device_type) || 'tablet';
   const shopId = num(req.body?.shop_id) || null;
   if (!hardwareSerial) {
     res.status(422).json({ error: 'hardware_serial is required' }); return;
   }
-  if (!['android', 'electron', 'web'].includes(deviceType)) {
-    res.status(422).json({ error: 'device_type must be android|electron|web' }); return;
+  if (!['android', 'electron', 'web', 'phone', 'tablet', 'desktop'].includes(deviceType)) {
+    res.status(422).json({ error: 'device_type must be android|electron|web|phone|tablet|desktop' }); return;
   }
   const deviceToken = crypto.randomBytes(32).toString('hex'); // 64-char token
   const { rows } = await pool.query(
-    `INSERT INTO pos_devices (device_id, device_type, name, shop_id, device_token, status, company_id)
-     VALUES ($1,$2,$3,$4,$5,'active',$6)
+    `INSERT INTO pos_devices (device_id, device_type, name, shop_id, device_token, status, company_id, paired_at, last_seen_at)
+     VALUES ($1,$2,$3,$4,$5,'active',$6,NOW(),NOW())
      ON CONFLICT (device_id) DO UPDATE SET
        device_type = EXCLUDED.device_type,
        name = EXCLUDED.name,
@@ -220,6 +221,7 @@ router.post('/devices/register', requireAdminAuth, async (req, res) => {
        device_token = EXCLUDED.device_token,
        status = EXCLUDED.status,
        last_seen = NOW(),
+       last_seen_at = NOW(),
        updated_at = NOW()
      RETURNING id, device_id, device_type, name, shop_id, device_token, status, company_id, paired_at`,
     [hardwareSerial, deviceType, deviceName, shopId, deviceToken, (req.adminUser as { company_id?: string | null })?.company_id ?? null]
@@ -234,40 +236,154 @@ router.post('/devices/register', requireAdminAuth, async (req, res) => {
   });
 });
 
-// ── Device hardware auth middleware ────────────────────────────────────
-// Validates Authorization: Bearer <device_token> against active pos_devices tokens.
-// Attaches req.device = { device_id, company_id, shop_id } and updates last_seen_at.
-// Must be used as async middleware in Express (returns Promise).
-export async function requireDeviceAuth(
-  req: Request,
-  res: Response,
-  next: NextFunction
-): Promise<void> {
-  const authHeader = str(req.headers.authorization);
-  if (!authHeader?.startsWith('Bearer ')) {
-    res.status(401).json({ error: 'Device token required' }); return;
+// ── Auto-registration (world-class, Preyone Transit technology) ─────
+// POST /api/pos/devices/auto-register
+// Called by desktop/Android on first launch. Uses admin JWT for company
+// scoping. Enforces 3-device quota: 1 phone + 1 tablet + 1 desktop.
+// Body: { device_uuid, device_public_key, device_type, device_name, app_version }
+// Returns: { device_token, company_id, shop_id, device_name, quota }
+const ALLOWED_AUTO_TYPES = ['phone', 'tablet', 'desktop'] as const;
+const DEVICE_TYPE_QUOTA: Record<string, number> = { phone: 1, tablet: 1, desktop: 1 };
+
+function isValidEd25519PublicKey(key: string): boolean {
+  // Ed25519 public keys are 32 bytes, base64 or hex encoded (44 or 64 chars)
+  if (!key || key.length < 40 || key.length > 128) return false;
+  return /^[A-Za-z0-9+/=_-]+$/.test(key);
+}
+
+router.post('/devices/auto-register', requireAdminAuth, async (req, res) => {
+  const deviceUuid = str(req.body?.device_uuid);
+  const devicePublicKey = str(req.body?.device_public_key);
+  const deviceType = str(req.body?.device_type);
+  const deviceName = str(req.body?.device_name) || 'Unknown Device';
+  const appVersion = str(req.body?.app_version) || null;
+  const shopId = num(req.body?.shop_id) || null;
+
+  // Validate inputs
+  if (!deviceUuid || deviceUuid.length < 8 || deviceUuid.length > 64) {
+    res.status(422).json({ error: 'device_uuid required (8-64 chars)' }); return;
   }
-  const token = authHeader.slice('Bearer '.length);
-  const { rows } = await pool.query(
-    `SELECT id, device_id, company_id, shop_id, status, last_seen_at FROM pos_devices WHERE device_token = $1 AND status = 'active'`,
-    [token]
+  if (!/^[A-Za-z0-9._:-]+$/.test(deviceUuid)) {
+    res.status(422).json({ error: 'device_uuid must be alphanumeric with . _ : -' }); return;
+  }
+  if (devicePublicKey && !isValidEd25519PublicKey(devicePublicKey)) {
+    res.status(422).json({ error: 'Invalid device_public_key (expected Ed25519, 32 bytes)' }); return;
+  }
+  if (!ALLOWED_AUTO_TYPES.includes(deviceType as typeof ALLOWED_AUTO_TYPES[number])) {
+    res.status(422).json({ error: `device_type must be one of: ${ALLOWED_AUTO_TYPES.join(', ')}` }); return;
+  }
+
+  const companyId = (req.adminUser as { company_id?: string | null })?.company_id ?? null;
+
+  // Check if this device_uuid already registered (idempotent re-register)
+  const existingDevice = await pool.query(
+    `SELECT id, device_id, device_type, status FROM pos_devices WHERE device_uuid = $1 OR device_id = $2`,
+    [deviceUuid, deviceUuid]
   );
-  const device = rows[0];
-  if (!device) {
-    res.status(401).json({ error: 'Invalid or revoked device token' }); return;
+
+  // If device exists and is suspended, reject
+  if (existingDevice.rows[0]?.status === 'suspended') {
+    res.status(403).json({ error: 'This device has been suspended. Contact your administrator.' }); return;
   }
-  // Update last_seen_at
-  await pool.query(
-    `UPDATE pos_devices SET last_seen_at = NOW() WHERE id = $1`,
-    [device.id]
-  ).catch(() => {});
-  req.device = {
-    device_id: device.device_id,
+
+  // Enforce quota: max N devices per type per company (only for NEW devices)
+  const isNewDevice = existingDevice.rows.length === 0;
+  if (isNewDevice && companyId) {
+    const quota = DEVICE_TYPE_QUOTA[deviceType];
+    if (quota) {
+      const countResult = await pool.query(
+        `SELECT COUNT(*)::int AS cnt FROM pos_devices
+          WHERE company_id = $1 AND device_type = $2 AND status = 'active'
+            AND device_uuid IS DISTINCT FROM $3`,
+        [companyId, deviceType, deviceUuid]
+      );
+      const activeCount = countResult.rows[0].cnt;
+      if (activeCount >= quota) {
+        res.status(409).json({
+          error: `Device quota exceeded: maximum ${quota} ${deviceType}(s) allowed per company. Deactivate an existing ${deviceType} first.`,
+          code: 'DEVICE_QUOTA_EXCEEDED',
+          quota: { type: deviceType, max: quota, current: activeCount },
+        });
+        return;
+      }
+    }
+  }
+
+  const deviceToken = crypto.randomBytes(32).toString('hex'); // 64-char token
+
+  // Upsert: use device_uuid as the stable identity
+  const { rows } = await pool.query(
+    `INSERT INTO pos_devices (device_id, device_uuid, device_public_key, device_type, name, shop_id, device_token, status, company_id, app_version, paired_at, last_seen, last_seen_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,'active',$8,$9,NOW(),NOW(),NOW())
+     ON CONFLICT (device_id) DO UPDATE SET
+       device_uuid = EXCLUDED.device_uuid,
+       device_public_key = COALESCE(EXCLUDED.device_public_key, pos_devices.device_public_key),
+       device_type = EXCLUDED.device_type,
+       name = EXCLUDED.name,
+       shop_id = EXCLUDED.shop_id,
+       device_token = EXCLUDED.device_token,
+       status = 'active',
+       app_version = EXCLUDED.app_version,
+       company_id = COALESCE(pos_devices.company_id, EXCLUDED.company_id),
+       last_seen = NOW(),
+       last_seen_at = NOW(),
+       updated_at = NOW()
+     RETURNING id, device_id, device_uuid, device_type, name, shop_id, device_token, status, company_id, app_version, paired_at`,
+    [deviceUuid, deviceUuid, devicePublicKey || null, deviceType, deviceName, shopId, deviceToken, companyId, appVersion]
+  );
+
+  const device = rows[0];
+
+  // Return quota summary so client knows its limits
+  const quotaSummary = await pool.query(
+    `SELECT device_type, COUNT(*)::int AS cnt FROM pos_devices
+      WHERE company_id = $1 AND status = 'active' AND device_type IN ('phone','tablet','desktop')
+      GROUP BY device_type`,
+    [companyId]
+  );
+
+  res.status(201).json({
+    status: 'success',
+    device_token: device.device_token,
     company_id: device.company_id,
     shop_id: device.shop_id,
-  };
-  next();
-}
+    device_name: device.name,
+    device_uuid: device.device_uuid,
+    device_type: device.device_type,
+    quota: {
+      limits: DEVICE_TYPE_QUOTA,
+      current: Object.fromEntries(quotaSummary.rows.map((r: { device_type: string; cnt: number }) => [r.device_type, r.cnt])),
+    },
+  });
+});
+
+// ── Device status (authenticated by device token) ───────────────────
+// GET /api/pos/devices/mine
+// Returns this device's registration status and quota info.
+router.get('/devices/mine', requireDeviceAuth, async (req, res) => {
+  const device = req.device!;
+  const { rows } = await pool.query(
+    `SELECT id, device_id, device_uuid, device_type, name, shop_id, status, last_seen_at, paired_at, app_version
+       FROM pos_devices WHERE device_token = $1`,
+    [device.device_id]
+  );
+  if (rows.length === 0) {
+    res.status(404).json({ error: 'Device not found' }); return;
+  }
+  const quotaSummary = await pool.query(
+    `SELECT device_type, COUNT(*)::int AS cnt FROM pos_devices
+      WHERE company_id = $1 AND status = 'active' AND device_type IN ('phone','tablet','desktop')
+      GROUP BY device_type`,
+    [device.company_id]
+  );
+  res.json({
+    device: rows[0],
+    quota: {
+      limits: DEVICE_TYPE_QUOTA,
+      current: Object.fromEntries(quotaSummary.rows.map((r: { device_type: string; cnt: number }) => [r.device_type, r.cnt])),
+    },
+  });
+});
 
 // ── Products ────────────────────────────────────────────────────────
 

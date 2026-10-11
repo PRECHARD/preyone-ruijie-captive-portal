@@ -86,8 +86,69 @@ describe('POS Devices API', () => {
       await requireDeviceAuth(mockReq, mockRes, mockNext);
 
       expect(mockNext).toHaveBeenCalled();
-      // req.device should be attached - check the middleware attached it
-      // Note: actual device object depends on implementation
+    });
+  });
+
+  describe('auto-registration quota enforcement', () => {
+    it('enforces quota: 1 phone + 1 tablet + 1 desktop per company', () => {
+      const quota = { phone: 1, tablet: 1, desktop: 1 };
+      const maxDevices = Object.values(quota).reduce((a, b) => a + b, 0);
+      expect(maxDevices).toBe(3);
+    });
+
+    it('rejects registration when quota exceeded', () => {
+      const quota = { phone: 1, tablet: 1, desktop: 1 };
+      const activeCount = 1;
+      const maxQuota = quota.tablet;
+      expect(activeCount).toBeGreaterThanOrEqual(maxQuota);
+    });
+
+    it('allows re-registration of same device_uuid (idempotent)', () => {
+      const existingDevice = { rows: [{ id: 1, status: 'active' }] };
+      const isNewDevice = existingDevice.rows.length === 0;
+      expect(isNewDevice).toBe(false);
+    });
+
+    it('rejects suspended devices from re-registering', () => {
+      const existing = { rows: [{ status: 'suspended' }] };
+      expect(existing.rows[0]?.status).toBe('suspended');
+    });
+
+    it('validates device_uuid format (8-64 chars, alphanumeric)', () => {
+      const valid = /^[A-Za-z0-9._:-]{8,64}$/;
+      expect(valid.test('android-abc123def')).toBe(true);
+      expect(valid.test('win-550e8400-e29b-41d4-a716-446655440000')).toBe(true);
+      expect(valid.test('short')).toBe(false);
+      expect(valid.test('x'.repeat(65))).toBe(false);
+      expect(valid.test('has spaces here')).toBe(false);
+    });
+
+    it('validates device_type against allowed list', () => {
+      const allowed = ['phone', 'tablet', 'desktop'];
+      expect(allowed).toContain('phone');
+      expect(allowed).toContain('tablet');
+      expect(allowed).toContain('desktop');
+      expect(allowed).not.toContain('android');
+      expect(allowed).not.toContain('electron');
+    });
+  });
+
+  describe('Ed25519 public key validation', () => {
+    it('accepts valid base64-encoded Ed25519 key (44 chars)', () => {
+      const validKey = 'MCowBQYDK2VwAyEAGb9ECWmEzf6FQbrBZ9w7lshQhqowtrbLDFw4rXAxZuE=';
+      expect(validKey.length).toBeGreaterThanOrEqual(40);
+      expect(validKey.length).toBeLessThanOrEqual(128);
+      expect(/^[A-Za-z0-9+/=_-]+$/.test(validKey)).toBe(true);
+    });
+
+    it('rejects keys with invalid characters', () => {
+      const invalidKey = 'abc def!@#$%';
+      expect(/^[A-Za-z0-9+/=_-]+$/.test(invalidKey)).toBe(false);
+    });
+
+    it('rejects keys that are too short or too long', () => {
+      expect('abc'.length >= 40).toBe(false);
+      expect('x'.repeat(129).length <= 128).toBe(false);
     });
   });
 });

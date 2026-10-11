@@ -1216,33 +1216,54 @@ const SQL = `
   CREATE INDEX IF NOT EXISTS idx_site_invoices_account  ON site_invoices (lower(account_ref));
   CREATE INDEX IF NOT EXISTS idx_site_invoices_email    ON site_invoices (lower(email));
 
-  -- POS devices & endpoints (desktop / web / android)
+  -- POS devices & endpoints (desktop / phone / tablet)
+  -- World-class auto-registration: device_uuid (hardware ID) + device_public_key
+  -- (Ed25519, Preyone Transit technology) + 64-char device_token for API auth.
+  -- Quota: 1 phone + 1 tablet + 1 desktop per company (enforced in code).
   CREATE TABLE IF NOT EXISTS pos_devices (
-    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    device_id   TEXT UNIQUE NOT NULL,
-    device_type TEXT NOT NULL DEFAULT 'android' CHECK (device_type IN ('desktop', 'web', 'android')),
-    name        TEXT NOT NULL,
-    branch      TEXT,
-    company_id  UUID REFERENCES companies(id) ON DELETE SET NULL,
-    app_version TEXT,
-    server_url  TEXT,
-    status      TEXT NOT NULL DEFAULT 'registered' CHECK (status IN ('registered', 'active', 'suspended')),
-    last_seen   TIMESTAMPTZ,
-    notes       TEXT,
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    device_id          TEXT UNIQUE NOT NULL,
+    device_type        TEXT NOT NULL DEFAULT 'tablet' CHECK (device_type IN ('desktop', 'web', 'android', 'phone', 'tablet')),
+    device_uuid        TEXT,
+    device_public_key  TEXT,
+    device_token       TEXT UNIQUE,
+    name               TEXT NOT NULL,
+    branch             TEXT,
+    shop_id            INTEGER,
+    company_id         UUID REFERENCES companies(id) ON DELETE SET NULL,
+    app_version        TEXT,
+    server_url         TEXT,
+    status             TEXT NOT NULL DEFAULT 'registered' CHECK (status IN ('registered', 'active', 'suspended')),
+    last_seen          TIMESTAMPTZ,
+    last_seen_at       TIMESTAMPTZ,
+    paired_at          TIMESTAMPTZ,
+    notes              TEXT,
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
   CREATE INDEX IF NOT EXISTS idx_pos_devices_type     ON pos_devices (device_type);
   CREATE INDEX IF NOT EXISTS idx_pos_devices_status   ON pos_devices (status);
   CREATE INDEX IF NOT EXISTS idx_pos_devices_last_seen ON pos_devices (last_seen);
+  CREATE INDEX IF NOT EXISTS idx_pos_devices_token    ON pos_devices (device_token);
+  CREATE INDEX IF NOT EXISTS idx_pos_devices_company  ON pos_devices (company_id);
 
   -- Demo devices so the Devices & Endpoints console has data to show
   INSERT INTO pos_devices (device_id, device_type, name, branch, app_version, status, last_seen)
   SELECT 'demo-desktop-01', 'desktop', 'Front Desk Desktop', 'Head Office', '1.0.0', 'active', NOW() - INTERVAL '5 minutes'
   WHERE NOT EXISTS (SELECT 1 FROM pos_devices WHERE device_id = 'demo-desktop-01');
   INSERT INTO pos_devices (device_id, device_type, name, branch, app_version, status, last_seen)
-  SELECT 'demo-android-01', 'android', 'Till Tablet (Hall)', 'Hall', '2.4.3', 'active', NOW() - INTERVAL '2 minutes'
+  SELECT 'demo-android-01', 'tablet', 'Till Tablet (Hall)', 'Hall', '2.4.3', 'active', NOW() - INTERVAL '2 minutes'
   WHERE NOT EXISTS (SELECT 1 FROM pos_devices WHERE device_id = 'demo-android-01');
+
+  -- Add columns to pre-existing pos_devices tables (idempotent upgrades)
+  ALTER TABLE pos_devices ADD COLUMN IF NOT EXISTS device_uuid       TEXT;
+  ALTER TABLE pos_devices ADD COLUMN IF NOT EXISTS device_public_key TEXT;
+  ALTER TABLE pos_devices ADD COLUMN IF NOT EXISTS device_token      TEXT UNIQUE;
+  ALTER TABLE pos_devices ADD COLUMN IF NOT EXISTS shop_id           INTEGER;
+  ALTER TABLE pos_devices ADD COLUMN IF NOT EXISTS last_seen_at      TIMESTAMPTZ;
+  ALTER TABLE pos_devices ADD COLUMN IF NOT EXISTS paired_at         TIMESTAMPTZ;
+  CREATE INDEX IF NOT EXISTS idx_pos_devices_token    ON pos_devices (device_token);
+  CREATE INDEX IF NOT EXISTS idx_pos_devices_company  ON pos_devices (company_id);
 
   -- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• Ruijie Cloud Voucher Integration â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   -- Maps sellable package tiers to Ruijie Cloud user groups (seed via
@@ -1429,7 +1450,6 @@ const SQL = `
   const client = await pool.connect();
   try {
     await client.query(SQL);
-<<<<<<< HEAD
 
     // ── Multi‑currency engine ─────────────────────────────────────────────────
     // 1. Add currency / exchange_rate columns to pos_documents (idempotent)
@@ -1465,10 +1485,8 @@ const SQL = `
       VALUES ('USD', 'ZWG', 26.500000)
       ON CONFLICT (company_id, target_currency) DO NOTHING;
     `);
-=======
-    
-    // Seed packages table (idempotent upsert â€” updates existing tiers, inserts new ones)
->>>>>>> 090ea86c9c91a0ec6f7605515292e557ea4b21a8
+
+    // Seed packages table (idempotent upsert — updates existing tiers, inserts new ones)
     const packages = [
       // Orange band
       ['PreLite', 'Daily Basic', 1.00, 'USD', 'daily', 1440, 5, false, 5, 5, 1],

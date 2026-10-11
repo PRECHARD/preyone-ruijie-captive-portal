@@ -22,6 +22,7 @@ import { transitWebRouter } from './routes/transitWeb';
 import { systemAdminRouter } from './routes/systemAdmin';
 import { starlinkRouter } from './routes/starlink';
 import { ruijieRouter } from './routes/ruijie';
+import { currencyRouter } from './routes/currency';
 import { ensureStarlinkSchema } from './db/starlink';
 import { errorHandler } from './middleware/errorHandler';
 import { maintenanceCheck } from './middleware/maintenanceMode';
@@ -339,6 +340,8 @@ app.use('/api/starlink', starlinkRouter);
 // Mounted under /api/ so the subdomain middleware (line ~169) is bypassed and
 // it cannot collide with gatewayRouter's /api/radius + /api/gateway paths.
 app.use('/api/ruijie', ruijieRouter);
+// Multi-currency exchange rates (company-scoped)
+app.use('/api/currency', currencyRouter);
 
 // Standard route aliases
 app.get('/login', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'account-login.html')));

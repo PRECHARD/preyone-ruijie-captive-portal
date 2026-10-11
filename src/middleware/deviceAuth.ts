@@ -1,6 +1,20 @@
 import { Request, Response, NextFunction } from 'express';
 import { pool } from '../db/pool';
 
+export interface DeviceAuth {
+  device_id: string;
+  company_id: string | null;
+  shop_id: number | null;
+}
+
+declare global {
+  namespace Express {
+    interface Request {
+      device?: DeviceAuth;
+    }
+  }
+}
+
 /**
  * Device hardware auth middleware
  * Validates Authorization: Bearer <device_token> against active pos_devices tokens.
