@@ -1465,46 +1465,8 @@ const SQL = `
   const client = await pool.connect();
   try {
     await client.query(SQL);
-<<<<<<< HEAD
-
-    // ── Multi‑currency engine ─────────────────────────────────────────────────
-    // 1. Add currency / exchange_rate columns to pos_documents (idempotent)
-    await client.query(`
-      ALTER TABLE pos_documents ADD COLUMN IF NOT EXISTS currency VARCHAR(10) DEFAULT 'USD';
-      ALTER TABLE pos_documents ADD COLUMN IF NOT EXISTS exchange_rate DECIMAL(18,6) DEFAULT 1.000000;
-    `);
-
-    // 2. Ensure companies have tax_rate, base_currency, branding_json (idempotent)
-    await client.query(`
-      ALTER TABLE companies ADD COLUMN IF NOT EXISTS tax_rate DECIMAL(5,2) DEFAULT 15.50;
-      ALTER TABLE companies ADD COLUMN IF NOT EXISTS base_currency VARCHAR(10) DEFAULT 'USD';
-      ALTER TABLE companies ADD COLUMN IF NOT EXISTS branding_json JSONB DEFAULT '{"logo":"","tagline":"","address":"","support_phone":"","website":""}'::jsonb;
-    `);
-
-    // 3. Create currency_rates table (idempotent)
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS currency_rates (
-        id SERIAL PRIMARY KEY,
-        company_id INT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
-        base_currency VARCHAR(10) NOT NULL DEFAULT 'USD',
-        target_currency VARCHAR(10) NOT NULL,
-        rate DECIMAL(18,6) NOT NULL,
-        effective_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-      CREATE INDEX IF NOT EXISTS idx_currency_rates_company ON currency_rates(company_id, target_currency);
-    `);
-
-    // Seed default USD->ZWG rate for Zimbabwe (optional – can be overridden)
-    await client.query(`
-      INSERT INTO currency_rates (base_currency, target_currency, rate)
-      VALUES ('USD', 'ZWG', 26.500000)
-      ON CONFLICT (company_id, target_currency) DO NOTHING;
-    `);
-=======
     
     // Seed packages table (idempotent upsert â€” updates existing tiers, inserts new ones)
->>>>>>> 090ea86c9c91a0ec6f7605515292e557ea4b21a8
     const packages = [
       // Orange band
       ['PreLite', 'Daily Basic', 1.00, 'USD', 'daily', 1440, 5, false, 5, 5, 1],

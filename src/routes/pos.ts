@@ -1,7 +1,6 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import crypto from 'crypto';
 import rateLimit from 'express-rate-limit';
 import { pool } from '../db/pool';
 import { requireAdminAuth, requireRole } from '../middleware/adminAuth';
@@ -194,80 +193,42 @@ router.get('/company/subscriptions', (req, res) => {
   });
 });
 
-// ── Device registration (Admin only) ─────────────────────────────────
-// POST /api/pos/devices/register
-// Body: { hardware_serial, device_name, device_type, shop_id }
-// Generates 64-char random hardware token; upserts on device_id conflict.
-router.post('/devices/register', requireAdminAuth, async (req, res) => {
-  const hardwareSerial = str(req.body?.hardware_serial);
-  const deviceName = str(req.body?.device_name) || 'Unknown Device';
-  const deviceType = str(req.body?.device_type) || 'android';
-  const shopId = num(req.body?.shop_id) || null;
-  if (!hardwareSerial) {
-    res.status(422).json({ error: 'hardware_serial is required' }); return;
+// ── Device self-register / heartbeat (desktop, web, android) ────────
+// Called by clients on login; keeps Devices & Endpoints console current.
+router.post('/devices/register', async (req, res) => {
+  const deviceId = str(req.body?.deviceId);
+  const deviceType = str(req.body?.deviceType) || 'android';
+  const name = str(req.body?.name) || req.adminUser!.fullName;
+  const branch = str(req.body?.branch) || null;
+  const appVersion = str(req.body?.appVersion) || null;
+  const serverUrl = str(req.body?.serverUrl) || null;
+  if (!/^[A-Za-z0-9._:-]{3,64}$/.test(deviceId)) {
+    res.status(422).json({ error: 'deviceId required (3-64 chars, letters/digits/._:-)' }); return;
   }
-  if (!['android', 'electron', 'web'].includes(deviceType)) {
-    res.status(422).json({ error: 'device_type must be android|electron|web' }); return;
+  if (!['desktop', 'web', 'android'].includes(deviceType)) {
+    res.status(422).json({ error: 'deviceType must be desktop|web|android' }); return;
   }
-  const deviceToken = crypto.randomBytes(32).toString('hex'); // 64-char token
+  const existing = await pool.query('SELECT id, status FROM pos_devices WHERE device_id = $1', [deviceId]);
+  if (existing.rows[0]?.status === 'suspended') {
+    res.status(403).json({ error: 'This device has been suspended. Contact your administrator.' }); return;
+  }
   const { rows } = await pool.query(
-    `INSERT INTO pos_devices (device_id, device_type, name, shop_id, device_token, status, company_id)
-     VALUES ($1,$2,$3,$4,$5,'active',$6)
+    `INSERT INTO pos_devices (device_id, device_type, name, branch, app_version, server_url, status, last_seen, company_id)
+     VALUES ($1,$2,$3,$4,$5,$6,'active',NOW(),$7)
      ON CONFLICT (device_id) DO UPDATE SET
        device_type = EXCLUDED.device_type,
        name = EXCLUDED.name,
-       shop_id = EXCLUDED.shop_id,
-       device_token = EXCLUDED.device_token,
-       status = EXCLUDED.status,
+       branch = EXCLUDED.branch,
+       app_version = EXCLUDED.app_version,
+       server_url = EXCLUDED.server_url,
+       company_id = COALESCE(pos_devices.company_id, EXCLUDED.company_id),
        last_seen = NOW(),
        updated_at = NOW()
-     RETURNING id, device_id, device_type, name, shop_id, device_token, status, company_id, paired_at`,
-    [hardwareSerial, deviceType, deviceName, shopId, deviceToken, (req.adminUser as { company_id?: string | null })?.company_id ?? null]
+     RETURNING *`,
+    [deviceId, deviceType, name, branch, appVersion, serverUrl, (req.adminUser as { company_id?: string | null })?.company_id ?? null]
   );
-  const device = rows[0];
-  res.json({
-    status: 'success',
-    device_token: device.device_token,
-    company_id: device.company_id,
-    shop_id: device.shop_id,
-    device_name: device.name,
-  });
+  res.json({ ok: true, device: rows[0] });
 });
-
-// ── Device hardware auth middleware ────────────────────────────────────
-// Validates Authorization: Bearer <device_token> against active pos_devices tokens.
-// Attaches req.device = { device_id, company_id, shop_id } and updates last_seen_at.
-// Must be used as async middleware in Express (returns Promise).
-export async function requireDeviceAuth(
-  req: Request,
-  res: Response,
-  next: NextFunction
-): Promise<void> {
-  const authHeader = str(req.headers.authorization);
-  if (!authHeader?.startsWith('Bearer ')) {
-    res.status(401).json({ error: 'Device token required' }); return;
-  }
-  const token = authHeader.slice('Bearer '.length);
-  const { rows } = await pool.query(
-    `SELECT id, device_id, company_id, shop_id, status, last_seen_at FROM pos_devices WHERE device_token = $1 AND status = 'active'`,
-    [token]
-  );
-  const device = rows[0];
-  if (!device) {
-    res.status(401).json({ error: 'Invalid or revoked device token' }); return;
-  }
-  // Update last_seen_at
-  await pool.query(
-    `UPDATE pos_devices SET last_seen_at = NOW() WHERE id = $1`,
-    [device.id]
-  ).catch(() => {});
-  req.device = {
-    device_id: device.device_id,
-    company_id: device.company_id,
-    shop_id: device.shop_id,
-  };
-  next();
-}
 
 // ── Products ────────────────────────────────────────────────────────
 
