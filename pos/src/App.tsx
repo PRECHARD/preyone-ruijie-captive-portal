@@ -6,6 +6,8 @@ import Terminal from './components/Terminal';
 import XReportModal from './components/XReportModal';
 import StockManager from './components/StockManager';
 import HistoryView from './components/HistoryView';
+import SettingsView from './components/SettingsView';
+import CloudSyncIndicator from './components/CloudSyncIndicator';
 
 export interface Toast {
   msg: string;
@@ -18,7 +20,9 @@ export default function App() {
   const [shiftTotals, setShiftTotals] = useState<MethodTotal[]>([]);
   const [shiftLoading, setShiftLoading] = useState(true);
   const [showX, setShowX] = useState(false);
-  const [view, setView] = useState<'sell' | 'stock' | 'history'>('sell');
+  const [view, setView] = useState<'home' | 'stock' | 'settings'>('home');
+  const [homeTab, setHomeTab] = useState<'register' | 'documents'>('register');
+  const [switching, setSwitching] = useState(false);
   const [toast, setToast] = useState<Toast | null>(null);
 
   const notify = useCallback((msg: string, kind: 'ok' | 'error' = 'ok') => {
@@ -82,23 +86,29 @@ export default function App() {
               <div className="brand-sub">ENTERPRISE</div>
             </div>
             <div className="spacer" />
+            <button className={`chip ${view === 'home' ? 'ok' : ''}`} onClick={() => setView('home')}>HOME</button>
             {user.role !== 'Cashier' && (
-              <>
-                <button className={`chip ${view === 'sell' ? 'ok' : ''}`} onClick={() => setView('sell')}>SELL</button>
-                <button className={`chip ${view === 'stock' ? 'ok' : ''}`} onClick={() => setView('stock')}>STOCK</button>
-              </>
+              <button className={`chip ${view === 'stock' ? 'ok' : ''}`} onClick={() => setView('stock')}>STOCK</button>
             )}
-            <button className={`chip ${view === 'history' ? 'ok' : ''}`} onClick={() => setView('history')}>HISTORY</button>
+            <button className={`chip ${view === 'settings' ? 'ok' : ''}`} onClick={() => setView('settings')}>
+              SETTINGS
+            </button>
             {shift && (
               <button className="chip ok" onClick={() => setShowX(true)}>
                 SHIFT OPEN · ${shiftValue.toFixed(2)}
               </button>
             )}
+            <CloudSyncIndicator />
             <span className="chip">{user.fullName}</span>
+            <button className="ghost-btn" onClick={() => setSwitching(true)} title="Hand the till to another cashier">
+              Switch
+            </button>
             <button className="ghost-btn" onClick={logout}>Sign out</button>
           </header>
 
-          {shiftLoading ? (
+          {view === 'settings' ? (
+            <SettingsView user={user} notify={notify} onApiError={sessionExpired} />
+          ) : shiftLoading ? (
             <div className="empty-note">Checking till…</div>
           ) : !shift ? (
             <ShiftGate
@@ -113,15 +123,53 @@ export default function App() {
             />
           ) : view === 'stock' ? (
             <StockManager />
-          ) : view === 'history' ? (
-            <HistoryView notify={notify} onApiError={sessionExpired} />
           ) : (
-            <Terminal
-              user={user}
-              notify={notify}
-              onApiError={sessionExpired}
-              onShiftChanged={refreshShift}
-            />
+            <div className="home-pane">
+              <div className="home-tabs">
+                <button
+                  className={`hist-tab${homeTab === 'register' ? ' on' : ''}`}
+                  onClick={() => setHomeTab('register')}
+                >
+                  Register
+                </button>
+                <button
+                  className={`hist-tab${homeTab === 'documents' ? ' on' : ''}`}
+                  onClick={() => setHomeTab('documents')}
+                >
+                  Invoices &amp; Quotes
+                </button>
+              </div>
+              <div className="home-body">
+                {homeTab === 'register' ? (
+                  <Terminal
+                    user={user}
+                    notify={notify}
+                    onApiError={sessionExpired}
+                    onShiftChanged={refreshShift}
+                    shiftId={shift.id}
+                  />
+                ) : (
+                  <HistoryView notify={notify} onApiError={sessionExpired} />
+                )}
+              </div>
+            </div>
+          )}
+
+          {switching && (
+            <div className="modal-backdrop" onClick={() => setSwitching(false)}>
+              <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+                <h3 className="modal-title">Switch cashier</h3>
+                <p className="hint">Select the next operator and enter their PIN to hand over the till.</p>
+                <PinLogin
+                  onLoggedIn={(t, u) => {
+                    handleLoggedIn(t, u);
+                    setSwitching(false);
+                    notify(`Now serving as ${u.fullName}`);
+                  }}
+                />
+                <button className="secondary-btn" onClick={() => setSwitching(false)}>Cancel</button>
+              </div>
+            </div>
           )}
         </div>
       )}

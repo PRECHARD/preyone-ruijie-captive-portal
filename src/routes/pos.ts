@@ -787,6 +787,27 @@ router.post('/shifts/close', async (req, res) => {
   res.json({ shift: rows[0], totalsByMethod: sums.rows });
 });
 
+// Cash drawer audit: every drawer-kick event is recorded against the shift
+// with the exact ESC/POS command bytes that open the drawer, so an auditor can
+// reconcile drawer events with shift records. The PIN-session admin (loaded by
+// requireAdminAuth at router level) is the author.
+router.post('/shifts/drawer-audit', async (req, res) => {
+  const rawEvent = str(req.body?.event);
+  const event = ['open', 'close', 'test'].includes(rawEvent) ? rawEvent : 'close';
+  const shiftId = str(req.body?.shiftId) || null;
+  await pool.query(
+    `INSERT INTO admin_audit_log (admin_id, admin_name, action, target_type, target_id, detail)
+     VALUES ($1,$2,'pos.drawer_kick','shift',$3,$4)`,
+    [
+      req.adminUser!.id,
+      req.adminUser!.fullName ?? null,
+      shiftId,
+      `ESC/POS drawer kick \\x1B\\x70\\x00\\x19\\xFA (${event})`,
+    ]
+  );
+  res.json({ ok: true, event, command: '\\x1B\\x70\\x00\\x19\\xFA' });
+});
+
 router.get('/shifts', async (req, res) => {
   const all = str(req.query.all) === '1' && MANAGER_ROLES.includes(req.adminUser!.role);
   // Managers still only see their own company's shifts: "all" widens from

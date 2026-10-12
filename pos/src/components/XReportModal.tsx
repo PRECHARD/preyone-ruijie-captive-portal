@@ -28,6 +28,9 @@ export default function XReportModal({
     setBusy(true);
     try {
       const data = await api.closeShift(Number(counted) || 0);
+      // Drawer audit: record the cash-up kick with the exact ESC/POS bytes so
+      // the close event reconciles against the shift record. Best-effort.
+      api.drawerAudit({ event: 'close', shiftId: shift.id }).catch(() => {});
       setResult(data.shift);
       setStage('closed');
     } catch (e) {
@@ -68,8 +71,11 @@ export default function XReportModal({
         {stage === 'closing' && (
           <>
             <h3 className="modal-title">Cash-up</h3>
-            <p className="hint">Count the drawer and enter the actual cash total.</p>
-            <div className="x-report-row"><span>Expected</span><strong>{money(expectedCash)}</strong></div>
+            <p className="hint">
+              Blind count — count the drawer and enter the actual cash total.
+              The expected figure stays hidden until you confirm, so the count
+              is honest.
+            </p>
             <label className="field-label">
               Cash counted ($)
               <input

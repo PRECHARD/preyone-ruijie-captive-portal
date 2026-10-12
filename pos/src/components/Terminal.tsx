@@ -8,13 +8,15 @@ interface Props {
   notify: (msg: string, kind?: 'ok' | 'error') => void;
   onApiError: (e: unknown) => boolean;
   onShiftChanged: () => Promise<void>;
+  shiftId?: string | null;
 }
 
 type DocType = 'sale' | 'invoice' | 'quotation';
 
 const money = (n: number): string => `$${(Number(n) || 0).toFixed(2)}`;
+const zig = (n: number, rate: number): string => `ZiG ${(Math.round(n * rate * 100) / 100).toFixed(2)}`;
 
-export default function Terminal({ user, notify, onApiError, onShiftChanged }: Props) {
+export default function Terminal({ user, notify, onApiError, onShiftChanged, shiftId }: Props) {
   const [products, setProducts] = useState<Product[]>([]);
   const [query, setQuery] = useState('');
   const [cart, setCart] = useState<CartLineState[]>([]);
@@ -26,6 +28,7 @@ export default function Terminal({ user, notify, onApiError, onShiftChanged }: P
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [receipt, setReceipt] = useState<CheckoutResult | null>(null);
   const [company, setCompany] = useState<CompanyProfile | null>(null);
+  const [zigRate, setZigRate] = useState<number | null>(null);
 
   interface CartLineState {
     productId: string | null;
@@ -44,6 +47,21 @@ export default function Terminal({ user, notify, onApiError, onShiftChanged }: P
     api.company()
       .then(setCompany)
       .catch(() => { /* receipts fall back to defaults */ });
+  }, []);
+
+  // Dual-currency display: pull the company's USD→ZiG rate once and show the
+  // local-currency equivalent beside every price. All cart maths stay in the
+  // document currency (USD); ZiG is display-only.
+  useEffect(() => {
+    api
+      .currencyRates()
+      .then((r) => {
+        const row =
+          r.rates.find((x) => x.base_currency === 'USD' && x.target_currency === 'ZWG') ??
+          r.rates.find((x) => x.target_currency === 'ZWG');
+        if (row && Number(row.rate) > 0) setZigRate(Number(row.rate));
+      })
+      .catch(() => { /* dual-currency stays off without a rate */ });
   }, []);
 
   const filtered = useMemo(() => {
@@ -132,6 +150,11 @@ export default function Terminal({ user, notify, onApiError, onShiftChanged }: P
       setDiscountPct('0');
       setTaxPct('15.5');
       notify(`${result.doc_number} completed`);
+      // A cash tender opens the physical drawer: log the kick against the
+      // shift so the drawer audit trail reconciles with cash-up.
+      if (shiftId && payments.some((p) => p.method === 'cash')) {
+        api.drawerAudit({ event: 'open', shiftId }).catch(() => { /* audit is best-effort */ });
+      }
       await onShiftChanged();
     } catch (e) {
       if (!onApiError(e)) notify(e instanceof Error ? e.message : 'Sale failed', 'error');
@@ -161,6 +184,7 @@ export default function Terminal({ user, notify, onApiError, onShiftChanged }: P
                 <button className="product-card" key={p.id} onClick={() => addToCart(p)}>
                   <span className="p-name">{p.name}</span>
                   <span className="p-price">{money(Number(p.price))}</span>
+                  {zigRate !== null && <span className="p-zig">≈ {zig(Number(p.price), zigRate)}</span>}
                   <span className={`p-stock ${low ? 'low' : ''}`}>
                     {p.track_stock ? `${Number(p.stock_qty)} in stock` : 'service'}
                   </span>
@@ -228,6 +252,9 @@ export default function Terminal({ user, notify, onApiError, onShiftChanged }: P
           {(Number(discountPct) || 0) > 0 && <div className="tot-row"><span>Discount</span><span>−{money(disc)}</span></div>}
           {taxPctNum > 0 && <div className="tot-row"><span>VAT {taxPctNum}% (INCL.)</span><span>{money(vatIncluded)}</span></div>}
           <div className="tot-row grand"><span>Total</span><span>{money(total)}</span></div>
+          {zigRate !== null && total > 0 && (
+            <div className="tot-row zig-line"><span>Local currency</span><span>≈ {zig(total, zigRate)}</span></div>
+          )}
 
           <button className="charge-btn" disabled={!canCharge} onClick={() => setCheckoutOpen(true)}>
             CHARGE {money(total)}

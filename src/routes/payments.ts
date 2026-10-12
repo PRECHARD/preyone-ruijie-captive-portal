@@ -24,6 +24,7 @@ import { RuijieApiError } from '../services/ruijieCloud';
 import { isRuijieCloudConfigured, findRuijieProfile, mintRuijieVoucherForTier } from '../services/ruijieMint';
 import { requireStarlinkAuth } from '../middleware/starlinkAuth';
 import { createStarlinkInvoice, applyStarlinkPayment, getStarlinkKit } from '../db/starlink';
+import { PLAN_TIERS } from './subscription';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'preyone-jwt-secret-change-in-production';
 let _jwtSecretWarned = false;
@@ -1570,7 +1571,7 @@ paymentsRouter.post('/pesepay/webhook', async (req: Request, res: Response) => {
       await client.query('BEGIN');
 
       const { rows: intentRows } = await client.query(
-        `SELECT id, reference, tenant_id, target_type, status
+        `SELECT id, reference, tenant_id, target_type, status, plan_tier
            FROM pesepay_intents
           WHERE reference = ANY($1::text[]) OR provider_reference = ANY($1::text[])
           FOR UPDATE`,
@@ -1612,12 +1613,22 @@ paymentsRouter.post('/pesepay/webhook', async (req: Request, res: Response) => {
         return;
       }
 
+      // A tier purchased through /api/subscription/checkout (or initiate with
+      // planTier) is applied here. The value is validated against the fixed
+      // tier list and interpolated as a literal so the query parameters stay
+      // exactly [companyId]; the companies.plan_type CHECK is a second guard.
+      const purchasedTier =
+        intent && typeof intent.plan_tier === 'string' && (PLAN_TIERS as readonly string[]).includes(intent.plan_tier)
+          ? intent.plan_tier
+          : null;
+
       const { rows: updated } = await client.query(
         `UPDATE companies
             SET subscription_expires_at = GREATEST(COALESCE(subscription_expires_at, NOW()), NOW()) + INTERVAL '30 days',
                 subscription_status = 'active',
                 reminder_3day_sent = FALSE,
                 reminder_1day_sent = FALSE,
+                ${purchasedTier ? `plan_type = '${purchasedTier}',` : ''}
                 updated_at = NOW()
           WHERE id = $1
           RETURNING id, plan_type, subscription_expires_at, subscription_status`,

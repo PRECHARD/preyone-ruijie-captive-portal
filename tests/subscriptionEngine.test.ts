@@ -471,6 +471,75 @@ describe('POST /api/payments/pesepay/webhook', () => {
     expect(companyUpdate![1]).toEqual([payloadCompany]);
   });
 
+  it('applies a purchased plan_tier to the company without extra bind params', async () => {
+    webhookState.intents = [
+      {
+        id: 'intent-9',
+        reference: 'SUB-9',
+        tenant_id: 'company-1',
+        target_type: 'subscription',
+        status: 'pending',
+        plan_tier: 'growth_20',
+      },
+    ];
+    webhookState.companyRows = [
+      {
+        id: 'company-1',
+        plan_type: 'standard_10',
+        subscription_expires_at: '2026-12-12T10:00:00.000Z',
+        subscription_status: 'active',
+      },
+    ];
+
+    const res = await request(createPaymentsApp())
+      .post('/api/payments/pesepay/webhook')
+      .set('authorization', KEY)
+      .send({ reference: 'SUB-9', transactionStatus: 'SUCCESS' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.applied).toBe(true);
+
+    const companyUpdate = clientState.query.mock.calls.find((c: any[]) => /UPDATE companies/.test(c[0]));
+    expect(companyUpdate).toBeTruthy();
+    // The tier rides in as a validated SQL literal so the bind parameters stay
+    // exactly [$1 companyId] — the invariants asserted above still hold.
+    expect(companyUpdate![0]).toContain(`plan_type = 'growth_20'`);
+    expect(companyUpdate![1]).toEqual(['company-1']);
+  });
+
+  it('ignores an unknown plan_tier from a legacy intent', async () => {
+    webhookState.intents = [
+      {
+        id: 'intent-10',
+        reference: 'SUB-10',
+        tenant_id: 'company-1',
+        target_type: 'subscription',
+        status: 'pending',
+        plan_tier: 'pro_99',
+      },
+    ];
+    webhookState.companyRows = [
+      {
+        id: 'company-1',
+        plan_type: 'standard_10',
+        subscription_expires_at: '2026-12-12T10:00:00.000Z',
+        subscription_status: 'active',
+      },
+    ];
+
+    const res = await request(createPaymentsApp())
+      .post('/api/payments/pesepay/webhook')
+      .set('authorization', KEY)
+      .send({ reference: 'SUB-10', transactionStatus: 'SUCCESS' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.applied).toBe(true);
+    // Still extends the subscription, but never writes an unvalidated tier.
+    const companyUpdate = clientState.query.mock.calls.find((c: any[]) => /UPDATE companies/.test(c[0]));
+    expect(companyUpdate![0]).not.toContain('plan_type = ');
+    expect(companyUpdate![1]).toEqual(['company-1']);
+  });
+
   it('400s when neither the payload nor an intent names a company', async () => {
     const res = await request(createPaymentsApp())
       .post('/api/payments/pesepay/webhook')

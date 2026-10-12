@@ -15,6 +15,7 @@ import { adminRouter } from './routes/admin';
 import { posRouter } from './routes/pos';
 import { adminAuthRouter } from './routes/adminAuth';
 import { paymentsRouter } from './routes/payments';
+import { subscriptionRouter } from './routes/subscription';
 import { siteInvoicesRouter } from './routes/siteInvoices';
 import { gatewayRouter } from './routes/gateway';
 import { transitRouter } from './routes/transit';
@@ -331,6 +332,8 @@ app.use('/api/admin', adminRouter);
 app.use('/api/v1/admin', systemAdminRouter);
 app.use('/api/v1/transit', transitWebRouter);
 app.use('/api/payments', paymentsRouter);
+// 3-tier plan browsing + Pesepay hosted checkout for Upgrade My Plan.
+app.use('/api/subscription', subscriptionRouter);
 // Public Starlink checkout for the marketing site. No session: the invoice is
 // created from a server-side plan catalog and settled by the Pesepay callback.
 app.use('/api/site', siteInvoicesRouter);

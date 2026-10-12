@@ -268,3 +268,45 @@ describe('POS document numbering prefixes', () => {
     expect(DOC_PREFIX.quotation).toBe('QUO');
   });
 });
+
+describe('Cash drawer audit', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    session.companyId = COMPANY_A;
+    session.userId = 'user-a';
+    session.role = 'Cashier';
+    (pool.query as any).mockImplementation(async () => ({ rows: [], rowCount: 0 }));
+  });
+
+  it('logs the ESC/POS kick bytes against the shift for the session admin', async () => {
+    const res = await request(createApp())
+      .post('/api/pos/shifts/drawer-audit')
+      .send({ event: 'open', shiftId: 'shift-9' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+    expect(res.body.event).toBe('open');
+    expect(res.body.command).toBe('\\x1B\\x70\\x00\\x19\\xFA');
+
+    const insert = (pool.query as any).mock.calls.find((c: any[]) =>
+      String(c[0]).includes('pos.drawer_kick')
+    );
+    expect(insert).toBeTruthy();
+    expect(insert![0]).toContain('INSERT INTO admin_audit_log');
+    const params = insert![1];
+    expect(params[0]).toBe('user-a');
+    expect(params[1]).toBe('Test User');
+    expect(params[2]).toBe('shift-9');
+    expect(String(params[3])).toContain('\\x1B\\x70\\x00\\x19\\xFA');
+    expect(String(params[3])).toContain('open');
+  });
+
+  it('falls back to a generic close event for an unknown event name', async () => {
+    const res = await request(createApp())
+      .post('/api/pos/shifts/drawer-audit')
+      .send({ event: 'weird' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.event).toBe('close');
+  });
+});

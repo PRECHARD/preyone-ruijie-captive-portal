@@ -86,6 +86,46 @@ export interface PosDocument {
   payments?: Array<{ amount: number; method: string; reference?: string }>;
 }
 
+export interface CurrencyRate {
+  base_currency: string;
+  target_currency: string;
+  rate: number;
+}
+
+export interface SubscriptionPlan {
+  id: string;
+  name: string;
+  price: number;
+  devices: number;
+  tagline: string;
+}
+
+export interface SubscriptionPlans {
+  tenantId: string;
+  current: {
+    plan_type: string;
+    max_devices: number;
+    subscription_status: string;
+    subscription_expires_at: string | null;
+  } | null;
+  tiers: SubscriptionPlan[];
+  currency: string;
+}
+
+export interface CheckoutSession {
+  success: boolean;
+  tier: string;
+  name: string;
+  amount: number;
+  currencyCode: string;
+  paymentMethod: string;
+  reference: string;
+  redirectUrl?: string;
+  pollUrl?: string;
+  instructions?: string;
+  tenantId: string;
+}
+
 const TOKEN_KEY = 'pos_token';
 const USER_KEY = 'pos_user';
 
@@ -123,6 +163,24 @@ async function req<T>(path: string, opts: RequestInit = {}): Promise<T> {
   const token = auth.token();
   if (token) headers.Authorization = `Bearer ${token}`;
   const res = await fetch(`/api/pos${path}`, { credentials: 'include', ...opts, headers });
+  if (res.status === 401) {
+    auth.clear();
+    throw new ApiError('Session expired — sign in again', 401);
+  }
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new ApiError((data as { error?: string }).error || `Request failed (${res.status})`, res.status);
+  }
+  return (await res.json()) as T;
+}
+
+// Same session rules as req(), but for endpoints outside /api/pos that still
+// accept the PIN-session Bearer token (subscription checkout, currency rates).
+async function root<T>(path: string, opts: RequestInit = {}): Promise<T> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const token = auth.token();
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const res = await fetch(`/api${path}`, { credentials: 'include', ...opts, headers });
   if (res.status === 401) {
     auth.clear();
     throw new ApiError('Session expired — sign in again', 401);
@@ -228,4 +286,20 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(p),
     }),
+
+  // Quotation/sale → invoice conversion (one click from document history)
+  convertToInvoice: (id: string) => req<PosDocument>(`/documents/${id}/convert-to-invoice`, { method: 'POST' }),
+
+  // Cash drawer audit: logs the exact ESC/POS kick bytes against the shift
+  drawerAudit: (payload: { event?: 'open' | 'close' | 'test'; shiftId?: string | null }) =>
+    req<{ ok: boolean; event: string; command: string }>('/shifts/drawer-audit', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  // ── Subscription (outside /api/pos, same PIN-session token) ─────────────
+  subscriptionPlans: () => root<SubscriptionPlans>('/subscription/plans'),
+  subscriptionCheckout: (payload: { tier: string; currencyCode?: string; paymentMethod?: string; phone?: string }) =>
+    root<CheckoutSession>('/subscription/checkout', { method: 'POST', body: JSON.stringify(payload) }),
+  currencyRates: () => root<{ rates: CurrencyRate[]; fallback: boolean }>('/currency/rates'),
 };
