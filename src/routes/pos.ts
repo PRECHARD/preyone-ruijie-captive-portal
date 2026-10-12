@@ -169,6 +169,72 @@ function tenantId(req: Request): string {
   return req.company!.id;
 }
 
+// ── SaaS subscription guard (3-tier engine) ───────────────────────────
+// Shared by /devices/register and /devices/auto-register. Reads the tier off
+// the companies row that requireCompany already loaded, then enforces in this
+// order (per the subscription spec):
+//   1. active device count vs the plan's max_devices, for a device that is
+//      not registered yet        -> 403 DEVICE_LIMIT_EXCEEDED
+//   2. subscription expiration   -> 403 SUBSCRIPTION_EXPIRED
+//      (manual suspension        -> 403 SUBSCRIPTION_SUSPENDED)
+// A device that already has a registration row re-registers without counting
+// against the cap (it is already one of the counted rows), but a lapsed
+// subscription still blocks it. Companies with no plan row yet — or a NULL
+// max_devices — are grandfathered: there is nothing to enforce against.
+// Returns true when the caller may proceed; false once a response was sent.
+async function enforceSubscriptionGuard(
+  res: Response,
+  companyId: string,
+  existingDevice: boolean
+): Promise<boolean> {
+  const { rows } = await pool.query(
+    `SELECT max_devices, subscription_status, subscription_expires_at
+       FROM companies WHERE id = $1`,
+    [companyId]
+  );
+  const plan = rows[0];
+  if (!plan) return true;
+
+  if (!existingDevice && plan.max_devices !== null && plan.max_devices !== undefined) {
+    const { rows: countRows } = await pool.query(
+      `SELECT COUNT(*)::int AS n FROM pos_devices
+        WHERE company_id = $1 AND status = 'active'`,
+      [companyId]
+    );
+    const active = Number(countRows[0]?.n ?? 0);
+    const max = Number(plan.max_devices);
+    if (active >= max) {
+      res.status(403).json({
+        error: `Device limit reached: your subscription allows ${max} active device(s). Upgrade your plan to register more devices.`,
+        code: 'DEVICE_LIMIT_EXCEEDED',
+        max_devices: max,
+        active_devices: active,
+      });
+      return false;
+    }
+  }
+
+  const expiresAt = plan.subscription_expires_at ? new Date(plan.subscription_expires_at) : null;
+  if ((expiresAt && expiresAt.getTime() <= Date.now()) || plan.subscription_status === 'expired') {
+    res.status(403).json({
+      error: 'Subscription expired. Renew your plan to continue registering devices.',
+      code: 'SUBSCRIPTION_EXPIRED',
+      subscription_expires_at: expiresAt ? expiresAt.toISOString() : null,
+    });
+    return false;
+  }
+
+  if (plan.subscription_status === 'suspended') {
+    res.status(403).json({
+      error: 'Subscription suspended. Renew your plan to re-enable device registration.',
+      code: 'SUBSCRIPTION_SUSPENDED',
+    });
+    return false;
+  }
+
+  return true;
+}
+
 // ── Payment methods accepted on documents ──────────────────────────
 // Mirrors the pos_document_payments_method_check constraint.
 // Mobile-money rails are the ones Pesepay actually enables for this merchant
@@ -199,6 +265,8 @@ router.get('/company/subscriptions', (req, res) => {
 // POST /api/pos/devices/register
 // Body: { hardware_serial, device_name, device_type, shop_id }
 // Generates 64-char random hardware token; upserts on device_id conflict.
+// Tenant-scoped to req.company and gated by the subscription guard
+// (plan device cap first, then subscription expiry).
 router.post('/devices/register', requireAdminAuth, async (req, res) => {
   const hardwareSerial = str(req.body?.hardware_serial);
   const deviceName = str(req.body?.device_name) || 'Unknown Device';
@@ -210,6 +278,14 @@ router.post('/devices/register', requireAdminAuth, async (req, res) => {
   if (!['android', 'electron', 'web', 'phone', 'tablet', 'desktop'].includes(deviceType)) {
     res.status(422).json({ error: 'device_type must be android|electron|web|phone|tablet|desktop' }); return;
   }
+  // Subscription engine: plan cap, then expiry, before any new registration.
+  const companyId = tenantId(req);
+  const { rows: existingRows } = await pool.query(
+    `SELECT id FROM pos_devices WHERE device_id = $1`,
+    [hardwareSerial]
+  );
+  if (!(await enforceSubscriptionGuard(res, companyId, existingRows.length > 0))) return;
+
   const deviceToken = crypto.randomBytes(32).toString('hex'); // 64-char token
   const { rows } = await pool.query(
     `INSERT INTO pos_devices (device_id, device_type, name, shop_id, device_token, status, company_id, paired_at, last_seen_at)
@@ -224,7 +300,7 @@ router.post('/devices/register', requireAdminAuth, async (req, res) => {
        last_seen_at = NOW(),
        updated_at = NOW()
      RETURNING id, device_id, device_type, name, shop_id, device_token, status, company_id, paired_at`,
-    [hardwareSerial, deviceType, deviceName, shopId, deviceToken, (req.adminUser as { company_id?: string | null })?.company_id ?? null]
+    [hardwareSerial, deviceType, deviceName, shopId, deviceToken, companyId]
   );
   const device = rows[0];
   res.json({
@@ -239,7 +315,8 @@ router.post('/devices/register', requireAdminAuth, async (req, res) => {
 // ── Auto-registration (world-class, Preyone Transit technology) ─────
 // POST /api/pos/devices/auto-register
 // Called by desktop/Android on first launch. Uses admin JWT for company
-// scoping. Enforces 3-device quota: 1 phone + 1 tablet + 1 desktop.
+// scoping (req.company, the portal tenant). Enforces 3-device quota: 1 phone
+// + 1 tablet + 1 desktop, plus the subscription plan's device cap.
 // Body: { device_uuid, device_public_key, device_type, device_name, app_version }
 // Returns: { device_token, company_id, shop_id, device_name, quota }
 const ALLOWED_AUTO_TYPES = ['phone', 'tablet', 'desktop'] as const;
@@ -273,7 +350,7 @@ router.post('/devices/auto-register', requireAdminAuth, async (req, res) => {
     res.status(422).json({ error: `device_type must be one of: ${ALLOWED_AUTO_TYPES.join(', ')}` }); return;
   }
 
-  const companyId = (req.adminUser as { company_id?: string | null })?.company_id ?? null;
+  const companyId = tenantId(req);
 
   // Check if this device_uuid already registered (idempotent re-register)
   const existingDevice = await pool.query(
@@ -285,6 +362,9 @@ router.post('/devices/auto-register', requireAdminAuth, async (req, res) => {
   if (existingDevice.rows[0]?.status === 'suspended') {
     res.status(403).json({ error: 'This device has been suspended. Contact your administrator.' }); return;
   }
+
+  // Subscription engine: plan cap and expiry outrank the per-type quota below.
+  if (!(await enforceSubscriptionGuard(res, companyId, existingDevice.rows.length > 0))) return;
 
   // Enforce quota: max N devices per type per company (only for NEW devices)
   const isNewDevice = existingDevice.rows.length === 0;

@@ -1,4 +1,6 @@
 import 'dotenv/config';
+import fs from 'fs';
+import path from 'path';
 import bcrypt from 'bcryptjs';
 import { pool } from './pool';
 import { formatZimPhone } from '../utils/phone';
@@ -192,6 +194,43 @@ const SQL = `
   ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS reset_token_expires_at TIMESTAMPTZ;
   ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT FALSE;
   ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS email_verification_token TEXT;
+
+  -- Admin console session policy (two-tier login: inactivity lock + absolute
+  -- cap) and email OTP 2FA challenge storage. session_expires_at is a DERIVED
+  -- cache of (last_activity + inactivity timeout) kept for legacy readers; the
+  -- two authoritative clocks are last_activity (slides on interaction) and
+  -- auth_time (immutable, stamped when 2FA succeeds).
+  ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS session_expires_at TIMESTAMPTZ;
+  ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS last_activity TIMESTAMPTZ;
+  ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS auth_time TIMESTAMPTZ;
+  -- Rotated on every sign-in and carried as the JWT "sid" claim. Logout points
+  -- it at a value no token can present, so outstanding bearer tokens die even
+  -- though JWTs are stateless. NULL means "not yet rotated" (pre-upgrade rows)
+  -- and skips the binding check.
+  ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS active_sid TEXT;
+
+  -- Backfill once: convert the old 60s idle deadline into a last_activity
+  -- stamp, then give every account an absolute-session start so the 10-hour
+  -- cap is enforced from the first request after this migration ships.
+  UPDATE admin_users
+     SET last_activity = session_expires_at - interval '60 seconds'
+   WHERE last_activity IS NULL AND session_expires_at IS NOT NULL;
+  UPDATE admin_users
+     SET auth_time = COALESCE(last_activity, created_at, NOW())
+   WHERE auth_time IS NULL;
+
+  -- Email OTP challenge for admin console 2FA (login step-up verification).
+  CREATE TABLE IF NOT EXISTS admin_2fa_challenges (
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    admin_user_id UUID NOT NULL REFERENCES admin_users(id) ON DELETE CASCADE,
+    code_hash     TEXT NOT NULL,
+    expires_at    TIMESTAMPTZ NOT NULL,
+    attempts      INTEGER NOT NULL DEFAULT 0,
+    consumed_at   TIMESTAMPTZ,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+  CREATE INDEX IF NOT EXISTS idx_admin_2fa_challenges_user
+    ON admin_2fa_challenges (admin_user_id, created_at DESC);
 
   CREATE UNIQUE INDEX IF NOT EXISTS idx_admin_users_email ON admin_users (email);
 
@@ -1466,24 +1505,39 @@ const SQL = `
     `);
 
     // 3. Create currency_rates table (idempotent)
+    // company_id must be UUID to match companies.id: it used to be declared
+    // INT NOT NULL REFERENCES companies(id), which makes this CREATE fail on
+    // any database that doesn't already have the table — and because the whole
+    // migration runs in one client, that single failure aborted everything
+    // below it (including the subscription upgrade). UNIQUE (company_id,
+    // target_currency) is what POST /api/currency/rates ... ON CONFLICT needs,
+    // and company_id stays nullable because the USD->ZWG seed row is the
+    // global default that GET /api/currency/rates falls back to.
     await client.query(`
       CREATE TABLE IF NOT EXISTS currency_rates (
         id SERIAL PRIMARY KEY,
-        company_id INT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+        company_id UUID REFERENCES companies(id) ON DELETE CASCADE,
         base_currency VARCHAR(10) NOT NULL DEFAULT 'USD',
         target_currency VARCHAR(10) NOT NULL,
         rate DECIMAL(18,6) NOT NULL,
         effective_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (company_id, target_currency)
       );
       CREATE INDEX IF NOT EXISTS idx_currency_rates_company ON currency_rates(company_id, target_currency);
     `);
 
-    // Seed default USD->ZWG rate for Zimbabwe (optional – can be overridden)
+    // Seed default USD->ZWG rate for Zimbabwe (optional – can be overridden).
+    // WHERE NOT EXISTS rather than ON CONFLICT: company_id is NULL for the
+    // global default row, NULLs never conflict, so ON CONFLICT would insert a
+    // duplicate seed on every migration run.
     await client.query(`
       INSERT INTO currency_rates (base_currency, target_currency, rate)
-      VALUES ('USD', 'ZWG', 26.500000)
-      ON CONFLICT (company_id, target_currency) DO NOTHING;
+      SELECT 'USD', 'ZWG', 26.500000
+      WHERE NOT EXISTS (
+        SELECT 1 FROM currency_rates
+         WHERE company_id IS NULL AND base_currency = 'USD' AND target_currency = 'ZWG'
+      );
     `);
 
     // Seed packages table (idempotent upsert — updates existing tiers, inserts new ones)
@@ -1746,6 +1800,20 @@ const SQL = `
       CREATE INDEX IF NOT EXISTS idx_vouchers_ruijie_sync_status
         ON vouchers (ruijie_sync_status) WHERE ruijie_sync_status IS NOT NULL;
     `);
+
+    // ── 3-tier SaaS subscription engine (v2 master upgrade) ─────────────────
+    // Plan tiers, device caps and dunning flags live in a standalone file so
+    // DBAs can review the schema change on its own; this stays the single
+    // entry point (`npm run migrate`). Resolves from src/db and from dist/db
+    // alike, and skips loudly rather than failing the rest of the migration
+    // when the file is absent from a partial deployment.
+    const v2UpgradePath = path.resolve(__dirname, '../../db/migrations/v2_master_upgrade.sql');
+    if (fs.existsSync(v2UpgradePath)) {
+      await client.query(fs.readFileSync(v2UpgradePath, 'utf8'));
+      console.log('Applied db/migrations/v2_master_upgrade.sql (subscription tiers + device caps).');
+    } else {
+      console.warn(`Skipped subscription upgrade: ${v2UpgradePath} not found.`);
+    }
 
     console.log('Migration complete. Packages + transit + RBAC seeded.');
   } finally {

@@ -30,6 +30,7 @@ import { scheduleSessionCleanup } from './services/sessionCleanup';
 import { ensureVoucherRuijieSchema, startRuijieAccountingPolling } from './services/ruijieService';
 import { scheduleAccessLogCleanup } from './services/accessLogCleanup';
 import { scheduleHandoverReminders } from './services/handoverReminder';
+import { scheduleSubscriptionCron } from './jobs/subscriptionCron';
 
 const app = express();
 const PORT = process.env.PORT ?? 3000;
@@ -441,6 +442,13 @@ app.listen(PORT, () => {
     const intervalMinutes = Number(process.env.HANDOVER_REMINDER_INTERVAL_MIN ?? 60);
     scheduleHandoverReminders(intervalMinutes);
     console.log(`Handover reminders scheduled every ${intervalMinutes} minute(s).`);
+  }
+
+  // 3-tier subscription dunning: 3-day warning, 1-day urgent notice and
+  // suspension on expiry, every day at midnight.
+  if (process.env.ENABLE_SUBSCRIPTION_CRON !== 'false') {
+    scheduleSubscriptionCron();
+    console.log('Subscription dunning scheduled daily at midnight.');
   }
 });
 
