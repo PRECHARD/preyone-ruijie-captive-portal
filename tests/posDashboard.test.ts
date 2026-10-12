@@ -108,7 +108,7 @@ describe('GET /api/pos/dashboard (POS sector aggregate)', () => {
     (pool.query as any).mockResolvedValueOnce({ rows: [] });
     const res = await request(createApp()).post('/api/pos/documents/doc-x/convert-to-invoice');
     expect(res.status).toBe(404);
-    expect(res.body.error).toBe('Quotation not found');
+    expect(res.body.error).toBe('Quotation or sale not found');
     // It must never reach nextval when the document does not belong here.
     expect((pool.query as any).mock.calls.length).toBe(1);
   });
@@ -128,5 +128,24 @@ describe('GET /api/pos/dashboard (POS sector aggregate)', () => {
     expect(updateSql).toContain('WHERE id = $2');
     // Ownership was already proven by the tenant-scoped SELECT (first call).
     expect((pool.query as any).mock.calls[0][0] as string).toContain('company_id = $2');
+  });
+
+  it('converts an owned sale to an invoice and preserves its paid status', async () => {
+    const selectSql = 'SELECT id, doc_type, status FROM pos_documents';
+    (pool.query as any)
+      .mockImplementation((sql: string) => {
+        if (sql.startsWith(selectSql)) {
+          // The probe now accepts sales as well as quotations.
+          expect(sql).toContain("doc_type IN ('quotation', 'sale')");
+          return Promise.resolve({ rows: [{ id: 's1', doc_type: 'sale', status: 'paid' }] });
+        }
+        if (sql.includes('nextval')) return Promise.resolve({ rows: [{ v: 43 }] });
+        return Promise.resolve({ rows: [{ id: 's1', doc_number: 'INV-0043', doc_type: 'invoice', status: 'paid' }] });
+      });
+
+    const res = await request(createApp()).post('/api/pos/documents/s1/convert-to-invoice');
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ doc_number: 'INV-0043', doc_type: 'invoice', status: 'paid' });
   });
 });

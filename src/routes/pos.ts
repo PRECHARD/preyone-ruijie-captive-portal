@@ -835,17 +835,17 @@ router.get('/documents/:id', async (req, res) => {
   res.json({ ...doc.rows[0], items: items.rows, payments: pays.rows, customer: customer.rows[0] || null });
 });
 
-// One-click quote → invoice conversion. Only a non-voided quotation owned by
-// this tenant can be converted; the doc_number is re-issued from the shared
-// sequence so the UNIQUE constraint keeps holding.
+// One-click quotation/sale → invoice conversion. Only a non-voided quotation
+// or sale owned by this tenant can be converted; the doc_number is re-issued
+// from the shared sequence so the UNIQUE constraint keeps holding.
 router.post('/documents/:id/convert-to-invoice', async (req, res) => {
   const doc = await pool.query(
     `SELECT id, doc_type, status FROM pos_documents
-      WHERE id = $1 AND company_id = $2 AND doc_type = 'quotation' AND status <> 'void'`,
+      WHERE id = $1 AND company_id = $2 AND doc_type IN ('quotation', 'sale') AND status <> 'void'`,
     [req.params.id, tenantId(req)]
   );
   if (doc.rows.length === 0) {
-    res.status(404).json({ error: 'Quotation not found' });
+    res.status(404).json({ error: 'Quotation or sale not found' });
     return;
   }
   const seq = await pool.query(`SELECT nextval('pos_doc_number_seq') AS v`);
