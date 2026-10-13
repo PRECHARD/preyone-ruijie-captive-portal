@@ -91,7 +91,11 @@
       color: var(--text);
       font-family: var(--font), sans-serif;
       font-size: 0.95rem;
-      text-transform: uppercase;
+      /* deliberately NOT text-transform:uppercase -- voucher PINs are issued
+         lowercase (see the migrate that ran lower(voucher_code) across every
+         table), and a forced-uppercase display made a correct PIN look wrong
+         and a paste of one fail the lookup. */
+      text-transform: none;
     }
 
     .usage-manual .field input:focus {
@@ -218,7 +222,7 @@
           <div class="field">
             <label for="manualVoucher">Voucher PIN</label>
             <input id="manualVoucher" name="voucher" type="text" inputmode="text" autocomplete="off"
-              autocapitalize="characters" spellcheck="false" placeholder="e.g. PRE123XYZ" required />
+              autocapitalize="none" spellcheck="false" placeholder="e.g. preyone-abcd1234" required />
             <span class="field-error" id="manualError"></span>
           </div>
           <div class="field">
@@ -267,13 +271,17 @@
       var qVoucher = params.get('voucher') || params.get('code') || '';
 
       if (qMac) { try { localStorage.setItem(LS_MAC, qMac); } catch (e) {} }
-      if (qVoucher) { try { localStorage.setItem(LS_VOUCHER, qVoucher.toUpperCase()); } catch (e) {} }
+      // Voucher PINs are stored and issued lowercase (the migrate that
+      // normalised every table did `UPDATE ... SET voucher_code = lower(...)`),
+      // so normalise here too -- and never let a phone's autocapitalisation
+      // turn a valid PIN into a failed lookup.
+      if (qVoucher) { try { localStorage.setItem(LS_VOUCHER, qVoucher.toLowerCase()); } catch (e) {} }
 
       function lsGet(k) { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } }
 
       var state = {
         mac: qMac || lsGet(LS_MAC),
-        voucher: (qVoucher || lsGet(LS_VOUCHER)).toUpperCase(),
+        voucher: (qVoucher || lsGet(LS_VOUCHER)).toLowerCase(),
         timer: null,
         deferredPrompt: null,
       };
@@ -342,7 +350,7 @@
 
         if (j.voucherCode) {
           $('metaVoucher').style.display = '';
-          $('metaVoucherTail').textContent = String(j.voucherCode).slice(-4).toUpperCase();
+          $('metaVoucherTail').textContent = String(j.voucherCode).slice(-4).toLowerCase();
         }
         if (j.packageTier) {
           $('metaTier').style.display = '';
@@ -395,7 +403,7 @@
 
       $('manualForm').addEventListener('submit', function (e) {
         e.preventDefault();
-        var v = $('manualVoucher').value.trim().toUpperCase();
+        var v = $('manualVoucher').value.trim().toLowerCase();
         var m = $('manualMac').value.trim();
         if (!v) { $('manualError').textContent = 'Enter your voucher PIN.'; return; }
         $('manualError').textContent = '';
