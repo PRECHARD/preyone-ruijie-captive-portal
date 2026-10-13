@@ -27,10 +27,21 @@ import { isRuijieCloudConfigured } from '../services/ruijieCloud';
  * usage (data_consumed_mb). So the lookup is voucher-first, and "session
  * expiry" is the voucher's own expires_at.
  *
- * Security posture (unchanged):
+ * ── Where the usage numbers come from ────────────────────────────────
+ * Ruijie Cloud is queried live when a device MAC is supplied, because
+ * vouchers.data_consumed_mb only fills in once syncAccountingData() can map a
+ * station MAC to a voucher — and in WiFiDog mode it never can (no binding is
+ * recorded). The customer does have their own MAC though: the gateway passes
+ * client_mac and the success-page button carries it into /data. See
+ * liveUsageByMac() below for the caching story.
+ *
+ * Security posture:
  *  - Rate limited; the PIN is the customer's secret and is what authenticates.
  *  - A MAC alone can NEVER look up usage — MACs are observable by anyone on
- *    the same L2 segment, so they only ever narrow a match.
+ *    the same L2 segment. It is not a credential and not even a WHERE filter
+ *    (see the note in the handler): it only selects which station's live
+ *    usage to display, and only after a valid PIN has already authenticated
+ *    the caller.
  *  - Errors are generic: a wrong PIN, an unredeemed voucher and an expired
  *    one all return the same `not_found`, so this cannot enumerate codes.
  */
@@ -122,8 +133,8 @@ usageRouter.get('/', usageLimiter, async (req: Request, res: Response) => {
       return;
     }
 
-    // When a MAC is supplied it must be well-formed, otherwise we would be
-    // matching on garbage and silently returning nothing.
+    // A supplied MAC must be well-formed: it selects which Ruijie station's
+    // usage to report, and garbage would silently yield "unknown" instead.
     if (req.query.mac || req.query.client_mac || req.query.clientMac) {
       if (!mac) {
         res.status(400).json({ error: 'invalid_mac' });
@@ -131,10 +142,12 @@ usageRouter.get('/', usageLimiter, async (req: Request, res: Response) => {
       }
     }
 
-    // Strip the separators the gateway uses (":" "-" ".") from stored values
-    // so AA:BB:CC:DD:EE:FF and aa-bb-cc-dd-ee-ff compare equal to AABBCCDDEEFF.
-    const MAC_SQL = (col: string) =>
-      `UPPER(replace(replace(replace(coalesce(${col}, ''), ':', ''), '-', ''), '.', ''))`;
+    // NOTE: the MAC is deliberately NOT a WHERE-clause filter here. In WiFiDog
+    // mode the gateway authorises the MAC itself and never records the binding
+    // locally, so the customer's own MAC will not exist in voucher_devices or
+    // users — requiring a local match would 404 every real lookup. The voucher
+    // PIN is what authenticates; the MAC only chooses which station's live
+    // usage to display. A MAC alone still cannot look up anything.
 
     const { rows } = await pool.query(
       `SELECT v.code,
@@ -156,36 +169,23 @@ usageRouter.get('/', usageLimiter, async (req: Request, res: Response) => {
          -- Only redeemed vouchers have a balance worth showing; an unsold
          -- code is not a customer's session.
          AND v.activated_at IS NOT NULL
-         AND (
-           $1::text IS NULL OR UPPER(v.code) = UPPER($1)
-           OR (
-             $3::text IS NOT NULL AND EXISTS (
-               SELECT 1 FROM users u
-               WHERE u.session_token = $3
-                 AND UPPER(u.voucher_code) = UPPER(v.code)
-             )
-           )
-         )
-         AND (
-           $2::text IS NULL
-           OR EXISTS (
-             SELECT 1 FROM voucher_devices d
-             WHERE d.voucher_id = v.id
-               AND ${MAC_SQL('d.mac_norm')} = $2
-           )
-           OR EXISTS (
-             SELECT 1 FROM users u
-             WHERE UPPER(u.voucher_code) = UPPER(v.code)
-               AND ${MAC_SQL('u.mac_address')} = $2
-           )
-         )
-       ORDER BY v.activated_at DESC
-       LIMIT 1`,
-      [voucher || null, mac, token || null]
+          AND (
+            $1::text IS NULL OR UPPER(v.code) = UPPER($1)
+            OR (
+              $2::text IS NOT NULL AND EXISTS (
+                SELECT 1 FROM users u
+                WHERE u.session_token = $2
+                  AND UPPER(u.voucher_code) = UPPER(v.code)
+              )
+            )
+          )
+        ORDER BY v.activated_at DESC
+        LIMIT 1`,
+      [voucher || null, token || null]
     );
 
-    // Same generic response for "no such voucher", "unredeemed", "wrong MAC"
-    // and "expired" — do not reveal which check failed.
+    // Same generic response for "no such voucher", "unredeemed" and "expired"
+    // — do not reveal which check failed.
     if (rows.length === 0) {
       res.status(404).json({ error: 'not_found' });
       return;
