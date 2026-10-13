@@ -446,142 +446,7 @@ export async function sendPasswordResetEmail(email: string, resetToken: string, 
   );
 }
 
-// ── Admin 2FA login code ─────────────────────────────────────────────
-export async function sendAdminLoginCode(email: string, fullName: string, code: string): Promise<boolean> {
-  // Self-contained template: the shared emailHeader()/emailFooter() helpers
-  // are styled for the older green skin and are reused by a dozen other
-  // transactional emails. Restyling them here would silently change all of
-  // them, so this OTP mail carries its own markup in the preyone.com palette
-  // (ink #050505, panel #0a0d17, brand #6a0dad, magenta #ff00ff, frost
-  // #f8fbff). PNG only — Gmail and Outlook do not render WebP.
-  const baseUrl = (process.env.BASE_URL || 'http://localhost:3000').replace(/\/$/, '');
-  const logo = `${baseUrl}/images/preyonenoneglow-logo-zoom-800.png`;
-  const footerMark = `${baseUrl}/images/preyonelogomainzw-email.png`;
-  const sans = "'Segoe UI',-apple-system,BlinkMacSystemFont,Roboto,Arial,sans-serif";
-  const mono = "'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace";
-
-  return sendMail(
-    email,
-    'Your Preyone sign-in code',
-    `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="color-scheme" content="dark">
-  <meta name="supported-color-schemes" content="dark">
-  <title>Your Preyone sign-in code</title>
-</head>
-<body style="margin:0;padding:0;background:#050505;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%">
-  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#050505">
-    <tr>
-      <td align="center" style="padding:40px 16px">
-        <!--[if mso]><table role="presentation" width="520" cellspacing="0" cellpadding="0" border="0" align="center"><tr><td><![endif]-->
-        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width:520px;width:100%">
-          <tr>
-            <td style="background:#0a0d17;border:1px solid #1c2438;border-radius:16px;overflow:hidden">
-
-              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
-                <tr><td style="height:3px;background:linear-gradient(90deg,#6a0dad,#ff00ff);font-size:1px;line-height:1px">&nbsp;</td></tr>
-              </table>
-
-              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
-                <tr>
-                  <td align="center" style="padding:34px 32px 4px">
-                    <img src="${logo}" width="190" alt="Preyone" style="display:block;width:190px;max-width:100%;height:auto;border:0;outline:none;text-decoration:none">
-                  </td>
-                </tr>
-                <tr>
-                  <td align="center" style="padding:22px 32px 0">
-                    <h1 style="margin:0;font-family:${sans};font-size:24px;line-height:1.3;font-weight:700;color:#f8fbff;letter-spacing:-0.2px">Your sign-in code</h1>
-                  </td>
-                </tr>
-              </table>
-
-              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
-                <tr>
-                  <td style="padding:22px 32px 0;font-family:${sans};font-size:15px;line-height:1.6;color:#94a3b8">
-                    <p style="margin:0 0 10px">Hi <strong style="color:#f8fbff;font-weight:600">${fullName}</strong>,</p>
-                    <p style="margin:0">Use the code below to finish signing in to the Preyone Admin Console.</p>
-                  </td>
-                </tr>
-              </table>
-
-              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
-                <tr>
-                  <td style="padding:24px 32px 0">
-                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#111827;border:1px solid #263049;border-radius:12px">
-                      <tr>
-                        <td align="center" style="padding:24px 16px 22px">
-                          <div style="font-family:${mono};font-size:38px;line-height:1;font-weight:700;letter-spacing:12px;padding-left:12px;color:#f8fbff;user-select:all;-webkit-user-select:all;-moz-user-select:all;mso-user-select:all">${code}</div>
-                        </td>
-                      </tr>
-                    </table>
-                  </td>
-                </tr>
-              </table>
-
-              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
-                <tr>
-                  <td style="padding:18px 32px 0;font-family:${sans};font-size:13px;line-height:1.6;color:#64748b" align="center">
-                    This code expires in <strong style="color:#7be0ff;font-weight:600">5 minutes</strong>. It can only be used once.
-                  </td>
-                </tr>
-                <tr>
-                  <td style="padding:16px 32px 0;font-family:${sans};font-size:13px;line-height:1.6;color:#64748b" align="center">
-                    Didn&rsquo;t request this? You can safely ignore this email &mdash; and we recommend changing your password.
-                  </td>
-                </tr>
-              </table>
-
-              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
-                <tr>
-                  <td style="padding:30px 32px 0">
-                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
-                      <tr><td style="border-top:1px solid #1c2438;font-size:1px;line-height:1px">&nbsp;</td></tr>
-                    </table>
-                  </td>
-                </tr>
-              </table>
-
-              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
-                <tr>
-                  <td align="center" style="padding:26px 32px 8px">
-                    <img src="${footerMark}" width="150" alt="Preyone Enterprises" style="display:block;width:150px;max-width:100%;height:auto;border:0;outline:none;text-decoration:none">
-                  </td>
-                </tr>
-                <tr>
-                  <td align="center" style="padding:14px 32px 0">
-                    <a href="https://wa.me/263771327202" style="display:inline-block;background:#6a0dad;color:#ffffff;padding:11px 26px;border-radius:8px;text-decoration:none;font-family:${sans};font-size:13px;font-weight:700;letter-spacing:0.02em;border:1px solid #8b18c9">Chat on WhatsApp</a>
-                  </td>
-                </tr>
-                <tr>
-                  <td align="center" style="padding:18px 32px 0;font-family:${sans};font-size:12px;line-height:1.7;color:#64748b">
-                    <a href="mailto:support@preyone.com" style="color:#7be0ff;text-decoration:none">support@preyone.com</a>
-                    <span style="color:#263049">&nbsp;&nbsp;|&nbsp;&nbsp;</span>
-                    <a href="tel:+263771327202" style="color:#7be0ff;text-decoration:none">+263 771 327 202</a>
-                  </td>
-                </tr>
-                <tr>
-                  <td align="center" style="padding:16px 32px 30px;font-family:${sans};font-size:11px;line-height:1.6;color:#475569">
-                    &copy; ${new Date().getFullYear()} Preyone Enterprises. All rights reserved.
-                  </td>
-                </tr>
-              </table>
-
-            </td>
-          </tr>
-        </table>
-        <!--[if mso]></td></tr></table><![endif]-->
-      </td>
-    </tr>
-  </table>
-</body>
-</html>`,
-    'Preyone', 'admin@preyone.com'
-  );
-}
-
+// ── Portal email verification ─────────────────────────────────────────
 export async function sendPortalEmailVerification(email: string, token: string, fullName: string): Promise<boolean> {
   // Must hit the MOUNTED portal route (authRouter -> /api/auth/verify-email),
   // which reads users.email_verification_token. A bare /verify-email path is
@@ -750,5 +615,213 @@ export async function sendStarlinkPasswordReset(email: string, resetToken: strin
       </div>
     </div>`,
     'Preyone Starlink Portal'
+  );
+}
+
+// ── Subscription dunning (3-tier SaaS engine) ────────────────────────────
+// Sent by src/jobs/subscriptionCron.ts: a 3-day warning, then a 1-day urgent
+// notice. Company names are admin-entered, so they are escaped before they go
+// into the HTML.
+function escapeSubscriptionText(value: string): string {
+  return String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function formatExpiryDate(value: Date | string): string {
+  return new Date(value).toLocaleString('en-GB', { dateStyle: 'long', timeStyle: 'short' });
+}
+
+const SUBSCRIPTION_PLANS_HTML = `
+    <div style="margin:20px 0 4px;padding:16px;background:#111827;border:1px solid #1f2937;border-radius:12px">
+      <p style="margin:0 0 10px;font-size:13px;color:#94a3b8;font-weight:600;text-transform:uppercase;letter-spacing:1px">Current plans</p>
+      <p style="margin:0 0 6px;font-size:14px;color:#e2e8f0"><strong style="color:#ffffff">Standard</strong> &mdash; $10/month &bull; 1 device</p>
+      <p style="margin:0 0 6px;font-size:14px;color:#e2e8f0"><strong style="color:#ffffff">Growth</strong> &mdash; $20/month &bull; 6 devices</p>
+      <p style="margin:0;font-size:14px;color:#e2e8f0"><strong style="color:#ffffff">Unlimited</strong> &mdash; $30/month &bull; unlimited devices</p>
+    </div>`;
+
+// 3-day warning: the subscription is still valid, everything keeps running.
+export async function sendSubscriptionExpiryWarningEmail(
+  to: string,
+  companyName: string,
+  expiresAt: Date | string,
+  daysLeft: number
+): Promise<boolean> {
+  const safeName = escapeSubscriptionText(companyName || 'there');
+  const formatted = formatExpiryDate(expiresAt);
+  const dayLabel = `${daysLeft} day${daysLeft === 1 ? '' : 's'}`;
+  return sendMail(
+    to,
+    `Your Preyone subscription expires in ${dayLabel}`,
+    `<div style="font-family:'Segoe UI',Arial,sans-serif;max-width:560px;margin:32px auto;background:#0a0a0a;border-radius:16px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.12),0 0 40px rgba(0,229,255,0.08)">
+      ${emailHeader('Subscription Expiry Warning')}
+      <div style="padding:24px 32px;text-align:center">
+        <p style="margin:0 0 12px;font-size:15px;color:#cbd5e1;line-height:1.6">Hi <strong style="color:#ffffff">${safeName}</strong>,</p>
+        <p style="margin:0 0 16px;font-size:15px;color:#cbd5e1;line-height:1.6">Your Preyone subscription expires on <strong style="color:#ffcc00">${formatted}</strong> &mdash; that is ${dayLabel} from now.</p>
+        <p style="margin:0 0 16px;font-size:15px;color:#cbd5e1;line-height:1.6">Renew before then to keep your POS, invoices and device registrations running without interruption. Once the subscription lapses, the account is suspended and no new devices can be registered.</p>
+        ${SUBSCRIPTION_PLANS_HTML}
+        ${emailFooter()}
+      </div>
+    </div>`,
+    'Preyone UltraNet WiFi'
+  );
+}
+
+// 1-day urgent notice: expires tomorrow, suspension follows automatically.
+export async function sendSubscriptionExpiryUrgentEmail(
+  to: string,
+  companyName: string,
+  expiresAt: Date | string
+): Promise<boolean> {
+  const safeName = escapeSubscriptionText(companyName || 'there');
+  const formatted = formatExpiryDate(expiresAt);
+  return sendMail(
+    to,
+    'URGENT: Your Preyone subscription expires tomorrow',
+    `<div style="font-family:'Segoe UI',Arial,sans-serif;max-width:560px;margin:32px auto;background:#0a0a0a;border-radius:16px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.12),0 0 40px rgba(255,68,68,0.08)">
+      ${emailHeader('Subscription Expires Tomorrow')}
+      <div style="padding:24px 32px;text-align:center">
+        <p style="margin:0 0 12px;font-size:15px;color:#cbd5e1;line-height:1.6">Hi <strong style="color:#ffffff">${safeName}</strong>,</p>
+        <p style="margin:0 0 16px;font-size:16px;color:#ffffff;line-height:1.6"><strong style="color:#ff6b6b">Your Preyone subscription expires tomorrow</strong>, on <strong style="color:#ffcc00">${formatted}</strong>.</p>
+        <p style="margin:0 0 16px;font-size:15px;color:#cbd5e1;line-height:1.6">Renew today to avoid suspension: your account will be suspended automatically when the subscription lapses, devices will stop registering and staff will lose access until it is renewed.</p>
+        ${SUBSCRIPTION_PLANS_HTML}
+        ${emailFooter()}
+      </div>
+    </div>`,
+    'Preyone UltraNet WiFi'
+  );
+}
+
+// ── Admin 2FA login code ─────────────────────────────────────────────
+export async function sendAdminLoginCode(email: string, fullName: string, code: string): Promise<boolean> {
+  // Self-contained template: the shared emailHeader()/emailFooter() helpers
+  // are styled for the older green skin and are reused by a dozen other
+  // transactional emails. Restyling them here would silently change all of
+  // them, so this OTP mail carries its own markup in the preyone.com palette
+  // (ink #050505, panel #0a0d17, brand #6a0dad, magenta #ff00ff, frost
+  // #f8fbff). PNG only — Gmail and Outlook do not render WebP.
+  const baseUrl = (process.env.BASE_URL || 'http://localhost:3000').replace(/\/$/, '');
+  const logo = `${baseUrl}/images/preyonenoneglow-logo-zoom-800.png`;
+  const footerMark = `${baseUrl}/images/preyonelogomainzw-email.png`;
+  const sans = "'Segoe UI',-apple-system,BlinkMacSystemFont,Roboto,Arial,sans-serif";
+  const mono = "'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace";
+
+  return sendMail(
+    email,
+    'Your Preyone sign-in code',
+    `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="supported-color-schemes" content="dark">
+  <title>Your Preyone sign-in code</title>
+</head>
+<body style="margin:0;padding:0;background:#050505;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#050505">
+    <tr>
+      <td align="center" style="padding:40px 16px">
+        <!--[if mso]><table role="presentation" width="520" cellspacing="0" cellpadding="0" border="0" align="center"><tr><td><![endif]-->
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width:520px;width:100%">
+          <tr>
+            <td style="background:#0a0d17;border:1px solid #1c2438;border-radius:16px;overflow:hidden">
+
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                <tr><td style="height:3px;background:linear-gradient(90deg,#6a0dad,#ff00ff);font-size:1px;line-height:1px">&nbsp;</td></tr>
+              </table>
+
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                <tr>
+                  <td align="center" style="padding:34px 32px 4px">
+                    <img src="${logo}" width="190" alt="Preyone" style="display:block;width:190px;max-width:100%;height:auto;border:0;outline:none;text-decoration:none">
+                  </td>
+                </tr>
+                <tr>
+                  <td align="center" style="padding:22px 32px 0">
+                    <h1 style="margin:0;font-family:${sans};font-size:24px;line-height:1.3;font-weight:700;color:#f8fbff;letter-spacing:-0.2px">Your sign-in code</h1>
+                  </td>
+                </tr>
+              </table>
+
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                <tr>
+                  <td style="padding:22px 32px 0;font-family:${sans};font-size:15px;line-height:1.6;color:#94a3b8">
+                    <p style="margin:0 0 10px">Hi <strong style="color:#f8fbff;font-weight:600">${fullName}</strong>,</p>
+                    <p style="margin:0">Use the code below to finish signing in to the Preyone Admin Console.</p>
+                  </td>
+                </tr>
+              </table>
+
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                <tr>
+                  <td style="padding:24px 32px 0">
+                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#111827;border:1px solid #263049;border-radius:12px">
+                      <tr>
+                        <td align="center" style="padding:24px 16px 22px">
+                          <div style="font-family:${mono};font-size:38px;line-height:1;font-weight:700;letter-spacing:12px;padding-left:12px;color:#f8fbff;user-select:all;-webkit-user-select:all;-moz-user-select:all;mso-user-select:all">${code}</div>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                <tr>
+                  <td style="padding:18px 32px 0;font-family:${sans};font-size:13px;line-height:1.6;color:#64748b" align="center">
+                    This code expires in <strong style="color:#7be0ff;font-weight:600">5 minutes</strong>. It can only be used once.
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:16px 32px 0;font-family:${sans};font-size:13px;line-height:1.6;color:#64748b" align="center">
+                    Didn&rsquo;t request this? You can safely ignore this email &mdash; and we recommend changing your password.
+                  </td>
+                </tr>
+              </table>
+
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                <tr>
+                  <td style="padding:30px 32px 0">
+                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                      <tr><td style="border-top:1px solid #1c2438;font-size:1px;line-height:1px">&nbsp;</td></tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                <tr>
+                  <td align="center" style="padding:26px 32px 8px">
+                    <img src="${footerMark}" width="150" alt="Preyone Enterprises" style="display:block;width:150px;max-width:100%;height:auto;border:0;outline:none;text-decoration:none">
+                  </td>
+                </tr>
+                <tr>
+                  <td align="center" style="padding:14px 32px 0">
+                    <a href="https://wa.me/263771327202" style="display:inline-block;background:#6a0dad;color:#ffffff;padding:11px 26px;border-radius:8px;text-decoration:none;font-family:${sans};font-size:13px;font-weight:700;letter-spacing:0.02em;border:1px solid #8b18c9">Chat on WhatsApp</a>
+                  </td>
+                </tr>
+                <tr>
+                  <td align="center" style="padding:18px 32px 0;font-family:${sans};font-size:12px;line-height:1.7;color:#64748b">
+                    <a href="mailto:support@preyone.com" style="color:#7be0ff;text-decoration:none">support@preyone.com</a>
+                    <span style="color:#263049">&nbsp;&nbsp;|&nbsp;&nbsp;</span>
+                    <a href="tel:+263771327202" style="color:#7be0ff;text-decoration:none">+263 771 327 202</a>
+                  </td>
+                </tr>
+                <tr>
+                  <td align="center" style="padding:16px 32px 30px;font-family:${sans};font-size:11px;line-height:1.6;color:#475569">
+                    &copy; ${new Date().getFullYear()} Preyone Enterprises. All rights reserved.
+                  </td>
+                </tr>
+              </table>
+
+            </td>
+          </tr>
+        </table>
+        <!--[if mso]></td></tr></table><![endif]-->
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`,
+    'Preyone', 'admin@preyone.com'
   );
 }

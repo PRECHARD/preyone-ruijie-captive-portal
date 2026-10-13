@@ -15,6 +15,7 @@ import { adminRouter } from './routes/admin';
 import { posRouter } from './routes/pos';
 import { adminAuthRouter } from './routes/adminAuth';
 import { paymentsRouter } from './routes/payments';
+import { subscriptionRouter } from './routes/subscription';
 import { siteInvoicesRouter } from './routes/siteInvoices';
 import { gatewayRouter } from './routes/gateway';
 import { transitRouter } from './routes/transit';
@@ -22,6 +23,7 @@ import { transitWebRouter } from './routes/transitWeb';
 import { systemAdminRouter } from './routes/systemAdmin';
 import { starlinkRouter } from './routes/starlink';
 import { ruijieRouter } from './routes/ruijie';
+import { currencyRouter } from './routes/currency';
 import { usageRouter } from './routes/usage';
 import { ensureStarlinkSchema } from './db/starlink';
 import { errorHandler } from './middleware/errorHandler';
@@ -30,6 +32,7 @@ import { scheduleSessionCleanup } from './services/sessionCleanup';
 import { ensureVoucherRuijieSchema, startRuijieAccountingPolling } from './services/ruijieService';
 import { scheduleAccessLogCleanup } from './services/accessLogCleanup';
 import { scheduleHandoverReminders } from './services/handoverReminder';
+import { scheduleSubscriptionCron } from './jobs/subscriptionCron';
 
 const app = express();
 const PORT = process.env.PORT ?? 3000;
@@ -227,9 +230,20 @@ app.use((req, res, next) => {
   if (host === 'admin.preyone.com') {
     const adminDist = path.join(__dirname, '..', 'admin', 'dist');
     if (fs.existsSync(adminDist)) {
-      const adminStatic = express.static(adminDist);
+      // no-cache on .html is essential: browsers heuristically cache an
+      // un-headered index.html and keep loading the OLD hashed JS/CSS after
+      // a deploy — that is exactly how the aurora login "reverted". Covers
+      // both express.static serving / → index.html AND the SPA fallback
+      // below. Hashed assets pass through untouched.
+      const noCacheHtml = (res: express.Response, filePath: string) => {
+        if (filePath.endsWith('.html')) {
+          res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+        }
+      };
+      const adminStatic = express.static(adminDist, { setHeaders: noCacheHtml });
       return adminStatic(req, res, () => {
         // SPA fallback: serve index.html for all non-file paths
+        noCacheHtml(res, 'index.html');
         res.sendFile(path.join(adminDist, 'index.html'));
       });
     }
@@ -345,6 +359,8 @@ app.use('/api/admin', adminRouter);
 app.use('/api/v1/admin', systemAdminRouter);
 app.use('/api/v1/transit', transitWebRouter);
 app.use('/api/payments', paymentsRouter);
+// 3-tier plan browsing + Pesepay hosted checkout for Upgrade My Plan.
+app.use('/api/subscription', subscriptionRouter);
 // Public Starlink checkout for the marketing site. No session: the invoice is
 // created from a server-side plan catalog and settled by the Pesepay callback.
 app.use('/api/site', siteInvoicesRouter);
@@ -358,6 +374,8 @@ app.use('/api/ruijie', ruijieRouter);
 // PWA usage portal (/data) — public, rate-limited, reads only the caller's own
 // session. Mounted at the exact /api/check-usage path the portal fetches.
 app.use('/api/check-usage', usageRouter);
+// Multi-currency exchange rates (company-scoped)
+app.use('/api/currency', currencyRouter);
 
 // Standard route aliases
 app.get('/login', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'account-login.html')));
@@ -457,6 +475,13 @@ app.listen(PORT, () => {
     const intervalMinutes = Number(process.env.HANDOVER_REMINDER_INTERVAL_MIN ?? 60);
     scheduleHandoverReminders(intervalMinutes);
     console.log(`Handover reminders scheduled every ${intervalMinutes} minute(s).`);
+  }
+
+  // 3-tier subscription dunning: 3-day warning, 1-day urgent notice and
+  // suspension on expiry, every day at midnight.
+  if (process.env.ENABLE_SUBSCRIPTION_CRON !== 'false') {
+    scheduleSubscriptionCron();
+    console.log('Subscription dunning scheduled daily at midnight.');
   }
 });
 

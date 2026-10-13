@@ -1,4 +1,6 @@
 import 'dotenv/config';
+import fs from 'fs';
+import path from 'path';
 import bcrypt from 'bcryptjs';
 import { pool } from './pool';
 import { formatZimPhone } from '../utils/phone';
@@ -193,9 +195,10 @@ const SQL = `
   ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT FALSE;
   ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS email_verification_token TEXT;
 
-  -- Admin console session policy: session_expires_at is a DERIVED cache of
-  -- (last_activity + INACTIVITY_TIMEOUT_SEC) kept for legacy readers. The two
-  -- authoritative clocks are last_activity (slides on interaction) and
+  -- Admin console session policy (two-tier login: inactivity lock + absolute
+  -- cap) and email OTP 2FA challenge storage. session_expires_at is a DERIVED
+  -- cache of (last_activity + inactivity timeout) kept for legacy readers; the
+  -- two authoritative clocks are last_activity (slides on interaction) and
   -- auth_time (immutable, stamped when 2FA succeeds).
   ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS session_expires_at TIMESTAMPTZ;
   ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS last_activity TIMESTAMPTZ;
@@ -1252,33 +1255,54 @@ const SQL = `
   CREATE INDEX IF NOT EXISTS idx_site_invoices_account  ON site_invoices (lower(account_ref));
   CREATE INDEX IF NOT EXISTS idx_site_invoices_email    ON site_invoices (lower(email));
 
-  -- POS devices & endpoints (desktop / web / android)
+  -- POS devices & endpoints (desktop / phone / tablet)
+  -- World-class auto-registration: device_uuid (hardware ID) + device_public_key
+  -- (Ed25519, Preyone Transit technology) + 64-char device_token for API auth.
+  -- Quota: 1 phone + 1 tablet + 1 desktop per company (enforced in code).
   CREATE TABLE IF NOT EXISTS pos_devices (
-    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    device_id   TEXT UNIQUE NOT NULL,
-    device_type TEXT NOT NULL DEFAULT 'android' CHECK (device_type IN ('desktop', 'web', 'android')),
-    name        TEXT NOT NULL,
-    branch      TEXT,
-    company_id  UUID REFERENCES companies(id) ON DELETE SET NULL,
-    app_version TEXT,
-    server_url  TEXT,
-    status      TEXT NOT NULL DEFAULT 'registered' CHECK (status IN ('registered', 'active', 'suspended')),
-    last_seen   TIMESTAMPTZ,
-    notes       TEXT,
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    device_id          TEXT UNIQUE NOT NULL,
+    device_type        TEXT NOT NULL DEFAULT 'tablet' CHECK (device_type IN ('desktop', 'web', 'android', 'phone', 'tablet')),
+    device_uuid        TEXT,
+    device_public_key  TEXT,
+    device_token       TEXT UNIQUE,
+    name               TEXT NOT NULL,
+    branch             TEXT,
+    shop_id            INTEGER,
+    company_id         UUID REFERENCES companies(id) ON DELETE SET NULL,
+    app_version        TEXT,
+    server_url         TEXT,
+    status             TEXT NOT NULL DEFAULT 'registered' CHECK (status IN ('registered', 'active', 'suspended')),
+    last_seen          TIMESTAMPTZ,
+    last_seen_at       TIMESTAMPTZ,
+    paired_at          TIMESTAMPTZ,
+    notes              TEXT,
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
   CREATE INDEX IF NOT EXISTS idx_pos_devices_type     ON pos_devices (device_type);
   CREATE INDEX IF NOT EXISTS idx_pos_devices_status   ON pos_devices (status);
   CREATE INDEX IF NOT EXISTS idx_pos_devices_last_seen ON pos_devices (last_seen);
+  CREATE INDEX IF NOT EXISTS idx_pos_devices_token    ON pos_devices (device_token);
+  CREATE INDEX IF NOT EXISTS idx_pos_devices_company  ON pos_devices (company_id);
 
   -- Demo devices so the Devices & Endpoints console has data to show
   INSERT INTO pos_devices (device_id, device_type, name, branch, app_version, status, last_seen)
   SELECT 'demo-desktop-01', 'desktop', 'Front Desk Desktop', 'Head Office', '1.0.0', 'active', NOW() - INTERVAL '5 minutes'
   WHERE NOT EXISTS (SELECT 1 FROM pos_devices WHERE device_id = 'demo-desktop-01');
   INSERT INTO pos_devices (device_id, device_type, name, branch, app_version, status, last_seen)
-  SELECT 'demo-android-01', 'android', 'Till Tablet (Hall)', 'Hall', '2.4.3', 'active', NOW() - INTERVAL '2 minutes'
+  SELECT 'demo-android-01', 'tablet', 'Till Tablet (Hall)', 'Hall', '2.4.3', 'active', NOW() - INTERVAL '2 minutes'
   WHERE NOT EXISTS (SELECT 1 FROM pos_devices WHERE device_id = 'demo-android-01');
+
+  -- Add columns to pre-existing pos_devices tables (idempotent upgrades)
+  ALTER TABLE pos_devices ADD COLUMN IF NOT EXISTS device_uuid       TEXT;
+  ALTER TABLE pos_devices ADD COLUMN IF NOT EXISTS device_public_key TEXT;
+  ALTER TABLE pos_devices ADD COLUMN IF NOT EXISTS device_token      TEXT UNIQUE;
+  ALTER TABLE pos_devices ADD COLUMN IF NOT EXISTS shop_id           INTEGER;
+  ALTER TABLE pos_devices ADD COLUMN IF NOT EXISTS last_seen_at      TIMESTAMPTZ;
+  ALTER TABLE pos_devices ADD COLUMN IF NOT EXISTS paired_at         TIMESTAMPTZ;
+  CREATE INDEX IF NOT EXISTS idx_pos_devices_token    ON pos_devices (device_token);
+  CREATE INDEX IF NOT EXISTS idx_pos_devices_company  ON pos_devices (company_id);
 
   -- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• Ruijie Cloud Voucher Integration â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   -- Maps sellable package tiers to Ruijie Cloud user groups (seed via
@@ -1465,8 +1489,58 @@ const SQL = `
   const client = await pool.connect();
   try {
     await client.query(SQL);
-    
-    // Seed packages table (idempotent upsert â€” updates existing tiers, inserts new ones)
+
+    // ── Multi‑currency engine ─────────────────────────────────────────────────
+    // 1. Add currency / exchange_rate columns to pos_documents (idempotent)
+    await client.query(`
+      ALTER TABLE pos_documents ADD COLUMN IF NOT EXISTS currency VARCHAR(10) DEFAULT 'USD';
+      ALTER TABLE pos_documents ADD COLUMN IF NOT EXISTS exchange_rate DECIMAL(18,6) DEFAULT 1.000000;
+    `);
+
+    // 2. Ensure companies have tax_rate, base_currency, branding_json (idempotent)
+    await client.query(`
+      ALTER TABLE companies ADD COLUMN IF NOT EXISTS tax_rate DECIMAL(5,2) DEFAULT 15.50;
+      ALTER TABLE companies ADD COLUMN IF NOT EXISTS base_currency VARCHAR(10) DEFAULT 'USD';
+      ALTER TABLE companies ADD COLUMN IF NOT EXISTS branding_json JSONB DEFAULT '{"logo":"","tagline":"","address":"","support_phone":"","website":""}'::jsonb;
+    `);
+
+    // 3. Create currency_rates table (idempotent)
+    // company_id must be UUID to match companies.id: it used to be declared
+    // INT NOT NULL REFERENCES companies(id), which makes this CREATE fail on
+    // any database that doesn't already have the table — and because the whole
+    // migration runs in one client, that single failure aborted everything
+    // below it (including the subscription upgrade). UNIQUE (company_id,
+    // target_currency) is what POST /api/currency/rates ... ON CONFLICT needs,
+    // and company_id stays nullable because the USD->ZWG seed row is the
+    // global default that GET /api/currency/rates falls back to.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS currency_rates (
+        id SERIAL PRIMARY KEY,
+        company_id UUID REFERENCES companies(id) ON DELETE CASCADE,
+        base_currency VARCHAR(10) NOT NULL DEFAULT 'USD',
+        target_currency VARCHAR(10) NOT NULL,
+        rate DECIMAL(18,6) NOT NULL,
+        effective_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (company_id, target_currency)
+      );
+      CREATE INDEX IF NOT EXISTS idx_currency_rates_company ON currency_rates(company_id, target_currency);
+    `);
+
+    // Seed default USD->ZWG rate for Zimbabwe (optional – can be overridden).
+    // WHERE NOT EXISTS rather than ON CONFLICT: company_id is NULL for the
+    // global default row, NULLs never conflict, so ON CONFLICT would insert a
+    // duplicate seed on every migration run.
+    await client.query(`
+      INSERT INTO currency_rates (base_currency, target_currency, rate)
+      SELECT 'USD', 'ZWG', 26.500000
+      WHERE NOT EXISTS (
+        SELECT 1 FROM currency_rates
+         WHERE company_id IS NULL AND base_currency = 'USD' AND target_currency = 'ZWG'
+      );
+    `);
+
+    // Seed packages table (idempotent upsert — updates existing tiers, inserts new ones)
     const packages = [
       // Orange band
       ['PreLite', 'Daily Basic', 1.00, 'USD', 'daily', 1440, 5, false, 5, 5, 1],
@@ -1726,6 +1800,20 @@ const SQL = `
       CREATE INDEX IF NOT EXISTS idx_vouchers_ruijie_sync_status
         ON vouchers (ruijie_sync_status) WHERE ruijie_sync_status IS NOT NULL;
     `);
+
+    // ── 3-tier SaaS subscription engine (v2 master upgrade) ─────────────────
+    // Plan tiers, device caps and dunning flags live in a standalone file so
+    // DBAs can review the schema change on its own; this stays the single
+    // entry point (`npm run migrate`). Resolves from src/db and from dist/db
+    // alike, and skips loudly rather than failing the rest of the migration
+    // when the file is absent from a partial deployment.
+    const v2UpgradePath = path.resolve(__dirname, '../../db/migrations/v2_master_upgrade.sql');
+    if (fs.existsSync(v2UpgradePath)) {
+      await client.query(fs.readFileSync(v2UpgradePath, 'utf8'));
+      console.log('Applied db/migrations/v2_master_upgrade.sql (subscription tiers + device caps).');
+    } else {
+      console.warn(`Skipped subscription upgrade: ${v2UpgradePath} not found.`);
+    }
 
     console.log('Migration complete. Packages + transit + RBAC seeded.');
   } finally {

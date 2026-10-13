@@ -108,7 +108,7 @@ describe('GET /api/pos/dashboard (POS sector aggregate)', () => {
     (pool.query as any).mockResolvedValueOnce({ rows: [] });
     const res = await request(createApp()).post('/api/pos/documents/doc-x/convert-to-invoice');
     expect(res.status).toBe(404);
-    expect(res.body.error).toBe('Quotation not found');
+    expect(res.body.error).toBe('Quotation or sale not found');
     // It must never reach nextval when the document does not belong here.
     expect((pool.query as any).mock.calls.length).toBe(1);
   });

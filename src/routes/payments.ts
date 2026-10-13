@@ -24,6 +24,7 @@ import { RuijieApiError } from '../services/ruijieCloud';
 import { isRuijieCloudConfigured, findRuijieProfile, mintRuijieVoucherForTier } from '../services/ruijieMint';
 import { requireStarlinkAuth } from '../middleware/starlinkAuth';
 import { createStarlinkInvoice, applyStarlinkPayment, getStarlinkKit } from '../db/starlink';
+import { PLAN_TIERS } from './subscription';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'preyone-jwt-secret-change-in-production';
 let _jwtSecretWarned = false;
@@ -1500,6 +1501,182 @@ paymentsRouter.post('/pesepay/callback', async (req: Request, res: Response) => 
   } catch (err) {
     console.error('Pesepay callback error:', err);
     res.status(500).json({ error: 'Callback processing failed' });
+  }
+});
+
+// ── Subscription renewal webhook ───────────────────────────────────────────
+// POST /api/payments/pesepay/webhook
+//
+// Point the Pesepay dashboard webhook at this URL for PLAN RENEWALS
+// (/pesepay/callback remains the browser resultUrl that settles invoices and
+// shifts). Same authentication as the callback: the integration key in the
+// authorization header, with an optional AES-CBC `payload` envelope.
+//
+// On SUCCESS it extends companies.subscription_expires_at by 30 days from
+// the later of now / the current expiry (renewing early never loses the
+// remaining days), sets subscription_status back to 'active' and clears both
+// dunning flags so the 3-day warning and 1-day urgent notice re-arm for the
+// next cycle. Idempotency rides on the payment intent: a replayed delivery
+// finds the intent already 'completed' and applies nothing, so the same
+// payment can never extend the subscription twice across /callback and here.
+paymentsRouter.post('/pesepay/webhook', async (req: Request, res: Response) => {
+  const integrationKey = process.env.PESEPAY_INTEGRATION_KEY || '';
+  const providedKey = req.header('authorization') || '';
+
+  if (!integrationKey || !safeEqual(providedKey, integrationKey)) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
+  }
+
+  try {
+    const payload = req.body?.payload
+      ? decryptResponse(req.body.payload, process.env.PESEPAY_ENCRYPTION_KEY || '')
+      : req.body;
+
+    if (!payload || typeof payload !== 'object') {
+      res.status(400).json({ error: 'Invalid payload' });
+      return;
+    }
+
+    const reference =
+      payload.referenceNumber ||
+      payload.merchantReference ||
+      payload.merchant_reference ||
+      payload.reference;
+
+    const transactionStatus = String(
+      payload.transactionStatus || payload.transaction_status || payload.status || ''
+    ).toUpperCase();
+
+    if (transactionStatus !== 'SUCCESS') {
+      res.status(200).json({
+        success: true,
+        referenceNumber: reference ?? null,
+        status: transactionStatus || 'UNKNOWN',
+        applied: false,
+        message: 'Ignored non-success status',
+      });
+      return;
+    }
+
+    const candidates = [
+      payload.merchantReference,
+      payload.merchant_reference,
+      payload.referenceNumber,
+      payload.reference,
+    ].filter((value): value is string => typeof value === 'string' && value.length > 0);
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      const { rows: intentRows } = await client.query(
+        `SELECT id, reference, tenant_id, target_type, status, plan_tier
+           FROM pesepay_intents
+          WHERE reference = ANY($1::text[]) OR provider_reference = ANY($1::text[])
+          FOR UPDATE`,
+        [candidates]
+      );
+      const intent = intentRows[0] || null;
+
+      if (intent && intent.status === 'completed') {
+        await client.query('COMMIT');
+        res.status(200).json({
+          success: true,
+          referenceNumber: reference ?? null,
+          status: 'completed',
+          applied: false,
+          message: 'Already processed',
+        });
+        return;
+      }
+
+      if (intent && intent.target_type !== 'subscription') {
+        await client.query('COMMIT');
+        res.status(200).json({
+          success: true,
+          referenceNumber: reference ?? null,
+          applied: false,
+          message: 'Ignored non-subscription payment',
+        });
+        return;
+      }
+
+      const companyId =
+        asUuid(payload.company_id) ||
+        asUuid(payload.tenant_id) ||
+        (intent ? intent.tenant_id : null);
+
+      if (!companyId) {
+        await client.query('ROLLBACK');
+        res.status(400).json({ error: 'Unable to resolve the subscription owner (no company reference)' });
+        return;
+      }
+
+      // A tier purchased through /api/subscription/checkout (or initiate with
+      // planTier) is applied here. The value is validated against the fixed
+      // tier list and interpolated as a literal so the query parameters stay
+      // exactly [companyId]; the companies.plan_type CHECK is a second guard.
+      const purchasedTier =
+        intent && typeof intent.plan_tier === 'string' && (PLAN_TIERS as readonly string[]).includes(intent.plan_tier)
+          ? intent.plan_tier
+          : null;
+
+      const { rows: updated } = await client.query(
+        `UPDATE companies
+            SET subscription_expires_at = GREATEST(COALESCE(subscription_expires_at, NOW()), NOW()) + INTERVAL '30 days',
+                subscription_status = 'active',
+                reminder_3day_sent = FALSE,
+                reminder_1day_sent = FALSE,
+                ${purchasedTier ? `plan_type = '${purchasedTier}',` : ''}
+                updated_at = NOW()
+          WHERE id = $1
+          RETURNING id, plan_type, subscription_expires_at, subscription_status`,
+        [companyId]
+      );
+
+      if (updated.length === 0) {
+        await client.query('ROLLBACK');
+        res.status(404).json({ error: 'Company not found' });
+        return;
+      }
+
+      if (intent) {
+        await client.query(
+          `UPDATE pesepay_intents
+              SET status = 'completed',
+                  completed_at = NOW(),
+                  provider_reference = COALESCE($2, provider_reference)
+            WHERE id = $1`,
+          [intent.id, payload.referenceNumber || null]
+        );
+      }
+
+      await client.query('COMMIT');
+
+      const company = updated[0];
+      res.json({
+        success: true,
+        referenceNumber: reference ?? null,
+        status: 'completed',
+        applied: true,
+        company_id: company.id,
+        plan_type: company.plan_type,
+        subscription_status: company.subscription_status,
+        subscription_expires_at: company.subscription_expires_at,
+        extended_days: 30,
+      });
+    } catch (err) {
+      await client.query('ROLLBACK');
+      const statusCode = err instanceof HttpError ? err.statusCode : 500;
+      if (statusCode === 500) console.error('Pesepay subscription webhook error:', err);
+      res.status(statusCode).json({ error: err instanceof Error ? err.message : 'Webhook processing failed' });
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    console.error('Pesepay subscription webhook error:', err);
+    res.status(500).json({ error: 'Webhook processing failed' });
   }
 });
 

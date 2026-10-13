@@ -247,12 +247,22 @@ systemAdminRouter.put('/payment-keys', async (req: Request, res: Response) => {
     res.status(422).json({ error: 'All payment key values must be strings' });
     return;
   }
+  // MERGE, don't replace: GET /payment-keys returns masked values, so a naive
+  // full-replace from the UI would overwrite live secrets with "abcd****wxyz".
+  // Only the keys present in the request body are updated; everything else is
+  // preserved exactly as stored.
+  const { rows } = await pool.query(`SELECT value FROM settings WHERE key = 'payment_gateway_keys'`);
+  let existing: Record<string, string> = {};
+  if (rows.length > 0) {
+    try { existing = JSON.parse(rows[0].value); } catch { existing = {}; }
+  }
+  const merged = { ...existing, ...keys };
   await pool.query(
     `INSERT INTO settings (key, value, updated_by) VALUES ('payment_gateway_keys', $1, $2)
      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW(), updated_by = EXCLUDED.updated_by`,
-    [JSON.stringify(keys), req.adminUser!.id]
+    [JSON.stringify(merged), req.adminUser!.id]
   );
-  res.json({ ok: true });
+  res.json({ ok: true, updated: Object.keys(keys) });
 });
 
 // ── Gateway & RADIUS settings (Level 0, secrets masked) ─────────────────
