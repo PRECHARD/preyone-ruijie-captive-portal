@@ -57,16 +57,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!res.ok) throw new Error(data.error || 'Login failed');
     setToken(data.token);
     const me = await fetchMe();
-    setUser(
-      me || {
-        id: data.user?.id ?? '',
-        fullName: data.user?.fullName ?? data.user?.full_name ?? '',
-        email: data.user?.email ?? '',
-        role: data.user?.role ?? 'Staff',
-        companyId: null,
-        permissions: [],
-      }
-    );
+    setUser(me || { id: data.user.id, fullName: data.user.fullName, email: data.user.email, role: data.user.role, companyId: null, permissions: [] });
   }, []);
 
   const signup = useCallback(async (body: { fullName: string; email: string; phone: string; role: string; password: string }) => {

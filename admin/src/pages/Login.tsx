@@ -34,27 +34,6 @@ export default function Login() {
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [sendingReset, setSendingReset] = useState(false);
-  const [resendingVerify, setResendingVerify] = useState(false);
-
-  const handleResendVerification = async () => {
-    if (!email.trim()) { setError('Enter your email address first'); return; }
-    setResendingVerify(true);
-    setError('');
-    setSuccessMsg('');
-    try {
-      const res = await fetch('/api/admin/auth/resend-verification', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email.trim() }),
-      });
-      const data = await res.json();
-      setSuccessMsg(data.message || 'If that address is registered and unverified, a new verification email has been sent.');
-    } catch {
-      setSuccessMsg('If that address is registered and unverified, a new verification email has been sent.');
-    } finally {
-      setResendingVerify(false);
-    }
-  };
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -228,16 +207,10 @@ export default function Login() {
                 </div>
               </div>
               {error && <div className="auth-error" role="alert">{error}</div>}
-              {successMsg && <div className="auth-success">{successMsg}</div>}
               <button type="submit" className="auth-btn" disabled={busy}>
                 {busy ? (<><span className="auth-btn-spinner" aria-hidden="true" />Signing in…</>) : 'Sign In'}
               </button>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <button type="button" className="auth-link-btn" onClick={() => { switchView('forgot'); setEmail(''); }}>Forgot Password?</button>
-                <button type="button" className="auth-link-btn" onClick={handleResendVerification} disabled={resendingVerify}>
-                  {resendingVerify ? 'Sending…' : 'Resend Verification Email'}
-                </button>
-              </div>
+              <button type="button" className="auth-link-btn" onClick={() => { switchView('forgot'); setEmail(''); }}>Forgot Password?</button>
             </form>
           )}
 
