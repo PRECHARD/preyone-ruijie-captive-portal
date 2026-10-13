@@ -155,6 +155,10 @@
 
       <div class="action-group">
         <a href="http://www.preyone.com" class="btn-primary" id="startBrowsingBtn">START BROWSING</a>
+        <!-- Href is filled in from the gateway's ?mac=&voucher= params by the
+             script below, so it deep-links straight into the PWA usage portal
+             with the session already identified. Hidden until then. -->
+        <a id="trackDataBtn" href="/data" class="btn-secondary" hidden>TRACK MY DATA</a>
         <a id="manageAccountLink" href="/login" class="btn-secondary" target="_blank" rel="noopener">MANAGE ACCOUNT</a>
         <button type="button" class="btn-secondary" id="successSignUpBtn">SIGN UP</button>
       </div>
@@ -567,6 +571,21 @@
           if (gwRedirectTimer) clearTimeout(gwRedirectTimer);
           goToExtLogin();
         });
+      }
+
+      // ── Deep-link into the PWA usage portal ──
+      // Carries the gateway's mac + voucher across so /data opens already
+      // identified (and persists them to localStorage for later visits).
+      // `code` and `cliMacRaw` are the values parsed from the gateway query
+      // string further up. Hidden when neither is present, so a manual visit
+      // to success.html does not show a dead button.
+      var trackBtn = document.getElementById('trackDataBtn');
+      if (trackBtn && (code || cliMacRaw)) {
+        var trackQs = new URLSearchParams();
+        if (cliMacRaw) trackQs.set('mac', cliMacRaw);
+        if (code) trackQs.set('voucher', code);
+        trackBtn.href = '/data?' + trackQs.toString();
+        trackBtn.hidden = false;
       }
     });
   </script>
