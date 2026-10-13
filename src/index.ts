@@ -214,14 +214,20 @@ app.use((req, res, next) => {
   if (host === 'admin.preyone.com') {
     const adminDist = path.join(__dirname, '..', 'admin', 'dist');
     if (fs.existsSync(adminDist)) {
-      const adminStatic = express.static(adminDist);
+      // no-cache on .html is essential: browsers heuristically cache an
+      // un-headered index.html and keep loading the OLD hashed JS/CSS after
+      // a deploy — that is exactly how the aurora login "reverted". Covers
+      // both express.static serving / → index.html AND the SPA fallback
+      // below. Hashed assets pass through untouched.
+      const noCacheHtml = (res: express.Response, filePath: string) => {
+        if (filePath.endsWith('.html')) {
+          res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+        }
+      };
+      const adminStatic = express.static(adminDist, { setHeaders: noCacheHtml });
       return adminStatic(req, res, () => {
-        // SPA fallback: serve index.html for all non-file paths.
-        // no-cache is essential: browsers heuristically cache an un-headered
-        // index.html and keep loading the OLD hashed JS/CSS after a deploy —
-        // that is exactly how the aurora login "reverted" to the old design.
-        // Hashed assets still pass through express.static above untouched.
-        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+        // SPA fallback: serve index.html for all non-file paths
+        noCacheHtml(res, 'index.html');
         res.sendFile(path.join(adminDist, 'index.html'));
       });
     }
