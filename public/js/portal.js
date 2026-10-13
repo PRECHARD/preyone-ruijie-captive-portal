@@ -822,6 +822,74 @@ function loadDashboardData() {
       localStorage.removeItem('portal_token');
       localStorage.removeItem('portal_user');
     });
+
+  loadMyDevices(token);
+}
+
+function loadMyDevices(token) {
+  var devicesList = document.getElementById('ma-devices-list');
+  var noDevices = document.getElementById('ma-no-devices');
+  var devicesSummary = document.getElementById('ma-devices-summary');
+  if (!devicesList) return;
+
+  fetch('/api/auth/my-devices', { headers: { 'Authorization': 'Bearer ' + token } })
+    .then(function (r) { return r.json(); })
+    .then(function (json) {
+      devicesList.innerHTML = '';
+      if (noDevices) noDevices.classList.add('hidden');
+      if (devicesSummary) devicesSummary.textContent = '';
+
+      if (!json.voucherCode) {
+        if (noDevices) { noDevices.textContent = 'No active session. Connect a device to see bound devices here.'; noDevices.classList.remove('hidden'); }
+        return;
+      }
+
+      if (devicesSummary) {
+        devicesSummary.textContent = 'Voucher ' + json.voucherCode + ' — ' + json.devicesActive + '/' + json.deviceLimit + ' device slots used (' + json.slotsRemaining + ' free).';
+      }
+
+      if (!json.devices || json.devices.length === 0) {
+        if (noDevices) { noDevices.textContent = 'No devices bound yet. Connect a device to your voucher to see it here.'; noDevices.classList.remove('hidden'); }
+        return;
+      }
+
+      json.devices.forEach(function (d) {
+        var card = document.createElement('div');
+        card.className = 'ma-session-card';
+        card.innerHTML =
+          '<div class="ma-session-status ' + (d.isActive ? 'active' : 'expired') + '">' +
+            (d.isActive ? '\u25cf ACTIVE' : '\u25cf INACTIVE') +
+          '</div>' +
+          '<div class="ma-session-body">' +
+            '<div class="ma-session-row"><span class="lbl">MAC</span><span class="val">' + escHtml(d.macAddress) + '</span></div>' +
+            (d.label ? '<div class="ma-session-row"><span class="lbl">Label</span><span class="val">' + escHtml(d.label) + '</span></div>' : '') +
+            (d.boundAt ? '<div class="ma-session-row"><span class="lbl">Bound</span><span class="val">' + new Date(d.boundAt).toLocaleString() + '</span></div>' : '') +
+            (d.lastSeenAt ? '<div class="ma-session-row"><span class="lbl">Last Seen</span><span class="val">' + new Date(d.lastSeenAt).toLocaleString() + '</span></div>' : '') +
+          '</div>' +
+          '<div style="padding:0.5rem 0.75rem;border-top:1px solid rgba(255,255,255,0.06)">' +
+            '<button class="account-btn account-btn--link ma-device-unbind" data-mac="' + escHtml(d.macAddress) + '" style="color:#f87171;font-size:0.75rem">Unbind Device</button>' +
+          '</div>';
+        devicesList.appendChild(card);
+      });
+
+      devicesList.querySelectorAll('.ma-device-unbind').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var mac = btn.getAttribute('data-mac');
+          if (!mac) return;
+          if (!window.confirm('Unbind device ' + mac + '? It will need to reconnect (and may use another voucher slot).')) return;
+          btn.disabled = true;
+          btn.textContent = 'Unbinding…';
+          fetch('/api/auth/my-devices?mac=' + encodeURIComponent(mac), {
+            method: 'DELETE',
+            headers: { 'Authorization': 'Bearer ' + token },
+          })
+            .then(function (r) { return r.json(); })
+            .then(function () { loadMyDevices(token); })
+            .catch(function () { btn.disabled = false; btn.textContent = 'Unbind Device'; });
+        });
+      });
+    })
+    .catch(function () { /* non-critical */ });
 }
 
 document.addEventListener('DOMContentLoaded', function () {

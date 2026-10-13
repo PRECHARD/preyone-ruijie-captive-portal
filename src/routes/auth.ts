@@ -866,3 +866,113 @@ authRouter.delete('/devices', async (req: Request, res: Response) => {
     res.status(500).json({ error: 'Failed to remove device.' });
   }
 });
+
+// ── My Devices (JWT-authenticated, for manage-account page) ─────────────
+// The portal JWT identifies the user; we resolve their current WiFi session
+// voucher server-side and list/unbind devices against it. No session token
+// ever leaves the browser.
+
+async function resolveVoucherForPortalUser(userId: string) {
+  const { rows } = await pool.query(
+    `SELECT u.session_token, u.voucher_code, v.id AS voucher_id, v.package_tier, v.max_devices
+       FROM users u
+       LEFT JOIN vouchers v ON UPPER(u.voucher_code) = UPPER(v.code)
+      WHERE u.id = $1 AND u.session_token IS NOT NULL AND u.session_expires_at > NOW()`,
+    [userId]
+  );
+  return rows[0] || null;
+}
+
+authRouter.get('/my-devices', async (req: Request, res: Response) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader?.startsWith('Bearer ')) {
+      res.status(401).json({ error: 'Missing or invalid token.' });
+      return;
+    }
+    let payload: any;
+    try {
+      payload = jwt.verify(authHeader.slice(7), getJwtSecret(), { algorithms: ['HS256'] });
+    } catch {
+      res.status(401).json({ error: 'Invalid or expired token.' });
+      return;
+    }
+
+    const voucher = await resolveVoucherForPortalUser(payload.id);
+    if (!voucher || !voucher.voucher_id) {
+      res.json({ voucherCode: null, deviceLimit: 0, devicesActive: 0, slotsRemaining: 0, devices: [] });
+      return;
+    }
+
+    const devices = await listDevices(voucher.voucher_id);
+    const limit = await getDeviceLimit(voucher.package_tier, voucher.max_devices);
+    const active = devices.filter((d) => d.isActive);
+
+    res.json({
+      voucherCode: voucher.voucher_code,
+      deviceLimit: limit,
+      devicesActive: active.length,
+      slotsRemaining: Math.max(0, limit - active.length),
+      devices: devices.map((d) => ({
+        id: d.id,
+        macAddress: d.macAddress,
+        label: d.label,
+        isActive: d.isActive,
+        boundAt: d.boundAt,
+        lastSeenAt: d.lastSeenAt,
+      })),
+    });
+  } catch (err) {
+    console.error('My devices error:', err);
+    res.status(500).json({ error: 'Failed to fetch devices.' });
+  }
+});
+
+authRouter.delete('/my-devices', async (req: Request, res: Response) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader?.startsWith('Bearer ')) {
+      res.status(401).json({ error: 'Missing or invalid token.' });
+      return;
+    }
+    let payload: any;
+    try {
+      payload = jwt.verify(authHeader.slice(7), getJwtSecret(), { algorithms: ['HS256'] });
+    } catch {
+      res.status(401).json({ error: 'Invalid or expired token.' });
+      return;
+    }
+
+    const mac = req.query.mac as string;
+    if (!normalizeMac(mac)) {
+      res.status(400).json({ error: 'Invalid device address.' });
+      return;
+    }
+
+    const voucher = await resolveVoucherForPortalUser(payload.id);
+    if (!voucher || !voucher.voucher_id) {
+      res.status(404).json({ error: 'No active session found.' });
+      return;
+    }
+
+    const removed = await unbindDevice(voucher.voucher_id, mac);
+    if (!removed) {
+      res.status(404).json({ error: 'Device not found on this voucher.' });
+      return;
+    }
+
+    const limit = await getDeviceLimit(voucher.package_tier, voucher.max_devices);
+    const remaining = await listDevices(voucher.voucher_id);
+    const active = remaining.filter((d) => d.isActive).length;
+
+    res.json({
+      removed: true,
+      deviceLimit: limit,
+      devicesActive: active,
+      slotsRemaining: Math.max(0, limit - active),
+    });
+  } catch (err) {
+    console.error('My devices unbind error:', err);
+    res.status(500).json({ error: 'Failed to remove device.' });
+  }
+});

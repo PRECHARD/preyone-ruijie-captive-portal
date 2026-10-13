@@ -444,6 +444,25 @@ const codes = a.voucher_data?.codes;
     }
   };
 
+  // ── Archive (soft-delete) — DELETE /vouchers/:id (management only) ──
+  const handleArchive = async (v: Voucher) => {
+    const ok = window.confirm(
+      `Archive voucher ${lc(v.code)}? It will be soft-deleted (disabled + hidden from lists). Redemption history is preserved.`
+    );
+    if (!ok) return;
+    setVoucherActionBusy(v.id);
+    try {
+      await api.del(`/vouchers/${v.id}`);
+      showToast({ title: 'Voucher Archived', message: `"${lc(v.code)}" archived`, type: 'success' });
+      reloadVouchers();
+      setDetailVoucher(null);
+    } catch (err: any) {
+      showToast({ title: 'Failed', message: err.message || 'Could not archive voucher', type: 'error' });
+    } finally {
+      setVoucherActionBusy(null);
+    }
+  };
+
   const handleApprovalRequest = async () => {
     if (!selectedPkg) return;
     try {
@@ -1685,6 +1704,16 @@ const codes = a.voucher_data?.codes;
                   >
                     Extend expiry…
                   </button>
+                  {isMgmt && (
+                    <button
+                      className="btn-sm btn-reject"
+                      disabled={voucherActionBusy === v.id}
+                      onClick={() => handleArchive(v)}
+                      title="Soft-delete this voucher (history preserved)"
+                    >
+                      Archive
+                    </button>
+                  )}
                 </div>
               </section>
 

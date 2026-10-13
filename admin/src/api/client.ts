@@ -59,5 +59,7 @@ export const systemApi = createClient('/api/v1/admin');
 export const transitApi = createClient('/api/v1/transit');
 /** Ruijie Cloud telemetry (sessions, devices, accounting, kick). Admin auth required. */
 export const ruijieApi = createClient('/api/ruijie');
+/** Currency exchange rates (admin auth required). */
+export const currencyApi = createClient('/api/currency');
 
 export { getToken, setToken, clearToken };

@@ -4,6 +4,7 @@ import { showToast } from '../utils/toast';
 import Spinner from '../components/Spinner';
 import EmptyState from '../components/EmptyState';
 import Badge from '../components/Badge';
+import Modal from '../components/Modal';
 
 export default function Reports() {
   const [tab, setTab] = useState('revenue');
@@ -16,6 +17,9 @@ export default function Reports() {
   const [acctStatus, setAcctStatus] = useState<any>(null);
   const [acctVouchers, setAcctVouchers] = useState<any[]>([]);
   const [syncing, setSyncing] = useState(false);
+  const [voucherSyncBusy, setVoucherSyncBusy] = useState<string | null>(null);
+  const [voucherDetail, setVoucherDetail] = useState<any>(null);
+  const [exporting, setExporting] = useState<string | null>(null);
 
   const loadAccounting = useCallback(() => {
     ruijieApi.get('/status').then(setAcctStatus).catch(() => {});
@@ -122,6 +126,86 @@ export default function Reports() {
     }
   };
 
+  const downloadBlob = (blob: Blob, filename: string) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const exportAllStaffSales = async () => {
+    const token = api.getToken();
+    if (!token) return;
+    setExporting('all-staff');
+    try {
+      const res = await fetch('/api/admin/staff-sales/export', { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) {
+        let msg = 'Export failed';
+        try { const err = await res.json(); msg = err.error || msg; } catch {}
+        throw new Error(msg);
+      }
+      downloadBlob(await res.blob(), 'Preyone_All_Staff_Sales.xlsx');
+      showToast({ title: 'Exported', message: 'All-staff sales workbook downloaded', type: 'success' });
+    } catch (e: any) {
+      showToast({ title: 'Export Failed', message: e.message, type: 'error' });
+    } finally {
+      setExporting(null);
+    }
+  };
+
+  const exportRevenueCsv = async () => {
+    const token = api.getToken();
+    if (!token) return;
+    setExporting('revenue');
+    try {
+      const res = await fetch('/api/admin/revenue/export', { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) {
+        let msg = 'Export failed';
+        try { const err = await res.json(); msg = err.error || msg; } catch {}
+        throw new Error(msg);
+      }
+      downloadBlob(await res.blob(), `Preyone_Revenue_${new Date().toISOString().slice(0, 10)}.csv`);
+      showToast({ title: 'Exported', message: 'Revenue CSV downloaded', type: 'success' });
+    } catch (e: any) {
+      showToast({ title: 'Export Failed', message: e.message, type: 'error' });
+    } finally {
+      setExporting(null);
+    }
+  };
+
+  // ── Per-voucher Ruijie verify (POST /vouchers/:code/sync) ──
+  const verifyVoucherOnRuijie = async (code: string) => {
+    setVoucherSyncBusy(code);
+    try {
+      const r = await ruijieApi.post<any>(`/vouchers/${encodeURIComponent(code)}/sync`);
+      if (r?.skipped) {
+        showToast({ title: 'Skipped', message: r.reason || 'Ruijie Cloud not configured', type: 'warning' });
+      } else if (r?.found === false || r?.status === 'missing') {
+        showToast({ title: 'Not Found on Ruijie', message: `Voucher ${code} is missing from Ruijie Cloud`, type: 'warning' });
+      } else {
+        showToast({ title: 'Synced', message: `Voucher ${code} verified on Ruijie Cloud`, type: 'success' });
+      }
+    } catch (e: any) {
+      showToast({ title: 'Sync Failed', message: e.message || 'Voucher sync failed', type: 'error' });
+    } finally {
+      setVoucherSyncBusy(null);
+      loadAccounting();
+    }
+  };
+
+  const openVoucherDetail = async (code: string) => {
+    try {
+      const r = await ruijieApi.get<any>(`/vouchers/${encodeURIComponent(code)}`);
+      setVoucherDetail(r);
+    } catch (e: any) {
+      showToast({ title: 'Lookup Failed', message: e.message, type: 'error' });
+    }
+  };
+
   if (loading) return <Spinner />;
 
   return (
@@ -142,6 +226,11 @@ export default function Reports() {
 
       {tab === 'revenue' && revenue && (
         <>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+            <button className="btn-sm" onClick={exportRevenueCsv} disabled={exporting === 'revenue'} title="Download completed transactions as CSV">
+              {exporting === 'revenue' ? 'Exporting…' : 'Export Revenue CSV'}
+            </button>
+          </div>
           <div className="stats-grid stats-grid--compact" style={{ marginBottom: 20 }}>
             <div className="stat-card stat-green"><span className="stat-label">Total Revenue</span><span className="stat-number"><span className="money">${Number(revenue.combinedRevenue || revenue.totalRevenue || 0).toFixed(2)} USD</span></span></div>
             <div className="stat-card stat-orange"><span className="stat-label">Pending</span><span className="stat-number"><span className="money">${Number(revenue.pendingRevenue || 0).toFixed(2)} USD</span></span></div>
@@ -190,6 +279,11 @@ export default function Reports() {
 
       {tab === 'sales' && staffSales && (
         <>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+            <button className="btn-sm" onClick={exportAllStaffSales} disabled={exporting === 'all-staff'} title="Download every staff member's sales in one workbook">
+              {exporting === 'all-staff' ? 'Exporting…' : 'Export All Staff Sales (Excel)'}
+            </button>
+          </div>
           {staffSales.staffSummary?.length > 0 && (
             <div className="card" style={{ marginBottom: 20 }}>
               <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', fontWeight: 600, fontSize: 13 }}>Staff Performance</div>
@@ -329,7 +423,7 @@ export default function Reports() {
             ) : (
               <div className="card-table">
                 <table className="data-table">
-                  <thead><tr><th>Voucher</th><th>Holder</th><th>Data Used</th><th>Last Sync</th><th>Status</th></tr></thead>
+                  <thead><tr><th>Voucher</th><th>Holder</th><th>Data Used</th><th>Last Sync</th><th>Status</th><th></th></tr></thead>
                   <tbody>
                     {acctVouchers.map((v: any) => (
                       <tr key={v.id}>
@@ -342,6 +436,21 @@ export default function Reports() {
                             {v.ruijie_sync_status || 'never'}
                           </Badge>
                         </td>
+                        <td>
+                          <div style={{ display: 'flex', gap: 4 }}>
+                            <button
+                              className="btn-sm"
+                              disabled={voucherSyncBusy === v.code}
+                              onClick={() => verifyVoucherOnRuijie(v.code)}
+                              title="Verify this voucher exists on Ruijie Cloud"
+                            >
+                              {voucherSyncBusy === v.code ? '…' : 'Verify on Ruijie'}
+                            </button>
+                            <button className="btn-sm" onClick={() => openVoucherDetail(v.code)} title="View local + Ruijie audit record">
+                              Details
+                            </button>
+                          </div>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -349,6 +458,58 @@ export default function Reports() {
               </div>
             )}
           </div>
+
+          <Modal open={!!voucherDetail} onClose={() => setVoucherDetail(null)} title={voucherDetail?.voucher ? `Voucher ${voucherDetail.voucher.code}` : 'Voucher Details'}>
+            {voucherDetail && (
+              <div className="auth-form">
+                {!voucherDetail.configured && (
+                  <div style={{ color: 'var(--orange)', fontSize: 13, marginBottom: 8 }}>
+                    Ruijie Cloud is not configured — audit record may be unavailable.
+                  </div>
+                )}
+                <div className="auth-field">
+                  <label>Local Voucher</label>
+                  <div style={{ fontSize: 13, lineHeight: 1.7 }}>
+                    <div><b>Code:</b> {voucherDetail.voucher?.code}</div>
+                    <div><b>Package:</b> {voucherDetail.voucher?.package_tier || '—'}</div>
+                    <div><b>Holder:</b> {voucherDetail.voucher?.holder_name || '—'}{voucherDetail.voucher?.holder_phone ? ` (${voucherDetail.voucher.holder_phone})` : ''}</div>
+                    <div><b>Data used:</b> {voucherDetail.voucher?.data_consumed_mb != null ? `${Number(voucherDetail.voucher.data_consumed_mb).toFixed(1)} MB` : '—'}</div>
+                    <div><b>Uses:</b> {voucherDetail.voucher?.used_count ?? '—'}</div>
+                    <div><b>Sync status:</b> {voucherDetail.voucher?.ruijie_sync_status || 'never'}</div>
+                    <div><b>Last accounting sync:</b> {voucherDetail.voucher?.last_accounting_sync ? new Date(voucherDetail.voucher.last_accounting_sync).toLocaleString() : '—'}</div>
+                    <div><b>Expires:</b> {voucherDetail.voucher?.expires_at ? new Date(voucherDetail.voucher.expires_at).toLocaleString() : '—'}</div>
+                    <div><b>Disabled:</b> {voucherDetail.voucher?.is_disabled ? 'Yes' : 'No'}</div>
+                  </div>
+                </div>
+                <div className="auth-field">
+                  <label>Ruijie Audit Record</label>
+                  {voucherDetail.ruijie ? (
+                    <div style={{ fontSize: 13, lineHeight: 1.7 }}>
+                      <div><b>Code No:</b> {voucherDetail.ruijie.code_no}</div>
+                      <div><b>Group ID:</b> {voucherDetail.ruijie.user_group_id || '—'}</div>
+                      <div><b>Profile UUID:</b> {voucherDetail.ruijie.profile_uuid || '—'}</div>
+                      <div><b>Expiry:</b> {voucherDetail.ruijie.ruijie_expiry ? new Date(voucherDetail.ruijie.ruijie_expiry).toLocaleString() : '—'}</div>
+                      <div><b>Source:</b> {voucherDetail.ruijie.source || '—'}</div>
+                      <div><b>Created:</b> {voucherDetail.ruijie.created_at ? new Date(voucherDetail.ruijie.created_at).toLocaleString() : '—'}</div>
+                      <div><b>Comment:</b> {voucherDetail.ruijie.comment || '—'}</div>
+                    </div>
+                  ) : (
+                    <div className="muted" style={{ fontSize: 13 }}>No Ruijie audit record found for this code.</div>
+                  )}
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
+                  <button className="btn-sm" onClick={() => setVoucherDetail(null)}>Close</button>
+                  <button
+                    className="btn-sm btn-approve"
+                    disabled={voucherSyncBusy === voucherDetail.voucher?.code}
+                    onClick={() => { verifyVoucherOnRuijie(voucherDetail.voucher.code); }}
+                  >
+                    {voucherSyncBusy === voucherDetail.voucher?.code ? 'Verifying…' : 'Verify on Ruijie'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </Modal>
         </>
       )}
     </div>

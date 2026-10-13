@@ -76,10 +76,12 @@ export default function Dashboard({ onNavigate }: { onNavigate?: (s: string) => 
 
   const [data, setData] = useState<DashboardData | null>(null);
   const [staffStats, setStaffStats] = useState<StaffStats | null>(null);
+  const [customerKpis, setCustomerKpis] = useState<any>(null);
 
   const loadAll = useCallback(() => {
     if (isMgmt) {
       api.get<DashboardData>('/dashboard').then(setData).catch(() => {});
+      api.get('/customer-kpis').then(setCustomerKpis).catch(() => {});
     } else {
       api.get<StaffStats>('/staff/stats').then(setStaffStats).catch(() => {});
     }
@@ -282,7 +284,48 @@ export default function Dashboard({ onNavigate }: { onNavigate?: (s: string) => 
             </div>
           </div>
 
-          {/* ── Row 6: Recent Sales ── */}
+          {/* ── Row 6: Customer Experience KPIs ── */}
+          {customerKpis && (
+            <>
+              <div className="section-head" style={{ marginTop: '1.5rem' }}>
+                <h2 className="section-head-title">Customer Experience</h2>
+                <p className="section-head-desc">Session quality &amp; loyalty signals</p>
+              </div>
+              <div className="stats-grid stats-grid--compact" style={{ marginBottom: 14 }}>
+                <div className="stat-card stat-cyan">
+                  <span className="stat-label">Avg Session</span>
+                  <span className="stat-number">{customerKpis.avgSessionDurationMin ?? '—'} min</span>
+                </div>
+                <div className="stat-card stat-green">
+                  <span className="stat-label">Completion Rate</span>
+                  <span className="stat-number">{customerKpis.completionRate ?? '—'}%</span>
+                </div>
+                <div className="stat-card stat-purple">
+                  <span className="stat-label">Reconnect Rate</span>
+                  <span className="stat-number">{customerKpis.reconnectRate ?? '—'}%</span>
+                </div>
+                <div className="stat-card stat-orange">
+                  <span className="stat-label">Unique MACs</span>
+                  <span className="stat-number">{customerKpis.uniqueMacs ?? '—'}</span>
+                </div>
+              </div>
+              {customerKpis.topPackages?.length > 0 && (
+                <div className="card" style={{ marginBottom: 14 }}>
+                  <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', fontWeight: 600, fontSize: 13 }}>Top Packages</div>
+                  <div style={{ padding: 12 }}>
+                    {customerKpis.topPackages.map((p: any, i: number) => (
+                      <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', fontSize: 13 }}>
+                        <span>{p.package_tier}</span>
+                        <span className="money">{p.count} sold</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+
+          {/* ── Row 7: Recent Sales ── */}
           {data.recentSales?.length > 0 && (
             <div className="card" style={{ marginTop: '1.5rem' }}>
               <div className="card-header">Recent Sales</div>
