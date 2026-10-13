@@ -170,4 +170,27 @@ describe('Level 0 vs Level 1 isolation (/api/v1/admin)', () => {
     expect(res.body.PESEPAY_INTEGRATION_KEY).toBe('sk_l****cdef');
     expect(res.body.PESEPAY_INTEGRATION_KEY).not.toContain('1234567890');
   });
+
+  it('merges payment-key updates instead of replacing the whole store', async () => {
+    mockAuth({ id: 'l0-1', role: 'CEO', permissions: ['system.developer'] });
+    const existing = { PESEPAY_INTEGRATION_KEY: 'sk_live_1234567890abcdef', OTHER_KEY: 'keep_me_please' };
+    // SELECT existing → INSERT..ON CONFLICT (merge target)
+    mockPoolQuery
+      .mockResolvedValueOnce({ rows: [{ value: JSON.stringify(existing) }] })
+      .mockResolvedValueOnce({ rows: [], rowCount: 1 });
+
+    const res = await request(createApp())
+      .put('/api/v1/admin/payment-keys')
+      .send({ PESEPAY_INTEGRATION_KEY: 'sk_live_new_secret_value' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.updated).toEqual(['PESEPAY_INTEGRATION_KEY']);
+
+    const upsert = mockPoolQuery.mock.calls.find(c => c[0].includes('payment_gateway_keys') && c[0].includes('ON CONFLICT'));
+    expect(upsert).toBeTruthy();
+    const stored = JSON.parse(upsert![1][0]);
+    // Updated key carries the new secret; untouched key survives the merge.
+    expect(stored.PESEPAY_INTEGRATION_KEY).toBe('sk_live_new_secret_value');
+    expect(stored.OTHER_KEY).toBe('keep_me_please');
+  });
 });

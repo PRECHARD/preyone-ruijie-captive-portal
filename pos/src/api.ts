@@ -199,6 +199,25 @@ export interface TillOperator {
   role: string;
 }
 
+export interface CashierRow {
+  id: string;
+  full_name: string;
+  email: string;
+  role: string;
+  approved: boolean;
+  has_pin: boolean;
+}
+
+export interface ShiftHistoryRow {
+  id: string;
+  opened_at: string;
+  closed_at: string | null;
+  status: string;
+  opening_float: number;
+  counted_cash: number | null;
+  cashier_name: string | null;
+}
+
 export interface CompanyProfile {
   name: string;
   tagline: string | null;
@@ -296,6 +315,21 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
+
+  // ── Till management (Settings screen) ─────────────────────────────────
+  // Change own PIN, or any user's PIN when the session role is Manager/CEO.
+  setPin: (pin: string, userId?: string) =>
+    req<{ ok: boolean; user: { id: string; full_name: string } }>('/auth/set-pin', {
+      method: 'POST',
+      body: JSON.stringify({ pin, userId: userId || undefined }),
+    }),
+
+  // Manager/CEO: every till operator in the company (has_pin flag included).
+  cashiers: () => req<CashierRow[]>('/cashiers'),
+
+  // Recent shifts — own by default, every cashier with ?all=1 (Manager/CEO).
+  shiftHistory: (all = false) =>
+    req<ShiftHistoryRow[]>(`/shifts${all ? '?all=1' : ''}`),
 
   // ── Subscription (outside /api/pos, same PIN-session token) ─────────────
   subscriptionPlans: () => root<SubscriptionPlans>('/subscription/plans'),

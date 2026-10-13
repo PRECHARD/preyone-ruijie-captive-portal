@@ -28,7 +28,7 @@ const DB = {
 
 const env = {
   ...process.env,
-  PORT: '3000',
+  PORT: process.env.PORT || '3000',
   NODE_ENV: 'development',
   JWT_SECRET: 'dev-secret-not-for-production',
   DB_HOST: DB.host,

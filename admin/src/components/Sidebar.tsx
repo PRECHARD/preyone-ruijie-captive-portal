@@ -95,6 +95,7 @@ const groups: LinkGroup[] = [
     links: [
       { label: 'Tenant Companies (Mupota)', section: 'tenants', roles: ['CEO'], icon: <FiGlobe /> },
       { label: 'Global Revenue', section: 'global-revenue', roles: ['CEO'], icon: <FiTrendingUp /> },
+      { label: 'Platform Settings', section: 'platform-settings', roles: ['CEO'], icon: <FiShield />, permissions: ['system.developer'] },
     ],
   },
   {

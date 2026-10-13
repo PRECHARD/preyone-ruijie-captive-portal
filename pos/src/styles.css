@@ -554,6 +554,9 @@ input:focus, select:focus, button:focus-visible {
 
 .profile-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 0.7rem 1rem; font-size: 0.88rem; }
 .profile-grid .field-label { margin-top: 0; }
+.pin-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 0.7rem 1rem; margin: 0.5rem 0 0.8rem; }
+.pin-grid label { display: block; }
+.pin-grid input { width: 100%; font-size: 1rem; letter-spacing: 0.2em; }
 
 .rate-list { max-width: 380px; }
 .settings-card code {

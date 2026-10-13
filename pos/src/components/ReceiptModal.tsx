@@ -97,6 +97,21 @@ export default function ReceiptModal({
     }
   };
 
+  const printReceipt = () => {
+    // Native Android APK bridges thermal printing through window.AndroidPOS.
+    const bridge = (window as { AndroidPOS?: { printReceipt?: (json: string) => void } }).AndroidPOS;
+    if (bridge?.printReceipt) {
+      try {
+        bridge.printReceipt(JSON.stringify(result));
+      } catch (e) {
+        console.error('Native print failed:', e);
+        window.print();
+      }
+      return;
+    }
+    window.print();
+  };
+
   const shareWhatsApp = async () => {
     try {
       var doc = getPdfDoc();
@@ -245,7 +260,7 @@ export default function ReceiptModal({
         </div>
 
         <div className="receipt-actions">
-          <button onClick={() => window.print()}>Print</button>
+          <button onClick={printReceipt}>Print</button>
           <button onClick={downloadPdf}>Download PDF</button>
           <button onClick={shareWhatsApp}>WhatsApp PDF</button>
         </div>

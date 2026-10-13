@@ -29,6 +29,7 @@ import SystemHealth from './pages/SystemHealth';
 import Tenants from './pages/Tenants';
 import GlobalRevenue from './pages/GlobalRevenue';
 import GatewaySettings from './pages/GatewaySettings';
+import PlatformSettings from './pages/PlatformSettings';
 import PlatformAudit from './pages/PlatformAudit';
 import Fleet from './pages/Fleet';
 import Trips from './pages/Trips';
@@ -79,7 +80,7 @@ const sectionRoles: Record<string, string[]> = {
 };
 
 /** Platform (Level 0) sections — CEO operators with no company binding only. */
-const LEVEL0_SECTIONS = ['system-health', 'tenants', 'global-revenue', 'gateway-settings', 'platform-audit'];
+const LEVEL0_SECTIONS = ['system-health', 'tenants', 'global-revenue', 'gateway-settings', 'platform-audit', 'platform-settings'];
 
 /** Company (Level 1-3) sections and the permissions that unlock them. */
 const TRANSIT_SECTIONS: Record<string, string[]> = {
@@ -259,6 +260,7 @@ export default function App() {
       {safeSection === 'tenants' && <Tenants />}
       {safeSection === 'global-revenue' && <GlobalRevenue />}
       {safeSection === 'gateway-settings' && <GatewaySettings />}
+      {safeSection === 'platform-settings' && <PlatformSettings />}
       {safeSection === 'platform-audit' && <PlatformAudit />}
       {safeSection === 'fleet' && <Fleet />}
       {safeSection === 'trips' && <Trips />}

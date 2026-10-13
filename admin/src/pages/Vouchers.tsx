@@ -165,6 +165,7 @@ export default function Vouchers() {
   const [editName, setEditName] = useState('');
   const [editPhone, setEditPhone] = useState('');
   const [editSaving, setEditSaving] = useState(false);
+  const [voucherActionBusy, setVoucherActionBusy] = useState<string | null>(null);
   const [editError, setEditError] = useState('');
 
   const loadClockStatus = useCallback(() => {
@@ -182,6 +183,9 @@ export default function Vouchers() {
   useEffect(() => {
     api.get<Package[]>('/packages').then(setPackages).catch(() => {});
     api.get<{ vouchers: Voucher[] }>('/vouchers').then(data => setVouchers(data.vouchers)).catch(() => {});
+    // Staff: opening Vouchers means they've seen their approved requests —
+    // clears the persistent "new approvals" badge (POST /notifications/acknowledge).
+    api.post('/notifications/acknowledge').catch(() => {});
     if (isMgmt) {
       api.get<ApprovalRequest[]>('/vouchers/pending-approvals').then(setPendingApprovals).catch(() => {});
     }
@@ -379,6 +383,64 @@ const codes = a.voucher_data?.codes;
       setEditError(err.message || 'Failed to update holder');
     } finally {
       setEditSaving(false);
+    }
+  };
+
+  // ── Disable / re-enable + extend expiry (POST /vouchers/:id/…) ──
+  const reloadVouchers = () => {
+    api.get<{ vouchers: Voucher[] }>('/vouchers').then(data => setVouchers(data.vouchers)).catch(() => {});
+  };
+
+  const handleToggleDisable = async (v: Voucher) => {
+    const disable = v.status !== 'Disabled';
+    const ok = window.confirm(
+      disable
+        ? `Disable voucher ${lc(v.code)}? It can no longer be redeemed.`
+        : `Re-enable voucher ${lc(v.code)}?`
+    );
+    if (!ok) return;
+    setVoucherActionBusy(v.id);
+    try {
+      await api.post(`/vouchers/${v.id}/disable`, { disabled: disable });
+      showToast({
+        title: disable ? 'Voucher Disabled' : 'Voucher Enabled',
+        message: `"${lc(v.code)}" is now ${disable ? 'disabled' : 'active'}`,
+        type: 'success',
+      });
+      reloadVouchers();
+      setDetailVoucher(prev => (prev && prev.id === v.id ? { ...prev, status: disable ? 'Disabled' : undefined } : prev));
+    } catch (err: any) {
+      showToast({ title: 'Failed', message: err.message || 'Could not update voucher', type: 'error' });
+    } finally {
+      setVoucherActionBusy(null);
+    }
+  };
+
+  const handleExtend = async (v: Voucher) => {
+    const input = window.prompt(
+      'Extend validity by how many minutes?\n(e.g. 60 = 1 hour, 1440 = 1 day, 10080 = 1 week)',
+      '1440'
+    );
+    if (!input) return;
+    const minutes = parseInt(input, 10);
+    if (!Number.isFinite(minutes) || minutes <= 0) {
+      showToast({ title: 'Invalid', message: 'Minutes must be a positive whole number', type: 'error' });
+      return;
+    }
+    setVoucherActionBusy(v.id);
+    try {
+      const data = await api.post<{ expires_at: string | null }>(`/vouchers/${v.id}/extend`, { minutes });
+      showToast({
+        title: 'Voucher Extended',
+        message: `"${lc(v.code)}" +${minutes} min (new expiry: ${data.expires_at ? fmtDate(data.expires_at) : 'never'})`,
+        type: 'success',
+      });
+      reloadVouchers();
+      setDetailVoucher(prev => (prev && prev.id === v.id ? { ...prev, expires_at: data.expires_at ?? prev.expires_at } : prev));
+    } catch (err: any) {
+      showToast({ title: 'Failed', message: err.message || 'Could not extend voucher', type: 'error' });
+    } finally {
+      setVoucherActionBusy(null);
     }
   };
 
@@ -1370,6 +1432,22 @@ const codes = a.voucher_data?.codes;
                       >
                         Edit Holder
                       </button>
+                      <button
+                        className="btn-sm"
+                        disabled={voucherActionBusy === v.id}
+                        onClick={() => handleToggleDisable(v)}
+                        aria-label={`${v.status === 'Disabled' ? 'Enable' : 'Disable'} voucher ${lc(v.code)}`}
+                      >
+                        {voucherActionBusy === v.id ? '…' : v.status === 'Disabled' ? 'Enable' : 'Disable'}
+                      </button>
+                      <button
+                        className="btn-sm"
+                        disabled={voucherActionBusy === v.id}
+                        onClick={() => handleExtend(v)}
+                        aria-label={`Extend voucher ${lc(v.code)}`}
+                      >
+                        Extend
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -1585,6 +1663,29 @@ const codes = a.voucher_data?.codes;
                 >
                   {releasingMac ? 'Releasing…' : 'Release all bindings'}
                 </button>
+              </section>
+
+              <section className="vd-section">
+                <h4 className="vd-section-title">Manage</h4>
+                <p className="vd-count">
+                  Block redemption or push the expiry date out. Changes are audit-logged.
+                </p>
+                <div className="vd-actions">
+                  <button
+                    className="btn-sm"
+                    disabled={voucherActionBusy === v.id}
+                    onClick={() => handleToggleDisable(v)}
+                  >
+                    {v.status === 'Disabled' ? 'Re-enable' : 'Disable'}
+                  </button>
+                  <button
+                    className="btn-sm"
+                    disabled={voucherActionBusy === v.id}
+                    onClick={() => handleExtend(v)}
+                  >
+                    Extend expiry…
+                  </button>
+                </div>
               </section>
 
               <section className="vd-section">
