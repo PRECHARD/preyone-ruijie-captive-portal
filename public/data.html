@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Data Usage — Preyone UltraNet Wi-Fi</title>
+  <link rel="icon" type="image/png" href="/favicon/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="/favicon/favicon.svg" />
+  <link rel="shortcut icon" href="/favicon/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/favicon/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-title" content="Preyone" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="theme-color" content="#0066ff" />
+  <meta name="description" content="Check your Preyone UltraNet WiFi data usage, remaining bundle and session status." />
+  <link rel="manifest" href="/manifest.json" />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Montserrat:wght@500;700&family=Satisfy&display=swap"
+    rel="stylesheet">
+  <link rel="stylesheet" href="/css/portal.css?v=28" />
+  <style>
+    /* PWA-specific additions only. Every colour below reuses the portal.css
+       tokens so this page stays on the same design language as success.html. */
+    .usage-metric-value {
+      font-family: 'Courier New', monospace;
+      font-size: 1.35rem;
+      font-weight: 800;
+      letter-spacing: 1px;
+      color: var(--cyan);
+      text-shadow: 0 0 15px rgba(0, 212, 255, 0.35);
+      word-break: break-word;
+    }
+
+    .usage-metric-value--warn { color: var(--orange); text-shadow: 0 0 15px rgba(245, 166, 35, 0.35); }
+    .usage-metric-value--over { color: #ef4444; text-shadow: 0 0 15px rgba(239, 68, 68, 0.4); }
+
+    .usage-meta-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem 1rem;
+      justify-content: center;
+      align-items: center;
+      margin: 0 0 1rem;
+      font-size: 0.7rem;
+      letter-spacing: 1px;
+      color: var(--text-muted);
+    }
+
+    .usage-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.25rem 0.6rem;
+      border-radius: 999px;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      background: rgba(255, 255, 255, 0.04);
+    }
+
+    .usage-badge--offline { border-color: rgba(239, 68, 68, 0.5); color: #f87171; }
+    .usage-badge--online { border-color: rgba(37, 211, 102, 0.5); color: #25D366; }
+
+    .usage-install-row { margin-top: 1.5rem; }
+
+    .usage-manual {
+      text-align: left;
+      margin-top: 1.5rem;
+      padding-top: 1.5rem;
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .usage-manual h2 {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 1.15rem;
+      letter-spacing: 1px;
+      margin: 0 0 0.35rem;
+    }
+
+    .usage-manual p.hint {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      margin: 0 0 1rem;
+    }
+
+    .usage-manual .field input {
+      width: 100%;
+      padding: 0.75rem 0.9rem;
+      border-radius: var(--radius, 12px);
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      background: rgba(255, 255, 255, 0.04);
+      color: var(--text);
+      font-family: var(--font), sans-serif;
+      font-size: 0.95rem;
+      text-transform: uppercase;
+    }
+
+    .usage-manual .field input:focus {
+      outline: none;
+      border-color: var(--cyan);
+      box-shadow: 0 0 0 2px rgba(0, 212, 255, 0.18);
+    }
+
+    .usage-actions { display: flex; flex-wrap: wrap; gap: 0.75rem; justify-content: center; margin-top: 1.5rem; }
+
+    @media (max-width: 480px) {
+      .status-grid { grid-template-columns: 1fr; gap: 0.75rem; padding: 1rem; }
+      .usage-metric-value { font-size: 1.2rem; }
+    }
+  </style>
+</head>
+
+<body class="portal-body">
+  <svg aria-hidden="true" style="position:absolute;width:0;height:0">
+    <defs>
+      <linearGradient id="ring-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#71ff2f" />
+        <stop offset="50%" stop-color="#13d8ff" />
+        <stop offset="100%" stop-color="#367cff" />
+      </linearGradient>
+    </defs>
+  </svg>
+
+  <!-- Sticky Header -->
+  <header class="portal-header">
+    <div class="brand-banner">
+      <img src="/images/preyonenoneglow-logo-optimized.png" alt="Preyone" class="brand-logo-img" width="1200"
+        height="600" decoding="async" />
+    </div>
+    <div class="brand-eyebrow">
+      <span class="brand-signature">Fadaya nePreyone UltraNet Wifi</span>
+    </div>
+  </header>
+
+  <main class="portal-shell">
+
+    <!-- Header card -->
+    <div class="card card--success">
+      <div class="brand">
+        <div class="success-icon-wrapper">
+          <svg class="wifi-icon--success" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <path d="M5 12.55a11 11 0 0 1 14.08 0" />
+            <path d="M1.42 9a16 16 0 0 1 21.16 0" />
+            <path d="M8.53 16.11a6 6 0 0 1 6.95 0" />
+            <line x1="12" y1="20" x2="12.01" y2="20" />
+          </svg>
+        </div>
+        <h1>DATA USAGE</h1>
+        <p class="subtitle">Live bundle balance for your Preyone UltraNet session.</p>
+      </div>
+
+      <div class="usage-meta-row">
+        <span class="usage-badge" id="netBadge">CONNECTING…</span>
+        <span id="metaVoucher" style="display:none">VOUCHER ••••<span id="metaVoucherTail"></span></span>
+        <span id="metaTier" style="display:none"></span>
+      </div>
+
+      <!-- Metric cards: Used / Remaining / Total -->
+      <div class="status-grid">
+        <div class="status-item">
+          <span class="label">USED</span>
+          <span class="value usage-metric-value" id="metricUsed">—</span>
+        </div>
+        <div class="status-item">
+          <span class="label">REMAINING</span>
+          <span class="value usage-metric-value" id="metricRemaining">—</span>
+        </div>
+        <div class="status-item">
+          <span class="label">TOTAL MB</span>
+          <span class="value usage-metric-value" id="metricTotal">—</span>
+        </div>
+      </div>
+
+      <!-- Progress bar -->
+      <div class="data-usage-section">
+        <div class="data-usage-header">
+          <span class="data-usage-label">BUNDLE CONSUMED</span>
+          <span class="data-usage-numbers" id="dataUsageNumbers">— / —</span>
+        </div>
+        <div class="data-bar-track">
+          <div class="data-bar-fill" id="dataBarFill" style="width:0%"></div>
+        </div>
+        <div class="data-usage-footer">
+          <span id="dataUsagePct">0%</span>
+          <span id="dataUsageRemaining">— remaining</span>
+        </div>
+      </div>
+
+      <!-- Session details -->
+      <div class="session-details">
+        <div class="detail-row">
+          <span class="detail-label">Status</span>
+          <span class="detail-value" id="detailStatus">—</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">Session Expires</span>
+          <span class="detail-value" id="detailExpires">—</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">Network</span>
+          <span class="detail-value">Preyone UltraNet Wi-Fi</span>
+        </div>
+      </div>
+
+      <!-- Install App -->
+      <div class="usage-install-row">
+        <button type="button" id="installBtn" class="btn-primary" hidden>INSTALL APP</button>
+        <p id="installHint" class="subtitle" style="margin:0.75rem 0 0;display:none">
+          Add Preyone WiFi to your home screen for one-tap usage checks.
+        </p>
+      </div>
+
+      <!-- Manual fallback (shown when no mac/voucher available) -->
+      <section id="manualSection" class="usage-manual" hidden>
+        <h2>ENTER YOUR VOUCHER</h2>
+        <p class="hint">We couldn't detect your session. Type the voucher PIN from your SMS or receipt to see your
+          balance.</p>
+        <form id="manualForm" novalidate>
+          <div class="field">
+            <label for="manualVoucher">Voucher PIN</label>
+            <input id="manualVoucher" name="voucher" type="text" inputmode="text" autocomplete="off"
+              autocapitalize="characters" spellcheck="false" placeholder="e.g. PRE123XYZ" required />
+            <span class="field-error" id="manualError"></span>
+          </div>
+          <div class="field">
+            <label for="manualMac">Device MAC <span style="opacity:.6">(optional)</span></label>
+            <input id="manualMac" name="mac" type="text" inputmode="text" autocomplete="off" spellcheck="false"
+              placeholder="AA:BB:CC:DD:EE:FF" />
+          </div>
+          <button type="submit" class="btn-primary" style="width:100%">CHECK USAGE</button>
+        </form>
+      </section>
+
+      <div class="usage-actions">
+        <button type="button" id="refreshBtn" class="btn-secondary">REFRESH</button>
+        <a href="/" class="btn-secondary">BACK TO PORTAL</a>
+      </div>
+    </div>
+
+  </main>
+
+  <footer class="portal-footer main-footer">
+    <div class="footer-bottom">
+      <div class="legal-row">
+        <p>&copy; <span id="currentYear"></span> Preyone Enterprises. All Rights Reserved.</p>
+        <div class="payment-badges">
+          <span class="secure-pay-label">Secure Payments</span>
+          <span class="pay-logos"><span class="pay-logo pay-logo--ecocash"><span class="ecocash-mark"><span
+                class="ecocash-eco">Eco</span><span class="ecocash-cash">Cash</span></span></span></span>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    (function () {
+      'use strict';
+
+      var LS_MAC = 'user_mac';
+      var LS_VOUCHER = 'user_voucher';
+      var POLL_MS = 15000;
+
+      var $ = function (id) { return document.getElementById(id); };
+
+      // ── Query params → localStorage, with client_mac / clientMac aliases ──
+      var params = new URLSearchParams(location.search);
+      var qMac = params.get('mac') || params.get('client_mac') || params.get('clientMac') || '';
+      var qVoucher = params.get('voucher') || params.get('code') || '';
+
+      if (qMac) { try { localStorage.setItem(LS_MAC, qMac); } catch (e) {} }
+      if (qVoucher) { try { localStorage.setItem(LS_VOUCHER, qVoucher.toUpperCase()); } catch (e) {} }
+
+      function lsGet(k) { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } }
+
+      var state = {
+        mac: qMac || lsGet(LS_MAC),
+        voucher: (qVoucher || lsGet(LS_VOUCHER)).toUpperCase(),
+        timer: null,
+        deferredPrompt: null,
+      };
+
+      // ── Formatting ──
+      function fmtMB(bytes) {
+        if (bytes == null || isNaN(bytes)) return '—';
+        var mb = bytes / 1048576;
+        if (mb >= 1024) return (mb / 1024).toFixed(2) + ' GB';
+        if (mb >= 1) return mb.toFixed(mb < 10 ? 1 : 0) + ' MB';
+        return (bytes / 1024).toFixed(1) + ' KB';
+      }
+
+      function fmtMBOnly(bytes) {
+        if (bytes == null || isNaN(bytes)) return '—';
+        var mb = bytes / 1048576;
+        return mb >= 1 ? mb.toFixed(mb < 10 ? 1 : 0) + ' MB' : (bytes / 1024).toFixed(1) + ' KB';
+      }
+
+      function setNetBadge(text, cls) {
+        var b = $('netBadge');
+        b.textContent = text;
+        b.className = 'usage-badge' + (cls ? ' ' + cls : '');
+      }
+
+      // ── Render ──
+      function render(j) {
+        var used = j.bytesUsed;
+        var total = j.bytesTotal;
+        var isUncapped = !!j.isUncapped;
+
+        var remaining = null;
+        if (used != null && total != null) remaining = Math.max(total - used, 0);
+
+        $('metricUsed').textContent = fmtMBOnly(used);
+        $('metricRemaining').textContent = isUncapped ? 'Unlimited' : fmtMBOnly(remaining);
+        $('metricTotal').textContent = isUncapped ? 'Unlimited' : fmtMBOnly(total);
+
+        $('dataUsageNumbers').textContent = fmtMB(used) + ' / ' + (isUncapped ? 'Unlimited' : fmtMB(total));
+
+        var pct = 0;
+        if (used != null && total != null && total > 0) {
+          pct = Math.min((used / total) * 100, 100);
+        }
+        $('dataBarFill').style.width = pct + '%';
+        $('dataUsagePct').textContent = pct.toFixed(1) + '%';
+        $('dataUsageRemaining').textContent = isUncapped ? 'Unlimited remaining' : fmtMB(remaining) + ' remaining';
+
+        // Colour the remaining metric as the bundle runs down.
+        var remEl = $('metricRemaining');
+        remEl.className = 'value usage-metric-value';
+        if (!isUncapped && total > 0) {
+          var ratio = remaining / total;
+          if (ratio <= 0) remEl.classList.add('usage-metric-value--over');
+          else if (ratio <= 0.15) remEl.classList.add('usage-metric-value--warn');
+        }
+
+        $('detailStatus').textContent = j.active ? '● ACTIVE' : 'EXPIRED';
+        $('detailStatus').style.color = j.active ? '#25D366' : '#f87171';
+
+        if (j.expiresAt) {
+          var d = new Date(j.expiresAt);
+          $('detailExpires').textContent = isNaN(d) ? '—'
+            : d.toLocaleString([], { hour12: false, dateStyle: 'medium', timeStyle: 'short' });
+        }
+
+        if (j.voucherCode) {
+          $('metaVoucher').style.display = '';
+          $('metaVoucherTail').textContent = String(j.voucherCode).slice(-4).toUpperCase();
+        }
+        if (j.packageTier) {
+          $('metaTier').style.display = '';
+          $('metaTier').textContent = String(j.packageTier).toUpperCase();
+        }
+
+        setNetBadge(j.active ? '● ONLINE' : '● SESSION ENDED', j.active ? 'usage-badge--online' : 'usage-badge--offline');
+      }
+
+      function renderError(msg) {
+        setNetBadge('● OFFLINE', 'usage-badge--offline');
+        if (msg) {
+          $('detailStatus').textContent = 'UNAVAILABLE';
+          $('detailStatus').style.color = '#f87171';
+        }
+      }
+
+      // ── API ──
+      function checkUsage() {
+        if (!state.voucher && !state.mac) { showManual(); return; }
+        var qs = new URLSearchParams();
+        if (state.voucher) qs.set('voucher', state.voucher);
+        if (state.mac) qs.set('mac', state.mac);
+
+        setNetBadge('UPDATING…');
+
+        fetch('/api/check-usage?' + qs.toString(), { credentials: 'same-origin' })
+          .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, body: j }; }); })
+          .then(function (res) {
+            if (!res.ok || res.body.error) {
+              renderError(true);
+              if (res.body && res.body.error === 'not_found') showManual('No active session for that voucher.');
+              return;
+            }
+            hideManual();
+            render(res.body);
+          })
+          .catch(function () { renderError(true); });
+      }
+
+      // ── Manual fallback ──
+      function showManual(msg) {
+        $('manualSection').hidden = false;
+        if (state.voucher) $('manualVoucher').value = state.voucher;
+        if (state.mac) $('manualMac').value = state.mac;
+        if (msg) $('manualError').textContent = msg;
+      }
+
+      function hideManual() { $('manualSection').hidden = true; }
+
+      $('manualForm').addEventListener('submit', function (e) {
+        e.preventDefault();
+        var v = $('manualVoucher').value.trim().toUpperCase();
+        var m = $('manualMac').value.trim();
+        if (!v) { $('manualError').textContent = 'Enter your voucher PIN.'; return; }
+        $('manualError').textContent = '';
+        state.voucher = v;
+        state.mac = m;
+        try {
+          localStorage.setItem(LS_VOUCHER, v);
+          if (m) localStorage.setItem(LS_MAC, m);
+        } catch (err) {}
+        checkUsage();
+      });
+
+      $('refreshBtn').addEventListener('click', checkUsage);
+
+      // ── Install prompt (beforeinstallprompt) ──
+      window.addEventListener('beforeinstallprompt', function (e) {
+        e.preventDefault();
+        state.deferredPrompt = e;
+        $('installBtn').hidden = false;
+        $('installHint').style.display = '';
+      });
+
+      $('installBtn').addEventListener('click', function () {
+        var prompt = state.deferredPrompt;
+        if (!prompt) return;
+        prompt.prompt();
+        prompt.userChoice.finally(function () {
+          state.deferredPrompt = null;
+          $('installBtn').hidden = true;
+          $('installHint').style.display = 'none';
+        });
+      });
+
+      window.addEventListener('appinstalled', function () {
+        $('installBtn').hidden = true;
+        $('installHint').style.display = 'none';
+      });
+
+      // ── Service worker ──
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', function () {
+          navigator.serviceWorker.register('/sw.js').catch(function () { /* non-fatal */ });
+        });
+      }
+
+      // ── Boot ──
+      $('currentYear').textContent = new Date().getFullYear();
+
+      if (!state.voucher && !state.mac) {
+        showManual();
+        setNetBadge('ENTER VOUCHER');
+      } else {
+        checkUsage();
+        state.timer = setInterval(checkUsage, POLL_MS);
+      }
+
+      // Refresh when the app returns to the foreground.
+      document.addEventListener('visibilitychange', function () {
+        if (!document.hidden && (state.voucher || state.mac)) checkUsage();
+      });
+    })();
+  </script>
+</body>
+
+</html>

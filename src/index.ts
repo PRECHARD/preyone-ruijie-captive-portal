@@ -22,6 +22,7 @@ import { transitWebRouter } from './routes/transitWeb';
 import { systemAdminRouter } from './routes/systemAdmin';
 import { starlinkRouter } from './routes/starlink';
 import { ruijieRouter } from './routes/ruijie';
+import { usageRouter } from './routes/usage';
 import { ensureStarlinkSchema } from './db/starlink';
 import { errorHandler } from './middleware/errorHandler';
 import { maintenanceCheck } from './middleware/maintenanceMode';
@@ -138,6 +139,21 @@ app.get('/sitemap.xml', (_req, res) => {
 app.get('/robots.txt', (_req, res) => {
   res.setHeader('Content-Type', 'text/plain');
   res.send('User-agent: *\nAllow: /\n\nSitemap: https://preyone.com/sitemap.xml\n');
+});
+
+// PWA usage portal. Registered BEFORE the subdomain middleware so it resolves
+// on every host — the middleware's unknown-host and preyone.com branches end in
+// a sendFile fallback that never calls next(), which would shadow a route
+// registered later and silently serve index.html instead of the usage page.
+//
+// It must not carry X-Captive-Portal: that header makes browsers treat the
+// page as a portal interstitial and suppress beforeinstallprompt, so the
+// install button would never appear. Cache-Control is no-cache (not no-store)
+// because the service worker is allowed to cache the shell; only the usage
+// payload is live.
+app.get('/data', (_req, res) => {
+  res.setHeader('Cache-Control', 'no-cache');
+  res.sendFile(path.join(__dirname, '..', 'public', 'data.html'));
 });
 
 // Advertise /connect (voucher form) rather than /login (account sign-in), so OS
@@ -339,6 +355,9 @@ app.use('/api/starlink', starlinkRouter);
 // Mounted under /api/ so the subdomain middleware (line ~169) is bypassed and
 // it cannot collide with gatewayRouter's /api/radius + /api/gateway paths.
 app.use('/api/ruijie', ruijieRouter);
+// PWA usage portal (/data) — public, rate-limited, reads only the caller's own
+// session. Mounted at the exact /api/check-usage path the portal fetches.
+app.use('/api/check-usage', usageRouter);
 
 // Standard route aliases
 app.get('/login', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'account-login.html')));
