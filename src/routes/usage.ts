@@ -1,6 +1,11 @@
 import { Router, Request, Response } from 'express';
 import rateLimit from 'express-rate-limit';
 import { pool } from '../db/pool';
+import {
+  fetchRuijieAccountingRecords,
+  listRuijieOnlineUsers,
+} from '../services/ruijieService';
+import { isRuijieCloudConfigured } from '../services/ruijieCloud';
 
 /**
  * GET /api/check-usage
@@ -53,6 +58,50 @@ function normalizeMac(raw?: unknown): string | null {
   if (raw == null) return null;
   const cleaned = String(raw).replace(/[^0-9a-fA-F]/g, '').toUpperCase();
   return cleaned.length === 12 ? cleaned : null;
+}
+
+// ── Live usage straight from Ruijie Cloud ───────────────────────────────────
+// Ruijie's Open API returns station usage keyed by MAC (the accounting
+// records all come back with code=null), and in WiFiDog mode the portal never
+// learns which MAC belongs to which voucher, so the periodic
+// syncAccountingData() can only attribute through voucher_devices /
+// users.mac_address — both of which are empty for real customers. The
+// customer, however, DOES have their own MAC: the gateway hands it over as
+// client_mac and /data carries it through. So when one is supplied we ask
+// Ruijie live for that station's usage rather than waiting for a sync that
+// can never match.
+//
+// The whole tenant roster is fetched, not a per-MAC query — there is no
+// single-MAC endpoint — and the result is cached so the PWA's 15s polling
+// costs at most one Ruijie call per minute no matter how many devices poll.
+let liveUsageCache: { at: number; byMac: Map<string, number> } | null = null;
+const LIVE_USAGE_CACHE_MS = 60_000;
+
+async function liveUsageByMac(): Promise<Map<string, number>> {
+  if (!isRuijieCloudConfigured()) return new Map();
+  if (liveUsageCache && Date.now() - liveUsageCache.at < LIVE_USAGE_CACHE_MS) {
+    return liveUsageCache.byMac;
+  }
+
+  const byMac = new Map<string, number>();
+  const bump = (mac: unknown, mb: unknown) => {
+    const m = String(mac ?? '').toLowerCase().replace(/[^a-f0-9]/g, '');
+    const n = Number(mb);
+    if (m.length !== 12 || !Number.isFinite(n)) return;
+    byMac.set(m, Math.max(byMac.get(m) ?? 0, n));
+  };
+
+  // Either call failing must not take the endpoint down — an empty map just
+  // means we fall back to whatever the vouchers table already holds.
+  const [online, records] = await Promise.all([
+    listRuijieOnlineUsers().catch(() => []),
+    fetchRuijieAccountingRecords().catch(() => []),
+  ]);
+  for (const u of online) bump(u.mac, u.usedMb);
+  for (const r of records) bump(r.mac, r.usedMb);
+
+  liveUsageCache = { at: Date.now(), byMac };
+  return byMac;
 }
 
 usageRouter.get('/', usageLimiter, async (req: Request, res: Response) => {
@@ -147,16 +196,43 @@ usageRouter.get('/', usageLimiter, async (req: Request, res: Response) => {
     const isUncapped = row.is_uncapped === true;
 
     // data_consumed_mb is NUMERIC megabytes written by the Ruijie accounting
-    // reconciliation (ruijieService). It is NULL until that sync has run at
-    // least once, in which case usage is genuinely unknown and reported as
-    // such rather than fabricated.
-    const usedMB: number | null =
+    // reconciliation. In WiFiDog mode it stays NULL (see the module header), so
+    // it is only a fallback for when a live lookup is impossible.
+    let usedMB: number | null =
       row.data_consumed_mb != null ? parseFloat(row.data_consumed_mb) : null;
-    const usedBytes = usedMB != null ? usedMB * MB : null;
+    let usageSource: 'ruijie_live' | 'voucher_accounting' | 'none' =
+      usedMB != null ? 'voucher_accounting' : 'none';
+
+    // Is this station online right now, as Ruijie sees it? Reported so the
+    // portal badge reflects reality rather than the voucher's own validity.
+    let onlineNow: boolean | null = null;
+
+    if (mac) {
+      try {
+        const live = await liveUsageByMac();
+        const liveMb = live.get(mac.toLowerCase());
+        if (liveMb != null) {
+          onlineNow = true;
+          // Live is authoritative: prefer it, and take the larger of the two in
+          // case the voucher figure was written by an earlier partial sync.
+          if (usedMB == null || liveMb > usedMB) {
+            usedMB = liveMb;
+            usageSource = 'ruijie_live';
+          }
+        } else {
+          // The roster was fetched successfully but has no trace of this MAC.
+          onlineNow = false;
+        }
+      } catch {
+        // Live lookup unavailable — leave usageSource as whatever the
+        // vouchers table gave us and report onlineNow as unknown.
+      }
+    }
 
     let totalMB: number | null =
       row.data_limit_gb != null ? parseFloat(row.data_limit_gb) * 1024 : null;
     const totalBytes = totalMB != null ? totalMB * MB : null;
+    const usedBytes = usedMB != null ? usedMB * MB : null;
 
     // Uncapped bundles report an unlimited total; a capped bundle with no
     // known quota is reported as unknown rather than fabricated.
@@ -185,6 +261,13 @@ usageRouter.get('/', usageLimiter, async (req: Request, res: Response) => {
       percentUsed: percentUsed != null ? Math.round(percentUsed * 10) / 10 : null,
       isUncapped,
       dataLimitGb: row.data_limit_gb,
+      // Where the used figure came from. ruijie_live is the real accounting
+      // number; voucher_accounting is the (possibly stale) reconciled column;
+      // none means usage is genuinely unknown and the UI must not invent it.
+      usageSource,
+      // True/false when a MAC was supplied and the Ruijie roster was reachable,
+      // null when we could not tell (no MAC given, or the lookup failed).
+      onlineNow,
       boundDevices: row.bound_devices,
       durationMin: row.duration_min,
       usedCount: row.used_count,
