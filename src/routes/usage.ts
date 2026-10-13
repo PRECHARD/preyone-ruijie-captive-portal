@@ -5,23 +5,29 @@ import { pool } from '../db/pool';
 /**
  * GET /api/check-usage
  *
- * Live bundle balance for the PWA usage portal (/data). Accepts either a
- * session `token` (the strongest identifier — a random UUID) or a `voucher`
- * PIN, optionally narrowed by the device `mac`.
+ * Bundle balance for the PWA usage portal (/data).
  *
- * Deliberately NOT modelled on /api/auth/status's query-string session token
- * alone: the PWA is opened from the gateway redirect and may only have the
- * voucher + MAC that the gateway handed it. The voucher PIN is the customer's
- * secret, so it is treated as the authenticating credential here.
+ * ── Why this does NOT read users.session_expires_at ──────────────────
+ * An earlier version of this query required `u.session_expires_at > NOW()`
+ * and LEFT JOINed wispr_profiles for the byte counters. That model is
+ * correct for the FreeRADIUS/WISPr path, but this deployment is still in
+ * Ruijie WiFiDog mode: the gateway authorises the MAC itself over ext_login
+ * and never tells the portal, so on production `users.session_expires_at`
+ * is NULL for every row and wispr_profiles is empty. Every voucher therefore
+ * 404'd "not found" while the phone was demonstrably online.
  *
- * Security posture:
- *  - Rate limited (the PWA polls, so the ceiling is generous but far below
- *    anything that would let voucher codes be brute-forced).
+ * The voucher row itself is the durable truth: it is written at redemption
+ * and carries the validity flags (deleted_at / is_disabled / expires_at /
+ * activated_at), the quota (data_limit_gb / is_uncapped) and the accounted
+ * usage (data_consumed_mb). So the lookup is voucher-first, and "session
+ * expiry" is the voucher's own expires_at.
+ *
+ * Security posture (unchanged):
+ *  - Rate limited; the PIN is the customer's secret and is what authenticates.
  *  - A MAC alone can NEVER look up usage — MACs are observable by anyone on
- *    the same L2 segment, so they are only ever used to narrow a voucher/token
- *    match, never to authenticate.
- *  - Errors are generic; a wrong voucher and an expired session both return
- *    the same `not_found`, so the endpoint cannot be used to enumerate codes.
+ *    the same L2 segment, so they only ever narrow a match.
+ *  - Errors are generic: a wrong PIN, an unredeemed voucher and an expired
+ *    one all return the same `not_found`, so this cannot enumerate codes.
  */
 export const usageRouter = Router();
 
@@ -36,6 +42,7 @@ const usageLimiter = rateLimit({
 });
 
 const GB = 1024 * 1024 * 1024;
+const MB = 1048576;
 
 /**
  * Accepts the MAC spellings the gateway actually sends (auth.ts reads
@@ -59,8 +66,8 @@ usageRouter.get('/', usageLimiter, async (req: Request, res: Response) => {
         (req.query.clientMac as string)
     );
 
-    // Voucher or session token is mandatory. See the header note on why a MAC
-    // on its own is not an acceptable credential.
+    // Voucher PIN or session token is mandatory. See the header note on why a
+    // MAC on its own is not an acceptable credential.
     if (!token && !voucher) {
       res.status(400).json({ error: 'missing_credentials' });
       return;
@@ -75,43 +82,61 @@ usageRouter.get('/', usageLimiter, async (req: Request, res: Response) => {
       }
     }
 
-    // Strip the separators the gateway uses (":" "-" ".") from both sides so
-    // AA:BB:CC:DD:EE:FF and aa-bb-cc-dd-ee-ff compare equal to AABBCCDDEEFF.
+    // Strip the separators the gateway uses (":" "-" ".") from stored values
+    // so AA:BB:CC:DD:EE:FF and aa-bb-cc-dd-ee-ff compare equal to AABBCCDDEEFF.
     const MAC_SQL = (col: string) =>
       `UPPER(replace(replace(replace(coalesce(${col}, ''), ':', ''), '-', ''), '.', ''))`;
 
     const { rows } = await pool.query(
-      `SELECT u.session_expires_at,
-              u.voucher_code,
-              wp.data_used_bytes,
-              wp.data_quota_bytes,
+      `SELECT v.code,
+              v.package_tier,
+              v.data_consumed_mb,
               v.data_limit_gb,
               v.is_uncapped,
-              p.tier_name AS package_tier
-       FROM users u
-       LEFT JOIN wispr_profiles wp ON wp.user_id = u.id
-       LEFT JOIN vouchers v        ON UPPER(v.code) = UPPER(u.voucher_code)
-       LEFT JOIN packages p        ON p.tier_name  = v.package_tier
-       WHERE u.session_expires_at > NOW()
-         AND ($1::text IS NULL OR UPPER(u.voucher_code) = UPPER($1))
+              v.expires_at,
+              v.activated_at,
+              v.duration_min,
+              v.used_count,
+              v.max_uses,
+              (SELECT count(*)::int FROM voucher_devices d
+                WHERE d.voucher_id = v.id AND d.is_active) AS bound_devices
+       FROM vouchers v
+       WHERE v.deleted_at IS NULL
+         AND v.is_disabled IS NOT TRUE
+         AND (v.expires_at IS NULL OR v.expires_at > NOW())
+         -- Only redeemed vouchers have a balance worth showing; an unsold
+         -- code is not a customer's session.
+         AND v.activated_at IS NOT NULL
          AND (
-           $2::text IS NULL
-           OR ${MAC_SQL('u.mac_address')} = $2
-           OR EXISTS (
-             SELECT 1 FROM wispr_profiles w2
-             WHERE w2.user_id = u.id AND ${MAC_SQL('w2.mac_address')} = $2
+           $1::text IS NULL OR UPPER(v.code) = UPPER($1)
+           OR (
+             $3::text IS NOT NULL AND EXISTS (
+               SELECT 1 FROM users u
+               WHERE u.session_token = $3
+                 AND UPPER(u.voucher_code) = UPPER(v.code)
+             )
            )
          )
          AND (
-           $3::text IS NULL OR u.session_token = $3
+           $2::text IS NULL
+           OR EXISTS (
+             SELECT 1 FROM voucher_devices d
+             WHERE d.voucher_id = v.id
+               AND ${MAC_SQL('d.mac_norm')} = $2
+           )
+           OR EXISTS (
+             SELECT 1 FROM users u
+             WHERE UPPER(u.voucher_code) = UPPER(v.code)
+               AND ${MAC_SQL('u.mac_address')} = $2
+           )
          )
-       ORDER BY u.session_expires_at DESC
+       ORDER BY v.activated_at DESC
        LIMIT 1`,
       [voucher || null, mac, token || null]
     );
 
-    // Same generic response for "no such voucher", "wrong MAC" and "session
-    // expired" — do not reveal which check failed.
+    // Same generic response for "no such voucher", "unredeemed", "wrong MAC"
+    // and "expired" — do not reveal which check failed.
     if (rows.length === 0) {
       res.status(404).json({ error: 'not_found' });
       return;
@@ -119,47 +144,55 @@ usageRouter.get('/', usageLimiter, async (req: Request, res: Response) => {
 
     const row = rows[0];
 
-    const usedBytes: number | null =
-      row.data_used_bytes != null ? parseInt(row.data_used_bytes, 10) : null;
-
-    // Quota can be stored either as an explicit byte count on the WISPr
-    // profile or only as a GB figure on the voucher — derive whichever exists.
-    let totalBytes: number | null =
-      row.data_quota_bytes != null ? parseInt(row.data_quota_bytes, 10) : null;
-    if (totalBytes == null && row.data_limit_gb != null) {
-      totalBytes = Math.round(parseFloat(row.data_limit_gb) * GB);
-    }
-
     const isUncapped = row.is_uncapped === true;
+
+    // data_consumed_mb is NUMERIC megabytes written by the Ruijie accounting
+    // reconciliation (ruijieService). It is NULL until that sync has run at
+    // least once, in which case usage is genuinely unknown and reported as
+    // such rather than fabricated.
+    const usedMB: number | null =
+      row.data_consumed_mb != null ? parseFloat(row.data_consumed_mb) : null;
+    const usedBytes = usedMB != null ? usedMB * MB : null;
+
+    let totalMB: number | null =
+      row.data_limit_gb != null ? parseFloat(row.data_limit_gb) * 1024 : null;
+    const totalBytes = totalMB != null ? totalMB * MB : null;
 
     // Uncapped bundles report an unlimited total; a capped bundle with no
     // known quota is reported as unknown rather than fabricated.
-    const effectiveTotal = isUncapped ? null : totalBytes;
-    const remainingBytes =
-      usedBytes != null && effectiveTotal != null
-        ? Math.max(effectiveTotal - usedBytes, 0)
+    const effectiveTotalMB = isUncapped ? null : totalMB;
+    const effectiveTotalBytes = isUncapped ? null : totalBytes;
+
+    const remainingMB =
+      usedMB != null && effectiveTotalMB != null
+        ? Math.max(effectiveTotalMB - usedMB, 0)
         : null;
 
     const percentUsed =
-      usedBytes != null && effectiveTotal != null && effectiveTotal > 0
-        ? Math.min((usedBytes / effectiveTotal) * 100, 100)
+      usedMB != null && effectiveTotalMB != null && effectiveTotalMB > 0
+        ? Math.min((usedMB / effectiveTotalMB) * 100, 100)
         : null;
-
-    const toMB = (b: number | null) => (b == null ? null : b / 1048576);
 
     res.json({
       active: true,
-      voucherCode: row.voucher_code,
+      voucherCode: row.code,
       packageTier: row.package_tier,
       bytesUsed: usedBytes,
-      bytesTotal: effectiveTotal,
-      usedMB: toMB(usedBytes),
-      remainingMB: toMB(remainingBytes),
-      totalMB: toMB(effectiveTotal),
+      bytesTotal: effectiveTotalBytes,
+      usedMB,
+      remainingMB,
+      totalMB: effectiveTotalMB,
       percentUsed: percentUsed != null ? Math.round(percentUsed * 10) / 10 : null,
       isUncapped,
       dataLimitGb: row.data_limit_gb,
-      expiresAt: row.session_expires_at,
+      boundDevices: row.bound_devices,
+      durationMin: row.duration_min,
+      usedCount: row.used_count,
+      maxUses: row.max_uses,
+      // Session expiry is the voucher's own expiry, not the (never-written)
+      // users.session_expires_at.
+      expiresAt: row.expires_at,
+      activatedAt: row.activated_at,
     });
   } catch (err) {
     console.error('check-usage error:', err);
