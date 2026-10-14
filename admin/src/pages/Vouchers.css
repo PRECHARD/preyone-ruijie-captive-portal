@@ -1109,3 +1109,129 @@
   gap: 6px;
   flex-wrap: wrap;
 }
+
+/* ── Live voucher list ─────────────────────────────────────────────────────
+   The list re-syncs every 10s, so every state that can change without anyone
+   touching this screen — redemption, a bound handset, an expiry passing — has
+   to read as current at a glance. */
+.live-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 0.68rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.live-pill__label {
+  color: var(--green);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.live-pill__time {
+  color: var(--text-muted);
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+
+/* Shared heartbeat: live pill, "In use" badge, bound-device chip. */
+.live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--green);
+  flex: none;
+  animation: livePulse 1.8s ease-out infinite;
+}
+
+@keyframes livePulse {
+  0%   { box-shadow: 0 0 0 0 rgba(0, 230, 118, 0.55); }
+  70%  { box-shadow: 0 0 0 7px rgba(0, 230, 118, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(0, 230, 118, 0); }
+}
+
+/* Status tones beyond yes/no/warn: Unused and Expired should sit quietly in
+   the list instead of competing with a genuinely running voucher. */
+.badge--idle { background: rgba(120, 155, 210, 0.15); color: #9dbbdd; }
+.badge--muted { background: rgba(255, 255, 255, 0.05); color: var(--text-muted); }
+
+.badge--live {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(0, 230, 118, 0.12);
+  color: var(--green);
+  border: 1px solid rgba(0, 230, 118, 0.32);
+  box-shadow: none;
+}
+
+.cell-badges {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.vd-badges {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* Redemption counter: a bar makes "1/1 spent" obvious without reading digits. */
+.used-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.used-bar {
+  width: 46px;
+  height: 5px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+  flex: none;
+}
+
+.used-bar__fill {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: linear-gradient(90deg, var(--un-cyan, #00f0ff), var(--green));
+  transition: width 0.4s ease;
+}
+
+.used-cell__n {
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+
+/* Device slots: green and pulsing the moment a handset is actually bound. */
+.dev-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.dev-chip--live {
+  background: rgba(0, 230, 118, 0.13);
+  color: var(--green);
+}
+
+.dev-chip--idle {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-muted);
+}

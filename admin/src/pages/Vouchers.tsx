@@ -115,6 +115,15 @@ function fmtDate(d: string): string {
 
 const PAYMENT_METHODS = ['Cash', 'EcoCash', 'OneMoney', 'Omari', 'InnBucks'];
 const IS_MOBILE_MONEY = (m: string) => m !== 'Cash';
+
+// One mapping for every status badge so the list and the detail sheet can
+// never disagree. Only a live or a disabled code earns colour; `Expired` and
+// anything unexpected fall through to a quiet grey.
+const statusTone = (status?: string | null) =>
+  status === 'Active' ? 'yes'
+    : status === 'Disabled' ? 'no'
+    : status === 'Unused' ? 'idle'
+    : 'muted';
 const lc = (s?: string) => (s || '').toLowerCase();
 
 export default function Vouchers() {
@@ -176,6 +185,9 @@ export default function Vouchers() {
   const [renewPackageTier, setRenewPackageTier] = useState('');
   const [renewSaving, setRenewSaving] = useState(false);
   const [renewError, setRenewError] = useState('');
+  // Stamp of the last successful list sync, surfaced as the "Live" pill so an
+  // operator can tell at a glance whether what they are reading is current.
+  const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
 
   const [toggleBusy, setToggleBusy] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Voucher | null>(null);
@@ -211,7 +223,6 @@ export default function Vouchers() {
 
   useEffect(() => {
     api.get<Package[]>('/packages').then(setPackages).catch(() => {});
-    api.get<{ vouchers: Voucher[] }>('/vouchers').then(data => setVouchers(data.vouchers)).catch(() => {});
     if (isMgmt) {
       api.get<ApprovalRequest[]>('/vouchers/pending-approvals').then(setPendingApprovals).catch(() => {});
     }
@@ -223,6 +234,43 @@ export default function Vouchers() {
       }
     }).catch(() => {});
   }, [isMgmt]);
+
+  // The list is the operator's live view of the network: a client redeems, a
+  // handset binds, an expiry passes — none of that waits for someone to refresh
+  // this screen. So it re-reads itself:
+  //   1. Every page is walked. The endpoint defaults to 25 rows and this UI has
+  //      no pager, so a single call silently hid everything older than the
+  //      newest page — which is why already-bound codes looked like they had
+  //      vanished from the list.
+  //   2. On an interval, merging into any open detail sheet so the drawer never
+  //      contradicts the row behind it.
+  useEffect(() => {
+    let cancelled = false;
+
+    const sync = async () => {
+      try {
+        const all: Voucher[] = [];
+        // 200 is the server's cap; loop until a short page ends the walk.
+        for (let page = 1; page <= 20; page++) {
+          const data = await api.get<{ vouchers: Voucher[] }>(`/vouchers?pageSize=200&page=${page}`);
+          const rows = data?.vouchers ?? [];
+          all.push(...rows);
+          if (rows.length < 200) break;
+        }
+        if (cancelled) return;
+        setVouchers(all);
+        setLastSyncedAt(new Date());
+        setDetailVoucher(prev => (prev ? all.find(r => r.id === prev.id) ?? prev : prev));
+      } catch {
+        // A dropped request keeps the last good snapshot on screen rather than
+        // blanking a list the operator is part-way through reading.
+      }
+    };
+
+    sync();
+    const interval = setInterval(sync, 10000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, []);
 
   // Poll myApprovals to detect newly-approved items and show card/bulk results
   useEffect(() => {
@@ -1464,26 +1512,62 @@ const codes = a.voucher_data?.codes;
       )}
 
       {/* Voucher List */}
-      <div className="section-head" style={{ marginTop: '2rem' }}>
-        <h2 className="section-head-title">Voucher List</h2>
+      <div className="section-head" style={{ marginTop: '2rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem' }}>
+        <h2 className="section-head-title" style={{ margin: 0 }}>Voucher List</h2>
+        <span
+          className="live-pill"
+          title="Re-reads every 10 seconds, so redemptions, bound devices and statuses stay current without a manual reload."
+        >
+          <span className="live-dot" />
+          <span className="live-pill__label">Live</span>
+          <span className="live-pill__time">{lastSyncedAt ? `synced ${lastSyncedAt.toLocaleTimeString()}` : 'syncing…'}</span>
+        </span>
       </div>
       <div className="card card-table">
         {vouchers.length === 0 ? (
           <div className="table-empty"><p>No vouchers created yet.</p></div>
         ) : (
           <table className="data-table">
-            <thead><tr><th>Code</th><th>Price</th><th>Duration</th><th>Bandwidth</th><th>Data</th><th>Max Uses</th><th>Used</th><th>Devices</th><th>Package</th><th>Created</th><th>Actions</th></tr></thead>
+            <thead><tr><th>Code</th><th>Status</th><th>Price</th><th>Duration</th><th>Bandwidth</th><th>Data</th><th>Max Uses</th><th>Used</th><th>Devices</th><th>Package</th><th>Created</th><th>Actions</th></tr></thead>
             <tbody>
-              {vouchers.map(v => (
+              {vouchers.map(v => {
+                const bound = (v.device_count ?? 0) > 0;
+                const uses = v.used_count || 0;
+                const maxUses = Math.max(1, v.max_uses || 1);
+                const usedPct = Math.min(100, Math.round((uses / maxUses) * 100));
+                return (
                 <tr key={v.id}>
                   <td><span className="code-cell" onClick={() => copyCode(lc(v.code))} title="Click to copy">{lc(v.code)}</span></td>
+                  <td>
+                    <span className="cell-badges">
+                      <span className={`badge badge--${statusTone(v.status)}`}>{v.status || 'Unknown'}</span>
+                      {bound && (
+                        <span className="badge badge--live" title="Bound to at least one device right now">
+                          <span className="live-dot" />In use
+                        </span>
+                      )}
+                    </span>
+                  </td>
                   <td><span className="money money--sm">{v.price_amount ? '$' + parseFloat(v.price_amount).toFixed(2) : '—'}</span></td>
                   <td>{fmtDur(v.duration_min)}</td>
                   <td>{v.bandwidth_mbps_up}/{v.bandwidth_mbps_down} Mbps</td>
                   <td>{v.is_uncapped ? 'Unlimited' : (v.data_limit_gb ?? 'Unlimited') + ' GB'}</td>
                   <td>{v.max_uses}</td>
-                  <td>{v.used_count}/{v.max_uses}</td>
-                  <td>{v.device_count ?? 0}/{v.max_devices ?? '—'}</td>
+                  <td>
+                    <span className="used-cell">
+                      <span className="used-bar"><span className="used-bar__fill" style={{ width: `${usedPct}%` }} /></span>
+                      <span className="used-cell__n">{uses}/{v.max_uses}</span>
+                    </span>
+                  </td>
+                  <td>
+                    <span
+                      className={`dev-chip ${bound ? 'dev-chip--live' : 'dev-chip--idle'}`}
+                      title={`${v.device_count ?? 0} of ${v.max_devices ?? '—'} device slots in use`}
+                    >
+                      {bound && <span className="live-dot" />}
+                      {v.device_count ?? 0}/{v.max_devices ?? '—'}
+                    </span>
+                  </td>
                   <td>{v.package_tier || <span className="muted">—</span>}</td>
                   <td>{fmtDate(v.created_at)}</td>
                   <td>
@@ -1510,7 +1594,8 @@ const codes = a.voucher_data?.codes;
                     </div>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         )}
@@ -1615,7 +1700,6 @@ const codes = a.voucher_data?.codes;
 
       {detailVoucher && (() => {
         const v = detailVoucher;
-        const statusTone = v.status === 'Active' ? 'yes' : v.status === 'Unused' ? 'warn' : 'no';
         const macs = Array.isArray(v.bound_macs) ? v.bound_macs : [];
         const gb = (b?: number | null) => (b == null ? null : (b / (1024 ** 3)).toFixed(2) + ' GB');
         const trafficUsed = gb(v.traffic_used_bytes);
@@ -1652,7 +1736,12 @@ const codes = a.voucher_data?.codes;
             <div className="voucher-detail">
               <div className="vd-head">
                 <div className="vd-code" onClick={() => copyCode(lc(v.code))} title="Click to copy">{lc(v.code)}</div>
-                <span className={`badge badge--${statusTone}`}>{v.status || 'Unknown'}</span>
+                <span className="vd-badges">
+                  <span className={`badge badge--${statusTone(v.status)}`}>{v.status || 'Unknown'}</span>
+                  {(v.device_count ?? 0) > 0 && (
+                    <span className="badge badge--live"><span className="live-dot" />In use</span>
+                  )}
+                </span>
               </div>
 
               <div className="vd-grid">

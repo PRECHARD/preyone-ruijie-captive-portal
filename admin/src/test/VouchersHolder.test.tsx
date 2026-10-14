@@ -1,6 +1,20 @@
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest';
 
+// Swappable payload for the paginated list endpoint: a test installs its own
+// rows (bound, active, disabled) and beforeEach clears it back to `defaultRow`.
+const listState = vi.hoisted(() => ({
+  rows: null as unknown[] | null,
+  defaultRow: {
+    id: 'v-1', code: 'prec-oldcode', price_amount: '5.00', duration_min: 60,
+    bandwidth_mbps_up: 2, bandwidth_mbps_down: 5, data_limit_gb: null,
+    is_uncapped: false, max_uses: 1, used_count: 0,
+    expires_at: '2027-01-01T00:00:00.000Z', created_at: '2026-10-01T00:00:00.000Z',
+    package_tier: 'PreCore', holder_name: 'Old Holder', holder_phone: '+263771111111',
+    device_count: 0, max_devices: 2, status: 'Unused',
+  },
+}));
+
 vi.mock('../api/client', () => {
   const pkg = {
     tier_name: 'PreCore', display_name: 'PreCore', price_amount: '5.00',
@@ -14,19 +28,14 @@ vi.mock('../api/client', () => {
     billing_period: 'once', duration_min: 1440, bandwidth_mbps_up: 10,
     bandwidth_mbps_down: 20, data_limit_gb: 20, is_uncapped: false,
   };
-  const voucher = {
-    id: 'v-1', code: 'prec-oldcode', price_amount: '5.00', duration_min: 60,
-    bandwidth_mbps_up: 2, bandwidth_mbps_down: 5, data_limit_gb: null,
-    is_uncapped: false, max_uses: 1, used_count: 0,
-    expires_at: '2027-01-01T00:00:00.000Z', created_at: '2026-10-01T00:00:00.000Z',
-    package_tier: 'PreCore', holder_name: 'Old Holder', holder_phone: '+263771111111',
-    device_count: 0, max_devices: 2, status: 'Unused',
-  };
+  const voucher = listState.defaultRow;
   return {
     api: {
       get: vi.fn((path: string) => {
         if (path === '/packages') return Promise.resolve([pkg, pkgMax]);
-        if (path === '/vouchers') return Promise.resolve({ vouchers: [voucher] });
+        // The live list walks pages (`/vouchers?pageSize=200&page=N`), so match
+        // on the query string rather than the bare path.
+        if (path.startsWith('/vouchers?')) return Promise.resolve({ vouchers: listState.rows ?? [voucher] });
         if (path === '/clock-status') return Promise.resolve({ clockedIn: true });
         if (path.includes('approvals')) return Promise.resolve([]);
         return Promise.resolve(null);
@@ -66,6 +75,10 @@ beforeAll(() => {
   HTMLCanvasElement.prototype.getContext = function () { return ctx; } as any;
   HTMLCanvasElement.prototype.toDataURL = () => 'data:image/png;base64,';
 });
+
+// Runs before every describe-level beforeEach, so each test starts from the
+// default single-voucher list unless it installs its own rows.
+beforeEach(() => { listState.rows = null; });
 
 describe('Vouchers holder capture (>= $4.99 gate + Edit Holder)', () => {
   beforeEach(() => {
@@ -270,5 +283,43 @@ describe('Renew / Resell package switch', () => {
         priceAmount: 5,
       }))
     );
+  });
+});
+
+describe('Voucher list liveness', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    authState.role = 'Manager';
+    authState.permissions = [];
+  });
+
+  const rowOf = async (code: string) =>
+    (await screen.findByRole('button', { name: `View details for voucher ${code}` })).closest('tr') as HTMLElement;
+
+  it('walks every page so older codes are never hidden behind the 25-row default', async () => {
+    render(<Vouchers />);
+    await rowOf('prec-oldcode');
+
+    expect(api.get).toHaveBeenCalledWith('/vouchers?pageSize=200&page=1');
+    // One short page ends the walk — no pointless second request.
+    expect(api.get).not.toHaveBeenCalledWith('/vouchers?pageSize=200&page=2');
+  });
+
+  it('flags a bound voucher with a status badge and a live In use chip', async () => {
+    listState.rows = [
+      { ...listState.defaultRow, id: 'v-live', code: 'live-code', status: 'Active', device_count: 2 },
+      { ...listState.defaultRow, id: 'v-off', code: 'off-code', status: 'Disabled', is_disabled: true, device_count: 0 },
+    ];
+    render(<Vouchers />);
+
+    const live = await rowOf('live-code');
+    expect(within(live).getByText('Active')).toHaveClass('badge--yes');
+    expect(within(live).getByText('In use')).toHaveClass('badge--live');
+    expect(within(live).getByText('2/2')).toHaveClass('dev-chip', 'dev-chip--live');
+
+    const off = await rowOf('off-code');
+    expect(within(off).getByText('Disabled')).toHaveClass('badge--no');
+    expect(within(off).queryByText('In use')).toBeNull();
+    expect(within(off).getByText('0/2')).toHaveClass('dev-chip--idle');
   });
 });
