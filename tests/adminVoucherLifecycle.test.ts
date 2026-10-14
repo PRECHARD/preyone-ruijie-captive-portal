@@ -426,6 +426,141 @@ describe('DELETE /api/admin/vouchers/:id', () => {
   });
 });
 
+describe('POST /api/admin/vouchers/:id/renew', () => {
+  const RENEW_ROW = { ...VOUCHER_ROW, price_amount: '4.99', duration_min: 720, expires_at: null };
+
+  /** Drives the renew transaction: BEGIN → UPDATE vouchers → INSERT sales → COMMIT. */
+  function seedTransaction() {
+    mockPoolQuery.mockResolvedValueOnce({ rows: [RENEW_ROW] });
+    mockClientQuery.mockImplementation((sql: string) => {
+      const s = String(sql);
+      if (s === 'BEGIN' || s === 'COMMIT') return Promise.resolve({ rows: [], rowCount: 0 });
+      if (s.includes('INSERT INTO sales')) {
+        return Promise.resolve({
+          rows: [{ id: 'sale-1', amount: 4.99, currency: 'USD', sale_type: 'renewal', sold_at: '2026-10-14T00:00:00Z' }],
+          rowCount: 1,
+        });
+      }
+      if (s.includes('UPDATE vouchers')) {
+        return Promise.resolve({
+          rows: [{ id: 'v-1', code: 'ABC123', expires_at: '2026-11-14', used_count: 0, max_uses: 1, price_amount: '4.99', duration_min: 720, is_disabled: false }],
+          rowCount: 1,
+        });
+      }
+      return Promise.resolve({ rows: [], rowCount: 0 });
+    });
+  }
+
+  const saleInsert = () =>
+    mockClientQuery.mock.calls.map(c => String(c[0])).find(s => s.includes('INSERT INTO sales')) ?? '';
+  const voucherUpdate = () =>
+    mockClientQuery.mock.calls.map(c => String(c[0])).find(s => s.includes('UPDATE vouchers')) ?? '';
+
+  it('re-arms the code AND books the resale so the revenue cannot slip', async () => {
+    mockAuth({ id: 'ceo-1', role: 'CEO', fullName: 'Boss' });
+    seedTransaction();
+
+    const res = await request(createApp())
+      .post('/api/admin/vouchers/v-1/renew')
+      .send({ durationMin: 720, priceAmount: 4.99, paymentMethod: 'EcoCash' });
+
+    expect(res.status).toBe(201);
+    expect(res.body.renewed).toBe(true);
+    expect(res.body.sale.sale_type).toBe('renewal');
+
+    // The resale lands in `sales`, which every revenue report reads from.
+    expect(saleInsert()).toContain('INSERT INTO sales');
+    expect(saleInsert()).toContain("'renewal'");
+    // amount is $5 of the INSERT's parameter list.
+    expect(paramsOf(mockClientQuery.mock.calls.find(c => String(c[0]).includes('INSERT INTO sales'))!)[4]).toBe(4.99);
+  });
+
+  it('clears used_count and expiry so a spent/expired PIN is redeemable again', async () => {
+    mockAuth({ id: 'ceo-1', role: 'CEO', fullName: 'Boss' });
+    seedTransaction();
+
+    await request(createApp()).post('/api/admin/vouchers/v-1/renew').send({ priceAmount: 4.99 });
+
+    const sql = voucherUpdate();
+    expect(sql).toMatch(/used_count\s*=\s*0/);
+    expect(sql).toContain('is_disabled    = FALSE');
+    // Renewing early must add on top of the current expiry, never clobber it.
+    expect(sql).toContain('GREATEST(NOW(), COALESCE(expires_at, NOW()))');
+    expect(sql).toContain('$1::text');
+    // No durationMin in the body → falls back to the voucher's own duration_min.
+    expect(paramsOf(mockClientQuery.mock.calls.find(c => String(c[0]).includes('UPDATE vouchers'))!)[0]).toBe(720);
+  });
+
+  it('resets the data quota by default and leaves it alone when told not to', async () => {
+    mockAuth({ id: 'ceo-1', role: 'CEO', fullName: 'Boss' });
+    seedTransaction();
+    await request(createApp()).post('/api/admin/vouchers/v-1/renew').send({ priceAmount: 4.99 });
+    const withReset = paramsOf(mockClientQuery.mock.calls.find(c => String(c[0]).includes('UPDATE vouchers'))!);
+    expect(withReset[1]).toBe(true);
+
+    vi.clearAllMocks();
+    mockPoolConnect.mockResolvedValue({ query: mockClientQuery, release: mockClientRelease });
+    seedTransaction();
+    await request(createApp())
+      .post('/api/admin/vouchers/v-1/renew')
+      .send({ priceAmount: 4.99, resetDataQuota: false });
+    const withoutReset = paramsOf(mockClientQuery.mock.calls.find(c => String(c[0]).includes('UPDATE vouchers'))!);
+    expect(withoutReset[1]).toBe(false);
+  });
+
+  it('refuses a non-positive amount so a renewal can never book nothing', async () => {
+    mockAuth({ id: 'ceo-1', role: 'CEO', fullName: 'Boss' });
+
+    for (const body of [{ priceAmount: 0 }, { priceAmount: -5 }, { priceAmount: 'abc' }]) {
+      mockPoolQuery.mockReset();
+      mockPoolQuery.mockResolvedValueOnce({ rows: [RENEW_ROW] });
+      const res = await request(createApp()).post('/api/admin/vouchers/v-1/renew').send(body);
+      expect(res.status).toBe(422);
+      // Rejected before BEGIN, so no voucher was touched and no sale booked.
+      expect(mockClientQuery).not.toHaveBeenCalled();
+    }
+  });
+
+  it('defaults the amount from the voucher so a renewal still books a sale', async () => {
+    mockAuth({ id: 'ceo-1', role: 'CEO', fullName: 'Boss' });
+    seedTransaction();
+
+    const res = await request(createApp()).post('/api/admin/vouchers/v-1/renew').send({});
+
+    expect(res.status).toBe(201);
+    expect(res.body.sale.sale_type).toBe('renewal');
+    const insert = mockClientQuery.mock.calls.find(c => String(c[0]).includes('INSERT INTO sales'))!;
+    expect(paramsOf(insert)[4]).toBe(4.99);
+  });
+
+  it('rejects a non-positive or absurd duration', async () => {
+    mockAuth({ id: 'ceo-1', role: 'CEO', fullName: 'Boss' });
+
+    for (const body of [{ durationMin: 0 }, { durationMin: -5 }, { durationMin: 'abc' }, { durationMin: 9999999 }]) {
+      mockPoolQuery.mockReset();
+      mockPoolQuery.mockResolvedValueOnce({ rows: [RENEW_ROW] });
+      const res = await request(createApp())
+        .post('/api/admin/vouchers/v-1/renew')
+        .send({ ...body, priceAmount: 4.99 });
+      expect(res.status).toBe(422);
+      expect(mockClientQuery).not.toHaveBeenCalled();
+    }
+  });
+
+  it('404s for an unknown voucher and scopes Staff to their own sales', async () => {
+    mockAuth({ id: 'ceo-1', role: 'CEO', fullName: 'Boss' });
+    mockPoolQuery.mockResolvedValueOnce({ rows: [] });
+    expect((await request(createApp()).post('/api/admin/vouchers/nope/renew').send({ priceAmount: 1 })).status).toBe(404);
+
+    mockAuth({ id: 'staff-9', role: 'Staff', fullName: 'Staff Jane' });
+    mockPoolQuery.mockClear();
+    mockPoolQuery.mockResolvedValueOnce({ rows: [] });
+    const res = await request(createApp()).post('/api/admin/vouchers/v-1/renew').send({ priceAmount: 1 });
+    expect(res.status).toBe(404);
+    expect(sqlOf(mockPoolQuery.mock.calls[0])).toContain('v.sold_by = $2');
+  });
+});
+
 /**
  * Regression guard: the prompts these routes came from asked for a stored
  * `status` column and a `/wispr/login` callback. Both would be regressions —

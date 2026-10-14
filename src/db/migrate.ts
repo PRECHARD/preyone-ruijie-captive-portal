@@ -294,6 +294,12 @@ const SQL = `
   CREATE INDEX IF NOT EXISTS idx_sales_sold_by ON sales (sold_by);
   CREATE INDEX IF NOT EXISTS idx_sales_sold_at ON sales (sold_at);
 
+  -- Renewals/resales: re-arming an expired voucher books a SECOND row here, so
+  -- the revenue never falls out of the numbers (every report reads FROM sales).
+  -- sale_type only labels the row for reporting — it changes no aggregation.
+  ALTER TABLE sales ADD COLUMN IF NOT EXISTS sale_type TEXT NOT NULL DEFAULT 'new';
+  CREATE INDEX IF NOT EXISTS idx_sales_sale_type ON sales (sale_type);
+
   CREATE TABLE IF NOT EXISTS staff_time_logs (
     id            BIGSERIAL PRIMARY KEY,
     admin_user_id UUID NOT NULL REFERENCES admin_users(id) ON DELETE CASCADE,

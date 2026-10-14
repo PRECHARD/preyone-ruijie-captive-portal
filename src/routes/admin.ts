@@ -373,7 +373,8 @@ async function loadScopedVoucher(
   voucherId: string
 ): Promise<any | null> {
   const params: any[] = [voucherId];
-  let sql = `SELECT id, code, package_tier, expires_at, is_disabled, deleted_at, used_count, max_uses
+  let sql = `SELECT id, code, package_tier, expires_at, is_disabled, deleted_at, used_count, max_uses,
+                    price_amount, duration_min
              FROM vouchers v WHERE v.id = $1 AND v.deleted_at IS NULL`;
   if (role === 'Staff') {
     params.push(adminUserId);
@@ -499,6 +500,110 @@ adminRouter.post('/vouchers/:id/extend', requirePermission(PERMISSIONS.COMPANY_A
       `Extended voucher ${voucher.code} by ${minutes} min${extendSessions ? ` (+${sessionsTouched} live sessions)` : ''}`
     );
     res.json({ ...rows[0], sessions_extended: sessionsTouched });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    throw err;
+  } finally {
+    client.release();
+  }
+});
+
+// ── Renew / Resell ───────────────────────────────────────────────────────────
+//
+// Re-arms an EXPIRED (or spent) voucher for another paid period under the SAME
+// PIN, so the client keeps their code and no new voucher has to be minted.
+//
+// Two invariants this must hold:
+//   1. The code has to become redeemable again. auth.ts signup rejects when
+//      `used_count >= max_uses` or `expires_at < now`, so both are reset here
+//      and is_disabled is cleared (a disabled code is still Disabled in the
+//      voucher_status view). Device bindings are deliberately LEFT ALONE: the
+//      same phone keeps its slot and "Release all bindings" stays available
+//      for a client who swapped handsets.
+//   2. The revenue must not slip. Every revenue report reads `FROM sales`, so
+//      each renewal INSERTs its own row tagged sale_type='renewal' — counted
+//      exactly like a first sale, but still separable in reporting.
+//
+// Expires from the CURRENT expiry when it is still in the future, so renewing
+// early adds time instead of overwriting what the client already paid for.
+adminRouter.post('/vouchers/:id/renew', requirePermission(PERMISSIONS.COMPANY_ADMIN), async (req: Request, res: Response) => {
+  const voucher = await loadScopedVoucher(req.adminUser!.id, req.adminUser!.role, req.params.id);
+  if (!voucher) { res.status(404).json({ error: 'Voucher not found' }); return; }
+
+  // A renewal books money, so it follows the same clock-in rule as a new sale.
+  if (req.adminUser!.role !== 'CEO') {
+    const clockedIn = await requireClockedIn(req.adminUser!.id);
+    if (!clockedIn) { res.status(403).json({ error: 'You must clock in before selling vouchers.' }); return; }
+  }
+
+  const body = (req.body ?? {}) as Record<string, unknown>;
+
+  const durationRaw = body.durationMin === undefined || body.durationMin === null || body.durationMin === ''
+    ? voucher.duration_min ?? 60
+    : parseInt(String(body.durationMin), 10);
+  if (!Number.isFinite(durationRaw) || durationRaw <= 0) {
+    res.status(422).json({ error: 'durationMin must be a positive integer' }); return;
+  }
+  if (durationRaw > 60 * 24 * 365) {
+    res.status(422).json({ error: 'durationMin cannot exceed 525600 (1 year)' }); return;
+  }
+
+  const priceRaw = body.priceAmount === undefined || body.priceAmount === null || body.priceAmount === ''
+    ? (voucher.price_amount == null ? null : Number(voucher.price_amount))
+    : Number(body.priceAmount);
+  // Non-positive revenue would be a freebie, not a resale — those belong on
+  // /vouchers/:id/extend, which books nothing. Rejecting here guarantees every
+  // renewal lands in `sales` and the reported figure can never drift.
+  if (priceRaw == null || !Number.isFinite(priceRaw) || priceRaw <= 0) {
+    res.status(422).json({ error: 'priceAmount must be greater than 0 — this is a paid resale' }); return;
+  }
+  const priceAmount = Math.round(priceRaw * 100) / 100;
+
+  const resetDataQuota = body.resetDataQuota !== false;
+  const saleMethod = typeof body.paymentMethod === 'string' && body.paymentMethod.trim() ? body.paymentMethod.trim() : 'Cash';
+  const saleReference = typeof body.paymentReference === 'string' && body.paymentReference.trim() ? body.paymentReference.trim() : null;
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const { rows } = await client.query(
+      `UPDATE vouchers
+          SET expires_at     = GREATEST(NOW(), COALESCE(expires_at, NOW())) + ($1::text || ' minutes')::interval,
+              used_count     = 0,
+              is_disabled    = FALSE,
+              data_consumed_mb = CASE WHEN $2::boolean THEN 0 ELSE data_consumed_mb END
+        WHERE id = $3
+        RETURNING id, code, expires_at, used_count, max_uses, price_amount, duration_min, is_disabled`,
+      [durationRaw, resetDataQuota, voucher.id]
+    );
+
+    const { rows: saleRows } = await client.query(
+      `INSERT INTO sales (voucher_id, voucher_code, sold_by, sold_by_name, amount, currency, payment_method, payment_reference, sale_type)
+       VALUES ($1, $2, $3, $4, $5, 'USD', $6, $7, 'renewal')
+       RETURNING id, amount, currency, sale_type, sold_at`,
+      [voucher.id, voucher.code, req.adminUser!.id, req.adminUser!.fullName, priceAmount, saleMethod, saleReference]
+    );
+
+    await client.query('COMMIT');
+
+    await recordAuditLog(
+      req.adminUser!.id,
+      req.adminUser!.fullName,
+      'voucher_renew',
+      'voucher',
+      voucher.id,
+      `Renewed voucher ${voucher.code} +${durationRaw} min for $${priceAmount.toFixed(2)} (${saleMethod})` +
+        `${resetDataQuota ? ' · data quota reset' : ' · data quota carried over'}`
+    );
+
+    res.status(201).json({
+      ...rows[0],
+      sale: saleRows[0],
+      renewed: true,
+      data_quota_reset: resetDataQuota,
+      message: `${voucher.code} renewed — expires ${rows[0].expires_at}`
+    });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => undefined);
     throw err;

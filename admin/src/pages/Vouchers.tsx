@@ -72,6 +72,9 @@ interface Package {
     // PATCH /vouchers/:id. Rendered on the voucher canvas when present.
     holder_name?: string | null;
     holder_phone?: string | null;
+    // Returned by the list query (admin.ts SELECT) and /vouchers/:id/renew.
+    is_disabled?: boolean;
+    deleted_at?: string | null;
   }
 
 interface ApprovalRequest {
@@ -150,6 +153,24 @@ export default function Vouchers() {
   const [expandedApproval, setExpandedApproval] = useState<string | null>(null);
   const [detailVoucher, setDetailVoucher] = useState<Voucher | null>(null);
   const [releasingMac, setReleasingMac] = useState(false);
+
+  // ── Renew / Resell ──
+  // Re-arms an expired or spent voucher under the same PIN. The backend books a
+  // sale_type='renewal' row on every call, so the revenue always lands in the
+  // reports — the price field therefore defaults from the voucher but is never
+  // blanked out to a zero.
+  const [renewTarget, setRenewTarget] = useState<Voucher | null>(null);
+  const [renewDuration, setRenewDuration] = useState(60);
+  const [renewPrice, setRenewPrice] = useState('');
+  const [renewPayMethod, setRenewPayMethod] = useState('Cash');
+  const [renewPayRef, setRenewPayRef] = useState('');
+  const [renewResetQuota, setRenewResetQuota] = useState(true);
+  const [renewSaving, setRenewSaving] = useState(false);
+  const [renewError, setRenewError] = useState('');
+
+  const [toggleBusy, setToggleBusy] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<Voucher | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
 
   // ── High-stakes (>= $4.99) customer capture + inline holder editing ──
   // The modal intercepts generation so no >=$4.99 voucher can be created
@@ -512,6 +533,96 @@ const codes = a.voucher_data?.codes;
       showToast({ title: 'Could not release bindings', message: err.message || 'Please try again.', type: 'error' });
     } finally {
       setReleasingMac(false);
+    }
+  };
+
+  const refreshVouchers = () => {
+    api.get<{ vouchers: Voucher[] }>('/vouchers').then(d => setVouchers(d.vouchers)).catch(() => {});
+  };
+
+  // Seeds the renew modal. Duration comes from the voucher's own package so a
+  // renewal buys exactly what the client bought the first time; price is
+  // pre-filled but editable, since a renewal is a real cash transaction.
+  const openRenew = (v: Voucher) => {
+    setRenewTarget(v);
+    setRenewDuration(v.duration_min || 60);
+    setRenewPrice(v.price_amount ? parseFloat(v.price_amount).toFixed(2) : '');
+    setRenewPayMethod('Cash');
+    setRenewPayRef('');
+    setRenewResetQuota(true);
+    setRenewError('');
+  };
+
+  const submitRenew = async () => {
+    if (!renewTarget || renewSaving) return;
+    const price = parseFloat(renewPrice);
+    if (!Number.isFinite(price) || price <= 0) {
+      setRenewError('Enter the amount the client paid for this renewal.');
+      return;
+    }
+    setRenewSaving(true);
+    setRenewError('');
+    try {
+      const data = await api.post<any>(`/vouchers/${renewTarget.id}/renew`, {
+        durationMin: renewDuration,
+        priceAmount: price,
+        paymentMethod: renewPayMethod,
+        paymentReference: renewPayRef.trim() || undefined,
+        resetDataQuota: renewResetQuota,
+      });
+      showToast({
+        title: 'Voucher renewed',
+        message: data?.message || `${lc(renewTarget.code)} resold for $${price.toFixed(2)} — sale recorded`,
+        type: 'success',
+      });
+      setRenewTarget(null);
+      const id = renewTarget.id;
+      setVouchers(prev => prev.map(x => (x.id === id ? { ...x, ...data, sale: undefined } : x)));
+      setDetailVoucher(prev => (prev && prev.id === id ? { ...prev, ...data, sale: undefined } : prev));
+      refreshVouchers();
+    } catch (err: any) {
+      setRenewError(err.message || 'Could not renew this voucher.');
+    } finally {
+      setRenewSaving(false);
+    }
+  };
+
+  // Disabling is reversible (the endpoint takes {disabled:false} to re-enable),
+  // unlike Delete which soft-deletes and turns the code off in the same breath.
+  const toggleDisable = async (v: Voucher) => {
+    if (toggleBusy) return;
+    const next = !v.is_disabled;
+    setToggleBusy(true);
+    try {
+      await api.post(`/vouchers/${v.id}/disable`, { disabled: next });
+      showToast({
+        title: next ? 'Voucher disabled' : 'Voucher enabled',
+        message: `${lc(v.code)} is now ${next ? 'blocked from redemption' : 'redeemable again'}`,
+        type: next ? 'warning' : 'success',
+      });
+      setDetailVoucher(prev => (prev && prev.id === v.id ? { ...prev, is_disabled: next, status: next ? 'Disabled' : prev.status } : prev));
+      setVouchers(prev => prev.map(x => (x.id === v.id ? { ...x, is_disabled: next, status: next ? 'Disabled' : x.status } : x)));
+    } catch (err: any) {
+      showToast({ title: 'Could not update voucher', message: err.message || 'Please try again.', type: 'error' });
+    } finally {
+      setToggleBusy(false);
+    }
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteTarget || deleteBusy) return;
+    setDeleteBusy(true);
+    try {
+      const data = await api.del<any>(`/vouchers/${deleteTarget.id}`);
+      showToast({ title: 'Voucher deleted', message: data?.message || `${lc(deleteTarget.code)} removed`, type: 'warning' });
+      const id = deleteTarget.id;
+      setDeleteTarget(null);
+      setDetailVoucher(prev => (prev && prev.id === id ? null : prev));
+      setVouchers(prev => prev.filter(x => x.id !== id));
+    } catch (err: any) {
+      showToast({ title: 'Could not delete voucher', message: err.message || 'Please try again.', type: 'error' });
+    } finally {
+      setDeleteBusy(false);
     }
   };
 
@@ -1608,10 +1719,151 @@ const codes = a.voucher_data?.codes;
                   </button>
                 </div>
               </section>
+
+              <section className="vd-section">
+                <h4 className="vd-section-title">Manage</h4>
+                <p className="vd-count">
+                  Renew keeps this PIN, buys the client another period and books the payment as a new sale.
+                  Disable blocks redemption but keeps the voucher (and its history) intact.
+                </p>
+                <div className="vd-actions">
+                  <button className="btn-sm btn-approve" onClick={() => openRenew(v)}>
+                    Renew / Resell
+                  </button>
+                  <button
+                    className={`btn-sm ${v.is_disabled ? 'btn-approve' : 'btn-reject'}`}
+                    disabled={toggleBusy}
+                    onClick={() => toggleDisable(v)}
+                  >
+                    {toggleBusy ? '…' : v.is_disabled ? 'Enable' : 'Disable'}
+                  </button>
+                  <button className="btn-sm btn-danger" onClick={() => setDeleteTarget(v)}>
+                    Delete
+                  </button>
+                </div>
+              </section>
             </div>
           </Modal>
         );
       })()}
+
+      {/* ── Renew / Resell (POST /vouchers/:id/renew) ──
+          Same PIN, new period, and the payment is written to `sales` as
+          sale_type='renewal', so resale revenue counts towards every report. */}
+      {renewTarget && (
+        <Modal
+          open
+          onClose={() => { if (!renewSaving) setRenewTarget(null); }}
+          title={`Renew / Resell — ${lc(renewTarget.code)}`}
+        >
+          <div className="holder-capture">
+            <p className="holder-capture__lead">
+              Issues <strong>{lc(renewTarget.code)}</strong> for another period instead of minting a new PIN.
+              The client keeps their code, bound devices stay attached, and this payment is booked as a
+              <strong> new sale</strong>.
+            </p>
+
+            <label className="holder-capture__label" htmlFor="renew-duration">Additional duration (minutes)</label>
+            <input
+              id="renew-duration"
+              className="holder-capture__input"
+              type="number"
+              min={1}
+              max={525600}
+              value={renewDuration}
+              onChange={e => setRenewDuration(parseInt(e.target.value || '0', 10))}
+            />
+            <p className="renew-hint">{fmtDur(renewDuration)} of access{renewTarget.expires_at ? ` on top of ${fmtDate(renewTarget.expires_at)}` : ''}</p>
+
+            <label className="holder-capture__label" htmlFor="renew-price">Amount paid (USD) *</label>
+            <input
+              id="renew-price"
+              className="holder-capture__input"
+              type="number"
+              min="0.01"
+              step="0.5"
+              inputMode="decimal"
+              value={renewPrice}
+              onChange={e => setRenewPrice(e.target.value)}
+              placeholder="0.00"
+              autoFocus
+            />
+
+            <label className="holder-capture__label" htmlFor="renew-pay-method">Payment method</label>
+            <select
+              id="renew-pay-method"
+              className="holder-capture__input"
+              value={renewPayMethod}
+              onChange={e => { setRenewPayMethod(e.target.value); if (e.target.value === 'Cash') setRenewPayRef(''); }}
+            >
+              {PAYMENT_METHODS.map(m => <option key={m} value={m}>{m}</option>)}
+            </select>
+
+            {IS_MOBILE_MONEY(renewPayMethod) && (
+              <>
+                <label className="holder-capture__label" htmlFor="renew-pay-ref">Payment reference</label>
+                <input
+                  id="renew-pay-ref"
+                  className="holder-capture__input"
+                  value={renewPayRef}
+                  onChange={e => setRenewPayRef(e.target.value)}
+                  placeholder="Transaction / approval code"
+                  maxLength={64}
+                />
+              </>
+            )}
+
+            <label className="renew-check">
+              <input
+                type="checkbox"
+                checked={renewResetQuota}
+                onChange={e => setRenewResetQuota(e.target.checked)}
+              />
+              <span>Reset the data quota so the new period starts fresh</span>
+            </label>
+            <p className="renew-hint">Uncheck to carry the client's remaining data over. Redemption uses are always reset.</p>
+
+            {renewError && <p className="holder-capture__error" role="alert">{renewError}</p>}
+            <div className="holder-capture__actions">
+              <button className="btn-sm" onClick={() => setRenewTarget(null)} disabled={renewSaving}>Cancel</button>
+              <button className="btn-action btn-action--download" onClick={submitRenew} disabled={renewSaving}>
+                {renewSaving ? 'Recording…' : `Renew for $${(parseFloat(renewPrice) || 0).toFixed(2)}`}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* ── Delete (DELETE /vouchers/:id) — soft delete, reverses nothing ── */}
+      {deleteTarget && (
+        <Modal
+          open
+          onClose={() => { if (!deleteBusy) setDeleteTarget(null); }}
+          title={`Delete ${lc(deleteTarget.code)}?`}
+        >
+          <div className="holder-capture">
+            <p className="holder-capture__lead">
+              This <strong>soft-deletes</strong> <strong>{lc(deleteTarget.code)}</strong> and disables it so the code
+              can no longer be redeemed. Redemption and device history are kept, but the voucher will no longer appear
+              in your active lists.
+            </p>
+            <p className="holder-capture__lead">
+              Already received money for it? Use <strong>Renew / Resell</strong> instead — that re-arms the same PIN
+              and records the payment.
+            </p>
+            <div className="holder-capture__actions">
+              <button className="btn-sm" onClick={() => setDeleteTarget(null)} disabled={deleteBusy}>Keep voucher</button>
+              <button
+                className="btn-sm btn-danger"
+                onClick={confirmDelete}
+                disabled={deleteBusy}
+              >
+                {deleteBusy ? 'Deleting…' : 'Delete permanently'}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

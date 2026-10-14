@@ -1008,6 +1008,31 @@
   margin-top: 10px;
 }
 
+/* ── Renew / Resell modal ────────────────────────────────────────────────── */
+.renew-hint {
+  margin: -2px 0 12px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+
+.renew-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 14px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.renew-check input {
+  margin-top: 2px;
+  accent-color: var(--purple-glow);
+  cursor: pointer;
+}
+
 /* ── High-stakes holder capture modal (#0D0F18 glass + cyan) ────────────────
    Used by the >=$4.99 generation gate and the Edit Holder row action. */
 .holder-capture {
