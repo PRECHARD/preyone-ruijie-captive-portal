@@ -355,7 +355,9 @@ gatewayRouter.get('/report-ua', async (req: Request, res: Response) => {
 // ── Gateway health check ──
 // The EG105G-P sends this every ~2 minutes to verify the auth server is alive
 // GET /ping/?gw_sn=<serial>&gw_id=<mac>&dev_model=<model>&dev_softversion=<fw>&sys_uptime=<seconds>
-gatewayRouter.get('/ping', async (req: Request, res: Response) => {
+// Exported because the firmware actually calls it under /connectAuth/ping/ —
+// see connectAuthRouter at the bottom of this file.
+export async function handleGatewayPing(req: Request, res: Response): Promise<void> {
   const { gw_sn, gw_id, dev_model, dev_softversion, sys_uptime } = req.query;
 
   // Log gateway heartbeats for admin dashboard
@@ -376,7 +378,9 @@ gatewayRouter.get('/ping', async (req: Request, res: Response) => {
 
   res.set('Content-Type', 'text/plain');
   res.send('OK');
-});
+}
+
+gatewayRouter.get('/ping', handleGatewayPing);
 
 // ── Session verification (called by gateway via WISPr / redirect) ──
 // GET /auth?token=<session_token>   — verify by session token
@@ -429,3 +433,45 @@ gatewayRouter.get('/portal', (req: Request, res: Response) => {
   }
   res.redirect(`/?${queryString.toString()}`);
 });
+
+// ── /connectAuth — the prefix the firmware actually uses ────────────────────
+// The EG105G-P's auth-server base path is `/connectAuth` (WiFiDog-style), so it
+// calls `/connectAuth/ping/`, `/connectAuth`, and — presumably once a client
+// asks for internet — `/connectAuth/auth`, `/connectAuth/login`, etc. None of
+// that existed here: every request fell through to the SPA catch-all and
+// received index.html (plus a 502 whenever pm2 restarted). That is why
+// gateway_heartbeats stayed empty and no client was ever redirected to the
+// portal, and therefore why voucher_redemptions / voucher_devices never filled.
+//
+// This router is deliberately observational:
+//   * it logs every path and query so the real protocol can be wired up to
+//     what the firmware expects rather than guessed;
+//   * it serves the heartbeat, which already existed under /api/gateway/ping;
+//   * it never answers an auth question — unmatched paths fall through
+//     unchanged, so no client's session state can be altered from here.
+export const connectAuthRouter = Router();
+
+// Session material must never reach the log; serials and MACs are the point of
+// the log, so they are kept.
+const SENSITIVE_QUERY_KEY = /^(password|pass|secret|jwt|token|pin|otp|access_?token|refresh_?token)$/i;
+
+function logConnectAuth(req: Request): void {
+  const query = Object.entries(req.query)
+    .map(([key, value]) => {
+      const rendered = Array.isArray(value) ? value.join(',') : String(value ?? '');
+      return `${key}=${SENSITIVE_QUERY_KEY.test(key) ? '[redacted]' : rendered}`;
+    })
+    .join('&');
+  console.info(
+    `[connectAuth] ${req.method} ${req.originalUrl.split('?')[0]}` +
+    `${query ? '?' + query : ''} from ${req.ip} ua=${req.get('user-agent') || '-'}`
+  );
+}
+
+connectAuthRouter.use((req, _res, next) => {
+  logConnectAuth(req);
+  next();
+});
+
+// express leaves strict routing off, so '/ping' also matches '/connectAuth/ping/'.
+connectAuthRouter.get('/ping', handleGatewayPing);

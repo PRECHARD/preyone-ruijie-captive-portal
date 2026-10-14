@@ -17,7 +17,7 @@ import { adminAuthRouter } from './routes/adminAuth';
 import { paymentsRouter } from './routes/payments';
 import { subscriptionRouter } from './routes/subscription';
 import { siteInvoicesRouter } from './routes/siteInvoices';
-import { gatewayRouter } from './routes/gateway';
+import { gatewayRouter, connectAuthRouter } from './routes/gateway';
 import { transitRouter } from './routes/transit';
 import { transitWebRouter } from './routes/transitWeb';
 import { systemAdminRouter } from './routes/systemAdmin';
@@ -89,6 +89,11 @@ app.use(cookieParser());
 
 // ── Gateway routes (work on any host, registered before subdomain routing) ──
 app.use(gatewayRouter);
+
+// The firmware's own base path. Observational: logs what it calls and answers
+// only the heartbeat, so everything else still falls through to the SPA below.
+// Must stay above the app.get('*') catch-all or the log would never fire.
+app.use('/connectAuth', connectAuthRouter);
 
 // WISPr XML helper — tells Apple/iOS that this is a captive portal
 function wisprXml(loginUrl: string): string {
