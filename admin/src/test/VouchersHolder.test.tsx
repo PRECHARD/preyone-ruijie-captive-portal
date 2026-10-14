@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest';
 
 vi.mock('../api/client', () => {
@@ -34,8 +34,14 @@ vi.mock('../api/client', () => {
   };
 });
 
+// vi.mock is hoisted above module init, so the mutable auth fixture has to be
+// created with vi.hoisted or it would hit the TDZ when the factory runs.
+const authState = vi.hoisted(() => ({ role: 'Manager', permissions: [] as string[] }));
+
 vi.mock('../context/AuthContext', () => ({
-  useAuth: () => ({ user: { id: 'u1', fullName: 'Test Manager', role: 'Manager', permissions: [] } }),
+  useAuth: () => ({
+    user: { id: 'u1', fullName: 'Test User', role: authState.role, permissions: authState.permissions },
+  }),
 }));
 vi.mock('../utils/sound', () => ({ playVoucherSound: vi.fn(), playAlertSound: vi.fn() }));
 vi.mock('../utils/toast', () => ({ showToast: vi.fn() }));
@@ -136,5 +142,54 @@ describe('Vouchers holder capture (>= $4.99 gate + Edit Holder)', () => {
         holderPhone: '+263771111111',
       })
     );
+  });
+});
+
+describe('Vouchers Manage actions (company.admin gate)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    authState.role = 'Manager';
+    authState.permissions = [];
+  });
+
+  const openDetailDialog = async () => {
+    fireEvent.click(await screen.findByRole('button', { name: 'View details for voucher prec-oldcode' }));
+    return within(await screen.findByRole('dialog'));
+  };
+
+  it('offers Renew, Disable, Delete and Release bindings to a Manager', async () => {
+    render(<Vouchers />);
+    const d = await openDetailDialog();
+
+    expect(await d.findByRole('button', { name: 'Renew / Resell' })).toBeInTheDocument();
+    expect(d.getByRole('button', { name: 'Disable' })).toBeInTheDocument();
+    expect(d.getByRole('button', { name: 'Delete' })).toBeInTheDocument();
+    expect(d.getByRole('button', { name: 'Release all bindings' })).toBeInTheDocument();
+  });
+
+  it('hides every company.admin action from Staff so they cannot hit a 403', async () => {
+    authState.role = 'Staff';
+    render(<Vouchers />);
+    const d = await openDetailDialog();
+
+    // The detail modal still opens and stays browsable — only the gated
+    // actions disappear. permissions is [] so this also exercises the
+    // role-list fallback rather than the permissions check. (The Redemption
+    // section is conditional on redemption data, so assert on a static one.)
+    expect(d.getByText('Share & Notify')).toBeInTheDocument();
+    expect(d.queryByRole('button', { name: 'Renew / Resell' })).toBeNull();
+    expect(d.queryByRole('button', { name: 'Disable' })).toBeNull();
+    expect(d.queryByRole('button', { name: 'Delete' })).toBeNull();
+    expect(d.queryByRole('button', { name: 'Release all bindings' })).toBeNull();
+  });
+
+  it('still shows them when the permissions array carries company.admin', async () => {
+    authState.role = 'Staff';
+    authState.permissions = ['company.admin'];
+    render(<Vouchers />);
+    const d = await openDetailDialog();
+
+    expect(await d.findByRole('button', { name: 'Renew / Resell' })).toBeInTheDocument();
+    expect(d.getByRole('button', { name: 'Release all bindings' })).toBeInTheDocument();
   });
 });

@@ -122,6 +122,12 @@ export default function Vouchers() {
   const role = user?.role || 'Staff';
   const isMgmt = role === 'CEO' || role === 'Manager';
   const needsClockIn = role !== 'CEO';
+  // admin.ts puts company.admin on renew/reset-mac/disable/delete. It is seeded
+  // for CEO, Manager, SUPER_ADMIN and COMPANY_ADMIN — never Staff — so without
+  // this gate Staff would see the buttons and only ever get a 403 back.
+  const canManageVoucher =
+    user?.permissions?.includes('company.admin') ||
+    ['CEO', 'Manager', 'SUPER_ADMIN', 'COMPANY_ADMIN'].includes(role);
 
   const [clockStatus, setClockStatus] = useState<ClockStatus | null>(null);
   const [packages, setPackages] = useState<Package[]>([]);
@@ -1689,13 +1695,15 @@ const codes = a.voucher_data?.codes;
                 ) : (
                   <p className="muted">No devices currently bound.</p>
                 )}
-                <button
-                  className="btn-sm btn-reject"
-                  onClick={() => handleReleaseMac(v)}
-                  disabled={releasingMac || (v.device_count ?? macs.length) === 0}
-                >
-                  {releasingMac ? 'Releasing…' : 'Release all bindings'}
-                </button>
+                {canManageVoucher && (
+                  <button
+                    className="btn-sm btn-reject"
+                    onClick={() => handleReleaseMac(v)}
+                    disabled={releasingMac || (v.device_count ?? macs.length) === 0}
+                  >
+                    {releasingMac ? 'Releasing…' : 'Release all bindings'}
+                  </button>
+                )}
               </section>
 
               <section className="vd-section">
@@ -1720,28 +1728,30 @@ const codes = a.voucher_data?.codes;
                 </div>
               </section>
 
-              <section className="vd-section">
-                <h4 className="vd-section-title">Manage</h4>
-                <p className="vd-count">
-                  Renew keeps this PIN, buys the client another period and books the payment as a new sale.
-                  Disable blocks redemption but keeps the voucher (and its history) intact.
-                </p>
-                <div className="vd-actions">
-                  <button className="btn-sm btn-approve" onClick={() => openRenew(v)}>
-                    Renew / Resell
-                  </button>
-                  <button
-                    className={`btn-sm ${v.is_disabled ? 'btn-approve' : 'btn-reject'}`}
-                    disabled={toggleBusy}
-                    onClick={() => toggleDisable(v)}
-                  >
-                    {toggleBusy ? '…' : v.is_disabled ? 'Enable' : 'Disable'}
-                  </button>
-                  <button className="btn-sm btn-danger" onClick={() => setDeleteTarget(v)}>
-                    Delete
-                  </button>
-                </div>
-              </section>
+              {canManageVoucher && (
+                <section className="vd-section">
+                  <h4 className="vd-section-title">Manage</h4>
+                  <p className="vd-count">
+                    Renew keeps this PIN, buys the client another period and books the payment as a new sale.
+                    Disable blocks redemption but keeps the voucher (and its history) intact.
+                  </p>
+                  <div className="vd-actions">
+                    <button className="btn-sm btn-approve" onClick={() => openRenew(v)}>
+                      Renew / Resell
+                    </button>
+                    <button
+                      className={`btn-sm ${v.is_disabled ? 'btn-approve' : 'btn-reject'}`}
+                      disabled={toggleBusy}
+                      onClick={() => toggleDisable(v)}
+                    >
+                      {toggleBusy ? '…' : v.is_disabled ? 'Enable' : 'Disable'}
+                    </button>
+                    <button className="btn-sm btn-danger" onClick={() => setDeleteTarget(v)}>
+                      Delete
+                    </button>
+                  </div>
+                </section>
+              )}
             </div>
           </Modal>
         );
