@@ -538,8 +538,34 @@ adminRouter.post('/vouchers/:id/renew', requirePermission(PERMISSIONS.COMPANY_AD
 
   const body = (req.body ?? {}) as Record<string, unknown>;
 
+  // A resale is the natural moment to move a client onto a different tier, so
+  // the renewal can optionally carry that package's own speed, data quota,
+  // validity and device cap onto the voucher instead of merely buying time.
+  // Omitted (or empty) keeps the voucher exactly as it is.
+  const packageTierRaw = typeof body.packageTier === 'string' ? body.packageTier.trim() : '';
+  let swappedPackage: {
+    tier_name: string;
+    duration_min: number;
+    data_limit_gb: number | null;
+    is_uncapped: boolean;
+    bandwidth_mbps_up: number;
+    bandwidth_mbps_down: number;
+    max_devices: number;
+  } | null = null;
+  if (packageTierRaw) {
+    const { rows: pkgs } = await pool.query(
+      `SELECT tier_name, duration_min, data_limit_gb, is_uncapped, bandwidth_mbps_up, bandwidth_mbps_down, max_devices
+         FROM packages WHERE tier_name = $1 AND deleted_at IS NULL`,
+      [packageTierRaw]
+    );
+    if (pkgs.length === 0) { res.status(422).json({ error: 'Package not found' }); return; }
+    swappedPackage = pkgs[0];
+  }
+
+  // A selected package supplies the new tier's validity as the default; an
+  // explicit durationMin in the body still wins over it.
   const durationRaw = body.durationMin === undefined || body.durationMin === null || body.durationMin === ''
-    ? voucher.duration_min ?? 60
+    ? (swappedPackage ? swappedPackage.duration_min : voucher.duration_min ?? 60)
     : parseInt(String(body.durationMin), 10);
   if (!Number.isFinite(durationRaw) || durationRaw <= 0) {
     res.status(422).json({ error: 'durationMin must be a positive integer' }); return;
@@ -567,15 +593,44 @@ adminRouter.post('/vouchers/:id/renew', requirePermission(PERMISSIONS.COMPANY_AD
   try {
     await client.query('BEGIN');
 
+    const setClauses = [
+      `expires_at     = GREATEST(NOW(), COALESCE(expires_at, NOW())) + ($1::text || ' minutes')::interval`,
+      `used_count     = 0`,
+      `is_disabled    = FALSE`,
+      `data_consumed_mb = CASE WHEN $2::boolean THEN 0 ELSE data_consumed_mb END`,
+    ];
+    const renewParams: unknown[] = [durationRaw, resetDataQuota, voucher.id];
+    if (swappedPackage) {
+      setClauses.push(
+        'package_tier        = $4',
+        'duration_min        = $5',
+        'data_limit_gb       = $6',
+        'is_uncapped         = $7',
+        'bandwidth_mbps_up   = $8',
+        'bandwidth_mbps_down = $9',
+        'max_devices         = $10',
+        'price_amount        = $11'
+      );
+      renewParams.push(
+        swappedPackage.tier_name,
+        durationRaw,
+        swappedPackage.data_limit_gb,
+        swappedPackage.is_uncapped,
+        swappedPackage.bandwidth_mbps_up,
+        swappedPackage.bandwidth_mbps_down,
+        swappedPackage.max_devices,
+        priceAmount
+      );
+    }
+
     const { rows } = await client.query(
       `UPDATE vouchers
-          SET expires_at     = GREATEST(NOW(), COALESCE(expires_at, NOW())) + ($1::text || ' minutes')::interval,
-              used_count     = 0,
-              is_disabled    = FALSE,
-              data_consumed_mb = CASE WHEN $2::boolean THEN 0 ELSE data_consumed_mb END
+          SET ${setClauses.join(',\n              ')}
         WHERE id = $3
-        RETURNING id, code, expires_at, used_count, max_uses, price_amount, duration_min, is_disabled`,
-      [durationRaw, resetDataQuota, voucher.id]
+        RETURNING id, code, expires_at, used_count, max_uses, price_amount, duration_min,
+                  package_tier, bandwidth_mbps_up, bandwidth_mbps_down, data_limit_gb, is_uncapped,
+                  is_disabled`,
+      renewParams
     );
 
     const { rows: saleRows } = await client.query(
@@ -594,7 +649,8 @@ adminRouter.post('/vouchers/:id/renew', requirePermission(PERMISSIONS.COMPANY_AD
       'voucher',
       voucher.id,
       `Renewed voucher ${voucher.code} +${durationRaw} min for $${priceAmount.toFixed(2)} (${saleMethod})` +
-        `${resetDataQuota ? ' · data quota reset' : ' · data quota carried over'}`
+        `${resetDataQuota ? ' · data quota reset' : ' · data quota carried over'}` +
+        (swappedPackage ? ` · package ${voucher.package_tier ?? 'custom'} → ${swappedPackage.tier_name}` : '')
     );
 
     res.status(201).json({
@@ -602,7 +658,9 @@ adminRouter.post('/vouchers/:id/renew', requirePermission(PERMISSIONS.COMPANY_AD
       sale: saleRows[0],
       renewed: true,
       data_quota_reset: resetDataQuota,
-      message: `${voucher.code} renewed — expires ${rows[0].expires_at}`
+      package_swapped: swappedPackage ? swappedPackage.tier_name : null,
+      message: `${voucher.code} renewed — expires ${rows[0].expires_at}` +
+        (swappedPackage ? ` · now ${swappedPackage.tier_name}` : '')
     });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => undefined);

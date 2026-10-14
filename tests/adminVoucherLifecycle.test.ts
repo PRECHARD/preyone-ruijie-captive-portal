@@ -428,10 +428,26 @@ describe('DELETE /api/admin/vouchers/:id', () => {
 
 describe('POST /api/admin/vouchers/:id/renew', () => {
   const RENEW_ROW = { ...VOUCHER_ROW, price_amount: '4.99', duration_min: 720, expires_at: null };
+  const PACKAGE_ROW = {
+    tier_name: 'PreMax',
+    duration_min: 1440,
+    data_limit_gb: 20,
+    is_uncapped: false,
+    bandwidth_mbps_up: 10,
+    bandwidth_mbps_down: 20,
+    max_devices: 5,
+  };
 
-  /** Drives the renew transaction: BEGIN → UPDATE vouchers → INSERT sales → COMMIT. */
-  function seedTransaction() {
+  /**
+   * Drives the renew transaction: BEGIN → UPDATE vouchers → INSERT sales → COMMIT.
+   * `packageRow` also queues the tier lookup that runs before BEGIN: omit it for
+   * the plain renewal path, pass null for a package that does not exist.
+   */
+  function seedTransaction(packageRow?: typeof PACKAGE_ROW | null) {
     mockPoolQuery.mockResolvedValueOnce({ rows: [RENEW_ROW] });
+    if (packageRow !== undefined) {
+      mockPoolQuery.mockResolvedValueOnce({ rows: packageRow ? [packageRow] : [] });
+    }
     mockClientQuery.mockImplementation((sql: string) => {
       const s = String(sql);
       if (s === 'BEGIN' || s === 'COMMIT') return Promise.resolve({ rows: [], rowCount: 0 });
@@ -558,6 +574,80 @@ describe('POST /api/admin/vouchers/:id/renew', () => {
     const res = await request(createApp()).post('/api/admin/vouchers/v-1/renew').send({ priceAmount: 1 });
     expect(res.status).toBe(404);
     expect(sqlOf(mockPoolQuery.mock.calls[0])).toContain('v.sold_by = $2');
+  });
+
+  it('copies the selected package speed, quota, validity and device cap onto the voucher', async () => {
+    mockAuth({ id: 'ceo-1', role: 'CEO', fullName: 'Boss' });
+    seedTransaction(PACKAGE_ROW);
+
+    const res = await request(createApp())
+      .post('/api/admin/vouchers/v-1/renew')
+      .send({ priceAmount: 9.99, packageTier: 'PreMax' });
+
+    expect(res.status).toBe(201);
+    expect(res.body.package_swapped).toBe('PreMax');
+
+    // The tier resolves through `packages`, the same lookup creation uses.
+    const lookup = mockPoolQuery.mock.calls[1];
+    expect(sqlOf(lookup)).toContain('FROM packages WHERE tier_name = $1');
+    expect(sqlOf(lookup)).toContain('deleted_at IS NULL');
+    expect(paramsOf(lookup)).toEqual(['PreMax']);
+
+    const update = mockClientQuery.mock.calls.find(c => String(c[0]).includes('UPDATE vouchers'))!;
+    // RETURNING always echoes these columns, so scope the check to what SET assigns.
+    const set = sqlOf(update).slice(sqlOf(update).indexOf('SET'), sqlOf(update).indexOf('WHERE'));
+    for (const col of ['package_tier', 'duration_min', 'data_limit_gb', 'is_uncapped',
+                       'bandwidth_mbps_up', 'bandwidth_mbps_down', 'max_devices', 'price_amount']) {
+      expect(set).toContain(col);
+    }
+
+    const p = paramsOf(update);
+    // No durationMin in the body → the new tier's validity is what gets granted
+    // ($1 for the interval) and what is stored as the voucher's duration_min ($5).
+    expect(p[0]).toBe(1440);
+    expect(p[2]).toBe('v-1');
+    expect(p[3]).toBe('PreMax');
+    expect(p[4]).toBe(1440);
+    expect(p[5]).toBe(20);
+    expect(p[6]).toBe(false);
+    expect(p[7]).toBe(10);
+    expect(p[8]).toBe(20);
+    expect(p[9]).toBe(5);
+    expect(p[10]).toBe(9.99);
+  });
+
+  it('422s an unknown package before the voucher or the sale is touched', async () => {
+    mockAuth({ id: 'ceo-1', role: 'CEO', fullName: 'Boss' });
+    seedTransaction(null);
+
+    const res = await request(createApp())
+      .post('/api/admin/vouchers/v-1/renew')
+      .send({ priceAmount: 4.99, packageTier: 'Nope' });
+
+    expect(res.status).toBe(422);
+    expect(res.body.error).toBe('Package not found');
+    expect(mockClientQuery).not.toHaveBeenCalled();
+  });
+
+  it('leaves every package column alone when no tier is supplied', async () => {
+    mockAuth({ id: 'ceo-1', role: 'CEO', fullName: 'Boss' });
+    seedTransaction();
+
+    const res = await request(createApp())
+      .post('/api/admin/vouchers/v-1/renew')
+      .send({ priceAmount: 4.99 });
+
+    expect(res.status).toBe(201);
+    expect(res.body.package_swapped).toBeNull();
+    const sql = voucherUpdate();
+    // RETURNING still echoes the package columns; SET must not assign any of them.
+    const set = sql.slice(sql.indexOf('SET'), sql.indexOf('WHERE'));
+    expect(set).not.toContain('package_tier');
+    expect(set).not.toContain('bandwidth_mbps_up');
+    expect(set).not.toContain('data_limit_gb');
+    expect(set).not.toContain('price_amount');
+    // Only the voucher load ran — no package lookup at all.
+    expect(mockPoolQuery).toHaveBeenCalledTimes(1);
   });
 });
 

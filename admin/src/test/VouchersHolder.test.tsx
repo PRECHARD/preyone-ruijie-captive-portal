@@ -7,6 +7,13 @@ vi.mock('../api/client', () => {
     billing_period: 'once', duration_min: 60, bandwidth_mbps_up: 2,
     bandwidth_mbps_down: 5, data_limit_gb: null, is_uncapped: false,
   };
+  // Deliberately different from PreCore on every field the renew form reads,
+  // so a package swap is observable rather than a no-op.
+  const pkgMax = {
+    tier_name: 'PreMax', display_name: 'PreMax', price_amount: '9.50',
+    billing_period: 'once', duration_min: 1440, bandwidth_mbps_up: 10,
+    bandwidth_mbps_down: 20, data_limit_gb: 20, is_uncapped: false,
+  };
   const voucher = {
     id: 'v-1', code: 'prec-oldcode', price_amount: '5.00', duration_min: 60,
     bandwidth_mbps_up: 2, bandwidth_mbps_down: 5, data_limit_gb: null,
@@ -18,7 +25,7 @@ vi.mock('../api/client', () => {
   return {
     api: {
       get: vi.fn((path: string) => {
-        if (path === '/packages') return Promise.resolve([pkg]);
+        if (path === '/packages') return Promise.resolve([pkg, pkgMax]);
         if (path === '/vouchers') return Promise.resolve({ vouchers: [voucher] });
         if (path === '/clock-status') return Promise.resolve({ clockedIn: true });
         if (path.includes('approvals')) return Promise.resolve([]);
@@ -191,5 +198,77 @@ describe('Vouchers Manage actions (company.admin gate)', () => {
 
     expect(await d.findByRole('button', { name: 'Renew / Resell' })).toBeInTheDocument();
     expect(d.getByRole('button', { name: 'Release all bindings' })).toBeInTheDocument();
+  });
+});
+
+describe('Renew / Resell package switch', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    authState.role = 'Manager';
+    authState.permissions = [];
+  });
+
+  /** Detail modal first, then the Renew modal it opens on top of it. */
+  const openRenewModal = async (): Promise<HTMLElement> => {
+    render(<Vouchers />);
+    fireEvent.click(await screen.findByRole('button', { name: 'View details for voucher prec-oldcode' }));
+    const detail = within(await screen.findByRole('dialog'));
+    fireEvent.click(await detail.findByRole('button', { name: 'Renew / Resell' }));
+    const dialogs = await screen.findAllByRole('dialog');
+    return dialogs[dialogs.length - 1];
+  };
+
+  const fieldValue = (dialog: HTMLElement, label: string) =>
+    (within(dialog).getByLabelText(label) as HTMLInputElement).value;
+
+  it('pre-fills validity, price, speed and quota when a tier is picked', async () => {
+    const renew = await openRenewModal();
+    const r = within(renew);
+
+    // Nothing swapped yet: the voucher's own duration, and no package detail grid.
+    expect(fieldValue(renew, 'Package')).toBe('');
+    expect(fieldValue(renew, 'Additional duration (minutes)')).toBe('60');
+    expect(r.queryByText('Speed')).toBeNull();
+
+    fireEvent.change(r.getByLabelText('Package'), { target: { value: 'PreMax' } });
+
+    expect(fieldValue(renew, 'Additional duration (minutes)')).toBe('1440');
+    expect(fieldValue(renew, 'Amount paid (USD) *')).toBe('9.50');
+    expect(r.getByText('Speed')).toBeInTheDocument();
+    expect(r.getByText('10/20 Mbps')).toBeInTheDocument();
+    expect(r.getByText('20 GB')).toBeInTheDocument();
+    expect(r.getByText('Validity')).toBeInTheDocument();
+    expect(r.getByText(/Swaps PreCore → PreMax/)).toBeInTheDocument();
+  });
+
+  it('posts the chosen tier with the renewal so the backend applies it', async () => {
+    const renew = await openRenewModal();
+    const r = within(renew);
+
+    fireEvent.change(r.getByLabelText('Package'), { target: { value: 'PreMax' } });
+    fireEvent.click(r.getByRole('button', { name: 'Renew for $9.50' }));
+
+    await waitFor(() =>
+      expect(api.post).toHaveBeenCalledWith('/vouchers/v-1/renew', expect.objectContaining({
+        packageTier: 'PreMax',
+        durationMin: 1440,
+        priceAmount: 9.5,
+      }))
+    );
+  });
+
+  it('keeps the current package when the picker is left on its default', async () => {
+    const renew = await openRenewModal();
+    const r = within(renew);
+
+    fireEvent.click(r.getByRole('button', { name: 'Renew for $5.00' }));
+
+    await waitFor(() =>
+      expect(api.post).toHaveBeenCalledWith('/vouchers/v-1/renew', expect.objectContaining({
+        packageTier: undefined,
+        durationMin: 60,
+        priceAmount: 5,
+      }))
+    );
   });
 });

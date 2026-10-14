@@ -171,6 +171,9 @@ export default function Vouchers() {
   const [renewPayMethod, setRenewPayMethod] = useState('Cash');
   const [renewPayRef, setRenewPayRef] = useState('');
   const [renewResetQuota, setRenewResetQuota] = useState(true);
+  // '' = keep the voucher on its current package. Any other value is a tier
+  // swap the backend applies alongside the renewal (speed, quota, validity).
+  const [renewPackageTier, setRenewPackageTier] = useState('');
   const [renewSaving, setRenewSaving] = useState(false);
   const [renewError, setRenewError] = useState('');
 
@@ -556,8 +559,24 @@ const codes = a.voucher_data?.codes;
     setRenewPayMethod('Cash');
     setRenewPayRef('');
     setRenewResetQuota(true);
+    setRenewPackageTier('');
     setRenewError('');
   };
+
+  // Selecting a package pulls its validity, price, data quota and speed onto
+  // the form in one go, so swapping tiers is a single choice rather than four
+  // separate edits. Duration and amount stay editable afterwards.
+  const applyRenewPackage = (tier: string) => {
+    setRenewPackageTier(tier);
+    if (!tier) return;
+    const pkg = packages.find(p => p.tier_name === tier);
+    if (!pkg) return;
+    if (pkg.duration_min) setRenewDuration(pkg.duration_min);
+    if (pkg.price_amount) setRenewPrice(parseFloat(String(pkg.price_amount)).toFixed(2));
+  };
+  const renewSelectedPkg = renewPackageTier
+    ? packages.find(p => p.tier_name === renewPackageTier) ?? null
+    : null;
 
   const submitRenew = async () => {
     if (!renewTarget || renewSaving) return;
@@ -575,6 +594,7 @@ const codes = a.voucher_data?.codes;
         paymentMethod: renewPayMethod,
         paymentReference: renewPayRef.trim() || undefined,
         resetDataQuota: renewResetQuota,
+        packageTier: renewPackageTier || undefined,
       });
       showToast({
         title: 'Voucher renewed',
@@ -1772,6 +1792,38 @@ const codes = a.voucher_data?.codes;
               The client keeps their code, bound devices stay attached, and this payment is booked as a
               <strong> new sale</strong>.
             </p>
+
+            <label className="holder-capture__label" htmlFor="renew-package">Package</label>
+            <select
+              id="renew-package"
+              className="holder-capture__input"
+              value={renewPackageTier}
+              onChange={e => applyRenewPackage(e.target.value)}
+            >
+              <option value="">
+                Keep {renewTarget.package_tier ? `${renewTarget.package_tier} (current)` : 'the current package'}
+              </option>
+              {packages.map(p => (
+                <option key={p.tier_name} value={p.tier_name}>
+                  {p.display_name || p.tier_name} — ${parseFloat(String(p.price_amount || 0)).toFixed(2)} · {fmtDur(p.duration_min)} · {p.is_uncapped ? 'Unlimited' : `${p.data_limit_gb ?? 'Unlimited'} GB`} · {p.bandwidth_mbps_up}/{p.bandwidth_mbps_down} Mbps
+                </option>
+              ))}
+            </select>
+
+            {renewSelectedPkg && (
+              <>
+                <div className="vd-grid" style={{ marginTop: 8 }}>
+                  <div className="vd-cell"><span className="vd-label">Speed</span><span className="vd-value">{renewSelectedPkg.bandwidth_mbps_up}/{renewSelectedPkg.bandwidth_mbps_down} Mbps</span></div>
+                  <div className="vd-cell"><span className="vd-label">Data quota</span><span className="vd-value">{renewSelectedPkg.is_uncapped ? 'Unlimited' : `${renewSelectedPkg.data_limit_gb ?? 'Unlimited'} GB`}</span></div>
+                  <div className="vd-cell"><span className="vd-label">Validity</span><span className="vd-value">{fmtDur(renewSelectedPkg.duration_min)}</span></div>
+                  <div className="vd-cell"><span className="vd-label">Price</span><span className="vd-value">${parseFloat(String(renewSelectedPkg.price_amount || 0)).toFixed(2)}</span></div>
+                </div>
+                <p className="renew-hint">
+                  Swaps {renewTarget.package_tier || 'custom'} → {renewSelectedPkg.tier_name}: speed, data quota,
+                  validity and device cap are copied onto the voucher. PIN, bound devices and history are untouched.
+                </p>
+              </>
+            )}
 
             <label className="holder-capture__label" htmlFor="renew-duration">Additional duration (minutes)</label>
             <input
