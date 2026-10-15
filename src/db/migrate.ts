@@ -1835,6 +1835,53 @@ const SQL = `
         ON vouchers (ruijie_sync_status) WHERE ruijie_sync_status IS NOT NULL;
     `);
 
+    // ── Hybrid multi-tier voucher alerts (80% / 95%) ──────────────────────
+    // Three additive tables for the threshold monitor: browser push
+    // subscriptions, the per-(voucher, tier) claim state that makes the sweep
+    // race-safe across the 4 PM2 clusters, and the audit/event log that also
+    // feeds the captive-portal banner ("pending" = not yet acknowledged).
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS push_subscriptions (
+        id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        voucher_code  TEXT NOT NULL,
+        endpoint      TEXT UNIQUE NOT NULL,
+        p256dh        TEXT NOT NULL,
+        auth          TEXT NOT NULL,
+        user_agent    TEXT,
+        created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        last_used_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_push_subscriptions_voucher
+        ON push_subscriptions (voucher_code);
+
+      CREATE TABLE IF NOT EXISTS voucher_alert_state (
+        id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        voucher_code          TEXT NOT NULL,
+        tier                  INTEGER NOT NULL,
+        last_alerted_used_mb  NUMERIC(12,2) NOT NULL DEFAULT 0,
+        last_alerted_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE (voucher_code, tier)
+      );
+
+      CREATE TABLE IF NOT EXISTS voucher_alert_events (
+        id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        voucher_code     TEXT NOT NULL,
+        tier             INTEGER NOT NULL,
+        used_mb          NUMERIC(12,2) NOT NULL,
+        total_mb         NUMERIC(12,2),
+        pct              NUMERIC(6,2) NOT NULL,
+        push_status      TEXT NOT NULL DEFAULT 'pending',
+        push_detail      TEXT,
+        acknowledged_at  TIMESTAMPTZ,
+        created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_voucher_alert_events_code
+        ON voucher_alert_events (voucher_code, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_voucher_alert_events_open
+        ON voucher_alert_events (voucher_code) WHERE acknowledged_at IS NULL;
+    `);
+
     // ── 3-tier SaaS subscription engine (v2 master upgrade) ─────────────────
     // Plan tiers, device caps and dunning flags live in a standalone file so
     // DBAs can review the schema change on its own; this stays the single

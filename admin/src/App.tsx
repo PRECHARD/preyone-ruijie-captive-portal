@@ -5,6 +5,7 @@ import LockScreen from './components/LockScreen';
 import IdleWarningDialog from './components/IdleWarningDialog';
 import Login from './pages/Login';
 import WifiDashboard from './pages/WifiDashboard';
+import VoucherConsumptionTab from './components/wifi/VoucherConsumptionTab';
 import TransitOperationsDashboard from './pages/TransitOperationsDashboard';
 import PosDashboard from './pages/PosDashboard';
 import Vouchers from './pages/Vouchers';
@@ -53,6 +54,7 @@ import { currentRoute, writeHash } from './routes';
 const sectionRoles: Record<string, string[]> = {
   overview: ['Staff', 'Manager', 'CEO'],
   vouchers: ['Staff', 'Manager', 'CEO'],
+  consumption: ['Staff', 'Manager', 'CEO'],
   users: ['Staff', 'Manager', 'CEO'],
   sessions: ['Staff', 'Manager', 'CEO'],
   'my-sales': ['Staff', 'Manager', 'CEO'],
@@ -243,6 +245,7 @@ export default function App() {
         : <WifiDashboard onNavigate={setSection} />
       )}
       {safeSection === 'vouchers' && <Vouchers />}
+      {safeSection === 'consumption' && <VoucherConsumptionTab />}
       {safeSection === 'users' && <Users />}
       {safeSection === 'sessions' && <Sessions />}
       {safeSection === 'my-sales' && <MySales />}

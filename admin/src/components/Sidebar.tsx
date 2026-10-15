@@ -50,6 +50,7 @@ const groups: LinkGroup[] = [
     workspace: 'ultranet',
     links: [
       { label: 'Vouchers', section: 'vouchers', roles: ['Staff', 'Manager', 'CEO'], icon: <FiCreditCard />, badgeKey: 'pendingApprovals' },
+      { label: 'Consumption', section: 'consumption', roles: ['Staff', 'Manager', 'CEO'], icon: <FiActivity /> },
     ],
   },
   {

@@ -482,6 +482,88 @@
   })();
   </script>
   <script src="/js/portal.js?v=8"></script>
+  <script>
+  // ── Captive-portal alert injection ──────────────────────────────────────
+  // The gateway bounces a blocked customer straight back to this page, so it
+  // is the natural surface for the hybrid alert channel's "portal" half: if
+  // the backend swept this PIN past 80% or 95% while the customer was away,
+  // show the advisory here (and on /data) even when Web Push is not granted.
+  (function () {
+    try {
+      var voucher = (localStorage.getItem('user_voucher') || '').trim().toLowerCase();
+      if (!voucher) return;
+      fetch('/api/alerts/pending?voucher=' + encodeURIComponent(voucher), { credentials: 'same-origin' })
+        .then(function (r) { return r.ok ? r.json() : { alerts: [] }; })
+        .then(function (j) {
+          var list = j.alerts || [];
+          if (!list.length) return;
+          var top = list[0];
+          var key = 'preyone_evt_' + top.id;
+          if (localStorage.getItem(key) === '1') return;
+          localStorage.setItem(key, '1');
+
+          var crit = top.tier >= 95;
+          var banner = document.createElement('div');
+          banner.id = 'portalAlertBanner';
+          banner.setAttribute('role', 'status');
+          banner.style.cssText =
+            'position:fixed;left:50%;top:12px;transform:translateX(-50%);z-index:9999;' +
+            'width:min(94vw,460px);box-sizing:border-box;padding:0.85rem 2.5rem 0.9rem 1.1rem;' +
+            'border-radius:14px;border:1px solid ' + (crit ? 'rgba(239,68,68,0.6)' : 'rgba(245,166,35,0.55)') + ';' +
+            'background:linear-gradient(135deg,rgba(10,13,23,0.97),rgba(5,5,5,0.97));' +
+            'box-shadow:0 0 26px ' + (crit ? 'rgba(239,68,68,0.3)' : 'rgba(245,166,35,0.22)') + ',0 12px 40px rgba(0,0,0,0.55);' +
+            'font-family:inherit;color:#f8fbff;text-align:left;';
+
+          var eyebrow = document.createElement('p');
+          eyebrow.textContent = 'ULTRANET ALERT';
+          eyebrow.style.cssText = 'margin:0 0 0.25rem;font-size:0.66rem;letter-spacing:0.3em;color:' +
+            (crit ? '#ff6b81' : '#f5a623') + ';';
+
+          var title = document.createElement('p');
+          title.textContent = crit ? 'ALMOST OUT OF DATA' : 'DATA RUNNING LOW';
+          title.style.cssText = 'margin:0 0 0.3rem;font-size:1rem;letter-spacing:0.05em;';
+
+          var body = document.createElement('p');
+          body.textContent = top.body || '';
+          body.style.cssText = 'margin:0 0 0.7rem;font-size:0.78rem;line-height:1.5;opacity:0.85;';
+
+          var actions = document.createElement('div');
+          actions.style.cssText = 'display:flex;gap:0.55rem;flex-wrap:wrap;';
+
+          var buy = document.createElement('a');
+          buy.textContent = 'BUY NEW VOUCHER';
+          buy.href = '/#packages-section';
+          buy.style.cssText = 'display:inline-block;padding:0.5rem 1rem;border-radius:50px;font-size:0.74rem;' +
+            'letter-spacing:0.05em;text-decoration:none;color:#050505;background:' + (crit ? '#ff1744' : '#ffd700') + ';font-weight:700;';
+
+          var dismiss = document.createElement('button');
+          dismiss.type = 'button';
+          dismiss.textContent = 'DISMISS';
+          dismiss.style.cssText = 'padding:0.5rem 1rem;border-radius:50px;font-size:0.74rem;cursor:pointer;' +
+            'background:transparent;color:#f8fbff;border:1px solid rgba(255,255,255,0.25);';
+
+          dismiss.addEventListener('click', function () {
+            banner.remove();
+            fetch('/api/alerts/ack', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'same-origin',
+              body: JSON.stringify({ id: top.id, voucher: voucher }),
+            }).catch(function () {});
+          });
+
+          actions.appendChild(buy);
+          actions.appendChild(dismiss);
+          banner.appendChild(eyebrow);
+          banner.appendChild(title);
+          banner.appendChild(body);
+          banner.appendChild(actions);
+          document.body.appendChild(banner);
+        })
+        .catch(function () { /* banner is best-effort; redemption flow unaffected */ });
+    } catch (e) { /* storage blocked */ }
+  })();
+  </script>
 </body>
 
 </html>

@@ -25,6 +25,8 @@ import { starlinkRouter } from './routes/starlink';
 import { ruijieRouter } from './routes/ruijie';
 import { currencyRouter } from './routes/currency';
 import { usageRouter } from './routes/usage';
+import { alertsRouter } from './routes/alerts';
+import { voucherAnalyticsRouter } from './routes/voucherAnalytics';
 import { ensureStarlinkSchema } from './db/starlink';
 import { errorHandler } from './middleware/errorHandler';
 import { maintenanceCheck } from './middleware/maintenanceMode';
@@ -32,6 +34,7 @@ import { scheduleSessionCleanup } from './services/sessionCleanup';
 import { ensureVoucherRuijieSchema, startRuijieAccountingPolling } from './services/ruijieService';
 import { scheduleAccessLogCleanup } from './services/accessLogCleanup';
 import { scheduleHandoverReminders } from './services/handoverReminder';
+import { startVoucherMonitor } from './services/voucherMonitorService';
 import { scheduleSubscriptionCron } from './jobs/subscriptionCron';
 
 const app = express();
@@ -379,6 +382,11 @@ app.use('/api/ruijie', ruijieRouter);
 // PWA usage portal (/data) — public, rate-limited, reads only the caller's own
 // session. Mounted at the exact /api/check-usage path the portal fetches.
 app.use('/api/check-usage', usageRouter);
+// Hybrid alert channel: push subscription management + the pending-alert feed
+// the captive portal banner reads. Public, PIN-gated, rate-limited.
+app.use('/api/alerts', alertsRouter);
+// Voucher Consumption & Status tab (admin): roster + alert history aggregate.
+app.use('/api/admin/voucher-analytics', voucherAnalyticsRouter);
 // Multi-currency exchange rates (company-scoped)
 app.use('/api/currency', currencyRouter);
 
@@ -481,6 +489,10 @@ app.listen(PORT, () => {
     scheduleHandoverReminders(intervalMinutes);
     console.log(`Handover reminders scheduled every ${intervalMinutes} minute(s).`);
   }
+
+  // Hybrid multi-tier voucher alerts (80% / 95%). In-process timer; the
+  // (voucher, tier) claim in the DB makes it exactly-once across clusters.
+  startVoucherMonitor();
 
   // 3-tier subscription dunning: 3-day warning, 1-day urgent notice and
   // suspension on expiry, every day at midnight.

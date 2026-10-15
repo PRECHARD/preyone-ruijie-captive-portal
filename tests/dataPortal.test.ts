@@ -79,3 +79,64 @@ describe('/data PWA — advisory, alerting and unlimited rendering', () => {
     expect(sw).toContain("'/data'");
   });
 });
+
+/**
+ * Hybrid channel contracts (2026-10-15): the backend sweep owns the 80/95
+ * thresholds; /data subscribes the browser to Web Push inside the opt-in
+ * click and renders server-pending events; the captive landing page shows
+ * the same pending alerts so a bounced customer sees them even with push
+ * off. The payload keys asserted here are the exact ones the SW consumes.
+ */
+describe('/data + captive portal — hybrid alert channel', () => {
+  it('aligns /data client thresholds with the 80/95 tiers', () => {
+    expect(html).toContain('var CRIT_PCT = 95');
+    expect(html).toContain('pct >= CRIT_PCT');
+    expect(html).toContain('ULTRANET // RUNNING DRY');
+    expect(html).toContain("notify('low95'");
+  });
+
+  it('subscribes to Web Push from the alerts opt-in click', () => {
+    expect(html).toContain('function ensurePushSubscription');
+    expect(html).toContain('/api/alerts/public-key');
+    expect(html).toContain('reg.pushManager.subscribe');
+    expect(html).toContain('/api/alerts/subscribe');
+    expect(html).toContain('urlBase64ToUint8Array');
+    // iOS/Android: subscription must be created inside the click gesture
+    expect(html).toContain('ensurePushSubscription();');
+  });
+
+  it('renders server-pending alerts with ack-backed dismiss on /data', () => {
+    expect(html).toContain('function fetchPendingAlerts');
+    expect(html).toContain('/api/alerts/pending');
+    expect(html).toContain('function ackAlert');
+    expect(html).toContain('/api/alerts/ack');
+    expect(html).toContain("'preyone_evt_' + top.id");
+  });
+
+  it('injects the same pending-alert banner into the captive landing page', () => {
+    expect(index).toContain('portalAlertBanner');
+    expect(index).toContain('/api/alerts/pending');
+    expect(index).toContain('/api/alerts/ack');
+    expect(index).toContain("localStorage.getItem('user_voucher')");
+    // buy path from the captive banner lands on the packages section
+    expect(index).toContain("buy.href = '/#packages-section'");
+  });
+
+  it('shows the install button on iOS where beforeinstallprompt never fires', () => {
+    expect(html).toContain('id="installBtn"');
+    expect(html).toContain('var isIOS');
+    expect(html).toContain('navigator.standalone');
+    // iOS has no programmatic install: button up front + Share steps
+    expect(html).toContain('Add to Home Screen');
+    expect(html).toContain("installBtn').hidden = false");
+    // the Android path still rides the deferred prompt
+    expect(html).toContain("addEventListener('beforeinstallprompt'");
+    // once installed, the button disappears again
+    expect(html).toContain('function hideInstall');
+  });
+
+  it('renders unlimited usage as "used / Unlimited" dynamically on /data', () => {
+    expect(html).toContain("fmtMB(used) + ' / ' + (isUncapped ? 'Unlimited'");
+    expect(html).toContain("isUncapped ? 'Unlimited' : fmtMBOnly(remaining)");
+  });
+});

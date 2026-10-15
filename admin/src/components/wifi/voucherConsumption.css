@@ -1,0 +1,344 @@
+/* ============================================================
+   Voucher Consumption & Status tab — styled in the Vouchers
+   page design language: Bebas display title, Montserrat body,
+   .card glass panels, .data-table cyan headers, badge tones,
+   live-pill, pink/cyan accents.
+   ============================================================ */
+
+.un-consume {
+  font-family: var(--font-body);
+  width: 100%;
+  padding-bottom: 28px;
+}
+
+/* ── Header: section-head + live pill + refresh (mirrors Voucher List) ── */
+.un-consume__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.35rem;
+}
+
+.un-consume__sub {
+  margin: 0 0 1rem;
+  font-size: 0.76rem;
+  color: var(--text-muted);
+}
+
+.un-consume__headactions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.un-consume .live-pill {
+  cursor: default;
+}
+
+.un-consume__refresh {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.un-consume__refresh:hover:not(:disabled) {
+  border-color: rgba(0, 229, 255, 0.45);
+  color: var(--cyan);
+  box-shadow: 0 0 12px rgba(0, 229, 255, 0.15);
+}
+
+.un-consume__refresh:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* Roster-offline pill: same shell as live-pill, muted tone. */
+.un-consume__pill-off {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 0.68rem;
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+/* ── Search + filter row ── */
+.un-consume__toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 0.9rem;
+}
+
+.un-consume__searchwrap {
+  position: relative;
+  flex: 1 1 240px;
+  max-width: 340px;
+}
+
+.un-consume__search {
+  width: 100%;
+  padding: 0.55rem 0.8rem 0.55rem 2rem;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: 0.8rem;
+  outline: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.un-consume__search::placeholder {
+  color: var(--text-dim);
+  font-size: 0.75rem;
+}
+
+.un-consume__search:focus {
+  border-color: rgba(0, 229, 255, 0.5);
+  box-shadow: 0 0 0 2px rgba(0, 229, 255, 0.12);
+}
+
+.un-consume__searchicon {
+  position: absolute;
+  left: 0.65rem;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-dim);
+  font-size: 0.8rem;
+  pointer-events: none;
+}
+
+.un-consume__count {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.un-consume__filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 1rem;
+}
+
+/* Chips echo .segmented-option: uppercase Montserrat, pink active glow. */
+.un-consume__chip {
+  padding: 6px 13px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  font-family: var(--font-body);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.un-consume__chip:hover {
+  color: var(--text);
+  background: rgba(0, 229, 255, 0.05);
+}
+
+.un-consume__chip[aria-pressed='true'] {
+  background: rgba(255, 0, 127, 0.12);
+  border-color: rgba(255, 0, 127, 0.45);
+  color: var(--pink);
+  text-shadow: 0 0 10px rgba(255, 0, 127, 0.4);
+}
+
+/* ── Stat tiles: .card shell, Bebas numbers ── */
+.un-consume__stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(150px, 100%), 1fr));
+  gap: 12px;
+  margin-bottom: 1rem;
+}
+
+.un-consume__stat {
+  position: relative;
+  overflow: hidden;
+  padding: 0.85rem 1rem;
+  background: linear-gradient(160deg, rgba(20, 20, 40, 0.55), rgba(8, 8, 16, 0.72));
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 10px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.25);
+}
+
+.un-consume__stat::after {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 2.5px;
+  background: var(--uc-accent, var(--cyan));
+  box-shadow: 0 0 12px var(--uc-accent, var(--cyan));
+}
+
+.un-consume__stat--total { --uc-accent: var(--cyan); }
+.un-consume__stat--ok { --uc-accent: var(--green); }
+.un-consume__stat--low { --uc-accent: var(--gold); }
+.un-consume__stat--critical { --uc-accent: var(--pink); }
+.un-consume__stat--exhausted { --uc-accent: var(--red); }
+.un-consume__stat--unlimited { --uc-accent: var(--purple, #a855f7); }
+
+.un-consume__stat-num {
+  font-family: var(--font-display);
+  font-size: 1.7rem;
+  letter-spacing: 1px;
+  line-height: 1;
+  color: var(--text);
+}
+
+.un-consume__stat-label {
+  margin-top: 5px;
+  font-size: 0.64rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+/* ── Table: shared .data-table + local bar/alert cells ── */
+.un-consume__barcell {
+  min-width: 190px;
+}
+
+.un-consume__bar {
+  position: relative;
+  height: 6px;
+  width: 170px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: visible;
+}
+
+.un-consume__fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 3px;
+  background: linear-gradient(90deg, var(--cyan), var(--green));
+  transition: width 0.5s ease;
+}
+
+.un-consume__fill--idle { background: #9dbbdd; }
+.un-consume__fill--ok { background: linear-gradient(90deg, var(--cyan), var(--green)); }
+.un-consume__fill--low { background: linear-gradient(90deg, var(--gold), #ff9100); }
+.un-consume__fill--critical { background: linear-gradient(90deg, var(--pink), var(--red)); }
+.un-consume__fill--exhausted { background: var(--red); box-shadow: 0 0 8px rgba(255, 23, 68, 0.5); }
+.un-consume__fill--unlimited {
+  background: linear-gradient(90deg, var(--cyan), var(--pink));
+  animation: uc-flow 2.4s linear infinite;
+}
+.un-consume__fill--disabled { background: rgba(255, 255, 255, 0.18); }
+
+@keyframes uc-flow {
+  0% { filter: brightness(1); }
+  50% { filter: brightness(1.45); }
+  100% { filter: brightness(1); }
+}
+
+/* 80 / 95 threshold ticks ride above the bar. */
+.un-consume__tick {
+  position: absolute;
+  top: -4px;
+  bottom: -4px;
+  width: 1px;
+  background: rgba(255, 255, 255, 0.45);
+}
+
+.un-consume__tick::after {
+  content: attr(data-label);
+  position: absolute;
+  top: -13px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.55rem;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.un-consume__pct {
+  margin-top: 5px;
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+
+.un-consume__used {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.un-consume__unl {
+  color: #c084fc;
+  font-weight: 600;
+}
+
+/* Badge tones beyond the Vouchers set. */
+.badge--crit {
+  background: rgba(255, 0, 127, 0.14);
+  color: var(--pink);
+  box-shadow: 0 0 8px rgba(255, 0, 127, 0.2);
+}
+
+.badge--unl {
+  background: rgba(168, 85, 247, 0.15);
+  color: #c084fc;
+  box-shadow: 0 0 8px rgba(168, 85, 247, 0.2);
+}
+
+.un-consume__alerts {
+  display: inline-flex;
+  gap: 8px;
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--text-muted);
+}
+
+.un-consume__alerts [data-tier='t80'] { color: var(--gold); }
+.un-consume__alerts [data-tier='t95'] { color: var(--pink); }
+
+.un-consume__muted {
+  color: var(--text-muted);
+}
+
+/* ── Offline / error banner ── */
+.un-consume__banner {
+  margin: 0 0 1rem;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 145, 0, 0.4);
+  background: rgba(255, 145, 0, 0.08);
+  color: var(--orange, #ff9100);
+  font-size: 0.76rem;
+}

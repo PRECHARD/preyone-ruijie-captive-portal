@@ -158,3 +158,44 @@ export interface WifiSession {
     userAgent: string | null;
   } | null;
 }
+
+// ── Voucher Consumption & Status tab (GET /api/admin/voucher-analytics) ────
+export type ConsumptionStatus =
+  | 'ok'
+  | 'low'        // >= 80% used
+  | 'critical'   // >= 95% used
+  | 'exhausted'  // >= 100% used
+  | 'unlimited'  // uncapped bundle (quotaMb <= 0)
+  | 'idle'       // 0 bytes used, capped bundle
+  | 'disabled';  // disableStatus != 0 (used up / cancelled)
+
+export interface VoucherConsumptionRow {
+  code: string;
+  packageName: string | null;
+  usedMB: number | null;
+  totalMB: number | null;
+  pct: number | null;
+  status: ConsumptionStatus;
+  onlineNow: boolean;
+  alertsSent: { t80: number; t95: number };
+  lastAlertAt: string | Date | null;
+}
+
+export interface VoucherConsumptionSummary {
+  total: number;
+  ok: number;
+  low: number;
+  critical: number;
+  exhausted: number;
+  unlimited: number;
+  idle: number;
+  disabled: number;
+}
+
+export interface VoucherConsumptionResponse {
+  generatedAt: string | Date;
+  /** false when Ruijie keys are missing — rows empty, tab shows roster-offline state. */
+  live: boolean;
+  summary: VoucherConsumptionSummary;
+  rows: VoucherConsumptionRow[];
+}

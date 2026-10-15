@@ -475,6 +475,7 @@
 
       // ── Advisory banner, toast and threshold alerting ──────────────────
       var WARN_PCT = 80;
+      var CRIT_PCT = 95;
       var toastTimer = null;
 
       function seen(kind) {
@@ -559,6 +560,77 @@
         if (state.timer) { clearInterval(state.timer); state.timer = null; }
       }
 
+      // ── Hybrid channel: server-pending alerts + Web Push subscribe ─────
+      // The backend sweep (voucherMonitorService) records every 80/95
+      // crossing; /api/alerts/pending serves the ones this PIN has not
+      // acknowledged yet, so a customer who was offline when the threshold
+      // fell still sees the banner on their next visit. Web Push is the
+      // other half: subscribe only ever happens inside a click handler
+      // (iOS/Android require a user gesture for Notification.requestPermission).
+
+      function urlBase64ToUint8Array(base64String) {
+        var padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+        var base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+        var raw = atob(base64);
+        var output = new Uint8Array(raw.length);
+        for (var i = 0; i < raw.length; i++) output[i] = raw.charCodeAt(i);
+        return output;
+      }
+
+      function ensurePushSubscription() {
+        if (!('serviceWorker' in navigator) || typeof Notification === 'undefined') return;
+        if (Notification.permission !== 'granted' || !state.voucher) return;
+        navigator.serviceWorker.ready.then(function (reg) {
+          return fetch('/api/alerts/public-key', { credentials: 'same-origin' })
+            .then(function (r) { return r.json(); })
+            .then(function (j) {
+              if (!j.publicKey) return null;
+              return reg.pushManager.subscribe({
+                userVisibleOnly: true,
+                applicationServerKey: urlBase64ToUint8Array(j.publicKey),
+              });
+            })
+            .then(function (sub) {
+              if (!sub) return;
+              return fetch('/api/alerts/subscribe', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'same-origin',
+                body: JSON.stringify({ voucher: state.voucher, subscription: sub.toJSON() }),
+              });
+            });
+        }).catch(function () { /* banner channel still works */ });
+      }
+
+      function ackAlert(id) {
+        fetch('/api/alerts/ack', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({ id: id, voucher: state.voucher }),
+        }).catch(function () { /* local dismiss already happened */ });
+      }
+
+      function fetchPendingAlerts() {
+        if (!state.voucher) return;
+        fetch('/api/alerts/pending?voucher=' + encodeURIComponent(state.voucher), { credentials: 'same-origin' })
+          .then(function (r) { return r.ok ? r.json() : { alerts: [] }; })
+          .then(function (j) {
+            var list = j.alerts || [];
+            if (!list.length) return;
+            var top = list[0]; // newest first
+            var key = 'preyone_evt_' + top.id;
+            if (lsGet(key) === '1') return;
+            try { localStorage.setItem(key, '1'); } catch (e) {}
+            var kind = top.tier >= 95 ? 'over' : 'warn';
+            setAlert(kind,
+              top.tier >= 95 ? 'ALMOST OUT OF DATA' : 'DATA RUNNING LOW',
+              top.body);
+            pushToast(kind, top.title, top.body);
+          })
+          .catch(function () { /* alerts are best-effort */ });
+      }
+
       // ── Render ──
       function render(j) {
         var used = j.bytesUsed;
@@ -623,11 +695,16 @@
             'Your data has run out and the gateway has paused your connection. Buy a fresh bundle to get back online.');
           notify('exhaust', 'ULTRANET // BUNDLE EXHAUSTED',
             'Data used up. Buy a new voucher to reconnect.', 'over');
+        } else if (!isUncapped && pct >= CRIT_PCT) {
+          setAlert('over', 'ALMOST OUT OF DATA',
+            'You have used ' + Math.round(pct) + '% of your bundle. Buy a new one now or the gateway cuts you off.');
+          notify('low95', 'ULTRANET // RUNNING DRY - ' + CRIT_PCT + '%',
+            'Almost out of data - buy a new bundle to stay online.', 'over');
         } else if (!isUncapped && pct >= WARN_PCT) {
           setAlert('warn', 'DATA RUNNING LOW',
             'You have used ' + Math.round(pct) + '% of your bundle. Top up now so you never drop off.');
           notify('low80', 'ULTRANET // DATA THRESHOLD ' + WARN_PCT + '%',
-            'Bundle at ' + WARN_PCT + '% — top up now to stay online.', 'warn');
+            'Bundle at ' + WARN_PCT + '% - top up now to stay online.', 'warn');
         } else {
           clearAlert();
         }
@@ -762,35 +839,70 @@
           refreshAlertsBtn();
           if (p === 'granted') {
             pushToast('', 'ALERTS ARMED',
-              'We will ping you at 80% used and the moment your bundle runs dry.');
+              'We will ping you at 80% and 95% used, and the moment your bundle runs dry.');
+            // iOS/Android: the subscription must be created inside this same
+            // click (permission + subscribe ride one user gesture).
+            ensurePushSubscription();
           }
         });
       });
 
       $('refreshBtn').addEventListener('click', checkUsage);
 
-      // ── Install prompt (beforeinstallprompt) ──
+      // ── Install prompt ──
+      // Android/Chrome fires beforeinstallprompt; iOS Safari NEVER does, so
+      // on iPhone/iPad the button is shown up front and guides the manual
+      // Share → Add to Home Screen route (the only install path iOS allows).
+      var isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) ||
+        (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+      var IOS_STEPS = 'On iPhone: tap the Share button (square with the up arrow), ' +
+        'scroll down and tap "Add to Home Screen".';
+
+      function isStandalone() {
+        if (navigator.standalone === true) return true;
+        try {
+          return !!(window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
+        } catch (e) { return false; }
+      }
+
+      function showInstall(label, hint) {
+        $('installBtn').textContent = label;
+        $('installBtn').hidden = false;
+        $('installHint').textContent = hint;
+        $('installHint').style.display = '';
+      }
+
+      function hideInstall() {
+        $('installBtn').hidden = true;
+        $('installHint').style.display = 'none';
+      }
+
+      if (isIOS && !isStandalone()) {
+        showInstall('INSTALL APP', IOS_STEPS);
+      }
+
       window.addEventListener('beforeinstallprompt', function (e) {
         e.preventDefault();
         state.deferredPrompt = e;
-        $('installBtn').hidden = false;
-        $('installHint').style.display = '';
+        showInstall('INSTALL APP', 'Add Preyone WiFi to your home screen for one-tap usage checks.');
       });
 
       $('installBtn').addEventListener('click', function () {
         var prompt = state.deferredPrompt;
-        if (!prompt) return;
-        prompt.prompt();
-        prompt.userChoice.finally(function () {
-          state.deferredPrompt = null;
-          $('installBtn').hidden = true;
-          $('installHint').style.display = 'none';
-        });
+        if (prompt) {
+          prompt.prompt();
+          prompt.userChoice.then(function (choice) {
+            state.deferredPrompt = null;
+            if (choice && choice.outcome === 'accepted') hideInstall();
+          }).catch(function () { /* dismissed */ });
+          return;
+        }
+        // iOS: there is no programmatic install — restate the manual steps.
+        if (isIOS) showInstall('HOW TO INSTALL', IOS_STEPS);
       });
 
       window.addEventListener('appinstalled', function () {
-        $('installBtn').hidden = true;
-        $('installHint').style.display = 'none';
+        hideInstall();
       });
 
       // ── Service worker ──
@@ -803,6 +915,11 @@
       // ── Boot ──
       $('currentYear').textContent = new Date().getFullYear();
       refreshAlertsBtn();
+      // Re-arm the push subscription on every visit (idempotent server-side)
+      // and surface any alert the backend fired while this device was away.
+      ensurePushSubscription();
+      fetchPendingAlerts();
+      setInterval(fetchPendingAlerts, 5 * 60 * 1000);
 
       if (!state.voucher && !state.mac) {
         showManual();
@@ -814,7 +931,10 @@
 
       // Refresh when the app returns to the foreground.
       document.addEventListener('visibilitychange', function () {
-        if (!document.hidden && (state.voucher || state.mac)) checkUsage();
+        if (!document.hidden && (state.voucher || state.mac)) {
+          checkUsage();
+          fetchPendingAlerts();
+        }
       });
     })();
   </script>
