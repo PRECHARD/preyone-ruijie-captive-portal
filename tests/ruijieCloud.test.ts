@@ -5,6 +5,7 @@ import {
   getRuijieUserGroups,
   createRuijieVoucher,
   getRuijieVouchers,
+  getAllRuijieVouchers,
   isRuijieCloudConfigured,
   resetRuijieCloudCache,
 } from '../src/services/ruijieCloud';
@@ -288,5 +289,72 @@ describe('getRuijieVouchers', () => {
     expect(mocks.get.mock.calls[0][0]).toContain('start=0');
     expect(mocks.get.mock.calls[0][0]).toContain('pageSize=20');
     expect(mocks.get.mock.calls[0][0]).not.toContain('pageIndex');
+  });
+
+  it('maps the accounting fields the /data PIN lookup depends on (verified live 2026-10-15)', async () => {
+    mocks.post.mockResolvedValueOnce({ status: 200, data: { code: 0, accessToken: 'tok' } });
+    mocks.get.mockResolvedValueOnce({
+      status: 200,
+      data: {
+        code: 0,
+        data: {
+          list: [{
+            voucherCode: 'abc123',
+            quota: 5120,
+            usedQuota: 1089,
+            usedTime: 256,
+            timePeriod: 1440,
+            loginTime: 1792051811000,
+            currentClients: 1,
+            maxClients: 1,
+            packageName: 'preLite_Daily',
+            disableStatus: 0,
+          }],
+        },
+      },
+    });
+
+    const [v] = await getRuijieVouchers({ start: 0, pageSize: 100 });
+    expect(v).toMatchObject({
+      voucherCode: 'abc123',
+      quotaMb: 5120,
+      usedQuotaMb: 1089,
+      usedTimeMin: 256,
+      timePeriodMin: 1440,
+      loginTime: 1792051811000,
+      currentClients: 1,
+      maxClients: 1,
+      packageName: 'preLite_Daily',
+      disableStatus: 0,
+    });
+  });
+});
+
+describe('getAllRuijieVouchers', () => {
+  it('pages until a short page and stops', async () => {
+    mocks.post.mockResolvedValueOnce({ status: 200, data: { code: 0, accessToken: 'tok' } });
+    const page1 = Array.from({ length: 100 }, (_, i) => ({ voucherCode: 'v' + i }));
+    const page2 = Array.from({ length: 8 }, (_, i) => ({ voucherCode: 'w' + i }));
+    mocks.get.mockResolvedValueOnce({ status: 200, data: { code: 0, data: { list: page1, total: 108 } } });
+    mocks.get.mockResolvedValueOnce({ status: 200, data: { code: 0, data: { list: page2, total: 108 } } });
+
+    const all = await getAllRuijieVouchers();
+    expect(all).toHaveLength(108);
+    expect(mocks.get).toHaveBeenCalledTimes(2);
+    expect(mocks.get.mock.calls[0][0]).toContain('start=0');
+    expect(mocks.get.mock.calls[1][0]).toContain('start=100');
+    expect(mocks.get.mock.calls[1][0]).toContain('pageSize=100');
+  });
+
+  it('stops after one page when the roster fits', async () => {
+    mocks.post.mockResolvedValueOnce({ status: 200, data: { code: 0, accessToken: 'tok' } });
+    mocks.get.mockResolvedValueOnce({
+      status: 200,
+      data: { code: 0, data: { list: [{ voucherCode: 'only' }], total: 1 } },
+    });
+
+    const all = await getAllRuijieVouchers();
+    expect(all).toHaveLength(1);
+    expect(mocks.get).toHaveBeenCalledTimes(1);
   });
 });

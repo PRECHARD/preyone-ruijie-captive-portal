@@ -57,6 +57,28 @@ export interface RuijieVoucher {
   userGroupId?: string;
   status?: string;
   comment?: string;
+  // ── Accounting (verified live 2026-10-15) ─────────────────────────────
+  // quota/usedQuota are MEGABYTES (quota: 5120 == 5 GB preLite_Daily),
+  // usedTime is minutes of accumulated login time, loginTime is epoch-ms of
+  // the most recent login, currentClients is how many devices are on the
+  // voucher right now, disableStatus is 0 while the voucher is usable.
+  // These are keyed by the voucher CODE itself — the gateway enforces the
+  // bundle against exactly these counters.
+  quotaMb?: number;
+  usedQuotaMb?: number;
+  usedTimeMin?: number;
+  timePeriodMin?: number;
+  loginTime?: number;
+  currentClients?: number;
+  maxClients?: number;
+  packageName?: string;
+  disableStatus?: number;
+}
+
+function toNum(v: unknown): number | undefined {
+  if (v == null || v === '') return undefined;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : undefined;
 }
 
 let cachedToken: { accessToken: string; expiresAt: number } | null = null;
@@ -244,6 +266,35 @@ export async function getRuijieVouchers(input: GetRuijieVouchersInput = {}): Pro
       userGroupId: v.userGroupId != null ? String(v.userGroupId) : undefined,
       status: v.status != null ? String(v.status) : undefined,
       comment: v.comment != null ? String(v.comment) : undefined,
+      quotaMb: toNum(v.quota),
+      usedQuotaMb: toNum(v.usedQuota),
+      usedTimeMin: toNum(v.usedTime),
+      timePeriodMin: toNum(v.timePeriod),
+      loginTime: toNum(v.loginTime),
+      currentClients: toNum(v.currentClients),
+      maxClients: toNum(v.maxClients),
+      packageName: v.packageName != null ? String(v.packageName) : undefined,
+      disableStatus: toNum(v.disableStatus),
     }));
   });
+}
+
+/**
+ * Every voucher in the tenant group: pages getList until a short page
+ * (pageSize=100 accepted live; the envelope carries `total`). The current
+ * roster (108 vouchers) costs 2 requests — callers should cache, see
+ * usage.ts ruijieVoucherByCode().
+ */
+export async function getAllRuijieVouchers(
+  opts: { pageSize?: number; maxPages?: number } = {}
+): Promise<RuijieVoucher[]> {
+  const pageSize = Math.max(1, opts.pageSize ?? 100);
+  const maxPages = opts.maxPages ?? 50;
+  const out: RuijieVoucher[] = [];
+  for (let page = 0; page < maxPages; page++) {
+    const batch = await getRuijieVouchers({ start: page * pageSize, pageSize });
+    out.push(...batch);
+    if (batch.length < pageSize) break;
+  }
+  return out;
 }
