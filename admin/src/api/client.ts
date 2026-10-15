@@ -61,5 +61,7 @@ export const transitApi = createClient('/api/v1/transit');
 export const ruijieApi = createClient('/api/ruijie');
 /** Currency exchange rates (admin auth required). */
 export const currencyApi = createClient('/api/currency');
+/** Subscription plans & Pesepay checkout (admin auth required). */
+export const subscriptionApi = createClient('/api/subscription');
 
 export { getToken, setToken, clearToken };

@@ -105,6 +105,12 @@ ALTER TABLE companies ADD COLUMN IF NOT EXISTS invoice_template_id  INTEGER;
 ALTER TABLE companies ADD COLUMN IF NOT EXISTS pos_theme_id         INTEGER;
 ALTER TABLE companies ADD COLUMN IF NOT EXISTS logo_url             TEXT;
 
+-- JSONB config blobs so the Global Settings Hub hardware / invoicing tabs
+-- persist without one column per field. pos_hardware: printer pairing, cash
+-- drawer kick, barcode scanner. invoice_settings: bank remittance + tax meta.
+ALTER TABLE companies ADD COLUMN IF NOT EXISTS pos_hardware     JSONB NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE companies ADD COLUMN IF NOT EXISTS invoice_settings JSONB NOT NULL DEFAULT '{}'::jsonb;
+
 -- ── 3. CHECK constraints (idempotent: skip when already present) ───────────
 DO $$ BEGIN
   ALTER TABLE companies ADD CONSTRAINT companies_business_profile_check

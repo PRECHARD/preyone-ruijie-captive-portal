@@ -7,6 +7,13 @@ import { PERMISSIONS, requirePermission, scopeUserVoucherCodeCondition, scopeVou
 import { recordAuditLog } from './adminAuth';
 import { sendAdminApprovedNotification, sendAdminRejectedNotification } from '../services/notificationService';
 import { isRuijieCloudConfigured, mintRuijieVoucherForTier } from '../services/ruijieMint';
+import { TIER_CATALOG } from './subscription';
+import {
+  BUSINESS_PROFILES,
+  CURRENCIES,
+  INVOICE_TEMPLATES,
+  POS_THEMES,
+} from '../catalog/ecosystem';
 import {
   getStaffDailySalesItemized,
   getPlatformDailySalesItemized,
@@ -2918,6 +2925,50 @@ adminRouter.delete('/report-schedules/:id', requirePermission(PERMISSIONS.SYSTEM
 // POS: Company profile (single source of truth for receipts/invoices)
 // ═══════════════════════════════════════════════════════
 
+adminRouter.get('/catalogues', requireRole('CEO'), async (_req: Request, res: Response) => {
+  const readCatalog = async <T>(table: string, fallback: T[]): Promise<T[]> => {
+    try {
+      const { rows } = await pool.query(`SELECT * FROM ${table} WHERE is_active = TRUE ORDER BY id`);
+      return rows.length > 0 ? (rows as unknown as T[]) : fallback;
+    } catch {
+      return fallback; // table absent before the v3 migration has run
+    }
+  };
+  const [invoiceTemplates, posThemes] = await Promise.all([
+    readCatalog('invoice_templates', INVOICE_TEMPLATES),
+    readCatalog('pos_themes', POS_THEMES),
+  ]);
+  res.json({
+    invoiceTemplates,
+    posThemes,
+    businessProfiles: BUSINESS_PROFILES,
+    currencies: CURRENCIES,
+    planTiers: TIER_CATALOG,
+  });
+});
+
+// Accepts a self-contained data:image URL, validates it, and returns it for the
+// caller to persist via PUT /company (logo_url). Storing the data URL (rather
+// than a file path) keeps the logo rendering on every host — the CSP already
+// allows data: images — and avoids a multipart upload dependency.
+adminRouter.post('/company/logo', requireRole('CEO'), async (req: Request, res: Response) => {
+  const { dataUrl } = req.body as { dataUrl?: string };
+  if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/')) {
+    res.status(422).json({ error: 'dataUrl must be a data:image/... URL' });
+    return;
+  }
+  const match = /^data:image\/(png|jpe?g|webp|gif|svg\+xml);base64,([A-Za-z0-9+/=]+)$/.exec(dataUrl);
+  if (!match) {
+    res.status(422).json({ error: 'Unsupported image format or encoding' });
+    return;
+  }
+  if (match[2].length > 2_800_000) { // ~2 MB decoded
+    res.status(413).json({ error: 'Logo too large — keep it under 2 MB' });
+    return;
+  }
+  res.json({ logoUrl: dataUrl });
+});
+
 adminRouter.get('/company', requireRole('CEO'), async (_req: Request, res: Response) => {
   const { rows } = await pool.query('SELECT * FROM companies ORDER BY created_at LIMIT 1');
   res.json(rows[0] || { name: 'Preyone', currency: 'USD', tax_pct: 0 });
@@ -2927,27 +2978,38 @@ adminRouter.put('/company', requireRole('CEO'), async (req: Request, res: Respon
   const {
     name, tagline, address, email, supportPhone, website, logoPath,
     currency, taxPct, invoicePrefix, quotePrefix, receiptFooter, termsText,
+    logoUrl, businessProfile, invoiceTemplateId, posThemeId, posHardware, invoiceSettings,
   } = req.body as any;
   const { rows } = await pool.query(
     `UPDATE companies SET
-       name           = COALESCE($1,  name),
-       tagline        = COALESCE($2,  tagline),
-       address        = COALESCE($3,  address),
-       email          = COALESCE($4,  email),
-       support_phone  = COALESCE($5,  support_phone),
-       website        = COALESCE($6,  website),
-       logo_path      = COALESCE($7,  logo_path),
-       currency       = COALESCE($8,  currency),
-       tax_pct        = COALESCE($9,  tax_pct),
-       invoice_prefix = COALESCE($10, invoice_prefix),
-       quote_prefix   = COALESCE($11, quote_prefix),
-       receipt_footer = COALESCE($12, receipt_footer),
-       terms_text     = COALESCE($13, terms_text),
-       updated_by     = $14, updated_at = NOW()
+       name                = COALESCE($1,  name),
+       tagline             = COALESCE($2,  tagline),
+       address             = COALESCE($3,  address),
+       email               = COALESCE($4,  email),
+       support_phone       = COALESCE($5,  support_phone),
+       website             = COALESCE($6,  website),
+       logo_path           = COALESCE($7,  logo_path),
+       currency            = COALESCE($8,  currency),
+       tax_pct             = COALESCE($9,  tax_pct),
+       invoice_prefix      = COALESCE($10, invoice_prefix),
+       quote_prefix        = COALESCE($11, quote_prefix),
+       receipt_footer      = COALESCE($12, receipt_footer),
+       terms_text          = COALESCE($13, terms_text),
+       logo_url            = COALESCE($14, logo_url),
+       business_profile    = COALESCE($15, business_profile),
+       invoice_template_id = COALESCE($16, invoice_template_id),
+       pos_theme_id        = COALESCE($17, pos_theme_id),
+       pos_hardware        = COALESCE($18::jsonb, pos_hardware),
+       invoice_settings    = COALESCE($19::jsonb, invoice_settings),
+       updated_by          = $20, updated_at = NOW()
      RETURNING *`,
     [name ?? null, tagline ?? null, address ?? null, email ?? null, supportPhone ?? null,
      website ?? null, logoPath ?? null, currency ?? null, taxPct ?? null, invoicePrefix ?? null,
-     quotePrefix ?? null, receiptFooter ?? null, termsText ?? null, req.adminUser!.id]
+     quotePrefix ?? null, receiptFooter ?? null, termsText ?? null, logoUrl ?? null,
+     businessProfile ?? null, invoiceTemplateId ?? null, posThemeId ?? null,
+     posHardware != null ? JSON.stringify(posHardware) : null,
+     invoiceSettings != null ? JSON.stringify(invoiceSettings) : null,
+     req.adminUser!.id]
   );
   await recordAuditLog(req.adminUser!.id, req.adminUser!.fullName, 'company_update', 'companies', rows[0]?.id, `Company profile updated`);
   res.json(rows[0]);

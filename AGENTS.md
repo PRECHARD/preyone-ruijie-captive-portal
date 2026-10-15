@@ -3,14 +3,16 @@
 ## Project Overview
 Ruijie captive portal system for Preyone UltraNet Wi-Fi. Voucher-based internet access with gateway integration via RADIUS and ext_login.
 
-## SCOPE LOCK (permanent) — Admin console is FROZEN
+## SCOPE LOCK — Admin console UNLOCKED for Global Settings Hub (2026-10-15)
 
-**Do NOT edit, develop, or deploy the admin console.** Frozen at the 12:00 2026-10-13 state.
-- Do NOT modify `admin/` (source or `admin/dist`), `app/` (enterprise gateway login), or the
-  admin auth screens / template / sign-in / sign-up / 2FA.
-- The sign-in/sign-up visual template (`admin/src/pages/Login.css`) is final — never change it.
+> **Status change (2026-10-15):** The admin console was permanently frozen at the 12:00 2026-10-13
+> state. The user has now **explicitly unlocked it** to host the new **Global Settings Hub**
+> (`admin/src/pages/GlobalSettingsHub.tsx`, section `global-settings`). Admin console edits are
+> permitted for this feature only. The admin **auth screens / sign-in / sign-up / 2FA and the
+> `Login.css` template remain frozen** — do not touch them.
 
-**Active focus — work ONLY on these:**
+**Active focus:**
+- **Global Settings Hub** (`admin/` — General, POS Hardware & Layout, Fast Food & KDS, Invoicing & Taxes)
 - **Invoice system** (`invoice.preyone.com`)
 - **POS** (`pos.preyone.com`, `pos/` SPA, thermal printing, till)
 
