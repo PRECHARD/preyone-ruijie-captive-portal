@@ -106,6 +106,147 @@
 
     .usage-actions { display: flex; flex-wrap: wrap; gap: 0.75rem; justify-content: center; margin-top: 1.5rem; }
 
+    /* ── Advisory banner: exhausted / low / expired ───────────────────── */
+    .usage-alert {
+      position: relative;
+      margin: 0 0 1rem;
+      padding: 1rem 1rem 0.95rem 1.15rem;
+      border-radius: var(--radius, 14px);
+      border: 1px solid rgba(0, 212, 255, 0.4);
+      background:
+        linear-gradient(160deg, rgba(10, 13, 23, 0.92), rgba(5, 5, 5, 0.92)),
+        radial-gradient(120% 80% at 0% 0%, rgba(106, 13, 173, 0.28), transparent 60%);
+      box-shadow: 0 0 22px rgba(0, 212, 255, 0.16), inset 0 0 30px rgba(106, 13, 173, 0.12);
+      text-align: left;
+      overflow: hidden;
+      animation: usage-alert-in 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    /* Neon rail down the left edge — the Preyone signal stripe. */
+    .usage-alert::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: 0;
+      width: 3px;
+      background: linear-gradient(180deg, #00d4ff, #ff00ff);
+    }
+
+    .usage-alert--warn { border-color: rgba(245, 166, 35, 0.5); box-shadow: 0 0 22px rgba(245, 166, 35, 0.16), inset 0 0 30px rgba(245, 166, 35, 0.06); }
+    .usage-alert--over { border-color: rgba(239, 68, 68, 0.55); box-shadow: 0 0 22px rgba(239, 68, 68, 0.2), inset 0 0 30px rgba(239, 68, 68, 0.07); }
+    .usage-alert--over::before, .usage-toast--over::before { background: linear-gradient(180deg, #ff5f6d, #ff1744); }
+    .usage-alert--warn::before, .usage-toast--warn::before { background: linear-gradient(180deg, #ffd700, #f5a623); }
+
+    .usage-alert__eyebrow {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 0.68rem;
+      letter-spacing: 0.32em;
+      color: var(--cyan);
+      margin: 0 0 0.3rem;
+    }
+
+    .usage-alert--warn .usage-alert__eyebrow, .usage-toast--warn .usage-alert__eyebrow { color: #f5a623; }
+    .usage-alert--over .usage-alert__eyebrow, .usage-toast--over .usage-alert__eyebrow { color: #ff6b81; }
+
+    .usage-alert__title {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 1.2rem;
+      letter-spacing: 0.07em;
+      color: #f8fbff;
+      margin: 0 0 0.35rem;
+    }
+
+    .usage-alert__body {
+      font-size: 0.78rem;
+      line-height: 1.55;
+      color: var(--text-muted);
+      margin: 0 0 0.8rem;
+    }
+
+    .usage-alert__actions { display: flex; flex-wrap: wrap; gap: 0.6rem; }
+    .usage-alert__btn { font-size: 0.76rem; padding: 0.55rem 1.05rem; letter-spacing: 0.05em; }
+
+    @keyframes usage-alert-in {
+      from { opacity: 0; transform: translateY(-8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ── Transient threshold toast (glass + glow, futuristic genre) ───── */
+    .usage-toast {
+      position: fixed;
+      left: 50%;
+      bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
+      transform: translateX(-50%);
+      width: min(92vw, 430px);
+      z-index: 60;
+      padding: 0.85rem 2.7rem 0.9rem 1.1rem;
+      border-radius: 14px;
+      border: 1px solid rgba(0, 212, 255, 0.5);
+      background: linear-gradient(135deg, rgba(10, 13, 23, 0.97), rgba(5, 5, 5, 0.97));
+      box-shadow: 0 0 30px rgba(0, 212, 255, 0.28), 0 14px 44px rgba(0, 0, 0, 0.6), inset 0 0 26px rgba(106, 13, 173, 0.16);
+      text-align: left;
+      overflow: hidden;
+      animation: usage-toast-in 0.45s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .usage-toast::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: 0;
+      width: 3px;
+      background: linear-gradient(180deg, #00d4ff, #ff00ff);
+    }
+
+    .usage-toast--warn { border-color: rgba(245, 166, 35, 0.55); }
+    .usage-toast--over { border-color: rgba(239, 68, 68, 0.6); }
+
+    .usage-toast__close {
+      position: absolute;
+      top: 0.35rem;
+      right: 0.45rem;
+      width: 2rem;
+      height: 2rem;
+      border: none;
+      background: transparent;
+      color: var(--text-muted);
+      font-size: 1.3rem;
+      line-height: 1;
+      cursor: pointer;
+    }
+
+    .usage-toast__close:hover { color: #f8fbff; }
+
+    @keyframes usage-toast-in {
+      from { opacity: 0; transform: translate(-50%, 16px); }
+      to { opacity: 1; transform: translate(-50%, 0); }
+    }
+
+    /* ── Unlimited bundles: a flowing signal, never a "full" bar ──────── */
+    .data-bar-fill--unlimited {
+      width: 100% !important;
+      background: linear-gradient(90deg, #00d4ff, #ff00ff, #00d4ff);
+      background-size: 200% 100%;
+      animation: usage-flow 3.2s linear infinite;
+      box-shadow: 0 0 14px rgba(255, 0, 255, 0.35);
+    }
+
+    @keyframes usage-flow { to { background-position: -200% 0; } }
+
+    .data-usage-pct--unlimited {
+      color: var(--cyan);
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-shadow: 0 0 12px rgba(0, 212, 255, 0.4);
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .usage-toast, .usage-alert { animation: none; }
+      .data-bar-fill--unlimited { animation: none; }
+    }
+
     @media (max-width: 480px) {
       .status-grid { grid-template-columns: 1fr; gap: 0.75rem; padding: 1rem; }
       .usage-metric-value { font-size: 1.2rem; }
@@ -157,6 +298,17 @@
         <span id="metaVoucher" style="display:none">VOUCHER ••••<span id="metaVoucherTail"></span></span>
         <span id="metaTier" style="display:none"></span>
       </div>
+
+      <!-- Advisory banner: exhausted / low / expired, with the buy path -->
+      <section id="usageAlert" class="usage-alert" hidden aria-live="polite">
+        <p class="usage-alert__eyebrow">ULTRANET ALERT</p>
+        <h2 class="usage-alert__title" id="alertTitle"></h2>
+        <p class="usage-alert__body" id="alertBody"></p>
+        <div class="usage-alert__actions">
+          <a class="btn-primary usage-alert__btn" id="alertBuy" href="/#packages-section">BUY NEW VOUCHER</a>
+          <button type="button" class="btn-secondary usage-alert__btn" id="alertEnter" hidden>ENTER NEW PIN</button>
+        </div>
+      </section>
 
       <!-- Metric cards: Used / Remaining / Total -->
       <div class="status-grid">
@@ -236,6 +388,7 @@
 
       <div class="usage-actions">
         <button type="button" id="refreshBtn" class="btn-secondary">REFRESH</button>
+        <button type="button" id="alertsBtn" class="btn-secondary" hidden>ENABLE DATA ALERTS</button>
         <a href="/" class="btn-secondary">BACK TO PORTAL</a>
       </div>
     </div>
@@ -254,6 +407,15 @@
       </div>
     </div>
   </footer>
+
+  <!-- Transient threshold toast — mirrored as a system notification when
+       the customer has granted alert permission (registered from sw.js). -->
+  <div id="usageToast" class="usage-toast" hidden role="status" aria-live="polite">
+    <button type="button" class="usage-toast__close" id="toastClose" aria-label="Dismiss">&times;</button>
+    <p class="usage-alert__eyebrow" id="toastEyebrow">ULTRANET ALERT</p>
+    <p class="usage-alert__title" id="toastTitle" style="font-size:1.02rem"></p>
+    <p class="usage-alert__body" id="toastBody" style="margin-bottom:0"></p>
+  </div>
 
   <script>
     (function () {
@@ -284,6 +446,10 @@
         voucher: (qVoucher || lsGet(LS_VOUCHER)).toLowerCase(),
         timer: null,
         deferredPrompt: null,
+        // Where the current PIN came from: 'stored' (link/localStorage, i.e.
+        // possibly a dead PIN) or 'manual' (they just typed it — a 404 may be
+        // a typo, so we keep their input instead of blanking it).
+        lastEntry: 'stored',
       };
 
       // ── Formatting ──
@@ -307,6 +473,92 @@
         b.className = 'usage-badge' + (cls ? ' ' + cls : '');
       }
 
+      // ── Advisory banner, toast and threshold alerting ──────────────────
+      var WARN_PCT = 80;
+      var toastTimer = null;
+
+      function seen(kind) {
+        try { return localStorage.getItem('preyone_seen_' + kind + '_' + state.voucher) === '1'; }
+        catch (e) { return false; }
+      }
+
+      function markSeen(kind) {
+        try { localStorage.setItem('preyone_seen_' + kind + '_' + state.voucher, '1'); }
+        catch (e) {}
+      }
+
+      function setAlert(kind, title, body) {
+        var el = $('usageAlert');
+        el.hidden = false;
+        el.className = 'usage-alert usage-alert--' + kind;
+        $('alertTitle').textContent = title;
+        $('alertBody').textContent = body;
+        $('alertEnter').hidden = false;
+      }
+
+      function clearAlert() { $('usageAlert').hidden = true; }
+
+      function pushToast(kind, title, body) {
+        var t = $('usageToast');
+        $('toastTitle').textContent = title;
+        $('toastBody').textContent = body;
+        t.className = 'usage-toast' + (kind ? ' usage-toast--' + kind : '');
+        t.hidden = false;
+        // restart the entry animation for repeat alerts
+        t.style.animation = 'none';
+        void t.offsetWidth;
+        t.style.animation = '';
+        if (toastTimer) clearTimeout(toastTimer);
+        toastTimer = setTimeout(function () { t.hidden = true; }, 14000);
+      }
+
+      // One alert per voucher per threshold: the toast is in-page and always
+      // works; the system notification is the push channel once permission
+      // was granted (ENABLE DATA ALERTS button, or a previous grant).
+      function notify(kind, title, body, alertKind) {
+        if (seen(kind)) return;
+        markSeen(kind);
+        pushToast(alertKind, title, body);
+        if (typeof Notification !== 'undefined' &&
+            Notification.permission === 'granted' &&
+            navigator.serviceWorker) {
+          navigator.serviceWorker.ready.then(function (reg) {
+            return reg.showNotification(title, {
+              body: body,
+              tag: 'preyone-' + kind + '-' + state.voucher,
+              icon: '/favicon/web-app-manifest-192x192.png',
+              badge: '/favicon/web-app-manifest-192x192.png',
+              data: { url: '/data' },
+            });
+          }).catch(function () { /* no SW here — the toast already landed */ });
+        }
+      }
+
+      function refreshAlertsBtn() {
+        var b = $('alertsBtn');
+        if (typeof Notification === 'undefined') { b.hidden = true; return; }
+        if (Notification.permission === 'granted') {
+          b.hidden = false;
+          b.disabled = true;
+          b.textContent = 'DATA ALERTS: ON';
+        } else if (Notification.permission === 'denied') {
+          b.hidden = true;
+        } else {
+          b.hidden = false;
+          b.disabled = false;
+          b.textContent = 'ENABLE DATA ALERTS';
+        }
+      }
+
+      function startPolling() {
+        if (state.timer) clearInterval(state.timer);
+        state.timer = setInterval(checkUsage, POLL_MS);
+      }
+
+      function stopPolling() {
+        if (state.timer) { clearInterval(state.timer); state.timer = null; }
+      }
+
       // ── Render ──
       function render(j) {
         var used = j.bytesUsed;
@@ -326,8 +578,16 @@
         if (used != null && total != null && total > 0) {
           pct = Math.min((used / total) * 100, 100);
         }
-        $('dataBarFill').style.width = pct + '%';
-        $('dataUsagePct').textContent = pct.toFixed(1) + '%';
+        // Exhausted = capped bundle whose allowance is fully consumed.
+        var exhausted = !isUncapped && used != null && total != null && total > 0 && used >= total;
+
+        // Unlimited bundles: no percentage semantics — a flowing signal bar
+        // and an explicit UNLIMITED readout instead of a misleading "0.0%".
+        var bar = $('dataBarFill');
+        bar.className = isUncapped ? 'data-bar-fill data-bar-fill--unlimited' : 'data-bar-fill';
+        bar.style.width = isUncapped ? '100%' : pct + '%';
+        $('dataUsagePct').textContent = isUncapped ? 'UNLIMITED' : pct.toFixed(1) + '%';
+        $('dataUsagePct').className = isUncapped ? 'data-usage-pct--unlimited' : '';
         $('dataUsageRemaining').textContent = isUncapped ? 'Unlimited remaining' : fmtMB(remaining) + ' remaining';
 
         // Colour the remaining metric as the bundle runs down.
@@ -357,6 +617,21 @@
           $('metaTier').textContent = String(j.packageTier).toUpperCase();
         }
 
+        // ── Advisory + threshold alerting ──
+        if (exhausted) {
+          setAlert('over', 'BUNDLE EXHAUSTED',
+            'Your data has run out and the gateway has paused your connection. Buy a fresh bundle to get back online.');
+          notify('exhaust', 'ULTRANET // BUNDLE EXHAUSTED',
+            'Data used up. Buy a new voucher to reconnect.', 'over');
+        } else if (!isUncapped && pct >= WARN_PCT) {
+          setAlert('warn', 'DATA RUNNING LOW',
+            'You have used ' + Math.round(pct) + '% of your bundle. Top up now so you never drop off.');
+          notify('low80', 'ULTRANET // DATA THRESHOLD ' + WARN_PCT + '%',
+            'Bundle at ' + WARN_PCT + '% — top up now to stay online.', 'warn');
+        } else {
+          clearAlert();
+        }
+
         setNetBadge(j.active ? '● ONLINE' : '● SESSION ENDED', j.active ? 'usage-badge--online' : 'usage-badge--offline');
       }
 
@@ -381,14 +656,57 @@
           .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, body: j }; }); })
           .then(function (res) {
             if (!res.ok || res.body.error) {
-              renderError(true);
-              if (res.body && res.body.error === 'not_found') showManual('No active session for that voucher.');
+              if (res.body && res.body.error === 'not_found') handleNotFound();
+              else renderError(true);
               return;
             }
             hideManual();
             render(res.body);
           })
           .catch(function () { renderError(true); });
+      }
+
+      // The PIN is dead: expired, fully used, disabled, or a typo. The API
+      // deliberately cannot tell us which (uniform 404 — see usage.ts), so we
+      // say all of them, blank every stale figure so old numbers never sit
+      // next to the new-PIN form, stop polling the corpse, and offer the two
+      // ways forward: enter the voucher just bought, or buy one.
+      function handleNotFound() {
+        stopPolling();
+
+        $('metricUsed').textContent = '—';
+        $('metricRemaining').textContent = '—';
+        $('metricTotal').textContent = '—';
+        $('dataUsageNumbers').textContent = '— / —';
+        var bar = $('dataBarFill');
+        bar.className = 'data-bar-fill';
+        bar.style.width = '0%';
+        $('dataUsagePct').textContent = '—';
+        $('dataUsagePct').className = '';
+        $('dataUsageRemaining').textContent = '— remaining';
+        $('detailStatus').textContent = 'EXPIRED';
+        $('detailStatus').style.color = '#f87171';
+
+        setAlert('over', 'VOUCHER EXPIRED OR USED UP',
+          'That voucher has ended — it expired, was fully used, or was disabled. Enter the PIN of a bundle you just bought, or grab a new one.');
+
+        var msg = 'This voucher has expired or been used up. Enter your new PIN to check another bundle.';
+        // Only pull up the keyboard the first time the form appears — later
+        // refreshes (visibilitychange, RESTORE) must not re-focus mid-typing.
+        var firstTime = $('manualSection').hidden;
+        showManual(msg);
+        if (state.lastEntry === 'manual') {
+          // They just typed this PIN — a typo, not necessarily a dead voucher.
+          // Keep it so one character can be fixed instead of retyped.
+          $('manualVoucher').value = state.voucher;
+        } else {
+          $('manualVoucher').value = '';
+        }
+        if (firstTime) $('manualVoucher').focus({ preventScroll: true });
+
+        setNetBadge('● VOUCHER ENDED', 'usage-badge--offline');
+        notify('expired', 'ULTRANET // VOUCHER ENDED',
+          'That voucher has expired or been used up. Enter your new PIN or buy a fresh bundle.', 'over');
       }
 
       // ── Manual fallback ──
@@ -409,11 +727,44 @@
         $('manualError').textContent = '';
         state.voucher = v;
         state.mac = m;
+        // Fresh manual entry: a 404 from here is as likely a typo as a dead
+        // voucher, so handleNotFound keeps this input for editing.
+        state.lastEntry = 'manual';
         try {
           localStorage.setItem(LS_VOUCHER, v);
           if (m) localStorage.setItem(LS_MAC, m);
         } catch (err) {}
         checkUsage();
+        // Restart the 15s cadence for the newly entered voucher (a dead PIN
+        // had stopped it in handleNotFound).
+        startPolling();
+      });
+
+      $('alertEnter').addEventListener('click', function () {
+        showManual('');
+        $('manualVoucher').value = '';
+        state.lastEntry = 'manual';
+        $('manualVoucher').focus({ preventScroll: false });
+        $('manualSection').scrollIntoView({ behavior: 'smooth', block: 'center' });
+      });
+
+      $('toastClose').addEventListener('click', function () {
+        $('usageToast').hidden = true;
+        if (toastTimer) clearTimeout(toastTimer);
+      });
+
+      $('alertsBtn').addEventListener('click', function () {
+        if (typeof Notification === 'undefined') return;
+        var asked = Notification.requestPermission
+          ? Notification.requestPermission()
+          : Promise.resolve(Notification.permission);
+        Promise.resolve(asked).then(function (p) {
+          refreshAlertsBtn();
+          if (p === 'granted') {
+            pushToast('', 'ALERTS ARMED',
+              'We will ping you at 80% used and the moment your bundle runs dry.');
+          }
+        });
       });
 
       $('refreshBtn').addEventListener('click', checkUsage);
@@ -451,13 +802,14 @@
 
       // ── Boot ──
       $('currentYear').textContent = new Date().getFullYear();
+      refreshAlertsBtn();
 
       if (!state.voucher && !state.mac) {
         showManual();
         setNetBadge('ENTER VOUCHER');
       } else {
         checkUsage();
-        state.timer = setInterval(checkUsage, POLL_MS);
+        startPolling();
       }
 
       // Refresh when the app returns to the foreground.

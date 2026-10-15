@@ -20,7 +20,7 @@
  *   - The portal's own index.html and all other portal pages.
  */
 
-const VERSION = 'v1';
+const VERSION = 'v2';
 const SHELL_CACHE = `preyone-shell-${VERSION}`;
 const ASSET_CACHE = `preyone-assets-${VERSION}`;
 const ACTIVE_CACHES = [SHELL_CACHE, ASSET_CACHE];
@@ -83,6 +83,43 @@ self.addEventListener('activate', (event) => {
       );
       await self.clients.claim();
     })()
+  );
+});
+
+// ── Threshold notifications (the /data PWA alert channel) ──────────────────
+// /data shows its advisory in-page too, so nothing here is load-bearing for
+// correctness — this is what makes the alert land in the OS notification tray
+// and what tapping it does: focus a running /data, else open one.
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const target = (event.notification.data && event.notification.data.url) || '/data';
+  event.waitUntil(
+    (async () => {
+      const open = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+      for (const client of open) {
+        if ('focus' in client) return client.focus();
+      }
+      if (self.clients.openWindow) return self.clients.openWindow(target);
+    })()
+  );
+});
+
+// Reserved for server-sent pushes (Web Push + VAPID) — until those are wired,
+// the payload simply never arrives and this changes nothing.
+self.addEventListener('push', (event) => {
+  let payload = { title: 'Preyone UltraNet', body: 'Check your data balance.', url: '/data' };
+  try {
+    if (event.data) payload = Object.assign(payload, event.data.json());
+  } catch (e) {
+    if (event.data) payload.body = event.data.text();
+  }
+  event.waitUntil(
+    self.registration.showNotification(payload.title, {
+      body: payload.body,
+      icon: '/favicon/web-app-manifest-192x192.png',
+      badge: '/favicon/web-app-manifest-192x192.png',
+      data: { url: payload.url || '/data' },
+    })
   );
 });
 
