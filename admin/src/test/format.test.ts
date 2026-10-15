@@ -6,6 +6,7 @@ import {
   fmtUsage,
   formatMac,
   formatSpeed,
+  formatRate,
   fmtDurationMin,
   fmtDateTime,
 } from '../utils/format';
@@ -86,6 +87,35 @@ describe('format utilities', () => {
       expect(formatSpeed(null, 5)).toBe('—/5 Mbps');
       expect(formatSpeed(2, null)).toBe('2/— Mbps');
       expect(formatSpeed(null, null)).toBe('—');
+    });
+  });
+
+  /**
+   * Ruijie reports upRate/downRate in BITS per second — verified live by
+   * comparing the reported rate against the flowDown delta across the API's
+   * 301s refresh bucket (ratio ~1.0 only when read as bps; as kbps every row
+   * lands 65-2600x off, and the observed peak of 9_012_250 would be 9 Gbps
+   * for a single Wi-Fi client).
+   */
+  describe('formatRate', () => {
+    it('reads the raw value as bits per second, not kbps', () => {
+      // 3_340_800 bps is 3.34 Mbps. The old formatter divided by 1000 and
+      // rendered exactly the reported "3340.8 Mbps" corruption.
+      expect(formatRate(3_340_800)).toBe('3.3 Mbps');
+      expect(formatRate(9_012_250)).toBe('9.0 Mbps');
+      expect(formatRate(1_000_000)).toBe('1.0 Mbps');
+    });
+
+    it('steps down to kbps and bps for smaller rates', () => {
+      expect(formatRate(53_873)).toBe('54 kbps');
+      expect(formatRate(999)).toBe('999 bps');
+      expect(formatRate(52)).toBe('52 bps');
+    });
+
+    it('em dashes missing or non-finite values', () => {
+      expect(formatRate(null)).toBe('—');
+      expect(formatRate(undefined)).toBe('—');
+      expect(formatRate(NaN)).toBe('—');
     });
   });
 

@@ -46,7 +46,15 @@ describe('Sector dashboards render against live CEO payloads', () => {
     fireEvent.click(screen.getByText('Network'));
     expect(screen.getByText('Access Point Monitoring')).toBeInTheDocument();
     fireEvent.click(screen.getByText('Sessions'));
-    expect(screen.getByText('Active Client Sessions')).toBeInTheDocument();
+    // Phase-2 layout: 3 summary cards (Client Type · Access Type ·
+    // Traffic Ranking) above the unified client-monitor table.
+    expect(screen.getByText('Client Type')).toBeInTheDocument();
+    expect(screen.getByText('Access Type')).toBeInTheDocument();
+    expect(screen.getByText('Traffic Ranking')).toBeInTheDocument();
+    expect(screen.getByText('Client Monitor')).toBeInTheDocument();
+    // The local `data.clients` duplicate table is gone — it was always empty
+    // in production and repeated what the cloud view already showed.
+    expect(screen.queryByText('Active Client Sessions')).not.toBeInTheDocument();
     expect(api.get).toHaveBeenCalledWith('/dashboard/wifi');
     expect(api.get).toHaveBeenCalledWith('/dashboard/ultranet/sales-summary');
   });

@@ -11,6 +11,13 @@ import {
   syncVoucherToRuijie,
   type RuijieOnlineUser,
 } from '../services/ruijieService';
+import {
+  bindingMacKey,
+  loadHolders,
+  resolveVoucherBindings,
+  verifyVoucherCodes,
+  type BindingSource,
+} from '../services/voucherBindingService';
 
 export const ruijieRouter = Router();
 
@@ -39,7 +46,7 @@ function sendRuijieError(res: any, err: unknown, fallback: string): void {
   res.status(500).json({ error: fallback });
 }
 
-// GET /api/ruijie/status — always answers 200 from local DB, even when the
+// GET /api/ruijie/status â€” always answers 200 from local DB, even when the
 // Ruijie Cloud keys are absent or the remote API is offline.
 ruijieRouter.get('/status', async (_req, res) => {
   try {
@@ -85,70 +92,68 @@ ruijieRouter.get('/status', async (_req, res) => {
   }
 });
 
-// GET /api/ruijie/sessions — live captive-portal session telemetry,
+// GET /api/ruijie/sessions â€” live captive-portal session telemetry,
 // enriched server-side with the local voucher record (PIN + holder details)
 // so the frontend never has to join two data sources itself.
 export interface EnrichedSession extends RuijieOnlineUser {
   code: string | null;
   holderName: string | null;
   holderPhone: string | null;
+  /** Which local source produced `code` â€” null when nothing resolved. */
+  bindingSource: BindingSource | null;
 }
 
 async function enrichSessions(sessions: RuijieOnlineUser[]): Promise<EnrichedSession[]> {
-  const out: EnrichedSession[] = sessions.map((s) => ({ ...s, code: null, holderName: null, holderPhone: null }));
-  const macs = [...new Set(out.map((s) => s.mac).filter((m) => m.length >= 12))];
-  if (macs.length === 0) return out;
+  const out: EnrichedSession[] = sessions.map((s) => ({
+    ...s,
+    code: null,
+    holderName: null,
+    holderPhone: null,
+    bindingSource: null,
+  }));
+  if (out.length === 0) return out;
 
   try {
-    const codeByMac = new Map<string, string>();
-
-    // 1) Bound portal devices (mac_norm is already hex-only lowercase).
-    const { rows: devRows } = await pool.query(
-      `SELECT DISTINCT ON (mac_norm) mac_norm, lower(voucher_code) AS code
-         FROM voucher_devices WHERE is_active = TRUE AND mac_norm = ANY($1)`,
-      [macs]
-    );
-    for (const row of devRows) codeByMac.set(String(row.mac_norm), String(row.code));
-
-    // 2) Portal users who authenticated but never bound a device.
-    const unresolved = macs.filter((m) => !codeByMac.has(m));
-    if (unresolved.length > 0) {
-      const { rows: userRows } = await pool.query(
-        `SELECT DISTINCT ON (lower(regexp_replace(mac_address, '[^a-fA-F0-9]', '', 'g')))
-           lower(regexp_replace(mac_address, '[^a-fA-F0-9]', '', 'g')) AS mac_norm,
-           lower(voucher_code) AS code
-           FROM users
-          WHERE voucher_code IS NOT NULL
-            AND lower(regexp_replace(mac_address, '[^a-fA-F0-9]', '', 'g')) = ANY($1)`,
-        [unresolved]
-      );
-      for (const row of userRows) codeByMac.set(String(row.mac_norm), String(row.code));
+    // 1) MAC â†’ voucher (shared resolver: case-correct across all four sources).
+    const byMac = await resolveVoucherBindings(out.map((s) => s.mac));
+    for (const s of out) {
+      const key = bindingMacKey(s.mac);
+      const binding = key ? byMac.get(key) : undefined;
+      if (!binding?.code) continue;
+      s.code = binding.code;
+      s.holderName = binding.holderName;
+      s.holderPhone = binding.holderPhone;
+      s.bindingSource = binding.source;
     }
 
-    // 3) Voucher rows → holder details.
-    const codes = [...new Set(codeByMac.values())];
-    const holderByCode = new Map<string, { name: string | null; phone: string | null }>();
-    if (codes.length > 0) {
-      const { rows: vRows } = await pool.query(
-        `SELECT lower(code) AS code, holder_name, holder_phone
-           FROM vouchers WHERE lower(code) = ANY($1) AND deleted_at IS NULL`,
-        [codes]
-      );
-      for (const row of vRows) {
-        holderByCode.set(String(row.code), { name: row.holder_name ?? null, phone: row.holder_phone ?? null });
+    // 2) Strict contract fallback: Ruijie reports the voucher code as
+    //    `userName` on some deployments. Accept it ONLY after confirming it
+    //    exists on vouchers â€” otherwise the label stays hidden and the UI
+    //    renders an em-dash rather than a fake PIN.
+    const candidates = out.filter((s) => !s.code && s.username);
+    if (candidates.length > 0) {
+      const verified = await verifyVoucherCodes(candidates.map((s) => s.username));
+      for (const s of candidates) {
+        const code = verified.get(String(s.username).trim().toLowerCase());
+        if (code) {
+          s.code = code;
+          s.bindingSource = 'ruijie_user_name';
+        }
+      }
+      if (verified.size > 0) {
+        const holders = await loadHolders(verified.values());
+        for (const s of out) {
+          if (!s.code || s.holderName) continue;
+          const holder = holders.get(s.code);
+          if (holder) {
+            s.holderName = holder.name;
+            s.holderPhone = holder.phone;
+          }
+        }
       }
     }
-
-    for (const s of out) {
-      const code = codeByMac.get(s.mac);
-      if (!code) continue;
-      s.code = code;
-      const holder = holderByCode.get(code);
-      s.holderName = holder?.name ?? null;
-      s.holderPhone = holder?.phone ?? null;
-    }
   } catch (err) {
-    // Holder enrichment must never sink live telemetry — sessions still ship.
+    // Holder enrichment must never sink live telemetry â€” sessions still ship.
     console.error('[RUIJIE API] session holder enrichment failed:', err);
   }
   return out;
@@ -168,7 +173,166 @@ ruijieRouter.get('/sessions', async (_req, res) => {
   }
 });
 
-// GET /api/ruijie/devices — AP/switch/gateway telemetry (serial, firmware,
+// â”€â”€ Historical clients â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// GET /api/ruijie/history â€” the audit trail behind the console's
+// "Historical Clients" view: one row per MAC the portal has ever seen, built
+// purely from local logs so it answers even when Ruijie Cloud is offline.
+const HISTORY_SQL = `
+  WITH raw AS (
+    SELECT UPPER(REGEXP_REPLACE(NULLIF(al.mac_address, ''), '[^0-9A-Fa-f]', '', 'g')) AS mac,
+           host(al.ip_address) AS ip,
+           al.created_at AS at,
+           'access_log' AS src,
+           u.full_name AS name,
+           u.voucher_code AS code,
+           u.user_agent AS ua,
+           NULL::text AS label
+      FROM access_log al
+      LEFT JOIN users u ON u.id = al.user_id
+     WHERE al.mac_address IS NOT NULL
+       AND LENGTH(REGEXP_REPLACE(al.mac_address, '[^0-9A-Fa-f]', '', 'g')) = 12
+    UNION ALL
+    SELECT UPPER(REGEXP_REPLACE(NULLIF(u.mac_address, ''), '[^0-9A-Fa-f]', '', 'g')),
+           host(u.ip_address), u.created_at, 'users',
+           u.full_name, u.voucher_code, u.user_agent, u.alias
+      FROM users u
+     WHERE u.mac_address IS NOT NULL
+       AND LENGTH(REGEXP_REPLACE(u.mac_address, '[^0-9A-Fa-f]', '', 'g')) = 12
+    UNION ALL
+    SELECT UPPER(REGEXP_REPLACE(NULLIF(vr.mac_address, ''), '[^0-9A-Fa-f]', '', 'g')),
+           host(vr.ip_address), vr.created_at, 'voucher_redemptions',
+           vr.full_name, vr.voucher_code, NULL::text, NULL::text
+      FROM voucher_redemptions vr
+     WHERE vr.mac_address IS NOT NULL
+       AND LENGTH(REGEXP_REPLACE(vr.mac_address, '[^0-9A-Fa-f]', '', 'g')) = 12
+    UNION ALL
+    SELECT UPPER(REGEXP_REPLACE(NULLIF(vd.mac_address, ''), '[^0-9A-Fa-f]', '', 'g')),
+           NULL::text, COALESCE(vd.last_seen_at, vd.bound_at), 'voucher_devices',
+           NULL::text, vd.voucher_code, NULL::text, vd.label
+      FROM voucher_devices vd
+     WHERE vd.mac_address IS NOT NULL
+       AND LENGTH(REGEXP_REPLACE(vd.mac_address, '[^0-9A-Fa-f]', '', 'g')) = 12
+  )
+  SELECT mac,
+         MAX(ip) FILTER (WHERE ip IS NOT NULL) AS ip,
+         MIN(at) AS first_seen,
+         MAX(at) AS last_seen,
+         COUNT(*)::int AS events,
+         (array_agg(DISTINCT src ORDER BY src)) AS sources,
+         COALESCE((array_agg(name  ORDER BY name  NULLS LAST))[1],
+                  (array_agg(label ORDER BY label NULLS LAST))[1]) AS name,
+         (array_agg(label ORDER BY label NULLS LAST))[1] AS label,
+         (array_agg(code  ORDER BY code  NULLS LAST))[1] AS code_raw,
+         (array_agg(ua    ORDER BY ua    NULLS LAST))[1] AS user_agent
+    FROM raw
+   WHERE mac IS NOT NULL AND LENGTH(mac) = 12
+   GROUP BY mac
+   ORDER BY last_seen DESC NULLS LAST
+   LIMIT $1`;
+
+export interface HistoricalClient {
+  /** 12-hex uppercase, no separators â€” normalized by the SQL above. */
+  mac: string;
+  ip: string | null;
+  /** Best name available: users.full_name, else voucher_devices.label. */
+  name: string | null;
+  label: string | null;
+  /** Verified voucher code only (same strict contract as /sessions). */
+  code: string | null;
+  holderName: string | null;
+  holderPhone: string | null;
+  bindingSource: BindingSource | null;
+  userAgent: string | null;
+  firstSeen: string | null;
+  lastSeen: string | null;
+  /** Raw event count across every log this MAC appears in. */
+  events: number;
+  /** Which logs produced rows, e.g. ["users","voucher_devices"]. */
+  sources: string[];
+}
+
+type HistoricalRow = HistoricalClient & { rawCode: string | null };
+
+function iso(value: unknown): string | null {
+  if (value == null) return null;
+  const d = value instanceof Date ? value : new Date(value as string);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+ruijieRouter.get('/history', async (req, res) => {
+  try {
+    const limit = Math.min(Math.max(Number(req.query.limit) || 500, 1), 2000);
+    const { rows } = await pool.query(HISTORY_SQL, [limit]);
+
+    const out: HistoricalRow[] = rows.map((r: any) => ({
+      mac: String(r.mac),
+      ip: r.ip ?? null,
+      name: r.name ?? null,
+      label: r.label ?? null,
+      code: null,
+      holderName: null,
+      holderPhone: null,
+      bindingSource: null,
+      userAgent: r.user_agent ?? null,
+      firstSeen: iso(r.first_seen),
+      lastSeen: iso(r.last_seen),
+      events: Number(r.events) || 0,
+      sources: Array.isArray(r.sources) ? r.sources.map(String) : [],
+      rawCode: r.code_raw ?? null,
+    }));
+
+    if (out.length > 0) {
+      try {
+        // Same precedence chain as the live session feed: MAC-resolved binding
+        // first, then a voucher code found verbatim in the local log.
+        const byMac = await resolveVoucherBindings(out.map((r) => r.mac));
+        const unmatched: HistoricalRow[] = [];
+        for (const r of out) {
+          const key = bindingMacKey(r.mac);
+          const binding = key ? byMac.get(key) : undefined;
+          if (binding?.code) {
+            r.code = binding.code;
+            r.holderName = binding.holderName;
+            r.holderPhone = binding.holderPhone;
+            r.bindingSource = binding.source;
+          } else {
+            unmatched.push(r);
+          }
+        }
+
+        const rawCodes = unmatched.map((r) => r.rawCode).filter((c): c is string => !!c);
+        if (rawCodes.length > 0) {
+          const verified = await verifyVoucherCodes(rawCodes);
+          if (verified.size > 0) {
+            const holders = await loadHolders(verified.values());
+            for (const r of unmatched) {
+              const key = String(r.rawCode ?? '').trim().toLowerCase();
+              const code = verified.get(key);
+              if (!code) continue;
+              r.code = code;
+              r.bindingSource = 'ruijie_user_name';
+              const holder = holders.get(code);
+              if (holder) {
+                r.holderName = holder.name;
+                r.holderPhone = holder.phone;
+              }
+            }
+          }
+        }
+      } catch (err) {
+        // Holder enrichment must never sink the audit trail.
+        console.error('[RUIJIE API] history holder enrichment failed:', err);
+      }
+    }
+
+    const users = out.map(({ rawCode: _rawCode, ...rest }) => rest);
+    res.json({ count: users.length, users });
+  } catch (err) {
+    sendRuijieError(res, err, 'Failed to fetch historical clients');
+  }
+});
+
+// GET /api/ruijie/devices â€” AP/switch/gateway telemetry (serial, firmware,
 // online status) for the managed group.
 ruijieRouter.get('/devices', async (_req, res) => {
   try {
@@ -183,7 +347,7 @@ ruijieRouter.get('/devices', async (_req, res) => {
   }
 });
 
-// POST /api/ruijie/accounting/sync — reconcile cumulative usage into
+// POST /api/ruijie/accounting/sync â€” reconcile cumulative usage into
 // vouchers.data_consumed_mb. Never touches session-state columns.
 ruijieRouter.post('/accounting/sync', async (_req, res) => {
   try {
@@ -194,7 +358,7 @@ ruijieRouter.post('/accounting/sync', async (_req, res) => {
   }
 });
 
-// POST /api/ruijie/kick — disconnect one client by MAC or session token.
+// POST /api/ruijie/kick â€” disconnect one client by MAC or session token.
 ruijieRouter.post('/kick', async (req, res) => {
   try {
     const { mac, sessionToken } = (req.body ?? {}) as { mac?: string; sessionToken?: string };
@@ -209,7 +373,7 @@ ruijieRouter.post('/kick', async (req, res) => {
   }
 });
 
-// POST /api/ruijie/vouchers/:code/sync — verify a local voucher exists on
+// POST /api/ruijie/vouchers/:code/sync â€” verify a local voucher exists on
 // Ruijie and record 'synced'/'missing'. Never re-mints a code.
 ruijieRouter.post('/vouchers/:code/sync', async (req, res) => {
   try {
@@ -221,7 +385,7 @@ ruijieRouter.post('/vouchers/:code/sync', async (req, res) => {
   }
 });
 
-// GET /api/ruijie/vouchers/:code — local row + Ruijie audit record (local DB
+// GET /api/ruijie/vouchers/:code â€” local row + Ruijie audit record (local DB
 // only, works offline).
 ruijieRouter.get('/vouchers/:code', async (req, res) => {
   try {

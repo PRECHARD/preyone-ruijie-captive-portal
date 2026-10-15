@@ -2,6 +2,12 @@ import { useState, useEffect, useCallback } from 'react';
 import { api, ruijieApi } from '../api/client';
 import { deviceShort } from '../utils/device';
 import { showToast } from '../utils/toast';
+import type { DeviceClass, HistoricalClient, PrimaryFilter, ViewMode, WifiSession } from '../types/wifi';
+import { applyFilters, historicalToSession } from '../components/wifi/sessionMeta';
+import SessionSummaryCards from '../components/wifi/SessionSummaryCards';
+import SessionMetricCards from '../components/wifi/SessionMetricCards';
+import SessionFilterHeader from '../components/wifi/SessionFilterHeader';
+import SessionTable from '../components/wifi/SessionTable';
 import {
   FiRadio, FiActivity, FiCreditCard, FiServer, FiSmartphone, FiTrendingUp,
   FiGrid, FiWifi, FiUsers, FiDollarSign, FiKey, FiShield, FiClock, FiChevronRight,
@@ -44,7 +50,7 @@ interface WifiDashboardData {
     data_used_bytes: number | null; data_quota_bytes: number | null; session_start: string | null;
   }[];
   vouchers: {
-    activeSessions: number; activeVouchers: number; redeemedToday: number; createdToday: number;
+    activeSessions: number; activeVouchers: number; redeemedToday: number; totalRedeemed: number; createdToday: number;
     pendingApprovals: number; connectionsToday: number; signupsToday: number; authSuccessRate: number;
     authAccepts: number; authRejects: number;
     quotaUsedBytes: number; quotaTotalBytes: number;
@@ -72,13 +78,9 @@ const TABS = [
 type TabId = typeof TABS[number]['id'];
 
 // ── Ruijie Cloud shapes (GET /api/ruijie/sessions | /devices | /status) ──
-interface RuijieSession {
-  mac: string; ip: string | null; username: string | null; sessionId: string | null;
-  usedMb: number | null; upMb: number | null; downMb: number | null;
-  onlineTimeSec: number | null; ssid: string | null; band: string | null;
-  rssi: number | null; upRate: number | null; downRate: number | null;
-  code: string | null; holderName: string | null; holderPhone: string | null;
-}
+// Session rows share the Wi-Fi session contract so the dashboard and the
+// standalone Sessions page render from one shape.
+type RuijieSession = WifiSession;
 interface RuijieDevice {
   sn: string; name: string | null; alias: string | null; commonType: string | null;
   productClass: string | null; softwareVersion: string | null;
@@ -99,14 +101,6 @@ function fmtMoney(n: number): string {
   return '$' + (n || 0).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 }
 
-function fmtBytes(b?: number | null): string {
-  if (b == null) return '—';
-  if (b > 1_073_741_824) return (b / 1_073_741_824).toFixed(1) + ' GB';
-  if (b > 1_048_576) return (b / 1_048_576).toFixed(0) + ' MB';
-  if (b > 1024) return (b / 1024).toFixed(0) + ' KB';
-  return b + ' B';
-}
-
 function fmtUptime(s?: number | null): string {
   if (!s) return '—';
   const h = Math.floor(s / 3600);
@@ -116,25 +110,6 @@ function fmtUptime(s?: number | null): string {
   return `${m}m`;
 }
 
-// Ruijie upRate/downRate are reported in kbps.
-function fmtRate(r?: number | null): string {
-  if (r == null) return '—';
-  if (r >= 1000) return (r / 1000).toFixed(1) + ' Mbps';
-  return Math.round(r) + ' kbps';
-}
-
-function fmtMb(mb?: number | null): string {
-  if (mb == null) return '—';
-  if (mb >= 1024) return (mb / 1024).toFixed(1) + ' GB';
-  return mb.toFixed(1) + ' MB';
-}
-
-function rssiTone(r?: number | null): string {
-  if (r == null) return '';
-  if (r >= -60) return 'un-up';
-  if (r >= -75) return '';
-  return 'un-down';
-}
 
 function Sparkline({ data, w = 92, h = 28 }: { data: { revenue: number }[]; w?: number; h?: number }) {
   if (!data.length) return <svg width={w} height={h} />;
@@ -233,6 +208,12 @@ export default function WifiDashboard({ onNavigate }: { onNavigate?: (s: string)
   const [rgStatus, setRgStatus] = useState<RuijieStatusData | null>(null);
   const [rgNote, setRgNote] = useState('');
   const [kicking, setKicking] = useState<string | null>(null);
+  // Client-monitor filters — kept here so they survive tab switches.
+  const [rgPrimary, setRgPrimary] = useState<PrimaryFilter>('All');
+  const [rgClass, setRgClass] = useState<DeviceClass | 'All'>('All');
+  const [rgView, setRgView] = useState<ViewMode>('online');
+  const [rgQuery, setRgQuery] = useState('');
+  const [rgHistory, setRgHistory] = useState<HistoricalClient[]>([]);
 
   const load = useCallback(() => {
     api.get<WifiDashboardData>('/dashboard/wifi').then(setData).catch((e) => setError(e.message || 'Failed to load'));
@@ -254,8 +235,8 @@ export default function WifiDashboard({ onNavigate }: { onNavigate?: (s: string)
     }).catch(() => {});
   }, []);
 
-  // Cloud calls hit the remote Ruijie API — poll on a slower cadence (60s)
-  // than the local dashboard (30s) to stay well inside cloud rate limits.
+  // Cloud calls hit the remote Ruijie API — polled on the same 30s cadence as
+  // the local dashboard so the client monitor never lags the portal figures.
   const loadRg = useCallback(async () => {
     try {
       const r = await ruijieApi.get<{ skipped: boolean; reason?: string; users?: RuijieSession[] }>('/sessions');
@@ -270,10 +251,16 @@ export default function WifiDashboard({ onNavigate }: { onNavigate?: (s: string)
       const s = await ruijieApi.get<RuijieStatusData>('/status');
       setRgStatus(s && s.vouchers ? s : null);
     } catch { /* status strip simply stays hidden */ }
+    // Local audit trail (not a cloud round-trip) — refreshed on the same
+    // cadence so the Historical Clients counter is never stale.
+    try {
+      const h = await ruijieApi.get<{ users?: HistoricalClient[] }>('/history');
+      setRgHistory(h?.users || []);
+    } catch { /* keep the last good audit snapshot */ }
   }, []);
 
   useEffect(() => { load(); const i = setInterval(load, 30000); return () => clearInterval(i); }, [load]);
-  useEffect(() => { loadRg(); const i = setInterval(loadRg, 60000); return () => clearInterval(i); }, [loadRg]);
+  useEffect(() => { loadRg(); const i = setInterval(loadRg, 30000); return () => clearInterval(i); }, [loadRg]);
 
   // Kick: the backend answers {skipped:true} when Ruijie exposes no REST
   // disconnect endpoint — show that honestly, never fake a success.
@@ -317,6 +304,14 @@ export default function WifiDashboard({ onNavigate }: { onNavigate?: (s: string)
     if (gb >= 100) return `${Math.round(gb)} GB`;
     if (gb >= 10) return `${gb.toFixed(0)} GB`;
     return `${gb.toFixed(1)} GB`;
+  };
+
+  const rgSource = rgView === 'historical' ? rgHistory.map(historicalToSession) : rgSessions;
+  const rgVisible = applyFilters(rgSource, rgPrimary, rgClass, rgQuery);
+  const rgMetrics = {
+    activeSessions: v?.activeSessions ?? null,
+    cloudClients: rgSessions.length,
+    totalRedeemed: v?.totalRedeemed ?? null,
   };
 
   return (
@@ -622,98 +617,43 @@ export default function WifiDashboard({ onNavigate }: { onNavigate?: (s: string)
           {/* ══════ SESSIONS ══════ */}
           {tab === 'sessions' && (
             <>
-              <div className="hud-grid">
-                <div className="hud-card hud-card--cyan"><div className="hud-label">Active Sessions</div><div className="hud-value">{v?.activeSessions ?? 0}</div><div className="hud-meta">{rgSessions.length} live on cloud</div></div>
-                <div className="hud-card"><div className="hud-label">Signups Today</div><div className="hud-value">{v?.signupsToday ?? 0}</div></div>
-                <div className="hud-card"><div className="hud-label">Connections Today</div><div className="hud-value">{v?.connectionsToday ?? 0}</div></div>
-                <div className="hud-card"><div className="hud-label">Pending Approvals</div><div className="hud-value">{v?.pendingApprovals ?? 0}</div></div>
-              </div>
+              <SessionMetricCards metrics={rgMetrics} loading={!data} />
+              <SessionSummaryCards sessions={rgSource} />
 
               <div className="un-panel">
                 <SectionTitle
-                  title="Live Cloud Sessions · Ruijie"
-                  sub="Holder · PIN · SSID/band · signal · speed · data used · disconnect"
+                  title={rgView === 'historical' ? 'Historical Clients' : 'Client Monitor'}
+                  sub={`${rgVisible.length} of ${rgSource.length} ${rgView === 'historical' ? 'devices' : 'clients'} shown · search IP / MAC / name`}
                 />
-                {rgSessions.length === 0 ? (
-                  <div className="table-empty">
-                    <p>{rgNote ? `Ruijie telemetry unavailable (${rgNote}).` : 'No clients online on the cloud controller.'}</p>
-                  </div>
-                ) : (
-                  <div className="table-scroll">
-                    <table className="data-table un-table">
-                      <thead><tr><th>Holder</th><th>PIN</th><th>MAC</th><th>IP</th><th>SSID · Band</th><th>Signal</th><th>Speed ↓/↑</th><th>Data Used</th><th>Online</th><th>Actions</th></tr></thead>
-                      <tbody>
-                        {rgSessions.map((s) => (
-                          <tr key={s.mac}>
-                            <td>
-                              {s.holderName || <span className="muted">—</span>}
-                              {s.holderPhone && <span className="muted" style={{ display: 'block', fontSize: 11 }}>{s.holderPhone}</span>}
-                            </td>
-                            <td>{(s.code || s.username) ? <span className="code-cell">{s.code || s.username}</span> : '—'}</td>
-                            <td className="vd-mono" style={{ fontSize: 11 }}>{s.mac}</td>
-                            <td style={{ fontSize: 12 }}>{s.ip || '—'}</td>
-                            <td style={{ fontSize: 12 }}>{s.ssid || '—'}{s.band ? <span className="muted"> · {s.band}</span> : ''}</td>
-                            <td className={rssiTone(s.rssi)} style={{ fontSize: 12 }}>{s.rssi != null ? `${s.rssi} dBm` : '—'}</td>
-                            <td className="muted" style={{ fontSize: 11 }}>{fmtRate(s.downRate)} ↓<br />{fmtRate(s.upRate)} ↑</td>
-                            <td className="muted" style={{ fontSize: 11 }}>{fmtMb(s.usedMb)}</td>
-                            <td className="muted">{fmtUptime(s.onlineTimeSec)}</td>
-                            <td>
-                              <button
-                                className="btn-sm"
-                                disabled={kicking === s.mac}
-                                onClick={() => kickClient(s)}
-                                aria-label={`Disconnect client ${s.mac}`}
-                              >
-                                {kicking === s.mac ? '…' : 'Kick'}
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
 
-              <div className="un-panel">
-                <SectionTitle title="Active Client Sessions" sub="IP · MAC · device · bandwidth · data usage" />
-                {data.clients.length === 0 ? (
-                  <div className="table-empty"><p>No active client sessions.</p></div>
-                ) : (
-                  <div className="table-scroll">
-                    <table className="data-table un-table">
-                      <thead><tr><th>Client</th><th>Device</th><th>MAC Address</th><th>IP</th><th>Voucher</th><th>Package</th><th>Speed ↓/↑</th><th>Data Used</th><th>Connected</th><th>Expires</th></tr></thead>
-                      <tbody>
-                        {data.clients.map((c) => {
-                          const used = c.data_used_bytes ?? 0;
-                          const total = c.data_quota_bytes;
-                          const pct = total ? Math.min(100, Math.round((used / total) * 100)) : null;
-                          return (
-                            <tr key={c.user_id}>
-                              <td>{c.full_name || '—'}</td>
-                              <td><span className="device-cell"><FiSmartphone size={12} /> {deviceShort(c.user_agent)}</span></td>
-                              <td className="vd-mono" style={{ fontSize: 11 }}>{c.mac_address || '—'}</td>
-                              <td style={{ fontSize: 12 }}>{c.ip_address || '—'}</td>
-                              <td>{c.voucher_code ? <span className="code-cell">{c.voucher_code}</span> : '—'}</td>
-                              <td>{c.package_tier || '—'}</td>
-                              <td className="muted" style={{ fontSize: 11 }}>
-                                {c.bandwidth_down_kbps != null && c.bandwidth_up_kbps != null
-                                  ? `${Math.round(c.bandwidth_down_kbps / 1000 * 10) / 10}/${Math.round(c.bandwidth_up_kbps / 1000 * 10) / 10} Mbps`
-                                  : '—'}
-                              </td>
-                              <td>
-                                <span className="muted" style={{ fontSize: 11 }}>{fmtBytes(used)}</span>
-                                {pct != null && <div className="data-bar-track"><div className="data-bar-fill" style={{ width: pct + '%' }} /></div>}
-                              </td>
-                              <td className="muted">{c.session_start ? fmtAgo(c.session_start) : '—'}</td>
-                              <td className="muted">{c.session_expires_at ? fmtAgo(c.session_expires_at) : '—'}</td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
+                <SessionFilterHeader
+                  sessions={rgSessions}
+                  primary={rgPrimary}
+                  onPrimary={setRgPrimary}
+                  deviceClass={rgClass}
+                  onDeviceClass={setRgClass}
+                  view={rgView}
+                  onView={setRgView}
+                  query={rgQuery}
+                  onQuery={setRgQuery}
+                  historyCount={rgHistory.length}
+                />
+
+                <SessionTable
+                  sessions={rgVisible}
+                  kickingMac={kicking}
+                  onKick={kickClient}
+                  mode={rgView}
+                  emptyHint={
+                    rgQuery
+                      ? `No clients match “${rgQuery}”.`
+                      : rgView === 'historical'
+                        ? 'No devices recorded in the audit trail yet.'
+                        : rgNote
+                          ? `Ruijie telemetry unavailable (${rgNote}).`
+                          : 'No clients match the current filters.'
+                  }
+                />
               </div>
             </>
           )}

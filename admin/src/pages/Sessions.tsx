@@ -5,48 +5,36 @@ import EmptyState from '../components/EmptyState';
 import Table from '../components/Table';
 import Badge from '../components/Badge';
 import { showToast } from '../utils/toast';
-
-interface RgSession {
-  mac: string; ip: string | null; username: string | null;
-  usedMb: number | null; onlineTimeSec: number | null;
-  ssid: string | null; band: string | null; rssi: number | null;
-  upRate: number | null; downRate: number | null;
-  code: string | null; holderName: string | null; holderPhone: string | null;
-}
-
-function fmtRate(r?: number | null): string {
-  if (r == null) return '—';
-  if (r >= 1000) return (r / 1000).toFixed(1) + ' Mbps';
-  return Math.round(r) + ' kbps';
-}
-
-function fmtMb(mb?: number | null): string {
-  if (mb == null) return '—';
-  if (mb >= 1024) return (mb / 1024).toFixed(1) + ' GB';
-  return mb.toFixed(1) + ' MB';
-}
-
-function fmtOnline(s?: number | null): string {
-  if (s == null || s <= 0) return '—';
-  const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  if (h > 0) return `${h}h ${m}m`;
-  if (m > 0) return `${m}m`;
-  return `${s}s`;
-}
+import type { DeviceClass, HistoricalClient, PrimaryFilter, ViewMode, WifiSession } from '../types/wifi';
+import { applyFilters, historicalToSession } from '../components/wifi/sessionMeta';
+import SessionSummaryCards from '../components/wifi/SessionSummaryCards';
+import SessionMetricCards from '../components/wifi/SessionMetricCards';
+import SessionFilterHeader from '../components/wifi/SessionFilterHeader';
+import SessionTable from '../components/wifi/SessionTable';
 
 export default function Sessions() {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [rg, setRg] = useState<{ users: RgSession[]; skipped: boolean; reason?: string } | null>(null);
+  const [rg, setRg] = useState<{ users: WifiSession[]; skipped: boolean; reason?: string } | null>(null);
   const [kicking, setKicking] = useState<string | null>(null);
+  const [primary, setPrimary] = useState<PrimaryFilter>('All');
+  const [deviceClass, setDeviceClass] = useState<DeviceClass | 'All'>('All');
+  const [view, setView] = useState<ViewMode>('online');
+  const [query, setQuery] = useState('');
+  const [history, setHistory] = useState<HistoricalClient[]>([]);
 
   const fetch = useCallback(async () => {
     try { setData(await api.get('/active-sessions')); } catch { /* ignore */ }
     try {
-      const r = await ruijieApi.get<{ skipped: boolean; reason?: string; users?: RgSession[] }>('/sessions');
+      const r = await ruijieApi.get<{ skipped: boolean; reason?: string; users?: WifiSession[] }>('/sessions');
       setRg({ users: r?.skipped ? [] : (r.users || []), skipped: !!r?.skipped, reason: r?.reason });
     } catch { setRg({ users: [], skipped: true, reason: 'cloud_error' }); }
+    // Local audit trail (not a cloud round-trip) — same cadence as the cloud
+    // feed so the Historical Clients counter is never stale.
+    try {
+      const h = await ruijieApi.get<{ users?: HistoricalClient[] }>('/history');
+      setHistory(h?.users || []);
+    } catch { /* keep the last good audit snapshot */ }
     setLoading(false);
   }, []);
 
@@ -54,7 +42,7 @@ export default function Sessions() {
 
   // Kick: backend returns {skipped:true} when Ruijie exposes no disconnect API —
   // surface that honestly instead of faking a success.
-  const kickClient = async (s: RgSession) => {
+  const kickClient = async (s: WifiSession) => {
     setKicking(s.mac);
     try {
       const r = await ruijieApi.post<{ skipped?: boolean }>('/kick', { mac: s.mac });
@@ -77,9 +65,16 @@ export default function Sessions() {
 
   if (loading) return <Spinner />;
 
-  const sessions = data?.activeUsers || [];
+  const portalSessions = data?.activeUsers || [];
   const cloud = rg?.users || [];
   const useCloud = cloud.length > 0;
+  const source = view === 'historical' ? history.map(historicalToSession) : cloud;
+  const visible = applyFilters(source, primary, deviceClass, query);
+  const metrics = {
+    activeSessions: data?.totalActive ?? null,
+    cloudClients: cloud.length,
+    totalRedeemed: data?.totalRedeemed ?? null,
+  };
 
   return (
     <div className="page">
@@ -94,51 +89,42 @@ export default function Sessions() {
         </div>
       </div>
 
-      <div className="stats-grid stats-grid--compact" style={{ marginBottom: 20 }}>
-        <div className="stat-card"><span className="stat-label">Active Sessions</span><span className="stat-number" style={{ color: 'var(--green)' }}>{data?.totalActive || 0}</span></div>
-        <div className="stat-card"><span className="stat-label">Cloud Clients</span><span className="stat-number" style={{ color: 'var(--cyan)' }}>{cloud.length}</span></div>
-        <div className="stat-card"><span className="stat-label">Total Redeemed</span><span className="stat-number" style={{ color: 'var(--cyan)' }}>{data?.totalRedeemed || 0}</span></div>
-      </div>
+      <SessionMetricCards metrics={metrics} loading={!data} />
 
-      {useCloud ? (
-        <div className="card">
-          <Table
-            columns={[
-              { key: 'holderName', label: 'Holder', render: (r: any) => (
-                <span>
-                  {r.holderName || '—'}
-                  {r.holderPhone && <span className="muted" style={{ display: 'block', fontSize: 11 }}>{r.holderPhone}</span>}
-                </span>
-              ) },
-              { key: 'pin', label: 'Voucher', width: '120px', render: (r: any) => r.pin ? <span className="code-cell">{r.pin}</span> : '—' },
-              { key: 'mac', label: 'MAC', width: '150px', render: (r: any) => <code style={{ fontSize: 11 }}>{r.mac}</code> },
-              { key: 'ip', label: 'IP', width: '120px', render: (r: any) => r.ip || '—' },
-              { key: 'ssid', label: 'SSID · Band', width: '140px', render: (r: any) => (
-                <span style={{ fontSize: 12 }}>{r.ssid || '—'}{r.band ? <span className="muted"> · {r.band}</span> : ''}</span>
-              ) },
-              { key: 'rssi', label: 'Signal', width: '90px', render: (r: any) => r.rssi != null ? <span style={{ fontSize: 12 }}>{r.rssi} dBm</span> : '—' },
-              { key: 'speed', label: 'Speed ↓/↑', width: '120px', render: (r: any) => (
-                <span className="muted" style={{ fontSize: 11 }}>{fmtRate(r.downRate)} ↓<br />{fmtRate(r.upRate)} ↑</span>
-              ) },
-              { key: 'usedMb', label: 'Data Used', width: '100px', render: (r: any) => <span style={{ fontSize: 12 }}>{fmtMb(r.usedMb)}</span> },
-              { key: 'onlineTimeSec', label: 'Online', width: '90px', render: (r: any) => <span className="muted" style={{ fontSize: 12 }}>{fmtOnline(r.onlineTimeSec)}</span> },
-              { key: 'actions', label: 'Actions', width: '90px', render: (r: any) => (
-                <button
-                  className="btn-sm"
-                  disabled={kicking === r.mac}
-                  onClick={() => kickClient(r as any)}
-                  aria-label={`Disconnect client ${r.mac}`}
-                >
-                  {kicking === r.mac ? '…' : 'Kick'}
-                </button>
-              ) },
-            ]}
-            data={cloud.map((s) => ({
-              ...s,
-              pin: s.code || s.username || null,
-            }))}
-          />
-        </div>
+      {view === 'historical' || useCloud ? (
+        <>
+          <SessionSummaryCards sessions={source} />
+
+          <div className="card">
+            <SessionFilterHeader
+              sessions={cloud}
+              primary={primary}
+              onPrimary={setPrimary}
+              deviceClass={deviceClass}
+              onDeviceClass={setDeviceClass}
+              view={view}
+              onView={setView}
+              query={query}
+              onQuery={setQuery}
+              historyCount={history.length}
+            />
+            <SessionTable
+              sessions={visible}
+              kickingMac={kicking}
+              onKick={kickClient}
+              mode={view}
+              emptyHint={
+                query
+                  ? `No clients match “${query}”.`
+                  : view === 'historical'
+                    ? 'No devices recorded in the audit trail yet.'
+                    : rg?.skipped
+                      ? `Ruijie Cloud telemetry unavailable (${rg.reason}).`
+                      : 'No clients match the current filters.'
+              }
+            />
+          </div>
+        </>
       ) : (
         <>
           {rg?.skipped && (
@@ -148,7 +134,7 @@ export default function Sessions() {
               </p>
             </div>
           )}
-          {sessions.length === 0 ? (
+          {portalSessions.length === 0 ? (
             <EmptyState icon="🌙" title="No Active Sessions" message="No users are currently connected." />
           ) : (
             <div className="card">
@@ -171,7 +157,7 @@ export default function Sessions() {
                     return <span style={expiringSoon ? { color: 'var(--orange)' } : {}}>{new Date(r.session_expires_at).toLocaleString()}{expiringSoon ? ' ⚠' : ''}</span>;
                   }},
                 ]}
-                data={sessions}
+                data={portalSessions}
               />
             </div>
           )}

@@ -105,7 +105,8 @@ async function liveUsageByMac(): Promise<Map<string, number>> {
   // Either call failing must not take the endpoint down — an empty map just
   // means we fall back to whatever the vouchers table already holds.
   const [online, records] = await Promise.all([
-    listRuijieOnlineUsers().catch(() => []),
+    // Only mac + usedMb are read here — skip the sta_users telemetry merge.
+    listRuijieOnlineUsers({ stationTelemetry: false }).catch(() => []),
     fetchRuijieAccountingRecords().catch(() => []),
   ]);
   for (const u of online) bump(u.mac, u.usedMb);
