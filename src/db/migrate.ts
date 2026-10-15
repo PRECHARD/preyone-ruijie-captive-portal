@@ -1815,6 +1815,17 @@ const SQL = `
       console.warn(`Skipped subscription upgrade: ${v2UpgradePath} not found.`);
     }
 
+    // 3-tier SaaS ecosystem (v3 master upgrade): industry profiles, 20 invoice
+    // templates, 20 POS themes and tenant logo. Same load pattern as v2 — a
+    // standalone file DBAs can review on its own, skipped loudly when absent.
+    const v3UpgradePath = path.resolve(__dirname, '../../db/migrations/v3_master_ecosystem.sql');
+    if (fs.existsSync(v3UpgradePath)) {
+      await client.query(fs.readFileSync(v3UpgradePath, 'utf8'));
+      console.log('Applied db/migrations/v3_master_ecosystem.sql (profiles + templates + themes).');
+    } else {
+      console.warn(`Skipped ecosystem upgrade: ${v3UpgradePath} not found.`);
+    }
+
     console.log('Migration complete. Packages + transit + RBAC seeded.');
   } finally {
     client.release();
