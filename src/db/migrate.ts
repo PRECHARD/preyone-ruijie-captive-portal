@@ -219,6 +219,34 @@ const SQL = `
      SET auth_time = COALESCE(last_activity, created_at, NOW())
    WHERE auth_time IS NULL;
 
+  -- Per-device admin sessions: one row per live JWT "sid". Every device keeps
+  -- its OWN inactivity lock and 10-hour absolute cap, and signing in on one
+  -- device no longer revokes the others (admin_users.active_sid rotation did,
+  -- which forced an email-OTP round-trip whenever two devices were used).
+  -- Revocation is the absence of a row: /logout DELETEs it.
+  CREATE TABLE IF NOT EXISTS admin_user_sessions (
+    sid           TEXT PRIMARY KEY,
+    admin_user_id UUID NOT NULL REFERENCES admin_users(id) ON DELETE CASCADE,
+    auth_time     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_activity TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_ip    TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_admin_user_sessions_user
+    ON admin_user_sessions (admin_user_id, last_activity DESC);
+
+  -- Adopt the single live pre-upgrade session so running this migration never
+  -- signs anybody out. All other pre-upgrade tokens were already dead under
+  -- the old one-session-per-account rule.
+  INSERT INTO admin_user_sessions (sid, admin_user_id, auth_time, last_activity)
+  SELECT active_sid, id,
+         COALESCE(auth_time, NOW()),
+         COALESCE(last_activity, NOW())
+    FROM admin_users
+   WHERE active_sid IS NOT NULL
+     AND active_sid <> '__revoked__'
+   ON CONFLICT (sid) DO NOTHING;
+
   -- Email OTP challenge for admin console 2FA (login step-up verification).
   CREATE TABLE IF NOT EXISTS admin_2fa_challenges (
     id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),

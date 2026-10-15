@@ -284,4 +284,95 @@ describe('session policy clocks', () => {
     expect(INACTIVITY_TIMEOUT_SEC).toBe(900);
     expect(MAX_SESSION_LIFETIME_SEC).toBe(36000);
   });
+
+  it('keeps a second device alive: a session row wins over another device holding active_sid', async () => {
+    // The phone signed in last (active_sid = device-a); the laptop's token
+    // still has its own admin_user_sessions row, so it must NOT be revoked —
+    // that cross-device revocation was what forced repeated email OTPs.
+    const token = sign({ sid: 'device-b' });
+    (pool.query as any)
+      .mockResolvedValueOnce({
+        rows: [liveRow({
+          active_sid: 'device-a',
+          session_sid: 'device-b',
+          session_auth_time: new Date(),
+          session_last_activity: new Date(),
+          // The account mirror is young because device-a is active; the laptop
+          // must be judged on ITS row, not on this.
+          last_activity: new Date(),
+          auth_time: new Date(),
+        })],
+      })
+      .mockResolvedValueOnce({ rows: [] });
+
+    const req = makeReq(token);
+    const next = vi.fn();
+    await requireAdminAuth(req, makeRes() as any, next);
+
+    expect(next).toHaveBeenCalled();
+    // /refresh and /unlock slide the clock of THIS device's row, so the
+    // binding must survive onto req.adminSession.
+    expect(req.adminSession!.sid).toBe('device-b');
+  });
+
+  it('locks the idle device even while another device keeps the account clock warm', async () => {
+    const token = sign({ sid: 'device-b' });
+    (pool.query as any).mockResolvedValueOnce({
+      rows: [liveRow({
+        active_sid: 'device-a',
+        session_sid: 'device-b',
+        session_auth_time: new Date(),
+        session_last_activity: new Date(Date.now() - (INACTIVITY_TIMEOUT_SEC + 1) * 1000),
+        last_activity: new Date(), // device-a is active right now
+        auth_time: new Date(),
+      })],
+    });
+
+    const res = makeRes();
+    const next = vi.fn();
+    await requireAdminAuth(makeReq(token), res as any, next);
+
+    expect(next).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(423);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ code: 'SESSION_LOCKED' }));
+  });
+
+  it('expires this device at its own 10-hour cap even if another device signed in later', async () => {
+    const token = sign({ sid: 'device-b' });
+    (pool.query as any).mockResolvedValueOnce({
+      rows: [liveRow({
+        active_sid: 'device-a',
+        session_sid: 'device-b',
+        session_auth_time: new Date(Date.now() - (MAX_SESSION_LIFETIME_SEC + 1) * 1000),
+        session_last_activity: new Date(),
+        auth_time: new Date(), // device-a refreshed the mirror recently
+        last_activity: new Date(),
+      })],
+    });
+
+    const res = makeRes();
+    const next = vi.fn();
+    await requireAdminAuth(makeReq(token), res as any, next);
+
+    expect(next).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ code: 'SESSION_EXPIRED' }));
+  });
+
+  it('revokes a device whose session row was deleted (logout elsewhere)', async () => {
+    // No row for device-b and the mirror now points at device-a: the row was
+    // deleted by /logout or evicted by the concurrent-device cap.
+    const token = sign({ sid: 'device-b' });
+    (pool.query as any).mockResolvedValueOnce({
+      rows: [liveRow({ active_sid: 'device-a', session_sid: null })],
+    });
+
+    const res = makeRes();
+    const next = vi.fn();
+    await requireAdminAuth(makeReq(token), res as any, next);
+
+    expect(next).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ code: 'SESSION_REVOKED' }));
+  });
 });

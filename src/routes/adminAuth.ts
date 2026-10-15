@@ -66,33 +66,23 @@ function newTwoFaCode(): string {
  *  claim (a real sid is always a UUID), so every outstanding bearer token dies. */
 const REVOKED_SID = '__revoked__';
 
+/** Concurrent devices a single account may hold. Beyond this, the least
+ *  recently active session is evicted (its row is deleted => its token dies). */
+const MAX_ADMIN_SESSIONS = 5;
+/** Idle sessions are garbage-collected after this many days — the ceiling on
+ *  any JWT's own 7-day lifetime, so an evicted/pruned row can never come back. */
+const ADMIN_SESSION_IDLE_DAYS = 7;
+
 /**
- * Issue the access token and arm BOTH session clocks:
+ * Issue the access token and arm BOTH session clocks on a per-device row:
  *   auth_time      — immutable, stamped now, anchors the 10-hour absolute cap.
  *   last_activity  — slides on user interaction, anchors the 15-minute lock.
- * active_sid is rotated so a later logout can revoke this specific token.
+ * The sid is minted per sign-in, so two devices keep independent sessions
+ * (signing in on one no longer revokes the other) while /logout can still
+ * revoke this specific token by deleting its row.
  */
 async function startAdminSession(req: Request, res: Response, user: any): Promise<{ token: string; authTime: Date }> {
   const sid = crypto.randomUUID();
-
-  // Detect a live session being replaced: single-session-per-user means the
-  // previous token dies here, and without an audit trail the victim cannot
-  // tell their own second login apart from a stolen token being used.
-  const { rows: prevRows } = await pool.query(
-    'SELECT active_sid, last_activity FROM admin_users WHERE id = $1',
-    [user.id]
-  );
-  const prevSid: string | null = prevRows[0]?.active_sid ?? null;
-  if (prevSid && prevSid !== REVOKED_SID) {
-    await recordAuditLog(
-      user.id,
-      user.full_name,
-      'session_superseded',
-      'admin_user',
-      user.id,
-      `New sign-in from ${req.ip ?? 'unknown'} replaced a session last active ${prevRows[0]?.last_activity ?? 'at an unknown time'}`
-    );
-  }
 
   const { rows } = await pool.query(
     `UPDATE admin_users
@@ -105,6 +95,47 @@ async function startAdminSession(req: Request, res: Response, user: any): Promis
     [INACTIVITY_TIMEOUT_SEC, sid, user.id]
   );
   const authTime: Date = rows[0]?.auth_time ?? new Date();
+  const lastActivity: Date = rows[0]?.last_activity ?? new Date();
+
+  await pool.query(
+    `INSERT INTO admin_user_sessions (sid, admin_user_id, auth_time, last_activity, created_ip)
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (sid) DO UPDATE
+       SET auth_time = EXCLUDED.auth_time,
+           last_activity = EXCLUDED.last_activity`,
+    [sid, user.id, authTime, lastActivity, req.ip ?? null]
+  );
+
+  // Housekeeping scoped to this account: drop sessions idle past the JWT
+  // lifetime, then keep only the newest N devices so a runaway client cannot
+  // pile rows up. AuthContext / tests only ever observe the returned token.
+  await pool.query(
+    `DELETE FROM admin_user_sessions
+      WHERE admin_user_id = $1
+        AND last_activity < NOW() - make_interval(days => $2)`,
+    [user.id, ADMIN_SESSION_IDLE_DAYS]
+  );
+  const evicted = await pool.query(
+    `DELETE FROM admin_user_sessions
+      WHERE admin_user_id = $1
+        AND sid NOT IN (SELECT sid
+                          FROM admin_user_sessions
+                         WHERE admin_user_id = $1
+                         ORDER BY last_activity DESC
+                         LIMIT $2)`,
+    [user.id, MAX_ADMIN_SESSIONS]
+  );
+  if ((evicted.rowCount ?? 0) > 0) {
+    await recordAuditLog(
+      user.id,
+      user.full_name,
+      'session_superseded',
+      'admin_user',
+      user.id,
+      `Evicted ${evicted.rowCount} idle device session(s) to stay within ${MAX_ADMIN_SESSIONS} concurrent devices`
+    );
+  }
+
   const token = jwt.sign(
     {
       id: user.id,
@@ -484,26 +515,57 @@ adminAuthRouter.post('/resend-2fa', resendLimiter, async (req: Request, res: Res
   }
 });
 
+/**
+ * Slides THIS device's inactivity clock forward. The per-device session row is
+ * authoritative; a pre-upgrade token with no row falls back to the account
+ * mirror columns so old tokens keep behaving exactly as they did.
+ */
+async function slideActivityClock(req: Request): Promise<{ lastActivity: unknown; authTime: unknown; expiresAt: unknown }> {
+  const sid = req.adminSession?.sid;
+  if (sid) {
+    const { rows } = await pool.query(
+      `UPDATE admin_user_sessions
+          SET last_activity = NOW()
+        WHERE sid = $1 AND admin_user_id = $2
+        RETURNING last_activity, auth_time`,
+      [sid, req.adminUser!.id]
+    );
+    const row = rows[0] ?? null;
+    return {
+      lastActivity: row?.last_activity ?? null,
+      authTime: row?.auth_time ?? null,
+      expiresAt: row ? new Date(new Date(row.last_activity).getTime() + INACTIVITY_TIMEOUT_SEC * 1000) : null,
+    };
+  }
+  const { rows } = await pool.query(
+    `UPDATE admin_users
+        SET last_activity      = NOW(),
+            session_expires_at = NOW() + make_interval(secs => $1)
+      WHERE id = $2
+      RETURNING last_activity, auth_time, session_expires_at`,
+    [INACTIVITY_TIMEOUT_SEC, req.adminUser!.id]
+  );
+  const row = rows[0] ?? null;
+  return {
+    lastActivity: row?.last_activity ?? null,
+    authTime: row?.auth_time ?? null,
+    expiresAt: row?.session_expires_at ?? null,
+  };
+}
+
 // Sliding-window refresh: called by the SPA only on real user activity events.
 // requireAdminAuth already rejects a locked (423) or absolutely-expired (401)
 // session, so an abandoned session cannot be revived here. Deliberately writes
-// ONLY last_activity — auth_time is the 10-hour anchor and must never move.
+// ONLY this device's last_activity — auth_time is the 10-hour anchor and must
+// never move, and other devices' clocks are never touched.
 adminAuthRouter.post('/refresh', requireAdminAuth, async (req: Request, res: Response) => {
   try {
-    const { rows } = await pool.query(
-      `UPDATE admin_users
-          SET last_activity      = NOW(),
-              session_expires_at = NOW() + make_interval(secs => $1)
-        WHERE id = $2
-        RETURNING last_activity, auth_time, session_expires_at`,
-      [INACTIVITY_TIMEOUT_SEC, req.adminUser!.id]
-    );
-    const row = rows[0] ?? null;
+    const clock = await slideActivityClock(req);
     res.json({
       ok: true,
-      lastActivity: row?.last_activity ?? null,
-      authTime: row?.auth_time ?? null,
-      expiresAt: row?.session_expires_at ?? null,
+      lastActivity: clock.lastActivity,
+      authTime: clock.authTime,
+      expiresAt: clock.expiresAt,
       sessionPolicy: SESSION_POLICY,
     });
   } catch (err) {
@@ -543,20 +605,12 @@ adminAuthRouter.post('/unlock', authLimiter, requireAdminAuthAllowLocked, async 
     return;
   }
 
-  const { rows: updated } = await pool.query(
-    `UPDATE admin_users
-        SET last_activity      = NOW(),
-            session_expires_at = NOW() + make_interval(secs => $1)
-      WHERE id = $2
-      RETURNING last_activity, auth_time`,
-    [INACTIVITY_TIMEOUT_SEC, req.adminUser!.id]
-  );
+  const clock = await slideActivityClock(req);
   await recordAuditLog(user.id, user.full_name, 'session_unlock', 'admin_user', user.id, 'Console unlocked after inactivity lock');
-  const row = updated[0] ?? null;
   res.json({
     ok: true,
-    lastActivity: row?.last_activity ?? null,
-    authTime: row?.auth_time ?? null,
+    lastActivity: clock.lastActivity,
+    authTime: clock.authTime,
     sessionPolicy: SESSION_POLICY,
   });
 });
@@ -570,23 +624,29 @@ adminAuthRouter.get('/policy', (_req: Request, res: Response) => {
 });
 
 // ── Logout ───────────────────────────────────────────────────────────
-// Clears the wildcard SSO cookie AND revokes the session server-side. JWTs are
-// stateless, so the real revocation is rotating active_sid to a sentinel value
-// that no token can present as its `sid` claim — every outstanding bearer token
-// (this browser, other tabs, other devices, any SSO copy) dies at once.
+// Signs THIS device out: its per-device session row is deleted (the row IS the
+// revocation record) and the wildcard SSO cookie is cleared. Other devices keep
+// their own sessions — that is the whole point of per-device rows.
+// For a pre-upgrade token with no row, fall back to rotating active_sid to a
+// sentinel, but only while that token still owns the mirror column, so an older
+// device's sign-out can never kill the account's current session.
 adminAuthRouter.post('/logout', async (req: Request, res: Response) => {
   try {
     const token = resolveAuthToken(req);
     if (token) {
       const decoded = jwt.verify(token, getJwtSecret()) as any;
       if (decoded?.id) {
+        if (decoded.sid) {
+          await pool.query('DELETE FROM admin_user_sessions WHERE sid = $1 AND admin_user_id = $2', [decoded.sid, decoded.id]);
+        }
         await pool.query(
           `UPDATE admin_users
               SET active_sid        = $1,
                   last_activity     = NOW(),
                   session_expires_at = NOW()
-            WHERE id = $2`,
-          [REVOKED_SID, decoded.id]
+            WHERE id = $2
+              AND active_sid = $3`,
+          [REVOKED_SID, decoded.id, decoded.sid ?? null]
         );
       }
     }
@@ -612,10 +672,16 @@ adminAuthRouter.get('/me', async (req: Request, res: Response) => {
   try {
     const decoded = jwt.verify(token, getJwtSecret()) as any;
     const { rows } = await pool.query(
-      `SELECT id, full_name, email, phone, role, company_id, portal_company_id, created_at,
-              email_verified, approved, last_activity, auth_time, active_sid
-         FROM admin_users WHERE id = $1`,
-      [decoded.id]
+      `SELECT u.id, u.full_name, u.email, u.phone, u.role, u.company_id, u.portal_company_id, u.created_at,
+              u.email_verified, u.approved, u.last_activity, u.auth_time, u.active_sid,
+              s.sid           AS session_sid,
+              s.auth_time     AS session_auth_time,
+              s.last_activity AS session_last_activity
+         FROM admin_users u
+         LEFT JOIN admin_user_sessions s
+           ON s.admin_user_id = u.id AND s.sid = $2
+        WHERE u.id = $1`,
+      [decoded.id, decoded.sid ?? null]
     );
     if (rows.length === 0) {
       res.status(401).json({ error: 'User not found' });
@@ -624,7 +690,11 @@ adminAuthRouter.get('/me', async (req: Request, res: Response) => {
     const user = rows[0];
 
     // ── Session clock enforcement (mirrors requireAdminAuth) ────────────
-    if (user.active_sid != null && user.active_sid !== decoded.sid) {
+    // Per-device row found => that session is alive with its own clocks. No
+    // row => pre-upgrade token, fall back to the account mirror + active_sid
+    // binding (rotated to a sentinel by logout, so a revoked token still dies).
+    const perDevice = user.session_sid != null;
+    if (!perDevice && user.active_sid != null && user.active_sid !== decoded.sid) {
       res.status(401).json({ error: 'Session revoked. Please sign in again.', code: SESSION_REVOKED_CODE, sessionPolicy: SESSION_POLICY });
       return;
     }
@@ -633,11 +703,13 @@ adminAuthRouter.get('/me', async (req: Request, res: Response) => {
       return;
     }
     const now = Date.now();
-    const authTimeMs = user.auth_time ? new Date(user.auth_time).getTime() : null;
-    const lastActivityMs = user.last_activity ? new Date(user.last_activity).getTime() : null;
+    const authTimeValue = perDevice ? user.session_auth_time : user.auth_time;
+    const lastActivityValue = perDevice ? user.session_last_activity : user.last_activity;
+    const authTimeMs = authTimeValue ? new Date(authTimeValue).getTime() : null;
+    const lastActivityMs = lastActivityValue ? new Date(lastActivityValue).getTime() : null;
     const sessionState = {
-      authTime: user.auth_time ?? null,
-      lastActivity: user.last_activity ?? null,
+      authTime: authTimeValue ?? null,
+      lastActivity: lastActivityValue ?? null,
       locked: false,
     };
     if (authTimeMs !== null && authTimeMs + SESSION_POLICY.maxSessionLifetimeSec * 1000 <= now) {
@@ -686,9 +758,19 @@ adminAuthRouter.get('/me', async (req: Request, res: Response) => {
 // whose companyId was set.
 const permissions = await loadPermissions(user.role, user.id, user.company_id ?? null);
 
-const { active_sid: _activeSid, approved: _approved, ...publicUser } = user;
+const {
+  active_sid: _activeSid,
+  approved: _approved,
+  session_sid: _sessionSid,
+  session_auth_time: _sessionAuthTime,
+  session_last_activity: _sessionLastActivity,
+  ...publicUser
+} = user;
 void _activeSid;
 void _approved;
+void _sessionSid;
+void _sessionAuthTime;
+void _sessionLastActivity;
 res.json({
   ...publicUser,
   tenant_id: tenantId,
@@ -757,6 +839,12 @@ adminAuthRouter.post('/reset-password', async (req: Request, res: Response) => {
       `UPDATE admin_users SET password_hash = $1, reset_token = NULL, reset_token_expires_at = NULL WHERE id = $2`,
       [passwordHash, rows[0].id]
     );
+
+    // A password reset is the recovery path for a compromised account: drop
+    // every device session and poison the mirror so no outstanding token —
+    // this browser, another device, an SSO copy — survives it.
+    await pool.query('DELETE FROM admin_user_sessions WHERE admin_user_id = $1', [rows[0].id]);
+    await pool.query('UPDATE admin_users SET active_sid = $1 WHERE id = $2', [REVOKED_SID, rows[0].id]);
 
     await recordAuditLog(rows[0].id, null, 'password_reset', 'admin_user', rows[0].id, 'Password reset via email');
 

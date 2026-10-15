@@ -29,7 +29,7 @@ export interface AdminUser {
   permissions?: string[];
 }
 
-/** Clock state resolved from the DB row during auth. */
+/** Clock state resolved from the session during auth. */
 export interface AdminSessionState {
   /** True when the inactivity window has lapsed (console must be unlocked). */
   locked: boolean;
@@ -37,6 +37,9 @@ export interface AdminSessionState {
   authTime: string | null;
   /** ISO stamp of the last sliding refresh. */
   lastActivity: string | null;
+  /** Per-device session row this token binds to; null for a pre-upgrade token
+   *  that still resolves through the admin_users mirror columns. */
+  sid: string | null;
 }
 
 declare global {
@@ -84,25 +87,40 @@ function bearerToken(req: Request): string | undefined {
 }
 
 /**
- * Resolves the two session clocks from the DB row.
+ * Resolves the two session clocks from the per-device session row.
  *
  * Read-only: an API call must never slide `last_activity` on its own, or a
  * background poll would keep an abandoned console alive forever. Only the
  * explicit activity endpoints (POST /refresh, POST /unlock) advance the clock.
+ *
+ * Each bearer token binds to its own admin_user_sessions row (keyed by the JWT
+ * `sid` claim), so a laptop and a phone hold independent sessions with
+ * independent clocks: signing in on one no longer revokes the other, and each
+ * device locks/expires on its own activity.
+ *
+ * Tokens minted before per-device sessions carry no row; they fall back to the
+ * admin_users mirror columns and the original active_sid binding check, so a
+ * deploy never has to sign anybody out mid-flight.
  */
 async function resolveSessionState(
   decoded: DecodedAdminToken,
 ): Promise<{ verdict: SessionVerdict; session: AdminSessionState; role: string; companyId: string | null; portalCompanyId: string | null }> {
   const { rows } = await pool.query(
-    `SELECT id, approved, role, company_id, portal_company_id,
-            session_expires_at, last_activity, auth_time, active_sid
-       FROM admin_users WHERE id = $1`,
-    [decoded.id]
+    `SELECT u.id, u.approved, u.role, u.company_id, u.portal_company_id,
+            u.active_sid, u.last_activity, u.auth_time,
+            s.sid           AS session_sid,
+            s.auth_time     AS session_auth_time,
+            s.last_activity AS session_last_activity
+       FROM admin_users u
+       LEFT JOIN admin_user_sessions s
+         ON s.admin_user_id = u.id AND s.sid = $2
+      WHERE u.id = $1`,
+    [decoded.id, decoded.sid ?? null]
   );
   if (rows.length === 0 || !rows[0].approved) {
     return {
       verdict: { state: 'unknown-user' },
-      session: { locked: false, authTime: null, lastActivity: null },
+      session: { locked: false, authTime: null, lastActivity: null, sid: null },
       role: '',
       companyId: null,
       portalCompanyId: null,
@@ -110,14 +128,20 @@ async function resolveSessionState(
   }
   const row = rows[0];
 
-  // Logout rotates active_sid to a sentinel no token can present, which kills
-  // every outstanding JWT even though JWTs are stateless. NULL means the row
-  // has never signed in since rotation shipped — grandfather those tokens so a
-  // deploy does not force a platform-wide re-login.
-  if (row.active_sid != null && row.active_sid !== decoded.sid) {
+  // A found session row IS the revocation record: /logout deletes it, so the
+  // absence of a row (handled by the legacy branch below) is the revocation.
+  const perDevice = row.session_sid != null;
+
+  // Pre-upgrade token: no session row, so bind to the account mirror exactly
+  // as the old one-session-per-account rule did. Logout rotates active_sid to
+  // a sentinel no token can present, which kills every outstanding JWT even
+  // though JWTs are stateless. NULL means the row has never signed in since
+  // rotation shipped — grandfather those tokens so a deploy does not force a
+  // platform-wide re-login.
+  if (!perDevice && row.active_sid != null && row.active_sid !== decoded.sid) {
     return {
       verdict: { state: 'revoked' },
-      session: { locked: false, authTime: null, lastActivity: null },
+      session: { locked: false, authTime: null, lastActivity: null, sid: null },
       role: row.role,
       companyId: row.company_id ?? null,
       portalCompanyId: row.portal_company_id ?? null,
@@ -125,10 +149,13 @@ async function resolveSessionState(
   }
 
   const now = Date.now();
-  const authTime = row.auth_time ? new Date(row.auth_time) : null;
-  const lastActivity = row.last_activity ? new Date(row.last_activity) : null;
+  const authTimeRaw = perDevice ? row.session_auth_time : row.auth_time;
+  const lastActivityRaw = perDevice ? row.session_last_activity : row.last_activity;
+  const authTime = authTimeRaw ? new Date(authTimeRaw) : null;
+  const lastActivity = lastActivityRaw ? new Date(lastActivityRaw) : null;
   const session: AdminSessionState = {
     locked: false,
+    sid: perDevice ? row.session_sid : null,
     authTime: authTime?.toISOString() ?? null,
     lastActivity: lastActivity?.toISOString() ?? null,
   };
