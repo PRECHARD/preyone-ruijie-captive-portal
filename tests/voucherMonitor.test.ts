@@ -34,7 +34,7 @@ import {
   stopVoucherMonitor,
   ALERT_TIERS,
 } from '../src/services/voucherMonitorService';
-import { consumptionStatus } from '../src/routes/voucherAnalytics';
+import { consumptionStatus, sortConsumptionRows } from '../src/routes/voucherAnalytics';
 import { alertsRouter } from '../src/routes/alerts';
 
 const MB = 1;
@@ -235,6 +235,50 @@ describe('consumptionStatus (analytics taxonomy)', () => {
     expect(consumptionStatus({ quotaMb: 1000, usedQuotaMb: 1000 }, 100)).toBe('exhausted');
     expect(consumptionStatus({ quotaMb: 0, usedQuotaMb: 0 }, null)).toBe('unlimited');
     expect(consumptionStatus({ quotaMb: 1000, usedQuotaMb: 10, disableStatus: 108 }, 1)).toBe('disabled');
+  });
+});
+
+describe('sortConsumptionRows (urgency-first ordering)', () => {
+  const r = (code: string, status: string, pct: number | null) => ({ code, status: status as never, pct });
+
+  it('orders critical → low → exhausted → ok → idle → unlimited → disabled (expired last)', () => {
+    const sorted = sortConsumptionRows([
+      r('dis1', 'disabled', 12),
+      r('unl1', 'unlimited', null),
+      r('idle1', 'idle', 0),
+      r('ok1', 'ok', 40),
+      r('exh1', 'exhausted', 100),
+      r('low1', 'low', 85),
+      r('crit1', 'critical', 97),
+    ]);
+    expect(sorted.map((x) => x.status)).toEqual([
+      'critical', 'low', 'exhausted', 'ok', 'idle', 'unlimited', 'disabled',
+    ]);
+  });
+
+  it('sinks every disabled code to the bottom even when its pct is high', () => {
+    const sorted = sortConsumptionRows([
+      r('dead99', 'disabled', 99),
+      r('live50', 'ok', 50),
+    ]);
+    expect(sorted.map((x) => x.code)).toEqual(['live50', 'dead99']);
+  });
+
+  it('breaks ties inside a status by pct desc, then PIN ascending', () => {
+    const sorted = sortConsumptionRows([
+      r('lowB', 'low', 81),
+      r('lowA', 'low', 81),
+      r('critMid', 'critical', 96),
+      r('critTop', 'critical', 99),
+    ]);
+    expect(sorted.map((x) => x.code)).toEqual(['critTop', 'critMid', 'lowA', 'lowB']);
+  });
+
+  it('does not mutate its input', () => {
+    const input = [r('b', 'ok', 10), r('a', 'critical', 96)];
+    const snapshot = [...input];
+    sortConsumptionRows(input);
+    expect(input).toEqual(snapshot);
   });
 });
 

@@ -3,6 +3,7 @@ import { api } from '../../api/client';
 import Spinner from '../Spinner';
 import EmptyState from '../EmptyState';
 import type { ConsumptionStatus, VoucherConsumptionResponse, VoucherConsumptionRow } from '../../types/wifi';
+import ConsumptionDetailModal from './ConsumptionDetailModal';
 import './voucherConsumption.css';
 
 const POLL_MS = 30_000;
@@ -96,6 +97,7 @@ export default function VoucherConsumptionTab() {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<FilterKey>('all');
   const [query, setQuery] = useState('');
+  const [detail, setDetail] = useState<VoucherConsumptionRow | null>(null);
 
   const load = useCallback(() => {
     api.get<VoucherConsumptionResponse>('/voucher-analytics')
@@ -134,9 +136,7 @@ export default function VoucherConsumptionTab() {
 
   const visible = useMemo(() => searched.filter((r) => matchesFilter(r, filter)), [searched, filter]);
 
-  const copyPin = (code: string) => {
-    try { navigator.clipboard?.writeText(code); } catch { /* clipboard denied */ }
-  };
+  const openDetail = (row: VoucherConsumptionRow) => setDetail(row);
 
   if (loading && !data) return <Spinner />;
   if (error && !data) return <EmptyState title="Could not load" message={error} />;
@@ -268,7 +268,11 @@ export default function VoucherConsumptionTab() {
               {visible.map((row) => (
                 <tr key={row.code}>
                   <td>
-                    <span className="code-cell" title="Click to copy" onClick={() => copyPin(row.code)}>
+                    <span
+                      className="code-cell"
+                      title="Click for voucher details"
+                      onClick={() => openDetail(row)}
+                    >
                       {row.code || '—'}
                     </span>
                   </td>
@@ -310,6 +314,14 @@ export default function VoucherConsumptionTab() {
           </table>
         )}
       </div>
+
+      {detail && (
+        <ConsumptionDetailModal
+          code={detail.code}
+          row={detail}
+          onClose={() => setDetail(null)}
+        />
+      )}
     </div>
   );
 }

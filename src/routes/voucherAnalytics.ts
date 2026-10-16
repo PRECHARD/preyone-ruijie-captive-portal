@@ -44,15 +44,33 @@ export function consumptionStatus(
   return 'idle';
 }
 
-const STATUS_ORDER: Record<ConsumptionStatus, number> = {
-  exhausted: 0,
-  critical: 1,
-  low: 2,
-  ok: 3,
-  idle: 4,
-  unlimited: 5,
-  disabled: 6,
-};
+/**
+ * Urgency-first ordering for the consumption table (pure, unit-tested).
+ *
+ * critical (95%+, upsell now) → low (80%+, upsell soon) → exhausted
+ * (recently drained stock) → ok → idle → unlimited → disabled (expired /
+ * cancelled) ALWAYS last, so dead codes never bury live ones. Within a
+ * status: higher pct first, then PIN ascending for a stable order.
+ */
+export function sortConsumptionRows<T extends { status: ConsumptionStatus; pct: number | null; code: string }>(rows: T[]): T[] {
+  const rank: Record<ConsumptionStatus, number> = {
+    critical: 0,
+    low: 1,
+    exhausted: 2,
+    ok: 3,
+    idle: 4,
+    unlimited: 5,
+    disabled: 6,
+  };
+  return [...rows].sort((a, b) => {
+    const byRank = rank[a.status] - rank[b.status];
+    if (byRank !== 0) return byRank;
+    const ap = a.pct ?? -1;
+    const bp = b.pct ?? -1;
+    if (bp !== ap) return bp - ap;
+    return a.code.localeCompare(b.code);
+  });
+}
 
 voucherAnalyticsRouter.get('/', async (_req: Request, res: Response) => {
   const live = isRuijieCloudConfigured();
@@ -84,7 +102,7 @@ voucherAnalyticsRouter.get('/', async (_req: Request, res: Response) => {
     alertMap.set(row.voucher_code, entry);
   }
 
-  const rows = vouchers.map((v) => {
+  const rows = sortConsumptionRows(vouchers.map((v) => {
     const pct = voucherPct(v);
     const code = v.voucherCode || '';
     const alerts = alertMap.get(code) || { t80: 0, t95: 0, lastAt: null as Date | null };
@@ -99,13 +117,7 @@ voucherAnalyticsRouter.get('/', async (_req: Request, res: Response) => {
       alertsSent: { t80: alerts.t80, t95: alerts.t95 },
       lastAlertAt: alerts.lastAt,
     };
-  });
-
-  rows.sort((a, b) => {
-    const byStatus = STATUS_ORDER[a.status] - STATUS_ORDER[b.status];
-    if (byStatus !== 0) return byStatus;
-    return (b.pct ?? -1) - (a.pct ?? -1);
-  });
+  }));
 
   const summary = {
     total: rows.length,

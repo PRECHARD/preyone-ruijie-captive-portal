@@ -12,6 +12,12 @@ vi.mock('../api/client', () => ({
   systemApi: { get: vi.fn(), post: vi.fn() },
 }));
 
+vi.mock('../context/AuthContext', () => ({
+  useAuth: () => ({
+    user: { id: 'u1', fullName: 'Test User', role: 'Manager', permissions: [] },
+  }),
+}));
+
 import VoucherConsumptionTab from '../components/wifi/VoucherConsumptionTab';
 
 function row(overrides: Record<string, unknown> = {}) {
@@ -135,5 +141,28 @@ describe('VoucherConsumptionTab', () => {
 
     fireEvent.click(screen.getByText('Refresh'));
     await waitFor(() => expect(apiState.get).toHaveBeenCalledTimes(2));
+  });
+
+  it('opens the voucher detail modal when a PIN is clicked', async () => {
+    render(<VoucherConsumptionTab />);
+    await waitFor(() => expect(screen.getByText('crit95x')).toBeTruthy());
+
+    fireEvent.click(screen.getByText('crit95x'));
+    await waitFor(() => expect(screen.getByText('Voucher crit95x')).toBeTruthy());
+    // consumption stats from the roster row are in the sheet (a second
+    // CRIT 95% badge appears alongside the table's own row badge). The h4
+    // is scoped by role because the table also has a "Consumption" column.
+    expect(screen.getByRole('heading', { name: 'Consumption', level: 4 })).toBeTruthy();
+    expect(screen.getAllByText('CRIT 95%').length).toBeGreaterThan(1);
+    expect(screen.getByText('Download JPEG')).toBeTruthy();
+    // the modal fetches the local sales row through the same mocked client
+    await waitFor(() => expect(
+      apiState.get.mock.calls.some((c) => String(c[0]).startsWith('/vouchers?search=crit95x')),
+    ).toBe(true));
+
+    // closing restores the bare table
+    fireEvent.click(document.querySelector('.modal-overlay')!);
+    await waitFor(() => expect(screen.queryByText('Voucher crit95x')).toBeNull());
+    expect(screen.getByText('crit95x')).toBeTruthy();
   });
 });
