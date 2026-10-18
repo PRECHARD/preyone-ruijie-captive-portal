@@ -149,6 +149,7 @@ const groups: LinkGroup[] = [
     links: [
       { label: 'Devices & Endpoints', section: 'pos-devices', roles: ['Manager', 'CEO'], icon: <FiSmartphone /> },
       { label: 'Company Profile', section: 'pos-company', roles: ['CEO'], icon: <FiBriefcase /> },
+      { label: 'Global Settings Hub', section: 'pos-settings', roles: ['CEO'], icon: <FiSettings /> },
     ],
   },
   // ── Global system settings (Preyone UltraNet WiFi workspace only) ──

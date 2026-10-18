@@ -28,6 +28,7 @@ import Broadcasts from './pages/Broadcasts';
 import AuditLog from './pages/AuditLog';
 import Backup from './pages/Backup';
 import Settings from './pages/Settings';
+import GlobalSettingsHub from './pages/GlobalSettingsHub';
 import SystemHealth from './pages/SystemHealth';
 import Tenants from './pages/Tenants';
 import GlobalRevenue from './pages/GlobalRevenue';
@@ -74,6 +75,7 @@ const sectionRoles: Record<string, string[]> = {
   'audit-log': ['CEO'],
   backup: ['CEO'],
   settings: ['CEO'],
+  'pos-settings': ['CEO'],
   'pos-sales': ['Staff', 'Manager', 'CEO', 'Cashier'],
   'pos-inventory': ['Staff', 'Manager', 'CEO', 'Cashier'],
   'pos-customers': ['Staff', 'Manager', 'CEO', 'Cashier'],
@@ -275,6 +277,7 @@ export default function App() {
       )}
       {safeSection === 'backup' && <Backup />}
       {safeSection === 'settings' && <Settings />}
+      {safeSection === 'pos-settings' && <GlobalSettingsHub />}
       {safeSection === 'system-health' && <SystemHealth />}
       {safeSection === 'tenants' && <Tenants />}
       {safeSection === 'global-revenue' && <GlobalRevenue />}

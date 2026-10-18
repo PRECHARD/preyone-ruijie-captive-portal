@@ -97,5 +97,7 @@ export const systemApi = createClient('/api/v1/admin');
 export const transitApi = createClient('/api/v1/transit');
 /** Ruijie Cloud telemetry (sessions, devices, accounting, kick). Admin auth required. */
 export const ruijieApi = createClient('/api/ruijie');
+/** Subscription plans + checkout (settings hub plan rail). */
+export const subscriptionApi = createClient('/api/subscription');
 
 export { getToken, setToken, clearToken };

@@ -24,6 +24,8 @@ import { RuijieApiError } from '../services/ruijieCloud';
 import ExcelJS from 'exceljs';
 import path from 'path';
 import fs from 'fs';
+import { INVOICE_TEMPLATES, POS_THEMES, BUSINESS_PROFILES, CURRENCIES } from '../catalog/ecosystem';
+import { TIER_CATALOG } from './subscription';
 
 export const adminRouter = Router();
 
@@ -3096,6 +3098,38 @@ adminRouter.delete('/report-schedules/:id', requirePermission(PERMISSIONS.SYSTEM
 // ═══════════════════════════════════════════════════════
 // POS: Company profile (single source of truth for receipts/invoices)
 // ═══════════════════════════════════════════════════════
+
+// Global Settings Hub catalogue. Invoice templates / POS themes prefer the
+// seeded tables (v3_master_ecosystem.sql) and fall back to the static mirrors
+// in src/catalog/ecosystem.ts when the tables are empty or unavailable.
+adminRouter.get('/catalogues', requireRole('CEO'), async (_req: Request, res: Response) => {
+  const fallback = {
+    invoiceTemplates: INVOICE_TEMPLATES,
+    posThemes: POS_THEMES,
+    businessProfiles: BUSINESS_PROFILES,
+    currencies: CURRENCIES.map((c) => ({ ...c })),
+    planTiers: TIER_CATALOG,
+  };
+  try {
+    const [inv, themes] = await Promise.all([
+      pool.query('SELECT id, name, description, layout, accent_color, show_logo FROM invoice_templates WHERE is_active ORDER BY id'),
+      pool.query('SELECT id, name, description, primary_color, secondary_color, accent_color, bg_color, text_color FROM pos_themes WHERE is_active ORDER BY id'),
+    ]);
+    res.json({
+      invoiceTemplates: inv.rows.length
+        ? inv.rows.map((t) => ({ id: t.id, name: t.name, description: t.description, layout: t.layout, accentColor: t.accent_color, showLogo: t.show_logo }))
+        : fallback.invoiceTemplates,
+      posThemes: themes.rows.length
+        ? themes.rows.map((t) => ({ id: t.id, name: t.name, description: t.description, primary: t.primary_color, secondary: t.secondary_color, accent: t.accent_color, bg: t.bg_color, text: t.text_color }))
+        : fallback.posThemes,
+      businessProfiles: fallback.businessProfiles,
+      currencies: fallback.currencies,
+      planTiers: fallback.planTiers,
+    });
+  } catch {
+    res.json(fallback);
+  }
+});
 
 adminRouter.get('/company', requireRole('CEO'), async (_req: Request, res: Response) => {
   const { rows } = await pool.query('SELECT * FROM companies ORDER BY created_at LIMIT 1');

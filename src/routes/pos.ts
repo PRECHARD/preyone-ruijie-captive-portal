@@ -5,6 +5,7 @@ import crypto from 'crypto';
 import rateLimit from 'express-rate-limit';
 import { pool } from '../db/pool';
 import { requireAdminAuth, requireRole } from '../middleware/adminAuth';
+import { INACTIVITY_TIMEOUT_SEC } from '../sessionPolicy';
 import { requireCompany } from '../middleware/company';
 import { requireDeviceAuth } from '../middleware/deviceAuth';
 
@@ -35,12 +36,36 @@ const num = (v: unknown): number => {
 };
 const str = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
 
-function signToken(user: StaffUser): string {
+function signToken(user: StaffUser, sid: string): string {
   return jwt.sign(
-    { id: user.id, email: user.email, role: user.role, fullName: user.fullName, company_id: user.company_id ?? null },
+    { id: user.id, email: user.email, role: user.role, fullName: user.fullName, company_id: user.company_id ?? null, sid },
     JWT_SECRET,
     { expiresIn: '12h' }
   );
+}
+
+/**
+ * Slides THIS till device's inactivity clock forward, keyed by the token's sid.
+ * requireAdminAuth only reads the clock, so without this an in-use till would
+ * lock after the inactivity window even while a cashier is actively ringing up
+ * sales. Only the till's own row moves — other devices are untouched.
+ */
+async function slideActivityClock(req: Request, _res: Response, next: NextFunction): Promise<void> {
+  try {
+    const sid = req.adminSession?.sid;
+    const userId = req.adminUser?.id;
+    if (sid && userId) {
+      await pool.query(
+        `UPDATE admin_user_sessions
+            SET last_activity = NOW()
+          WHERE sid = $1 AND admin_user_id = $2`,
+        [sid, userId]
+      );
+    }
+  } catch (err) {
+    console.error('POS activity slide error:', err);
+  }
+  next();
 }
 
 function isStaff(user?: StaffUser): boolean {
@@ -98,7 +123,36 @@ router.post('/auth/pin', pinLimiter, async (req, res) => {
       fullName: row.full_name,
       company_id: row.company_id ?? null,
     };
-    res.json({ token: signToken(user), user });
+
+    // Bind this till sign-in to a per-device session, exactly like the admin
+    // console's startAdminSession. requireAdminAuth validates the JWT's sid
+    // against an admin_user_sessions row; a token without one falls back to the
+    // active_sid mirror, where any other sign-in (console or another till)
+    // rotates the sentinel and instantly revokes it — that is what made every
+    // POS call 401 with "Session expired". Writing the row + sid makes this
+    // device's session authoritative and independent of other devices.
+    const sid = crypto.randomUUID();
+    const { rows: sessionRows } = await pool.query(
+      `UPDATE admin_users
+          SET auth_time          = NOW(),
+              last_activity      = NOW(),
+              session_expires_at = NOW() + make_interval(secs => $1),
+              active_sid         = $2
+        WHERE id = $3
+        RETURNING auth_time`,
+      [INACTIVITY_TIMEOUT_SEC, sid, user.id]
+    );
+    const authTime: Date = sessionRows[0]?.auth_time ?? new Date();
+    await pool.query(
+      `INSERT INTO admin_user_sessions (sid, admin_user_id, auth_time, last_activity, created_ip)
+       VALUES ($1, $2, $3, $3, $4)
+       ON CONFLICT (sid) DO UPDATE
+         SET auth_time     = EXCLUDED.auth_time,
+             last_activity = EXCLUDED.last_activity`,
+      [sid, user.id, authTime, req.ip ?? null]
+    );
+
+    res.json({ token: signToken(user, sid), user });
     return;
   }
   res.status(401).json({ error: 'Invalid PIN for this operator' });
@@ -153,7 +207,7 @@ function requireStaff(req: Request, res: Response, next: NextFunction): void {
   }
   next();
 }
-router.use(requireAdminAuth, requireStaff, requireCompany);
+router.use(requireAdminAuth, requireStaff, requireCompany, slideActivityClock);
 
 // ── Tenant scoping ─────────────────────────────────────────────────
 //
