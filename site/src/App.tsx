@@ -4,6 +4,7 @@ import { Route, Routes, useLocation } from 'react-router-dom'
 import { Background } from './components/Background'
 import { Footer } from './components/Footer'
 import { Nav } from './components/Nav'
+import { WhatsAppFab } from './components/WhatsAppFab'
 import { AboutPage } from './pages/AboutPage'
 import { HomePage } from './pages/HomePage'
 import { PaymentPage } from './pages/PaymentPage'
@@ -60,6 +61,7 @@ export default function App() {
       </main>
 
       <Footer />
+      <WhatsAppFab />
     </div>
   )
 }

@@ -328,7 +328,11 @@ usageRouter.get('/', usageLimiter, async (req: Request, res: Response) => {
         usageSource = source;
       }
     };
-    offer(rv?.usedQuotaMb, 'ruijie_voucher');
+    // Ruijie's usedQuota is unreliable for uncapped vouchers (returns garbage).
+    // For uncapped, only use the locally reconciled data_consumed_mb.
+    if (!isUncapped) {
+      offer(rv?.usedQuotaMb, 'ruijie_voucher');
+    }
     // data_consumed_mb is NUMERIC megabytes written by the Ruijie accounting
     // reconciliation; NULL for every voucher syncAccountingData() could not
     // attribute (see module header).

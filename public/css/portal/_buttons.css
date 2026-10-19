@@ -91,29 +91,46 @@
 
 .hero-btn-group {
   display: flex;
-  gap: 1rem;
+  flex-wrap: wrap;
+  gap: clamp(0.75rem, 2vw, 1.25rem);
   justify-content: center;
-  margin-top: 1.5rem;
-}
-
-@media (max-width: 768px) {
-  .hero-btn-group {
-    justify-content: center;
-  }
+  align-items: center;
+  margin-top: clamp(1rem, 2.5vw, 2rem);
 }
 
 .hero-connect-btn {
-  flex: 1;
-  max-width: 260px;
-  padding: 0.9rem 1.5rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1 1 auto;
+  min-width: 140px;
+  max-width: 300px;
+  width: 100%;
+  padding: clamp(0.7rem, 1.5vw, 1.1rem) clamp(1.2rem, 3vw, 2.2rem);
   font-family: var(--display);
-  font-size: 1.4rem;
+  font-size: clamp(1rem, 2vw, 1.5rem);
+  letter-spacing: 0.06em;
+  white-space: nowrap;
   background: linear-gradient(90deg, #ff00cc, #3333ff);
   border: none;
   border-radius: 50px;
   color: #fff;
   cursor: pointer;
-  transition: all 0.2s ease;
+  text-decoration: none;
+  transition: all 0.25s ease;
+  box-shadow: 0 4px 20px rgba(255, 0, 204, 0.25);
+}
+
+.hero-connect-btn--ghost {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow: none;
+}
+
+.hero-connect-btn--ghost:hover {
+  border-color: var(--pink);
+  color: var(--pink);
+  background: transparent;
 }
 
 .hero-connect-btn:hover {
