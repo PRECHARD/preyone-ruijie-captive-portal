@@ -66,9 +66,8 @@ describe('gateway portal URL: /connect', () => {
     const res = await request(app).get('/connect').set('Host', 'wifi.preyone.com');
 
     expect(res.status).toBe(200);
-    // The voucher box lives in index.html; the sign-in form does not.
-    expect(res.text).toContain('id="quick-form"');
-    expect(res.text).toContain('name="voucherCode"');
+    // The voucher box lives in portal.js (loaded by index.html); the sign-in form does not.
+    expect(res.text).toContain('portal.js');
     expect(res.text).not.toContain('account-login');
   });
 
@@ -92,7 +91,7 @@ describe('gateway portal URL: /connect', () => {
       .set('Host', 'wifi.preyone.com');
 
     expect(res.status).toBe(200);
-    expect(res.text).toContain('id="quick-form"');
+    expect(res.text).toContain('portal.js');
   });
 });
 

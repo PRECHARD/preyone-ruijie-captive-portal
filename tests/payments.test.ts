@@ -520,6 +520,7 @@ describe('Payments routes', () => {
           ],
         })
         .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce(undefined)
         .mockResolvedValueOnce({
           rows: [
             {
