@@ -1269,7 +1269,7 @@ adminRouter.get('/revenue', requirePermission(PERMISSIONS.COMPANY_ADMIN), async 
   `);
   const { rows: recentTx } = await pool.query(`
     SELECT t.id, t.package_tier, t.amount, t.currency, t.status, t.created_at, t.completed_at,
-           u.full_name AS user_name
+           u.full_name AS user_name, t.sold_by_name
     FROM transactions t
     LEFT JOIN users u ON u.id = t.user_id
     ORDER BY t.created_at DESC LIMIT 100

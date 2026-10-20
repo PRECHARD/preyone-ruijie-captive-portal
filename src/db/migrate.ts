@@ -272,12 +272,15 @@ const SQL = `
     payment_method  TEXT NOT NULL DEFAULT 'EcoCash',
     voucher_code    TEXT,
     status          TEXT NOT NULL DEFAULT 'pending',
+    sold_by_name    TEXT,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     completed_at    TIMESTAMPTZ
   );
 
   CREATE INDEX IF NOT EXISTS idx_transactions_user_id ON transactions (user_id);
   CREATE INDEX IF NOT EXISTS idx_transactions_status ON transactions (status);
+
+  ALTER TABLE transactions ADD COLUMN IF NOT EXISTS sold_by_name TEXT;
   CREATE INDEX IF NOT EXISTS idx_transactions_package_tier ON transactions (package_tier);
 
   CREATE TABLE IF NOT EXISTS settings (

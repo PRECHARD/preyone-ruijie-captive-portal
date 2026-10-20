@@ -365,11 +365,12 @@ async function completePayment(paymentId: string): Promise<string> {
     );
     const completedAt: Date = completedRows[0]?.completed_at ?? new Date();
 
+    // Update the existing pending transaction to completed (created at initiation).
     await client.query(
-      `INSERT INTO transactions
-        (payment_id, user_id, package_tier, amount, currency, payment_method, voucher_code, status, completed_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'completed', NOW())`,
-      [paymentId, pay.user_id, pay.tier_name, pay.amount, pay.currency, pay.payment_method, code]
+      `UPDATE transactions
+       SET status = 'completed', voucher_code = $2, completed_at = NOW()
+       WHERE payment_id = $1`,
+      [paymentId, code]
     );
 
     // ── Account for the sale ────────────────────────────────────────────────
@@ -404,24 +405,26 @@ async function completePayment(paymentId: string): Promise<string> {
 
     // The legacy local mint already inserted the row with sold_by NULL; the
     // statement above skips it, so attribute it here instead.
-    await client.query(
-      `UPDATE vouchers SET sold_by = $2
-       WHERE code = $1 AND sold_by IS NULL AND $2 IS NOT NULL`,
-      [code, owner?.id ?? null]
-    );
+    if (owner?.id) {
+      await client.query(
+        `UPDATE vouchers SET sold_by = $2
+         WHERE code = $1 AND sold_by IS NULL`,
+        [code, owner.id]
+      );
+    }
 
     await client.query(
       `INSERT INTO sales
          (voucher_id, voucher_code, sold_by, sold_by_name, amount, currency,
           payment_method, payment_reference, sold_at)
-       SELECT v.id, v.code, $2, $3, $4, $5, $6, $7, $8
+       SELECT v.id, v.code, $2::uuid, $3, $4, $5, $6, $7, $8
        FROM vouchers v
        WHERE v.code = $1
          AND NOT EXISTS (SELECT 1 FROM sales WHERE voucher_code = $1)`,
       [
         code,
         owner?.id ?? null,
-        owner?.fullName ?? null,
+        owner?.fullName ?? 'Online',
         pay.amount,
         pay.currency || 'USD',
         normalizeSaleMethod(pay.payment_method),
@@ -530,6 +533,15 @@ paymentsRouter.post('/initiate', async (req: Request, res: Response) => {
     ]
   );
   const paymentId = paymentInsert.rows[0].id;
+
+  // Record the transaction immediately (status: pending) so every payment
+  // attempt is visible in the admin console, even if completion fails.
+  await pool.query(
+    `INSERT INTO transactions
+      (payment_id, user_id, package_tier, amount, currency, payment_method, status, sold_by_name)
+     VALUES ($1, $2, $3, $4, $5, $6, 'pending', 'Online')`,
+    [paymentId, user.id, pkg.tier_name, amount, resolvedCurrency, 'EcoCash (Pesepay)']
+  );
 
   const baseUrl = (process.env.BASE_URL || 'https://wifi.preyone.com').replace(/\/$/, '');
 
@@ -713,6 +725,10 @@ paymentsRouter.post('/webhook', async (req: Request, res: Response) => {
       `UPDATE payments SET status = 'refunded', error_message = $2 WHERE id = $1 AND status = $3`,
       [pay.id, `Payment ${parsed.label}`, pay.status]
     );
+    await pool.query(
+      `UPDATE transactions SET status = 'refunded' WHERE payment_id = $1 AND status = 'pending'`,
+      [pay.id]
+    );
     res.json({ status: 'ok', state: 'refunded' });
     return;
   }
@@ -866,6 +882,11 @@ paymentsRouter.get('/status/:paymentId', async (req: Request, res: Response) => 
               `UPDATE payments SET status = $2, error_message = $3
                WHERE id = $1 AND status = 'pending'`,
               [paymentId, parsed.state, `Gateway reported ${parsed.label} (status check)`]
+            );
+            await pool.query(
+              `UPDATE transactions SET status = $2
+               WHERE payment_id = $1 AND status = 'pending'`,
+              [paymentId, parsed.state]
             );
           }
         } catch (err) {
