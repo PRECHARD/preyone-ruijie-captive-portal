@@ -1085,6 +1085,16 @@ const SQL = `
     stock_qty           NUMERIC(12,2) NOT NULL DEFAULT 0,
     track_stock         BOOLEAN NOT NULL DEFAULT TRUE,
     low_stock_threshold NUMERIC(12,2) NOT NULL DEFAULT 0,
+    track_serial        BOOLEAN NOT NULL DEFAULT FALSE,
+    unit                TEXT NOT NULL DEFAULT 'each',
+    allow_fractional    BOOLEAN NOT NULL DEFAULT FALSE,
+    oem_part_number     TEXT,
+    make                TEXT,
+    model               TEXT,
+    year_from           INTEGER,
+    year_to             INTEGER,
+    brand               TEXT,
+    bin_location        TEXT,
     active              BOOLEAN NOT NULL DEFAULT TRUE,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -1097,14 +1107,17 @@ const SQL = `
 
   -- Client book
   CREATE TABLE IF NOT EXISTS pos_customers (
-    id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name       TEXT NOT NULL,
-    phone      TEXT,
-    email      TEXT,
-    address    TEXT,
-    notes      TEXT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name              TEXT NOT NULL,
+    phone             TEXT,
+    email             TEXT,
+    address           TEXT,
+    notes             TEXT,
+    credit_limit      NUMERIC(12,2) NOT NULL DEFAULT 0,
+    credit_balance    NUMERIC(12,2) NOT NULL DEFAULT 0,
+    on_account_allowed BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
 
   CREATE UNIQUE INDEX IF NOT EXISTS idx_pos_customers_name ON pos_customers (lower(name));
@@ -1167,7 +1180,8 @@ const SQL = `
     price         NUMERIC(12,2) NOT NULL DEFAULT 0,
     qty           NUMERIC(12,2) NOT NULL DEFAULT 1,
     line_total    NUMERIC(12,2) NOT NULL DEFAULT 0,
-    position      INTEGER NOT NULL DEFAULT 0
+    position      INTEGER NOT NULL DEFAULT 0,
+    serial_number TEXT
   );
 
   CREATE INDEX IF NOT EXISTS idx_pos_doc_items_document ON pos_document_items (document_id);
@@ -1178,7 +1192,7 @@ const SQL = `
     document_id   UUID NOT NULL REFERENCES pos_documents(id) ON DELETE CASCADE,
     amount        NUMERIC(12,2) NOT NULL CHECK (amount > 0),
     method        TEXT NOT NULL DEFAULT 'cash'
-                  CHECK (method IN ('cash', 'card', 'ecocash', 'bank', 'pesepay', 'other')),
+                  CHECK (method IN ('cash', 'card', 'ecocash', 'bank', 'pesepay', 'other', 'on_account')),
     reference     TEXT,
     paid_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     recorded_by   UUID REFERENCES admin_users(id) ON DELETE SET NULL,
@@ -1228,6 +1242,108 @@ const SQL = `
   CREATE INDEX IF NOT EXISTS idx_pos_documents_company ON pos_documents (company_id);
   CREATE INDEX IF NOT EXISTS idx_pos_shifts_company    ON pos_shifts (company_id);
 
+  -- POS Industry Profile Engine (additive). New tables are created IF NOT
+  -- EXISTS so a fresh migrate() and an upgraded live DB converge. Existing
+  -- tables get their new columns via the ALTERs below this block.
+
+  CREATE TABLE IF NOT EXISTS pos_serial_numbers (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id  UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    product_id  UUID NOT NULL REFERENCES pos_products(id) ON DELETE CASCADE,
+    serial_number TEXT NOT NULL,
+    status      TEXT NOT NULL DEFAULT 'in_stock' CHECK (status IN ('in_stock', 'sold', 'returned')),
+    document_id UUID REFERENCES pos_documents(id) ON DELETE SET NULL,
+    sold_at     TIMESTAMPTZ,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (company_id, serial_number)
+  );
+  CREATE INDEX IF NOT EXISTS idx_pos_serials_product  ON pos_serial_numbers (product_id);
+  CREATE INDEX IF NOT EXISTS idx_pos_serials_status   ON pos_serial_numbers (status);
+  CREATE INDEX IF NOT EXISTS idx_pos_serials_document ON pos_serial_numbers (document_id);
+
+  CREATE TABLE IF NOT EXISTS pos_repair_tickets (
+    id                     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id             UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    customer_id            UUID REFERENCES pos_customers(id) ON DELETE SET NULL,
+    device_type            TEXT,
+    brand                  TEXT,
+    model                  TEXT,
+    serial_number          TEXT,
+    issue_description      TEXT NOT NULL,
+    status                 TEXT NOT NULL DEFAULT 'received'
+                           CHECK (status IN ('received', 'diagnosed', 'in_progress', 'ready', 'delivered', 'cancelled')),
+    estimated_cost         NUMERIC(12,2) NOT NULL DEFAULT 0,
+    final_cost             NUMERIC(12,2),
+    invoice_document_id    UUID REFERENCES pos_documents(id) ON DELETE SET NULL,
+    created_by             UUID REFERENCES admin_users(id) ON DELETE SET NULL,
+    created_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at             TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+  CREATE INDEX IF NOT EXISTS idx_pos_repairs_company  ON pos_repair_tickets (company_id);
+  CREATE INDEX IF NOT EXISTS idx_pos_repairs_status   ON pos_repair_tickets (status);
+  CREATE INDEX IF NOT EXISTS idx_pos_repairs_customer ON pos_repair_tickets (customer_id);
+
+  CREATE TABLE IF NOT EXISTS pos_tables (
+    id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id            UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    name                  TEXT NOT NULL,
+    capacity              INTEGER NOT NULL DEFAULT 2,
+    status                TEXT NOT NULL DEFAULT 'available'
+                          CHECK (status IN ('available', 'occupied', 'reserved')),
+    current_document_id   UUID REFERENCES pos_documents(id) ON DELETE SET NULL,
+    created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+  CREATE INDEX IF NOT EXISTS idx_pos_tables_company ON pos_tables (company_id);
+  CREATE INDEX IF NOT EXISTS idx_pos_tables_status  ON pos_tables (status);
+
+  CREATE TABLE IF NOT EXISTS pos_kds_tickets (
+    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id   UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    document_id  UUID NOT NULL REFERENCES pos_documents(id) ON DELETE CASCADE,
+    station      TEXT NOT NULL DEFAULT 'main',
+    status       TEXT NOT NULL DEFAULT 'pending'
+                 CHECK (status IN ('pending', 'preparing', 'ready', 'bumped')),
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    bumped_at    TIMESTAMPTZ,
+    bumped_by    UUID REFERENCES admin_users(id) ON DELETE SET NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_pos_kds_company  ON pos_kds_tickets (company_id);
+  CREATE INDEX IF NOT EXISTS idx_pos_kds_status   ON pos_kds_tickets (status);
+  CREATE INDEX IF NOT EXISTS idx_pos_kds_document ON pos_kds_tickets (document_id);
+
+  CREATE TABLE IF NOT EXISTS pos_kds_items (
+    id                BIGSERIAL PRIMARY KEY,
+    kds_ticket_id     UUID NOT NULL REFERENCES pos_kds_tickets(id) ON DELETE CASCADE,
+    document_item_id  BIGINT REFERENCES pos_document_items(id) ON DELETE SET NULL,
+    description       TEXT NOT NULL,
+    qty               NUMERIC(12,2) NOT NULL DEFAULT 1,
+    kds_status        TEXT NOT NULL DEFAULT 'pending'
+                      CHECK (kds_status IN ('pending', 'preparing', 'ready', 'bumped'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_pos_kds_items_ticket ON pos_kds_items (kds_ticket_id);
+
+  -- Backfill new columns on existing tables (idempotent).
+  ALTER TABLE pos_products ADD COLUMN IF NOT EXISTS track_serial     BOOLEAN NOT NULL DEFAULT FALSE;
+  ALTER TABLE pos_products ADD COLUMN IF NOT EXISTS unit             TEXT    NOT NULL DEFAULT 'each';
+  ALTER TABLE pos_products ADD COLUMN IF NOT EXISTS allow_fractional BOOLEAN NOT NULL DEFAULT FALSE;
+  ALTER TABLE pos_products ADD COLUMN IF NOT EXISTS oem_part_number  TEXT;
+  ALTER TABLE pos_products ADD COLUMN IF NOT EXISTS make             TEXT;
+  ALTER TABLE pos_products ADD COLUMN IF NOT EXISTS model            TEXT;
+  ALTER TABLE pos_products ADD COLUMN IF NOT EXISTS year_from        INTEGER;
+  ALTER TABLE pos_products ADD COLUMN IF NOT EXISTS year_to          INTEGER;
+  ALTER TABLE pos_products ADD COLUMN IF NOT EXISTS brand            TEXT;
+  ALTER TABLE pos_products ADD COLUMN IF NOT EXISTS bin_location     TEXT;
+
+  ALTER TABLE pos_customers ADD COLUMN IF NOT EXISTS credit_limit       NUMERIC(12,2) NOT NULL DEFAULT 0;
+  ALTER TABLE pos_customers ADD COLUMN IF NOT EXISTS credit_balance     NUMERIC(12,2) NOT NULL DEFAULT 0;
+  ALTER TABLE pos_customers ADD COLUMN IF NOT EXISTS on_account_allowed BOOLEAN NOT NULL DEFAULT FALSE;
+
+  ALTER TABLE pos_document_items ADD COLUMN IF NOT EXISTS serial_number TEXT;
+
+  ALTER TABLE pos_document_payments DROP CONSTRAINT IF EXISTS pos_document_payments_method_check;
+  ALTER TABLE pos_document_payments ADD CONSTRAINT pos_document_payments_method_check
+    CHECK (method IN ('cash', 'card', 'ecocash', 'bank', 'pesepay', 'other', 'on_account'));
   -- Pesepay payment intents. Also originally added by hand; the payments
   -- router writes every column below and the callback settles them.
   CREATE TABLE IF NOT EXISTS pesepay_intents (

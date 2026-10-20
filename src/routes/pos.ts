@@ -296,7 +296,7 @@ async function enforceSubscriptionGuard(
 // Mastercard are NOT listed: Pesepay rejects them for this merchant, and
 // offering an unusable rail at the till is worse than not offering it.
 const PAYMENT_METHODS = [
-  'cash', 'card', 'ecocash', 'innbucks', 'paygo', 'omari', 'bank', 'pesepay', 'other',
+  'cash', 'card', 'ecocash', 'innbucks', 'paygo', 'omari', 'bank', 'pesepay', 'other', 'on_account',
 ];
 
 // ── Company profile (read-only for staff clients) ───────────────────
@@ -524,12 +524,24 @@ router.get('/devices/mine', requireDeviceAuth, async (req, res) => {
 router.get('/products', async (req, res) => {
   const q = str(req.query.q);
   const includeInactive = str(req.query.includeInactive) === '1';
+  const oem = str(req.query.oem);
+  const make = str(req.query.make);
+  const model = str(req.query.model);
+  const year = num(req.query.year);
+  const brand = str(req.query.brand);
+  const bin = str(req.query.bin);
   const params: unknown[] = [];
   let where = includeInactive ? '' : 'AND active = TRUE';
   if (q) {
     params.push(`%${q.toLowerCase()}%`);
-    where += ` AND (lower(name) LIKE $${params.length} OR lower(coalesce(sku,'')) LIKE $${params.length} OR lower(coalesce(barcode,'')) LIKE $${params.length})`;
+    where += ` AND (lower(name) LIKE $${params.length} OR lower(coalesce(sku,'')) LIKE $${params.length} OR lower(coalesce(barcode,'')) LIKE $${params.length} OR lower(coalesce(oem_part_number,'')) LIKE $${params.length} OR lower(coalesce(make,'')) LIKE $${params.length} OR lower(coalesce(model,'')) LIKE $${params.length} OR lower(coalesce(brand,'')) LIKE $${params.length})`;
   }
+  if (oem) { params.push(`%${oem.toLowerCase()}%`); where += ` AND lower(coalesce(oem_part_number,'')) LIKE $${params.length}`; }
+  if (make) { params.push(`%${make.toLowerCase()}%`); where += ` AND lower(coalesce(make,'')) LIKE $${params.length}`; }
+  if (model) { params.push(`%${model.toLowerCase()}%`); where += ` AND lower(coalesce(model,'')) LIKE $${params.length}`; }
+  if (brand) { params.push(`%${brand.toLowerCase()}%`); where += ` AND lower(coalesce(brand,'')) LIKE $${params.length}`; }
+  if (bin) { params.push(`%${bin.toLowerCase()}%`); where += ` AND lower(coalesce(bin_location,'')) LIKE $${params.length}`; }
+  if (year) { params.push(year); where += ` AND (year_from IS NULL OR year_from <= $${params.length}) AND (year_to IS NULL OR year_to >= $${params.length})`; }
   const { rows } = await pool.query(
     `SELECT * FROM pos_products WHERE TRUE ${where} ORDER BY name LIMIT 500`,
     params
@@ -545,8 +557,8 @@ router.post('/products', async (req, res) => {
     return;
   }
   const { rows } = await pool.query(
-    `INSERT INTO pos_products (name, sku, barcode, category, price, cost_price, stock_qty, track_stock, low_stock_threshold)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+    `INSERT INTO pos_products (name, sku, barcode, category, price, cost_price, stock_qty, track_stock, low_stock_threshold, track_serial, unit, allow_fractional, oem_part_number, make, model, year_from, year_to, brand, bin_location)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
      RETURNING *`,
     [
       name,
@@ -558,6 +570,16 @@ router.post('/products', async (req, res) => {
       round2(num(b.stockQty)),
       b.trackStock !== false,
       round2(num(b.lowStockThreshold)),
+      b.trackSerial === true,
+      str(b.unit) || 'each',
+      b.allowFractional === true,
+      str(b.oemPartNumber) || null,
+      str(b.make) || null,
+      str(b.model) || null,
+      b.yearFrom ? num(b.yearFrom) : null,
+      b.yearTo ? num(b.yearTo) : null,
+      str(b.brand) || null,
+      str(b.binLocation) || null,
     ]
   );
   res.status(201).json(rows[0]);
@@ -578,10 +600,20 @@ router.put('/products/:id', async (req, res) => {
     trackStock: 'track_stock',
     lowStockThreshold: 'low_stock_threshold',
     active: 'active',
+    trackSerial: 'track_serial',
+    unit: 'unit',
+    allowFractional: 'allow_fractional',
+    oemPartNumber: 'oem_part_number',
+    make: 'make',
+    model: 'model',
+    yearFrom: 'year_from',
+    yearTo: 'year_to',
+    brand: 'brand',
+    binLocation: 'bin_location',
   };
   for (const [key, col] of Object.entries(map)) {
     if (key in b) {
-      values.push(key === 'name' ? str(b[key]) || null : key === 'price' || key === 'costPrice' || key === 'stockQty' || key === 'lowStockThreshold' ? round2(num(b[key])) : key === 'trackStock' || key === 'active' ? !!b[key] : str(b[key]) || null);
+       values.push(key === 'name' ? str(b[key]) || null : key === 'price' || key === 'costPrice' || key === 'stockQty' || key === 'lowStockThreshold' ? round2(num(b[key])) : key === 'yearFrom' || key === 'yearTo' ? (b[key] ? num(b[key]) : null) : key === 'trackStock' || key === 'active' || key === 'trackSerial' || key === 'allowFractional' ? !!b[key] : str(b[key]) || null);
       fields.push(`${col} = $${values.length}`);
     }
   }
@@ -1039,23 +1071,49 @@ router.post('/checkout', async (req, res) => {
     await client.query('BEGIN');
 
     // Refuse overselling tracked stock (row-locked to prevent race conditions)
-    for (const line of lines) {
+    for (let li = 0; li < lines.length; li++) {
+      const line = lines[li];
       const pid = str(line.productId);
       if (!pid) continue;
       const prod = await client.query(
-        `SELECT name, track_stock, stock_qty FROM pos_products WHERE id = $1 FOR UPDATE`,
+        `SELECT name, track_stock, stock_qty, allow_fractional, track_serial FROM pos_products WHERE id = $1 FOR UPDATE`,
         [pid]
       );
-      if (
-        prod.rows.length > 0 &&
-        prod.rows[0].track_stock &&
-        Number(prod.rows[0].stock_qty) < line.qty
-      ) {
+      if (prod.rows.length === 0) continue;
+      const p = prod.rows[0];
+      if (p.track_stock && Number(p.stock_qty) < line.qty) {
         await client.query('ROLLBACK');
         res.status(400).json({
-          error: `Insufficient stock for ${prod.rows[0].name}: have ${Number(prod.rows[0].stock_qty)}, need ${line.qty}`,
+          error: `Insufficient stock for ${p.name}: have ${Number(p.stock_qty)}, need ${line.qty}`,
         });
         return;
+      }
+      // Fractional quantity guard (small trader module)
+      if (!p.allow_fractional && line.qty !== Math.trunc(line.qty)) {
+        await client.query('ROLLBACK');
+        res.status(400).json({ error: `${p.name} does not allow fractional quantities` });
+        return;
+      }
+      // Serial / IMEI tracking guard (mobile & computer module)
+      if (p.track_serial) {
+        const rawLine = rawItems[li] || {};
+        const serials = Array.isArray((rawLine as any).serialNumbers) ? (rawLine as any).serialNumbers : [];
+        if (serials.length !== line.qty) {
+          await client.query('ROLLBACK');
+          res.status(400).json({ error: `${p.name} requires ${line.qty} serial number(s), got ${serials.length}` });
+          return;
+        }
+        // verify availability
+        const { rows: avail } = await client.query(
+          `SELECT serial_number FROM pos_serial_numbers
+            WHERE company_id = $1 AND product_id = $2 AND status = 'in_stock' AND serial_number = ANY($3::text[])`,
+          [tenantId(req), pid, serials]
+        );
+        if (avail.length !== serials.length) {
+          await client.query('ROLLBACK');
+          res.status(400).json({ error: `One or more serials for ${p.name} are not in stock` });
+          return;
+        }
       }
     }
 
@@ -1115,13 +1173,18 @@ router.post('/checkout', async (req, res) => {
     );
     const doc = docInsert.rows[0];
 
-    for (const line of lines) {
+    for (let li = 0; li < lines.length; li++) {
+      const line = lines[li];
       const description = str(line.description) || 'Item';
-      await client.query(
-        `INSERT INTO pos_document_items (document_id, product_id, description, price, qty, line_total, position)
-         VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-        [doc.id, str(line.productId) || null, description, line.price, line.qty, line.lineTotal, line.position]
+      const rawLine = (rawItems[li] || {}) as any;
+      const serials: string[] = Array.isArray(rawLine.serialNumbers) ? rawLine.serialNumbers.map((s: unknown) => str(s)).filter(Boolean) : [];
+      const serialText = serials.length ? serials.join(',') : null;
+      const itemRes = await client.query(
+        `INSERT INTO pos_document_items (document_id, product_id, description, price, qty, line_total, position, serial_number)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+        [doc.id, str(line.productId) || null, description, line.price, line.qty, line.lineTotal, line.position, serialText]
       );
+      const itemId = itemRes.rows[0]?.id;
       if (line.productId) {
         await client.query(
           `UPDATE pos_products
@@ -1129,6 +1192,35 @@ router.post('/checkout', async (req, res) => {
             WHERE id = $2 AND track_stock = TRUE`,
           [line.qty, line.productId]
         );
+        // Mark serials sold (mobile & computer module)
+        if (serials.length) {
+          await client.query(
+            `UPDATE pos_serial_numbers
+                SET status = 'sold', document_id = $1, sold_at = NOW()
+              WHERE company_id = $2 AND product_id = $3 AND serial_number = ANY($4::text[])`,
+            [doc.id, tenantId(req), str(line.productId), serials]
+          );
+        }
+      }
+      // kitchen item flag stored on raw line (no schema change); KDS created below if profile demands
+      (line as any)._itemId = itemId;
+    }
+
+    // on_account credit validation (small trader module)
+    const onAccountTotal = round2(rawPayments.filter((p) => str(p?.method) === 'on_account').reduce((s, p) => s + num(p?.amount), 0));
+    if (onAccountTotal > 0) {
+      if (!customerId) { await client.query('ROLLBACK'); res.status(400).json({ error: 'Customer required for on-account payment' }); return; }
+      const { rows: crows } = await client.query(
+        `SELECT credit_limit, credit_balance, on_account_allowed FROM pos_customers WHERE id = $1 FOR UPDATE`,
+        [customerId]
+      );
+      if (crows.length === 0) { await client.query('ROLLBACK'); res.status(404).json({ error: 'Customer not found' }); return; }
+      const cust = crows[0];
+      if (!cust.on_account_allowed) { await client.query('ROLLBACK'); res.status(403).json({ error: 'Customer not allowed on account' }); return; }
+      if (Number(cust.credit_balance) + onAccountTotal > Number(cust.credit_limit)) {
+        await client.query('ROLLBACK');
+        res.status(400).json({ error: `Credit limit exceeded: balance ${cust.credit_balance}, limit ${cust.credit_limit}` });
+        return;
       }
     }
 
@@ -1143,18 +1235,55 @@ router.post('/checkout', async (req, res) => {
          VALUES ($1,$2,$3,$4,$5,$6)`,
         [doc.id, amount, method, str(p?.reference) || null, me.id, shiftId]
       );
+      if (method === 'on_account') {
+        await client.query(
+          `UPDATE pos_customers SET credit_balance = credit_balance + $1, updated_at = NOW() WHERE id = $2`,
+          [amount, customerId]
+        );
+      }
+    }
+
+    // Auto-create KDS ticket for QSR/restaurant profiles (or explicit flag)
+    let kdsTicketId: string | null = null;
+    const wantsKds = b.createKds === true || !!b.kdsStation;
+    const { rows: compRows } = await client.query(`SELECT business_profile FROM companies WHERE id = $1`, [tenantId(req)]);
+    const profile = compRows[0]?.business_profile;
+    const isFood = profile === 'fast_food_qsr' || profile === 'restaurant_dine_in';
+    if ((wantsKds || isFood) && lines.length > 0) {
+      const station = str(b.kdsStation) || 'main';
+      const { rows: kt } = await client.query(
+        `INSERT INTO pos_kds_tickets (company_id, document_id, station, status) VALUES ($1,$2,$3,'pending') RETURNING id`,
+        [tenantId(req), doc.id, station]
+      );
+      kdsTicketId = kt[0].id;
+      for (const line of lines) {
+        await client.query(
+          `INSERT INTO pos_kds_items (kds_ticket_id, document_item_id, description, qty, kds_status)
+           VALUES ($1,$2,$3,$4,'pending')`,
+          [kdsTicketId, (line as any)._itemId || null, str(line.description) || 'Item', line.qty]
+        );
+      }
+    }
+    // Table assign for dine-in
+    if (b.tableId) {
+      await client.query(
+        `UPDATE pos_tables SET status = 'occupied', current_document_id = $1, updated_at = NOW() WHERE id = $2 AND company_id = $3`,
+        [doc.id, str(b.tableId), tenantId(req)]
+      );
     }
 
     await client.query('COMMIT');
     res.status(201).json({
       ...doc,
       balanceDue: round2(total - paidTotal),
-      items: lines.map((l) => ({
+      items: lines.map((l, idx) => ({
         description: str(l.description) || 'Item',
         price: l.price,
         qty: l.qty,
         lineTotal: l.lineTotal,
+        serialNumber: Array.isArray((rawItems[idx] as any)?.serialNumbers) ? (rawItems[idx] as any).serialNumbers.join(',') : null,
       })),
+       kdsTicketId,
     });
   } catch (e) {
     await client.query('ROLLBACK');
@@ -1195,6 +1324,19 @@ router.post('/documents/:id/payments', async (req, res) => {
       res.status(400).json({ error: 'Document is void' });
       return;
     }
+    if (method === 'on_account') {
+      if (!doc.customer_id) { await client.query('ROLLBACK'); res.status(400).json({ error: 'Customer required for on-account payment' }); return; }
+      const { rows: crows } = await client.query(
+        `SELECT credit_limit, credit_balance, on_account_allowed FROM pos_customers WHERE id = $1 FOR UPDATE`,
+        [doc.customer_id]
+      );
+      if (crows.length === 0) { await client.query('ROLLBACK'); res.status(404).json({ error: 'Customer not found' }); return; }
+      const cust = crows[0];
+      if (!cust.on_account_allowed) { await client.query('ROLLBACK'); res.status(403).json({ error: 'Customer not allowed on account' }); return; }
+      if (Number(cust.credit_balance) + amount > Number(cust.credit_limit)) {
+        await client.query('ROLLBACK'); res.status(400).json({ error: 'Credit limit exceeded' }); return;
+      }
+    }
     let shiftId: string | null = doc.shift_id;
     if (method === 'cash') {
       const open = await client.query(
@@ -1208,6 +1350,12 @@ router.post('/documents/:id/payments', async (req, res) => {
        VALUES ($1,$2,$3,$4,$5,$6)`,
       [doc.id, amount, method, reference, me.id, shiftId]
     );
+    if (method === 'on_account' && doc.customer_id) {
+      await client.query(
+        `UPDATE pos_customers SET credit_balance = credit_balance + $1, updated_at = NOW() WHERE id = $2`,
+        [amount, doc.customer_id]
+      );
+    }
     const sums = await client.query(
       `SELECT COALESCE(SUM(amount),0) AS paid FROM pos_document_payments WHERE document_id = $1`,
       [doc.id]
@@ -1276,6 +1424,295 @@ router.post('/documents/:id/void', requireRole(...MANAGER_ROLES), async (req, re
   } finally {
     client.release();
   }
+});
+
+// ── POS Industry Profile Engine: Serial / IMEI tracking ───────────────
+
+router.post('/products/:id/serials', async (req, res) => {
+  const cid = tenantId(req);
+  const productId = req.params.id;
+  const serials = Array.isArray(req.body?.serials) ? req.body.serials : (req.body?.serial ? [req.body.serial] : []);
+  const cleaned = serials.map((s: unknown) => str(s)).filter(Boolean);
+  if (cleaned.length === 0) { res.status(400).json({ error: 'serials required' }); return; }
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: prod } = await client.query('SELECT id FROM pos_products WHERE id = $1', [productId]);
+    if (prod.length === 0) { await client.query('ROLLBACK'); res.status(404).json({ error: 'Product not found' }); return; }
+    const inserted: string[] = [];
+    for (const sn of cleaned) {
+      const { rows } = await client.query(
+        `INSERT INTO pos_serial_numbers (company_id, product_id, serial_number, status)
+         VALUES ($1,$2,$3,'in_stock')
+         ON CONFLICT (company_id, serial_number) DO NOTHING
+         RETURNING serial_number`,
+        [cid, productId, sn]
+      );
+      if (rows.length) inserted.push(rows[0].serial_number);
+    }
+    await client.query('COMMIT');
+    res.status(201).json({ inserted, count: inserted.length });
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {});
+    res.status(500).json({ error: (e as Error).message });
+  } finally {
+    client.release();
+  }
+});
+
+router.get('/products/:id/serials', async (req, res) => {
+  const cid = tenantId(req);
+  const status = str(req.query.status) || 'in_stock';
+  const { rows } = await pool.query(
+    `SELECT id, serial_number, status, document_id, sold_at, created_at
+       FROM pos_serial_numbers
+      WHERE company_id = $1 AND product_id = $2 AND ($3 = 'all' OR status = $3)
+      ORDER BY created_at DESC`,
+    [cid, req.params.id, status]
+  );
+  res.json(rows);
+});
+
+// ── POS Industry Profile Engine: Repair tickets ───────────────────────
+
+router.get('/repairs', async (req, res) => {
+  const cid = tenantId(req);
+  const status = str(req.query.status);
+  const params: unknown[] = [cid];
+  let where = 'WHERE company_id = $1';
+  if (status) { params.push(status); where += ` AND status = $${params.length}`; }
+  const { rows } = await pool.query(
+    `SELECT r.*, c.name AS customer_name, c.phone AS customer_phone
+       FROM pos_repair_tickets r
+       LEFT JOIN pos_customers c ON c.id = r.customer_id
+       ${where} ORDER BY r.created_at DESC LIMIT 500`,
+    params
+  );
+  res.json(rows);
+});
+
+router.post('/repairs', async (req, res) => {
+  const cid = tenantId(req);
+  const b = req.body || {};
+  const issue = str(b.issueDescription || b.issue);
+  if (!issue) { res.status(400).json({ error: 'issueDescription is required' }); return; }
+  const { rows } = await pool.query(
+    `INSERT INTO pos_repair_tickets
+       (company_id, customer_id, device_type, brand, model, serial_number, issue_description, status, estimated_cost, created_by)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,'received',$8,$9)
+     RETURNING *`,
+    [
+      cid,
+      b.customerId || null,
+      str(b.deviceType) || null,
+      str(b.brand) || null,
+      str(b.model) || null,
+      str(b.serialNumber) || null,
+      issue,
+      round2(num(b.estimatedCost)),
+      req.adminUser!.id,
+    ]
+  );
+  res.status(201).json(rows[0]);
+});
+
+router.get('/repairs/:id', async (req, res) => {
+  const cid = tenantId(req);
+  const { rows } = await pool.query(
+    `SELECT r.*, c.name AS customer_name, c.phone AS customer_phone
+       FROM pos_repair_tickets r
+       LEFT JOIN pos_customers c ON c.id = r.customer_id
+      WHERE r.id = $1 AND r.company_id = $2`,
+    [req.params.id, cid]
+  );
+  if (rows.length === 0) { res.status(404).json({ error: 'Repair ticket not found' }); return; }
+  res.json(rows[0]);
+});
+
+router.patch('/repairs/:id/status', async (req, res) => {
+  const cid = tenantId(req);
+  const status = str(req.body?.status);
+  const allowed = ['received', 'diagnosed', 'in_progress', 'ready', 'delivered', 'cancelled'];
+  if (!allowed.includes(status)) { res.status(400).json({ error: 'invalid status' }); return; }
+  const finalCost = req.body?.finalCost != null ? round2(num(req.body.finalCost)) : null;
+  const { rows } = await pool.query(
+    `UPDATE pos_repair_tickets
+        SET status = $1, final_cost = COALESCE($2, final_cost), updated_at = NOW()
+      WHERE id = $3 AND company_id = $4
+      RETURNING *`,
+    [status, finalCost, req.params.id, cid]
+  );
+  if (rows.length === 0) { res.status(404).json({ error: 'Repair ticket not found' }); return; }
+  res.json(rows[0]);
+});
+
+router.post('/repairs/:id/convert', async (req, res) => {
+  const cid = tenantId(req);
+  const { rows: trows } = await pool.query(
+    `SELECT * FROM pos_repair_tickets WHERE id = $1 AND company_id = $2`,
+    [req.params.id, cid]
+  );
+  if (trows.length === 0) { res.status(404).json({ error: 'Repair ticket not found' }); return; }
+  const t = trows[0];
+  if (t.invoice_document_id) { res.status(409).json({ error: 'Already converted', documentId: t.invoice_document_id }); return; }
+  const amount = round2(num(t.final_cost != null ? t.final_cost : t.estimated_cost));
+  const docNumber = `INV-${Date.now()}`;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: docs } = await client.query(
+      `INSERT INTO pos_documents (doc_number, doc_type, channel, status, customer_id, cashier_id, company_id, subtotal, total, amount_paid, notes)
+       VALUES ($1,'invoice','office','unpaid',$2,$3,$4,$5,$5,0,$6) RETURNING *`,
+      [docNumber, t.customer_id, req.adminUser!.id, cid, amount, `Repair ticket ${t.id}: ${t.issue_description}`]
+    );
+    const doc = docs[0];
+    await client.query(
+      `INSERT INTO pos_document_items (document_id, description, price, qty, line_total, position)
+       VALUES ($1,$2,$3,1,$3,0)`,
+      [doc.id, `Repair: ${t.issue_description}`, amount]
+    );
+    await client.query(
+      `UPDATE pos_repair_tickets SET invoice_document_id = $1, status = 'delivered', updated_at = NOW() WHERE id = $2`,
+      [doc.id, t.id]
+    );
+    await client.query('COMMIT');
+    res.status(201).json({ document: doc, repairId: t.id });
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {});
+    res.status(500).json({ error: (e as Error).message });
+  } finally {
+    client.release();
+  }
+});
+
+// ── POS Industry Profile Engine: Tables (dine-in) ─────────────────────
+
+router.get('/tables', async (req, res) => {
+  const cid = tenantId(req);
+  const { rows } = await pool.query(
+    `SELECT * FROM pos_tables WHERE company_id = $1 ORDER BY name`,
+    [cid]
+  );
+  res.json(rows);
+});
+
+router.post('/tables', async (req, res) => {
+  const cid = tenantId(req);
+  const b = req.body || {};
+  const name = str(b.name);
+  if (!name) { res.status(400).json({ error: 'name is required' }); return; }
+  const { rows } = await pool.query(
+    `INSERT INTO pos_tables (company_id, name, capacity, status)
+     VALUES ($1,$2,$3,'available') RETURNING *`,
+    [cid, name, b.capacity ? num(b.capacity) : 2]
+  );
+  res.status(201).json(rows[0]);
+});
+
+router.patch('/tables/:id', async (req, res) => {
+  const cid = tenantId(req);
+  const b = req.body || {};
+  const fields: string[] = [];
+  const values: unknown[] = [];
+  if ('status' in b) { values.push(str(b.status)); fields.push(`status = $${values.length}`); }
+  if ('name' in b) { values.push(str(b.name)); fields.push(`name = $${values.length}`); }
+  if ('capacity' in b) { values.push(num(b.capacity)); fields.push(`capacity = $${values.length}`); }
+  if ('currentDocumentId' in b) { values.push(b.currentDocumentId || null); fields.push(`current_document_id = $${values.length}`); }
+  if (fields.length === 0) { res.status(400).json({ error: 'Nothing to update' }); return; }
+  values.push(req.params.id, cid);
+  const { rows } = await pool.query(
+    `UPDATE pos_tables SET ${fields.join(', ')}, updated_at = NOW() WHERE id = $${values.length - 1} AND company_id = $${values.length} RETURNING *`,
+    values
+  );
+  if (rows.length === 0) { res.status(404).json({ error: 'Table not found' }); return; }
+  res.json(rows[0]);
+});
+
+router.post('/tables/:id/assign', async (req, res) => {
+  const cid = tenantId(req);
+  const documentId = str(req.body?.documentId);
+  if (!documentId) { res.status(400).json({ error: 'documentId required' }); return; }
+  const { rows } = await pool.query(
+    `UPDATE pos_tables SET status = 'occupied', current_document_id = $1, updated_at = NOW()
+      WHERE id = $2 AND company_id = $3 RETURNING *`,
+    [documentId, req.params.id, cid]
+  );
+  if (rows.length === 0) { res.status(404).json({ error: 'Table not found' }); return; }
+  res.json(rows[0]);
+});
+
+// ── POS Industry Profile Engine: KDS ──────────────────────────────────
+
+router.get('/kds/tickets', async (req, res) => {
+  const cid = tenantId(req);
+  const status = str(req.query.status) || 'open';
+  const where = status === 'open'
+    ? "AND t.status IN ('pending','preparing','ready')"
+    : (status === 'all' ? '' : 'AND t.status = $2');
+  const params: unknown[] = [cid];
+  if (status !== 'open' && status !== 'all') params.push(status);
+  const { rows: tickets } = await pool.query(
+    `SELECT t.*, d.doc_number, d.total, d.created_at AS doc_created
+       FROM pos_kds_tickets t
+       JOIN pos_documents d ON d.id = t.document_id
+      WHERE t.company_id = $1 ${where}
+      ORDER BY t.created_at ASC`,
+    params
+  );
+  for (const t of tickets) {
+    const { rows: items } = await pool.query(
+      `SELECT * FROM pos_kds_items WHERE kds_ticket_id = $1 ORDER BY id`,
+      [t.id]
+    );
+    t.items = items;
+  }
+  res.json(tickets);
+});
+
+router.post('/kds/tickets/:id/bump', async (req, res) => {
+  const cid = tenantId(req);
+  const next = str(req.body?.status) || 'bumped';
+  const allowed = ['pending', 'preparing', 'ready', 'bumped'];
+  if (!allowed.includes(next)) { res.status(400).json({ error: 'invalid status' }); return; }
+  const { rows } = await pool.query(
+    `UPDATE pos_kds_tickets
+        SET status = $1, bumped_at = ${next === 'bumped' ? 'NOW()' : 'bumped_at'}, bumped_by = $2
+      WHERE id = $3 AND company_id = $4
+      RETURNING *`,
+    [next, req.adminUser!.id, req.params.id, cid]
+  );
+  if (rows.length === 0) { res.status(404).json({ error: 'KDS ticket not found' }); return; }
+  res.json(rows[0]);
+});
+
+// ── POS Industry Profile Engine: Customer credit (small trader) ───────
+
+router.get('/customers/:id/credit', async (req, res) => {
+  const cid = tenantId(req);
+  const { rows } = await pool.query(
+    `SELECT id, name, credit_limit, credit_balance, on_account_allowed
+       FROM pos_customers WHERE id = $1`,
+    [req.params.id]
+  );
+  if (rows.length === 0) { res.status(404).json({ error: 'Customer not found' }); return; }
+  res.json(rows[0]);
+});
+
+router.patch('/customers/:id/credit', async (req, res) => {
+  const b = req.body || {};
+  const fields: string[] = [];
+  const values: unknown[] = [];
+  if ('creditLimit' in b) { values.push(round2(num(b.creditLimit))); fields.push(`credit_limit = $${values.length}`); }
+  if ('creditBalance' in b) { values.push(round2(num(b.creditBalance))); fields.push(`credit_balance = $${values.length}`); }
+  if ('onAccountAllowed' in b) { values.push(!!b.onAccountAllowed); fields.push(`on_account_allowed = $${values.length}`); }
+  if (fields.length === 0) { res.status(400).json({ error: 'Nothing to update' }); return; }
+  values.push(req.params.id);
+  const { rows } = await pool.query(
+    `UPDATE pos_customers SET ${fields.join(', ')}, updated_at = NOW() WHERE id = $${values.length} RETURNING id, name, credit_limit, credit_balance, on_account_allowed`,
+    values
+  );
+  if (rows.length === 0) { res.status(404).json({ error: 'Customer not found' }); return; }
+  res.json(rows[0]);
 });
 
 // ── POS sector dashboard ───────────────────────────────────────────

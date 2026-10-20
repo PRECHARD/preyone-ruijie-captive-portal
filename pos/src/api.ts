@@ -17,6 +17,16 @@ export interface Product {
   track_stock: boolean;
   low_stock_threshold: number;
   active: boolean;
+  track_serial: boolean;
+  unit: string;
+  allow_fractional: boolean;
+  oem_part_number: string | null;
+  make: string | null;
+  model: string | null;
+  year_from: number | null;
+  year_to: number | null;
+  brand: string | null;
+  bin_location: string | null;
 }
 
 export interface Shift {
@@ -42,6 +52,7 @@ export interface CartLine {
   description: string;
   price: number;
   qty: number;
+  serialNumbers?: string[];
 }
 
 export interface PaymentInput {
@@ -61,7 +72,8 @@ export interface CheckoutResult {
   total: number;
   amount_paid: number;
   balanceDue: number;
-  items: Array<{ description: string; price: number; qty: number; lineTotal: number }>;
+  kdsTicketId?: string | null;
+  items: Array<{ description: string; price: number; qty: number; lineTotal: number; serialNumber?: string | null }>;
   payments: Array<{ amount: number; method: string; reference?: string }>;
   customer_name?: string;
   customer_phone?: string;
@@ -142,6 +154,7 @@ export interface TillOperator {
 }
 
 export interface CompanyProfile {
+  business_profile?: string;
   name: string;
   tagline: string | null;
   address: string | null;
@@ -181,6 +194,16 @@ export const api = {
         stockQty: Number(p.stock_qty) || 0,
         trackStock: p.track_stock !== false,
         lowStockThreshold: Number(p.low_stock_threshold) || 0,
+        trackSerial: p.track_serial === true,
+        unit: p.unit || 'each',
+        allowFractional: p.allow_fractional === true,
+        oemPartNumber: p.oem_part_number || undefined,
+        make: p.make || undefined,
+        model: p.model || undefined,
+        yearFrom: p.year_from || undefined,
+        yearTo: p.year_to || undefined,
+        brand: p.brand || undefined,
+        binLocation: p.bin_location || undefined,
       }),
     }),
   updateProduct: (id: string, patch: Record<string, unknown>) =>
@@ -210,7 +233,43 @@ export const api = {
     discountPct?: number;
     taxPct?: number;
     notes?: string;
+    tableId?: string;
+    createKds?: boolean;
+    kdsStation?: string;
   }) => req<CheckoutResult>('/checkout', { method: 'POST', body: JSON.stringify(payload) }),
+
+  // Industry profile helpers
+  productsSearch: (q: Record<string, string>) => {
+    const qs = new URLSearchParams(q).toString();
+    return req<Product[]>(`/products?${qs}`);
+  },
+  registerSerials: (productId: string, serials: string[]) =>
+    req<{ inserted: string[]; count: number }>(`/products/${productId}/serials`, {
+      method: 'POST',
+      body: JSON.stringify({ serials }),
+    }),
+  productSerials: (productId: string, status = 'in_stock') =>
+    req<Array<{ id: string; serial_number: string; status: string }>>(`/products/${productId}/serials?status=${status}`),
+
+  repairs: (status?: string) => req<any[]>(`/repairs${status ? `?status=${status}` : ''}`),
+  createRepair: (b: any) => req<any>('/repairs', { method: 'POST', body: JSON.stringify(b) }),
+  updateRepairStatus: (id: string, status: string, finalCost?: number) =>
+    req<any>(`/repairs/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status, finalCost }) }),
+  convertRepair: (id: string) => req<any>(`/repairs/${id}/convert`, { method: 'POST' }),
+
+  tables: () => req<any[]>('/tables'),
+  createTable: (name: string, capacity?: number) =>
+    req<any>('/tables', { method: 'POST', body: JSON.stringify({ name, capacity }) }),
+  updateTable: (id: string, patch: any) => req<any>(`/tables/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  assignTable: (id: string, documentId: string) =>
+    req<any>(`/tables/${id}/assign`, { method: 'POST', body: JSON.stringify({ documentId }) }),
+
+  kdsTickets: (status = 'open') => req<any[]>(`/kds/tickets?status=${status}`),
+  bumpKds: (id: string, status: string) => req<any>(`/kds/tickets/${id}/bump`, { method: 'POST', body: JSON.stringify({ status }) }),
+
+  customerCredit: (id: string) => req<any>(`/customers/${id}/credit`),
+  updateCustomerCredit: (id: string, patch: any) =>
+    req<any>(`/customers/${id}/credit`, { method: 'PATCH', body: JSON.stringify(patch) }),
 
   // No type → every document type (sales, invoices, quotations) in one list.
   documents: (type?: string | null, limit = 100, status?: string) => {

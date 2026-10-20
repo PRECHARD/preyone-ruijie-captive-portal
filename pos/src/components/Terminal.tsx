@@ -32,6 +32,8 @@ export default function Terminal({ user, notify, onApiError, onShiftChanged }: P
     description: string;
     price: number;
     qty: number;
+    serialNumbers?: string[];
+    allowFractional?: boolean;
   }
 
   useEffect(() => {
@@ -62,10 +64,21 @@ export default function Terminal({ user, notify, onApiError, onShiftChanged }: P
       const i = c.findIndex((l) => l.productId === p.id);
       if (i >= 0) {
         const copy = [...c];
-        copy[i] = { ...copy[i], qty: copy[i].qty + 1 };
+        const newQty = copy[i].qty + 1;
+        copy[i] = { ...copy[i], qty: newQty, allowFractional: p.allow_fractional };
+        if (p.track_serial) {
+          const extra = window.prompt(`Enter serial/IMEI #${newQty} for ${p.name}:`, '');
+          if (extra !== null) copy[i].serialNumbers = [...(copy[i].serialNumbers || []), extra.trim()];
+        }
         return copy;
       }
-      return [...c, { productId: p.id, description: p.name, price: Number(p.price), qty: 1 }];
+      const serials: string[] = [];
+      if (p.track_serial) {
+        const s = window.prompt(`Enter serial/IMEI #1 for ${p.name}:`, '');
+        if (s === null) return c;
+        serials.push(s.trim());
+      }
+      return [...c, { productId: p.id, description: p.name, price: Number(p.price), qty: 1, serialNumbers: serials, allowFractional: p.allow_fractional }];
     });
   };
 
@@ -114,7 +127,9 @@ export default function Terminal({ user, notify, onApiError, onShiftChanged }: P
           description: l.description,
           price: l.price,
           qty: l.qty,
+          serialNumbers: l.serialNumbers,
         })),
+        createKds: true,
         payments,
         discountPct: Number(discountPct) || 0,
         taxPct: Number(taxPct) || 0,
@@ -189,7 +204,20 @@ export default function Terminal({ user, notify, onApiError, onShiftChanged }: P
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                   <button className="qty-btn" onClick={() => bumpQty(idx, -1)}>−</button>
-                  <span className="qty-val">{l.qty}</span>
+                   <input
+                     className="qty-input"
+                     type="number"
+                     min="0"
+                     step={l.allowFractional ? '0.01' : '1'}
+                     value={l.qty}
+                     onChange={(e) => {
+                       const v = Number(e.target.value);
+                       if (!Number.isNaN(v) && v >= 0) {
+                         setCart((c) => c.map((x, i) => (i === idx ? { ...x, qty: v } : x)).filter((x) => x.qty > 0));
+                       }
+                     }}
+                     style={{ width: 56, textAlign: 'center' }}
+                   />
                   <button className="qty-btn" onClick={() => bumpQty(idx, 1)}>+</button>
                 </div>
                 <span className="cl-total">{money(l.price * l.qty)}</span>

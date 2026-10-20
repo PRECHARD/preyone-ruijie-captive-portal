@@ -163,3 +163,28 @@ DROP TRIGGER IF EXISTS update_company_device_limit ON companies;
 CREATE TRIGGER update_company_device_limit
   BEFORE INSERT OR UPDATE OF plan_type ON companies
   FOR EACH ROW EXECUTE FUNCTION update_company_device_limit();
+
+
+-- ============================================================================
+-- POS Industry Profile Engine (additive) - mirrors src/db/migrate.ts
+-- ============================================================================
+ALTER TABLE pos_products ADD COLUMN IF NOT EXISTS track_serial     BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE pos_products ADD COLUMN IF NOT EXISTS unit             TEXT    NOT NULL DEFAULT 'each';
+ALTER TABLE pos_products ADD COLUMN IF NOT EXISTS allow_fractional BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE pos_products ADD COLUMN IF NOT EXISTS oem_part_number  TEXT;
+ALTER TABLE pos_products ADD COLUMN IF NOT EXISTS make             TEXT;
+ALTER TABLE pos_products ADD COLUMN IF NOT EXISTS model            TEXT;
+ALTER TABLE pos_products ADD COLUMN IF NOT EXISTS year_from        INTEGER;
+ALTER TABLE pos_products ADD COLUMN IF NOT EXISTS year_to          INTEGER;
+ALTER TABLE pos_products ADD COLUMN IF NOT EXISTS brand            TEXT;
+ALTER TABLE pos_products ADD COLUMN IF NOT EXISTS bin_location     TEXT;
+
+ALTER TABLE pos_customers ADD COLUMN IF NOT EXISTS credit_limit       NUMERIC(12,2) NOT NULL DEFAULT 0;
+ALTER TABLE pos_customers ADD COLUMN IF NOT EXISTS credit_balance     NUMERIC(12,2) NOT NULL DEFAULT 0;
+ALTER TABLE pos_customers ADD COLUMN IF NOT EXISTS on_account_allowed BOOLEAN NOT NULL DEFAULT FALSE;
+
+ALTER TABLE pos_document_items ADD COLUMN IF NOT EXISTS serial_number TEXT;
+
+ALTER TABLE pos_document_payments DROP CONSTRAINT IF EXISTS pos_document_payments_method_check;
+ALTER TABLE pos_document_payments ADD CONSTRAINT pos_document_payments_method_check
+  CHECK (method IN ('cash', 'card', 'ecocash', 'bank', 'pesepay', 'other', 'on_account'));

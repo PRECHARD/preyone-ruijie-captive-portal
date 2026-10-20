@@ -19,6 +19,7 @@ const PESEPAY_RAILS = [
 
 const METHOD_LABELS: Record<string, string> = {
   cash: 'Cash',
+  on_account: 'On Account',
   ...Object.fromEntries(PESEPAY_RAILS.map((r) => [r.key, r.label])),
 };
 
@@ -44,7 +45,7 @@ export default function CheckoutModal({
   const [customerName, setCustomerName] = useState('');
 
   const rail = PESEPAY_RAILS.find((r) => r.key === method);
-  const methods = ['cash', ...PESEPAY_RAILS.map((r) => r.key)];
+  const methods = ['cash', 'on_account', ...PESEPAY_RAILS.map((r) => r.key)];
 
   const partsSum = useMemo(() => parts.reduce((s, p) => s + p.amount, 0), [parts]);
   const remaining = Math.max(0, Math.round((total - partsSum) * 100) / 100);
@@ -72,7 +73,7 @@ export default function CheckoutModal({
   const addPart = () => {
     const amount = Number(tendered);
     if (!amount || amount <= 0) return;
-    const capped = method === 'cash' ? amount : Math.min(amount, remaining);
+    const capped = method === 'cash' || method === 'on_account' ? amount : Math.min(amount, remaining);
     if (capped <= 0) return;
     setParts((p) => [
       ...p,

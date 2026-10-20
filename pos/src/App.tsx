@@ -6,6 +6,10 @@ import Terminal from './components/Terminal';
 import XReportModal from './components/XReportModal';
 import StockManager from './components/StockManager';
 import HistoryView from './components/HistoryView';
+import SparesSearch from './components/SparesSearch';
+import KdsBoard from './components/KdsBoard';
+import TableGrid from './components/TableGrid';
+import RepairIntake from './components/RepairIntake';
 
 export interface Toast {
   msg: string;
@@ -18,7 +22,7 @@ export default function App() {
   const [shiftTotals, setShiftTotals] = useState<MethodTotal[]>([]);
   const [shiftLoading, setShiftLoading] = useState(true);
   const [showX, setShowX] = useState(false);
-  const [view, setView] = useState<'sell' | 'stock' | 'history'>('sell');
+  const [view, setView] = useState<'sell' | 'stock' | 'history' | 'spares' | 'kds' | 'tables' | 'repairs'>('sell');
   const [toast, setToast] = useState<Toast | null>(null);
 
   const notify = useCallback((msg: string, kind: 'ok' | 'error' = 'ok') => {
@@ -86,6 +90,10 @@ export default function App() {
               <>
                 <button className={`chip ${view === 'sell' ? 'ok' : ''}`} onClick={() => setView('sell')}>SELL</button>
                 <button className={`chip ${view === 'stock' ? 'ok' : ''}`} onClick={() => setView('stock')}>STOCK</button>
+                <button className={`chip ${view === 'spares' ? 'ok' : ''}`} onClick={() => setView('spares')}>SPARES</button>
+                <button className={`chip ${view === 'kds' ? 'ok' : ''}`} onClick={() => setView('kds')}>KDS</button>
+                <button className={`chip ${view === 'tables' ? 'ok' : ''}`} onClick={() => setView('tables')}>TABLES</button>
+                <button className={`chip ${view === 'repairs' ? 'ok' : ''}`} onClick={() => setView('repairs')}>REPAIRS</button>
               </>
             )}
             <button className={`chip ${view === 'history' ? 'ok' : ''}`} onClick={() => setView('history')}>HISTORY</button>
@@ -113,6 +121,14 @@ export default function App() {
             />
           ) : view === 'stock' ? (
             <StockManager />
+           ) : view === 'spares' ? (
+             <SparesSearch />
+           ) : view === 'kds' ? (
+             <KdsBoard notify={notify} />
+           ) : view === 'tables' ? (
+             <TableGrid notify={notify} />
+           ) : view === 'repairs' ? (
+             <RepairIntake notify={notify} />
           ) : view === 'history' ? (
             <HistoryView notify={notify} onApiError={sessionExpired} />
           ) : (

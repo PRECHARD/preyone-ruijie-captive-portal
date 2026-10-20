@@ -14,6 +14,7 @@ const METHODS = [
   { key: 'bank', label: 'Bank' },
   { key: 'pesepay', label: 'Pesepay' },
   { key: 'other', label: 'Other' },
+  { key: 'on_account', label: 'On Account' },
 ];
 
 export default function PaymentModal({

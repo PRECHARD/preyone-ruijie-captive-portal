@@ -170,6 +170,13 @@ export default function ReceiptModal({
                   <td>
                     {i.description}
                     <br />
+                   {i.description}
+                     {i.serialNumber && (
+                       <>
+                         <br />
+                         <span className="receipt-muted" style={{ fontSize: '8.5px' }}>S/N: {i.serialNumber}</span>
+                       </>
+                     )}
                     <span className="receipt-muted">{i.qty} × {money(i.price)}</span>
                   </td>
                   <td className="r-num">{money(i.lineTotal)}</td>
@@ -234,7 +241,18 @@ export default function ReceiptModal({
           </div>
           <hr className="r-rule" />
 
-          {/* Footer */}
+          {result.items.some((i) => i.serialNumber) && (
+             <>
+               <div className="receipt-center" style={{ fontSize: '8.5px', margin: '4px 0' }}>
+                 <strong>WARRANTY</strong>
+                 <br />
+                 <span className="receipt-muted">Serial/IMEI numbers recorded above. Warranty terms apply per manufacturer policy.</span>
+               </div>
+               <hr className="r-rule" />
+             </>
+           )}
+
+           {/* Footer */}
           <div className="receipt-center">
             <div style={{ fontWeight: 700, fontSize: '11px', marginBottom: 4 }}>THANKS FOR YOUR PURCHASE</div>
             <div className="receipt-muted" style={{ fontSize: '8.5px' }}>Terms &amp; Conditions Apply</div>
