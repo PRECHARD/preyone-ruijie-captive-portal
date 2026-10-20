@@ -1131,8 +1131,11 @@ const SQL = `
     closed_at     TIMESTAMPTZ,
     expected_cash NUMERIC(12,2),
     counted_cash  NUMERIC(12,2),
-    variance      NUMERIC(12,2),
-    status        TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'closed')),
+    variance              NUMERIC(12,2),
+    blind_reconciled      BOOLEAN NOT NULL DEFAULT FALSE,
+    reconciled_at         TIMESTAMPTZ,
+    reconciled_by         UUID REFERENCES admin_users(id) ON DELETE SET NULL,
+    status                TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'closed')),
     notes         TEXT
   );
 
@@ -1146,7 +1149,7 @@ const SQL = `
   CREATE TABLE IF NOT EXISTS pos_documents (
     id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     doc_number   TEXT UNIQUE NOT NULL,
-    doc_type     TEXT NOT NULL CHECK (doc_type IN ('sale', 'invoice', 'quotation')),
+    doc_type     TEXT NOT NULL CHECK (doc_type IN ('sale', 'invoice', 'tax_invoice', 'proforma', 'receipt', 'sales_receipt', 'cash_receipt', 'quote', 'estimate', 'credit_memo', 'credit_note', 'purchase_order', 'delivery_note')),
     channel      TEXT NOT NULL DEFAULT 'till' CHECK (channel IN ('till', 'online', 'office')),
     status       TEXT NOT NULL DEFAULT 'draft'
                  CHECK (status IN ('draft', 'unpaid', 'partial', 'paid', 'sent', 'void')),
@@ -1161,6 +1164,7 @@ const SQL = `
     total        NUMERIC(12,2) NOT NULL DEFAULT 0,
     amount_paid  NUMERIC(12,2) NOT NULL DEFAULT 0,
     notes        TEXT,
+    void_reason  TEXT,
     created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
@@ -1241,6 +1245,28 @@ const SQL = `
   ALTER TABLE pos_shifts    ALTER COLUMN company_id SET NOT NULL;
   CREATE INDEX IF NOT EXISTS idx_pos_documents_company ON pos_documents (company_id);
   CREATE INDEX IF NOT EXISTS idx_pos_shifts_company    ON pos_shifts (company_id);
+
+  -- International invoicing: expand document types + void reason
+  ALTER TABLE pos_documents DROP CONSTRAINT IF EXISTS pos_documents_doc_type_check;
+  ALTER TABLE pos_documents ADD CONSTRAINT pos_documents_doc_type_check CHECK (doc_type IN ('sale', 'invoice', 'tax_invoice', 'proforma', 'receipt', 'sales_receipt', 'cash_receipt', 'quote', 'estimate', 'credit_memo', 'credit_note', 'purchase_order', 'delivery_note'));
+  ALTER TABLE pos_documents ADD COLUMN IF NOT EXISTS void_reason TEXT;
+
+  -- Blind shift reconciliation
+  ALTER TABLE pos_shifts ADD COLUMN IF NOT EXISTS blind_reconciled BOOLEAN NOT NULL DEFAULT FALSE;
+  ALTER TABLE pos_shifts ADD COLUMN IF NOT EXISTS reconciled_at TIMESTAMPTZ;
+  ALTER TABLE pos_shifts ADD COLUMN IF NOT EXISTS reconciled_by UUID REFERENCES admin_users(id) ON DELETE SET NULL;
+
+  -- No-sale / drawer audit log table
+  CREATE TABLE IF NOT EXISTS pos_no_sale_events (
+    id         BIGSERIAL PRIMARY KEY,
+    company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    shift_id   UUID REFERENCES pos_shifts(id) ON DELETE SET NULL,
+    cashier_id UUID REFERENCES admin_users(id) ON DELETE SET NULL,
+    reason     TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+  CREATE INDEX IF NOT EXISTS idx_pos_no_sale_company ON pos_no_sale_events (company_id);
+  CREATE INDEX IF NOT EXISTS idx_pos_no_sale_created ON pos_no_sale_events (created_at);
 
   -- POS Industry Profile Engine (additive). New tables are created IF NOT
   -- EXISTS so a fresh migrate() and an upgraded live DB converge. Existing

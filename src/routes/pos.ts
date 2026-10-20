@@ -917,7 +917,22 @@ interface CartItemInput {
   qty?: number | string;
 }
 
-const DOC_PREFIX: Record<string, string> = { sale: 'RCP', invoice: 'INV', quotation: 'QUO' };
+const DOC_PREFIX: Record<string, string> = {
+  sale: 'RCP',
+  invoice: 'INV',
+  tax_invoice: 'TAX',
+  proforma: 'PRO',
+  receipt: 'REC',
+  sales_receipt: 'SR',
+  cash_receipt: 'CR',
+  quote: 'QUO',
+  quotation: 'QUO',
+  estimate: 'EST',
+  credit_memo: 'CM',
+  credit_note: 'CN',
+  purchase_order: 'PO',
+  delivery_note: 'DN',
+};
 
 export function computeTotals(items: CartItemInput[], discountPct: number, taxPct: number) {
   let subtotal = 0;
@@ -938,7 +953,7 @@ export function computeTotals(items: CartItemInput[], discountPct: number, taxPc
 export function statusForPaid(docType: string, total: number, paid: number): string {
   if (total > 0 && paid >= total - 0.005) return 'paid';
   if (paid > 0) return 'partial';
-  return docType === 'quotation' ? 'sent' : 'unpaid';
+  return (docType === 'quotation' || docType === 'quote' || docType === 'estimate' || docType === 'proforma') ? 'sent' : 'unpaid';
 }
 
 router.get('/documents', async (req, res) => {
@@ -1052,7 +1067,8 @@ router.post('/documents/:id/convert-to-invoice', async (req, res) => {
 router.post('/checkout', async (req, res) => {
   const me = req.adminUser!;
   const b = req.body || {};
-  const docType = ['sale', 'invoice', 'quotation'].includes(str(b.docType)) ? str(b.docType) : 'sale';
+  const DOC_TYPES = ['sale', 'invoice', 'tax_invoice', 'proforma', 'receipt', 'sales_receipt', 'cash_receipt', 'quote', 'estimate', 'credit_memo', 'credit_note', 'purchase_order', 'delivery_note'];
+  const docType = DOC_TYPES.includes(str(b.docType)) ? str(b.docType) : 'sale';
   const channel = ['till', 'online', 'office'].includes(str(b.channel)) ? str(b.channel) : 'till';
   const rawItems: CartItemInput[] = Array.isArray(b.items) ? b.items : [];
   if (rawItems.length === 0) {
@@ -1713,6 +1729,194 @@ router.patch('/customers/:id/credit', async (req, res) => {
   );
   if (rows.length === 0) { res.status(404).json({ error: 'Customer not found' }); return; }
   res.json(rows[0]);
+});
+
+// ── International invoicing: UBL/Peppol export ────────────────────────
+
+router.get('/documents/:id/ubl', async (req, res) => {
+  const cid = tenantId(req);
+  const { rows } = await pool.query(
+    `SELECT d.*, c.name AS customer_name, c.email AS customer_email, c.address AS customer_address
+       FROM pos_documents d
+       LEFT JOIN pos_customers c ON c.id = d.customer_id
+      WHERE d.id = $1 AND d.company_id = $2`,
+    [req.params.id, cid]
+  );
+  if (rows.length === 0) { res.status(404).json({ error: 'Document not found' }); return; }
+  const d = rows[0];
+  const { rows: items } = await pool.query(
+    `SELECT * FROM pos_document_items WHERE document_id = $1 ORDER BY position`,
+    [d.id]
+  );
+  const { rows: comp } = await pool.query(`SELECT * FROM companies WHERE id = $1`, [cid]);
+  const co = comp[0] || {};
+  const esc = (s: unknown) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
+         xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
+         xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">
+  <cbc:UBLVersionID>2.1</cbc:UBLVersionID>
+  <cbc:CustomizationID>urn:cen.eu:en16931:2017#compliant#urn:fdc:peppol.eu:2017:poacc:billing:3.0</cbc:CustomizationID>
+  <cbc:ProfileID>urn:fdc:peppol.eu:2017:poacc:billing:01:1.0</cbc:ProfileID>
+  <cbc:ID>${esc(d.doc_number)}</cbc:ID>
+  <cbc:IssueDate>${esc(d.issue_date)}</cbc:IssueDate>
+  <cbc:InvoiceTypeCode>380</cbc:InvoiceTypeCode>
+  <cbc:DocumentCurrencyCode>${esc(d.currency || 'USD')}</cbc:DocumentCurrencyCode>
+  <cac:AccountingSupplierParty>
+    <cac:Party>
+      <cac:PartyName><cbc:Name>${esc(co.name)}</cbc:Name></cac:PartyName>
+    </cac:Party>
+  </cac:AccountingSupplierParty>
+  <cac:AccountingCustomerParty>
+    <cac:Party>
+      <cac:PartyName><cbc:Name>${esc(d.customer_name || 'Walk-in')}</cbc:Name></cac:PartyName>
+    </cac:Party>
+  </cac:AccountingCustomerParty>
+  <cac:LegalMonetaryTotal>
+    <cbc:LineExtensionAmount currencyID="${esc(d.currency || 'USD')}">${Number(d.subtotal).toFixed(2)}</cbc:LineExtensionAmount>
+    <cbc:TaxExclusiveAmount currencyID="${esc(d.currency || 'USD')}">${Number(d.subtotal).toFixed(2)}</cbc:TaxExclusiveAmount>
+    <cbc:TaxInclusiveAmount currencyID="${esc(d.currency || 'USD')}">${Number(d.total).toFixed(2)}</cbc:TaxInclusiveAmount>
+    <cbc:PayableAmount currencyID="${esc(d.currency || 'USD')}">${Number(d.total).toFixed(2)}</cbc:PayableAmount>
+  </cac:LegalMonetaryTotal>
+${items.map((it: any, i: number) => `  <cac:InvoiceLine>
+    <cbc:ID>${i + 1}</cbc:ID>
+    <cbc:InvoicedQuantity unitCode="EA">${Number(it.qty)}</cbc:InvoicedQuantity>
+    <cbc:LineExtensionAmount currencyID="${esc(d.currency || 'USD')}">${Number(it.line_total).toFixed(2)}</cbc:LineExtensionAmount>
+    <cac:Item><cbc:Name>${esc(it.description)}</cbc:Name></cac:Item>
+    <cac:Price><cbc:PriceAmount currencyID="${esc(d.currency || 'USD')}">${Number(it.price).toFixed(2)}</cbc:PriceAmount></cac:Price>
+  </cac:InvoiceLine>`).join('\n')}
+</Invoice>`;
+  res.type('application/xml').send(xml);
+});
+
+// ── Accounts Receivable aging ─────────────────────────────────────────
+
+router.get('/reports/ar-aging', async (req, res) => {
+  const cid = tenantId(req);
+  const { rows } = await pool.query(
+    `SELECT d.id, d.doc_number, d.doc_type, d.status, d.total, d.amount_paid, d.issue_date, d.due_date, c.name AS customer_name
+       FROM pos_documents d
+       LEFT JOIN pos_customers c ON c.id = d.customer_id
+      WHERE d.company_id = $1
+        AND d.status IN ('unpaid','partial')
+        AND d.doc_type IN ('invoice','tax_invoice','proforma','sales_receipt')
+      ORDER BY d.issue_date`,
+    [cid]
+  );
+  const now = new Date();
+  const buckets = { current: 0, d1_30: 0, d31_60: 0, d61_90: 0, d90plus: 0 };
+  const detail = rows.map((r: any) => {
+    const due = r.due_date ? new Date(r.due_date) : new Date(r.issue_date);
+    const days = Math.floor((now.getTime() - due.getTime()) / 86400000);
+    const balance = round2(Number(r.total) - Number(r.amount_paid));
+    let bucket = 'current';
+    if (days > 90) bucket = 'd90plus';
+    else if (days > 60) bucket = 'd61_90';
+    else if (days > 30) bucket = 'd31_60';
+    else if (days > 0) bucket = 'd1_30';
+    (buckets as any)[bucket] += balance;
+    return { ...r, balance, daysOverdue: Math.max(0, days), bucket };
+  });
+  res.json({ buckets, detail, total: round2(Object.values(buckets).reduce((a, b) => a + b, 0)) });
+});
+
+// ── Blind shift reconciliation ────────────────────────────────────────
+
+router.post('/shifts/:id/reconcile', async (req, res) => {
+  const cid = tenantId(req);
+  const me = req.adminUser!;
+  const counted = round2(num(req.body?.countedCash));
+  const { rows } = await pool.query(
+    `SELECT * FROM pos_shifts WHERE id = $1 AND company_id = $2 FOR UPDATE`,
+    [req.params.id, cid]
+  );
+  if (rows.length === 0) { res.status(404).json({ error: 'Shift not found' }); return; }
+  const shift = rows[0];
+  if (shift.status !== 'open') { res.status(400).json({ error: 'Shift already closed' }); return; }
+  // expected cash = opening float + cash payments - (we don't track payouts here) ; compute from payments
+  const { rows: pay } = await pool.query(
+    `SELECT COALESCE(SUM(amount),0) AS cash_paid FROM pos_document_payments
+      WHERE shift_id = $1 AND method = 'cash'`,
+    [shift.id]
+  );
+  const expected = round2(Number(shift.opening_float) + Number(pay[0].cash_paid));
+  const variance = round2(counted - expected);
+  const { rows: upd } = await pool.query(
+    `UPDATE pos_shifts
+        SET counted_cash = $1, expected_cash = $2, variance = $3,
+            blind_reconciled = TRUE, reconciled_at = NOW(), reconciled_by = $4,
+            closed_at = NOW(), status = 'closed'
+      WHERE id = $5 RETURNING *`,
+    [counted, expected, variance, me.id, shift.id]
+  );
+  // cashier never sees expected until after submit; response includes it for record
+  res.json({ ...upd[0], expectedCash: expected, variance });
+});
+
+// ── No-sale / drawer audit ────────────────────────────────────────────
+
+router.post('/drawer/no-sale', async (req, res) => {
+  const cid = tenantId(req);
+  const me = req.adminUser!;
+  const reason = str(req.body?.reason) || 'no-sale';
+  const shiftId = str(req.body?.shiftId) || null;
+  await pool.query(
+    `INSERT INTO pos_no_sale_events (company_id, shift_id, cashier_id, reason) VALUES ($1,$2,$3,$4)`,
+    [cid, shiftId, me.id, reason]
+  );
+  await pool.query(
+    `INSERT INTO admin_audit_log (admin_id, admin_name, action, target_type, target_id, detail)
+     VALUES ($1,$2,'pos.drawer_no_sale','shift',$3,$4)`,
+    [me.id, me.fullName ?? null, shiftId, reason]
+  );
+  res.json({ ok: true });
+});
+
+router.get('/drawer/no-sale', async (req, res) => {
+  const cid = tenantId(req);
+  const { rows } = await pool.query(
+    `SELECT * FROM pos_no_sale_events WHERE company_id = $1 ORDER BY created_at DESC LIMIT 200`,
+    [cid]
+  );
+  res.json(rows);
+});
+
+// ── Fast 4-digit PIN cashier switching ────────────────────────────────
+
+router.post('/auth/quick-switch', async (req, res) => {
+  const pin = str(req.body?.pin);
+  if (!/^\d{4}$/.test(pin)) { res.status(400).json({ error: 'PIN must be 4 digits' }); return; }
+  const cid = tenantId(req);
+  // find staff in same company with matching pin
+  const { rows } = await pool.query(
+    `SELECT id, email, full_name, role, pin_hash, portal_company_id
+       FROM admin_users
+      WHERE portal_company_id = $1 AND pin_hash IS NOT NULL AND role IN ('Staff','Manager','CEO','Cashier')`,
+    [cid]
+  );
+  const bcrypt = await import('bcryptjs');
+  for (const u of rows) {
+    if (u.pin_hash && (await bcrypt.compare(pin, u.pin_hash))) {
+      const sid = (await import('crypto')).randomUUID();
+      await pool.query(
+        `UPDATE admin_users SET active_sid = $1, auth_time = NOW(), last_activity = NOW(), session_expires_at = NOW() + INTERVAL '12 hours' WHERE id = $2`,
+        [sid, u.id]
+      );
+      await pool.query(
+        `INSERT INTO admin_user_sessions (sid, admin_user_id, auth_time, last_activity, created_ip) VALUES ($1,$2,NOW(),NOW(),$3)`,
+        [sid, u.id, req.ip || null]
+      );
+      const jwt = await import('jsonwebtoken');
+      const token = jwt.sign(
+        { id: u.id, email: u.email, role: u.role, fullName: u.full_name, portalCompanyId: u.portal_company_id, sid },
+        process.env.JWT_SECRET || 'preyone-jwt-secret-change-in-production',
+        { algorithm: 'HS256', expiresIn: '12h' }
+      );
+      res.json({ token, user: { id: u.id, email: u.email, role: u.role, fullName: u.full_name } });
+      return;
+    }
+  }
+  res.status(401).json({ error: 'Invalid PIN' });
 });
 
 // ── POS sector dashboard ───────────────────────────────────────────
