@@ -82,6 +82,9 @@
       <div class="brand-eyebrow brand-eyebrow--main">
         <span class="brand-signature">Fadaya nePreyone UltraNet Wifi</span>
       </div>
+      <div class="header-auth">
+        <a href="/manage-account" class="header-login-btn">Log In</a>
+      </div>
     </header>
 
     <section class="hero-section">
@@ -89,7 +92,7 @@
         <p class="hero-eyebrow">Preyone UltraNet WiFi</p>
         <h1 class="hero-title">STAY CONNECTED. <span>STAY AHEAD.</span></h1>
         <p class="hero-text">High-speed internet for homes, businesses & everywhere in Zimbabwe. Choose the package that
-          fits your day, week, or month and connect instantly with your voucher or phone number.</p>
+          fits your day, week, or month and connect instantly with your voucher.</p>
         <div class="hero-stats">
           <div class="stat-card stat-card--pink">
             <span>HIGH SPEED</span>
@@ -111,33 +114,68 @@
       </div>
 
       <div class="hero-btn-group">
-        <button type="button" class="hero-connect-btn" id="connectNowBtn">Connect Now</button>
+        <button type="button" class="hero-connect-btn" id="signUpBtn">Sign Up Now</button>
       </div>
 
-      <aside class="hero-card">
+      <aside class="hero-card" id="signup-card" style="display:none;">
         <div class="glass-card glass-card--hero">
           <div class="brand">
-            <h2>Connect Now</h2>
-            <p class="subtitle">Enter your access code to connect instantly.</p>
+            <button type="button" id="signup-close-btn" class="signup-close-btn" aria-label="Close">&times;</button>
+            <h2>Create Account</h2>
+            <p class="subtitle">Sign up to buy vouchers and manage your data.</p>
           </div>
-          <form id="quick-form" method="POST" novalidate>
-            <input type="hidden" name="fullName" value="Guest" />
-            <input type="hidden" name="phone" value="N/A" />
-            <input type="hidden" name="email" value="" />
-            <input type="hidden" name="acceptedTos" value="true" />
-            <div class="field">
-              <label for="accessCode">Access Code</label>
-              <input id="accessCode" name="voucherCode" type="text" placeholder="e.g. PRELINK-XXXX"
-                autocomplete="off" required />
-              <span class="field-error" id="err-accessCode"></span>
-            </div>
-            <div id="server-error" class="field-error hidden"></div>
-            <div id="form-error" class="field-error hidden"></div>
-            <button type="submit" id="quick-submit-btn">
-              <span id="quick-btn-text">Connect</span>
-              <span id="quick-btn-spinner" class="spinner hidden" aria-hidden="true"></span>
-            </button>
-          </form>
+          <div id="signup-section">
+            <form id="signup-form" method="POST" novalidate>
+              <div class="field">
+                <label for="fullName">Full Name / Company Name</label>
+                <input id="fullName" name="fullName" type="text" placeholder="Your name or company"
+                  autocomplete="name" required />
+                <span class="field-error" id="err-fullName"></span>
+              </div>
+              <div class="field">
+                <label for="phone">Mobile Phone Number</label>
+                <input id="phone" name="phone" type="tel" placeholder="e.g. 0771 234 567"
+                  autocomplete="tel" required />
+                <span class="field-error" id="err-phone"></span>
+              </div>
+              <div class="field">
+                <label for="email">Email Address</label>
+                <input id="email" name="email" type="email" placeholder="you@example.com"
+                  autocomplete="email" required />
+                <span class="field-error" id="err-email"></span>
+              </div>
+              <div class="field">
+                <label for="suPassword">Password</label>
+                <input id="suPassword" name="password" type="password" placeholder="Min 8 chars, upper, lower, number, special"
+                  autocomplete="new-password" required />
+                <span class="field-error" id="err-suPassword"></span>
+              </div>
+              <div class="field">
+                <label for="suPasswordConfirm">Confirm Password</label>
+                <input id="suPasswordConfirm" name="passwordConfirm" type="password" placeholder="Re-enter password"
+                  autocomplete="new-password" required />
+                <span class="field-error" id="err-suPasswordConfirm"></span>
+              </div>
+              <div class="field">
+                <label class="checkbox-label">
+                  <input type="checkbox" id="acceptedTos" name="acceptedTos" required />
+                  I accept the <a href="/terms.html" target="_blank">Terms of Service</a>
+                </label>
+                <span class="field-error" id="err-acceptedTos"></span>
+              </div>
+              <div id="signup-form-error" class="field-error hidden"></div>
+              <button type="submit" id="signup-submit-btn">
+                <span id="signup-btn-text">Create Account</span>
+                <span id="signup-btn-spinner" class="spinner hidden" aria-hidden="true"></span>
+              </button>
+            </form>
+          </div>
+          <div id="register-success-section" class="hidden">
+            <p>Your account has been created! Please check your email to verify your account.</p>
+            <p>Registered email: <strong id="registered-email"></strong></p>
+            <p><a href="/manage-account">Go to your account</a></p>
+          </div>
+          <p class="signup-link">Already have an account? <a href="/manage-account">Log in</a></p>
         </div>
       </aside>
 
@@ -179,7 +217,7 @@
           <p class="section-eyebrow">Choose Your Preyone PreSuite package</p>
           <h2 id="packages-heading">Packages for every need</h2>
         </div>
-        <div class="section-note">Select the right plan and activate immediately with your voucher.
+        <div class="section-note">Sarudza Preyone Package raunoda kutenga ufadaye
         </div>
       </div>
       <div class="brand-eybrow--main">
@@ -547,18 +585,32 @@
     }
 
     // Detect gateway redirect â€” if params like wlanuserip or nasip exist, user
-    // was redirected here by the EG105G-P. Auto-focus access code input.
-    var fromGateway = params.has('wlanuserip') || params.has('nasip') || params.has('nas_ip') || params.has('client_mac');
-    if (fromGateway) {
-      document.addEventListener('DOMContentLoaded', function() {
-        var input = document.getElementById('accessCode');
-        if (input) {
-          setTimeout(function() { input.focus(); }, 600);
-          input.classList.add('voucher-highlight');
-          setTimeout(function() { input.classList.remove('voucher-highlight'); }, 2600);
+    // was redirected here by the EG105G-P. Auto-focus access code input    // Sign Up button reveals the registration form
+    var signUpBtn = document.getElementById('signUpBtn');
+    if (signUpBtn) {
+      signUpBtn.addEventListener('click', function() {
+        var card = document.getElementById('signup-card');
+        var heroSection = document.querySelector('.hero-section');
+        if (card) {
+          card.style.display = 'block';
+          if (heroSection) heroSection.classList.add('signup-open');
+          card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          var nameInput = document.getElementById('fullName');
+          if (nameInput) setTimeout(function() { nameInput.focus(); }, 300);
         }
-        var card = document.querySelector('.hero-card');
-        if (card) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      });
+    }
+
+    // Close button hides the form and restores centered layout
+    var closeBtn = document.getElementById('signup-close-btn');
+    if (closeBtn) {
+      closeBtn.addEventListener('click', function() {
+        var card = document.getElementById('signup-card');
+        var heroSection = document.querySelector('.hero-section');
+        if (card) {
+          card.style.display = 'none';
+          if (heroSection) heroSection.classList.remove('signup-open');
+        }
       });
     }
   })();

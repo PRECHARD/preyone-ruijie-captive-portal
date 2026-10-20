@@ -362,6 +362,11 @@ app.use((req, res, next) => {
 app.use(maintenanceCheck);
 
 app.use('/api/auth', authRouter);
+// Alias: /api/auth/login -> /api/auth/portal-login
+app.post('/api/auth/login', (req, res) => {
+  req.url = '/portal-login';
+  authRouter(req, res, () => { res.status(404).json({ error: 'Not found' }); });
+});
 app.use('/api/admin/auth', adminAuthRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/v1/admin', systemAdminRouter);
@@ -391,8 +396,10 @@ app.use('/api/admin/voucher-analytics', voucherAnalyticsRouter);
 app.use('/api/currency', currencyRouter);
 
 // Standard route aliases
-app.get('/login', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'account-login.html')));
+app.get('/login', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'login.html')));
 app.get('/account', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'manage-account.html')));
+app.get('/login', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'login.html')));
+app.get('/manage-account', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'manage-account.html')));
 app.get('/forgot-password', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'forgot-password.html')));
 app.get('/reset-password', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'reset-password.html')));
 

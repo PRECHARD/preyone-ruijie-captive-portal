@@ -103,22 +103,47 @@
   align-items: center;
   justify-content: center;
   flex: 1 1 auto;
-  min-width: 140px;
-  max-width: 300px;
+  min-width: 160px;
+  max-width: 320px;
   width: 100%;
-  padding: clamp(0.7rem, 1.5vw, 1.1rem) clamp(1.2rem, 3vw, 2.2rem);
+  padding: clamp(0.85rem, 1.8vw, 1.3rem) clamp(1.8rem, 4vw, 3rem);
   font-family: var(--display);
-  font-size: clamp(1rem, 2vw, 1.5rem);
-  letter-spacing: 0.06em;
+  font-size: clamp(1.1rem, 2.2vw, 1.7rem);
+  letter-spacing: 0.1em;
   white-space: nowrap;
-  background: linear-gradient(90deg, #ff00cc, #3333ff);
-  border: none;
+  background: linear-gradient(135deg, #ff00cc 0%, #3333ff 50%, #00d4ff 100%);
+  border: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: 50px;
   color: #fff;
   cursor: pointer;
   text-decoration: none;
-  transition: all 0.25s ease;
-  box-shadow: 0 4px 20px rgba(255, 0, 204, 0.25);
+  transition: all 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+  box-shadow: 0 0 30px rgba(255, 0, 204, 0.3), 0 4px 20px rgba(0, 0, 0, 0.3);
+  position: relative;
+  overflow: hidden;
+}
+
+.hero-connect-btn::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(255,255,255,0.15) 0%, transparent 50%);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.hero-connect-btn:hover {
+  transform: translateY(-3px) scale(1.03);
+  filter: brightness(1.15);
+  box-shadow: 0 0 40px rgba(255, 0, 204, 0.5), 0 0 20px rgba(0, 212, 255, 0.3), 0 8px 30px rgba(0, 0, 0, 0.4);
+}
+
+.hero-connect-btn:hover::before {
+  opacity: 1;
+}
+
+.hero-connect-btn:active {
+  transform: translateY(0) scale(0.98);
 }
 
 .hero-connect-btn--ghost {

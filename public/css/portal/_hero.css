@@ -1,14 +1,30 @@
 .hero-section {
   display: grid;
-  grid-template-columns: 1fr 400px;
+  grid-template-columns: 1fr;
   gap: 2rem;
   margin-bottom: 1rem;
   align-items: center;
+  justify-items: center;
+  transition: grid-template-columns 0.4s ease;
+}
+
+.hero-section.signup-open {
+  grid-template-columns: 1fr 400px;
+  justify-items: stretch;
 }
 
 .hero-section > .hero-copy {
   grid-column: 1;
   grid-row: 1;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.hero-section.signup-open > .hero-copy {
+  text-align: left;
+  align-items: flex-start;
 }
 
 .hero-section > .hero-btn-group {
@@ -18,8 +34,30 @@
 }
 
 .hero-section > .hero-card {
+  grid-column: 1;
+  grid-row: 2;
+  width: 100%;
+  max-width: 420px;
+}
+
+.hero-section.signup-open > .hero-card {
   grid-column: 2;
   grid-row: 1;
+  max-width: none;
+}
+
+.hero-text {
+  color: var(--text-muted);
+  font-size: 1.1rem;
+  margin-bottom: 1.5rem;
+  max-width: 600px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.hero-section.signup-open .hero-text {
+  margin-left: 0;
+  margin-right: 0;
 }
 
 .hero-eyebrow {
@@ -51,8 +89,21 @@
 
 .hero-stats {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  grid-template-columns: repeat(4, 1fr);
   gap: 1rem;
+}
+
+@media (max-width: 768px) {
+  .hero-stats {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 480px) {
+  .hero-stats {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.75rem;
+  }
 }
 
 .stat-card {
@@ -129,4 +180,37 @@
   color: var(--cyan);
   text-decoration: underline;
   cursor: pointer;
+}
+
+
+/* Close button on signup card */
+.signup-close-btn {
+  position: absolute;
+  top: 1rem;
+  right: 1.25rem;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.05);
+  color: #fff;
+  font-size: 1.5rem;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  z-index: 2;
+}
+
+.signup-close-btn:hover {
+  background: rgba(255, 0, 204, 0.2);
+  border-color: var(--pink);
+  color: var(--pink);
+  transform: scale(1.1);
+}
+
+.glass-card--hero {
+  position: relative;
 }

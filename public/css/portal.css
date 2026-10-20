@@ -832,27 +832,51 @@ body.portal-body {
 }
 
 .hero-connect-btn {
-  flex: 1;
-  max-width: 260px;
-  padding: 0.9rem 1.5rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1 1 auto;
+  min-width: 160px;
+  max-width: 320px;
+  width: 100%;
+  padding: clamp(0.85rem, 1.8vw, 1.3rem) clamp(1.8rem, 4vw, 3rem);
   font-family: var(--display);
-  font-size: 1.4rem;
-  background: linear-gradient(90deg, #ff00cc, #3333ff);
-  border: none;
+  font-size: clamp(1.1rem, 2.2vw, 1.7rem);
+  letter-spacing: 0.1em;
+  white-space: nowrap;
+  background: linear-gradient(135deg, #ff00cc 0%, #3333ff 50%, #00d4ff 100%);
+  border: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: 50px;
   color: #fff;
   cursor: pointer;
-  transition: all 0.2s ease;
+  text-decoration: none;
+  transition: all 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+  box-shadow: 0 0 30px rgba(255, 0, 204, 0.3), 0 4px 20px rgba(0, 0, 0, 0.3);
+  position: relative;
+  overflow: hidden;
+}
+
+.hero-connect-btn::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(255,255,255,0.15) 0%, transparent 50%);
+  opacity: 0;
+  transition: opacity 0.3s ease;
 }
 
 .hero-connect-btn:hover {
-  transform: scale(1.05);
-  filter: brightness(1.2);
-  box-shadow: 0 0 20px rgba(255, 0, 204, 0.4);
+  transform: translateY(-3px) scale(1.03);
+  filter: brightness(1.15);
+  box-shadow: 0 0 40px rgba(255, 0, 204, 0.5), 0 0 20px rgba(0, 212, 255, 0.3), 0 8px 30px rgba(0, 0, 0, 0.4);
+}
+
+.hero-connect-btn:hover::before {
+  opacity: 1;
 }
 
 .hero-connect-btn:active {
-  transform: scale(0.95);
+  transform: translateY(0) scale(0.98);
 }
 
 .action-group {
@@ -3487,4 +3511,279 @@ a.footer-card:hover {
   .checkout-title { font-size: 1.6rem; }
 
   .checkout-voucher-code { font-size: 1.35rem; }
+}
+
+/* === Header Auth === */
+/* Header auth (Log In button) */
+.header-auth {
+  position: absolute;
+  top: 1rem;
+  right: 1.5rem;
+  z-index: 10;
+}
+
+.header-login-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.5rem 1.25rem;
+  font-family: var(--display);
+  font-size: 1rem;
+  letter-spacing: 0.06em;
+  color: #fff;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 50px;
+  text-decoration: none;
+  transition: all 0.2s ease;
+}
+
+.header-login-btn:hover {
+  border-color: var(--pink);
+  color: var(--pink);
+  box-shadow: 0 0 12px rgba(255, 0, 255, 0.2);
+}
+
+/* Signup link below form */
+.signup-link {
+  text-align: center;
+  margin-top: 1rem;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.signup-link a {
+  color: var(--cyan);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.signup-link a:hover {
+  text-decoration: underline;
+}
+
+
+/* === Hero Centered/Expanded === */
+.hero-section {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 2rem;
+  margin-bottom: 1rem;
+  align-items: center;
+  justify-items: center;
+  transition: grid-template-columns 0.4s ease;
+}
+
+.hero-section.signup-open {
+  grid-template-columns: 1fr 400px;
+  justify-items: stretch;
+}
+
+.hero-section > .hero-copy {
+  grid-column: 1;
+  grid-row: 1;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.hero-section.signup-open > .hero-copy {
+  text-align: left;
+  align-items: flex-start;
+}
+
+.hero-section > .hero-btn-group {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  justify-self: center;
+}
+
+.hero-section > .hero-card {
+  grid-column: 1;
+  grid-row: 2;
+  width: 100%;
+  max-width: 420px;
+}
+
+.hero-section.signup-open > .hero-card {
+  grid-column: 2;
+  grid-row: 1;
+  max-width: none;
+}
+
+.hero-text {
+  color: var(--text-muted);
+  font-size: 1.1rem;
+  margin-bottom: 1.5rem;
+  max-width: 600px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.hero-section.signup-open .hero-text {
+  margin-left: 0;
+  margin-right: 0;
+}
+
+.hero-eyebrow {
+  color: var(--pink);
+  font-weight: 800;
+  font-size: 0.9rem;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+}
+
+.hero-title {
+  font-family: var(--display);
+  font-size: clamp(3rem, 6vw, 5rem);
+  line-height: 1;
+  margin: 0.5rem 0 1.5rem;
+}
+
+.hero-title span {
+  color: var(--cyan);
+  display: block;
+}
+
+.hero-text {
+  color: var(--text-muted);
+  font-size: 1.1rem;
+  margin-bottom: 1.5rem;
+  max-width: 600px;
+}
+
+.hero-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 1rem;
+}
+
+.stat-card {
+  background: rgba(255, 255, 255, 0.05);
+  padding: 1rem;
+  border-radius: 8px;
+  border-bottom: 3px solid var(--text-muted);
+}
+
+.stat-card span {
+  display: block;
+  font-size: 0.7rem;
+  font-weight: 800;
+  color: var(--text-muted);
+  margin-bottom: 0.3rem;
+}
+
+.stat-card strong {
+  font-size: 0.9rem;
+  color: #fff;
+  line-height: 1.2;
+  display: block;
+}
+
+.stat-card--pink { border-color: var(--pink); }
+.stat-card--cyan { border-color: var(--cyan); }
+.stat-card--purple { border-color: var(--purple); }
+
+/* ── Data exhausted panel ────────────────────────────────────────────
+   Shown in place of the connect form when /api/gateway/quota reports the
+   device has used its whole allowance. */
+.data-finished-usage {
+  margin: 1.5rem 0;
+}
+
+.data-finished-bar {
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.data-finished-bar-fill {
+  display: block;
+  height: 100%;
+  width: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--pink), var(--purple));
+}
+
+.data-finished-usage-text {
+  margin: 0.6rem 0 0;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.data-finished-help {
+  margin: 1.25rem 0 0;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.data-finished-help a {
+  color: var(--cyan);
+}
+
+.link-button {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  font-size: 0.8rem;
+  color: var(--cyan);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+
+/* Close button on signup card */
+.signup-close-btn {
+  position: absolute;
+  top: 1rem;
+  right: 1.25rem;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.05);
+  color: #fff;
+  font-size: 1.5rem;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  z-index: 2;
+}
+
+.signup-close-btn:hover {
+  background: rgba(255, 0, 204, 0.2);
+  border-color: var(--pink);
+  color: var(--pink);
+  transform: scale(1.1);
+}
+
+.glass-card--hero {
+  position: relative;
+}
+
+
+/* Hero stats grid fix */
+.hero-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1rem;
+}
+
+@media (max-width: 768px) {
+  .hero-stats {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 480px) {
+  .hero-stats {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.75rem;
+  }
 }
