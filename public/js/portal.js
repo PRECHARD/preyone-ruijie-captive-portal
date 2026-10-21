@@ -38,27 +38,16 @@
           <p><strong>Speed:</strong> ${packageData['data-bandwidth-down']} Mbps download</p>
         </div>
         <form class="modal-form" id="pesepay-form" novalidate>
-          <div class="rail-selector">
-            <label class="rail-option">
-              <input type="radio" name="paymentRail" value="ecocash" checked />
-              <span class="rail-label">EcoCash USD</span>
-            </label>
-            <label class="rail-option">
-              <input type="radio" name="paymentRail" value="ecocash" data-currency="ZiG" />
-              <span class="rail-label">EcoCash ZiG</span>
-            </label>
-            <label class="rail-option">
-              <input type="radio" name="paymentRail" value="innbucks" />
-              <span class="rail-label">InnBucks USD</span>
-            </label>
-            <label class="rail-option">
-              <input type="radio" name="paymentRail" value="paygo" />
-              <span class="rail-label">PayGo ZiG</span>
-            </label>
-            <label class="rail-option">
-              <input type="radio" name="paymentRail" value="omari" />
-              <span class="rail-label">O'mari USD</span>
-            </label>
+          <div class="rail-select-wrapper">
+            <label class="rail-select-label">Payment Method</label>
+            <select id="pesepay-rail" class="rail-select">
+              <option value="ecocash" data-currency="USD">EcoCash USD</option>
+              <option value="ecocash" data-currency="ZiG">EcoCash ZiG</option>
+              <option value="innbucks" data-currency="USD">InnBucks USD</option>
+              <option value="paygo" data-currency="ZiG">PayGo ZiG</option>
+              <option value="omari" data-currency="USD">O'mari USD</option>
+            </select>
+            <span class="rail-select-arrow">&#9662;</span>
           </div>
           ${needsTierCapture ? `
           <div class="field" id="field-fullName">
@@ -105,23 +94,25 @@
 
     // Rail selection config
     var railConfig = {
-      'ecocash': { label: 'EcoCash Phone Number', subtext: 'Check your phone for the USSD payment prompt.', currency: 'USD' },
-      'ecocash-zig': { label: 'EcoCash Phone Number', subtext: 'Check your phone for the USSD payment prompt.', currency: 'ZiG' },
-      'innbucks': { label: 'InnBucks Account / Phone Number', subtext: 'Enter your InnBucks phone or ID to receive prompt.', currency: 'USD' },
-      'paygo': { label: 'PayGo Phone / Account Number', subtext: 'Enter your registered PayGo account number.', currency: 'ZiG' },
-      'omari': { label: 'O\'mari Phone or Card Number', subtext: 'Enter your O\'mari wallet phone number or O\'mari card number.', currency: 'USD' },
+      'ecocash-usd': { label: 'EcoCash Phone Number', subtext: 'Check your phone for the USSD payment prompt.', currency: 'USD', requiresPhone: true },
+      'ecocash-zig': { label: 'EcoCash Phone Number', subtext: 'Check your phone for the USSD payment prompt.', currency: 'ZiG', requiresPhone: true },
+      'innbucks': { label: 'InnBucks Account / Phone Number', subtext: 'Enter your InnBucks phone or ID to receive prompt.', currency: 'USD', requiresPhone: false },
+      'paygo': { label: 'PayGo Phone / Account Number', subtext: 'Enter your registered PayGo account number.', currency: 'ZiG', requiresPhone: false },
+      'omari': { label: 'O\'mari Phone or Card Number', subtext: 'Enter your O\'mari wallet phone number or O\'mari card number.', currency: 'USD', requiresPhone: true },
     };
 
-    // Map radio values to rail keys
-    function getRailKey(radio) {
-      if (radio.value === 'ecocash' && radio.getAttribute('data-currency') === 'ZiG') return 'ecocash-zig';
-      return radio.value;
+    function getRailKey() {
+      var select = form.querySelector('#pesepay-rail');
+      if (!select) return 'ecocash-usd';
+      var opt = select.options[select.selectedIndex];
+      var val = select.value;
+      var cur = opt.getAttribute('data-currency');
+      if (val === 'ecocash' && cur === 'ZiG') return 'ecocash-zig';
+      return val;
     }
 
     function updateRailUI() {
-      var checked = form.querySelector('input[name="paymentRail"]:checked');
-      if (!checked) return;
-      var key = getRailKey(checked);
+      var key = getRailKey();
       var cfg = railConfig[key];
       if (cfg) {
         phoneLabel.textContent = cfg.label;
@@ -129,10 +120,10 @@
       }
     }
 
-    // Attach rail change listeners
-    form.querySelectorAll('input[name="paymentRail"]').forEach(function(radio) {
-      radio.addEventListener('change', updateRailUI);
-    });
+    var railSelect = form.querySelector('#pesepay-rail');
+    if (railSelect) {
+      railSelect.addEventListener('change', updateRailUI);
+    }
     updateRailUI();
 
     function setLoading(loading, label) {
@@ -287,7 +278,6 @@
               '<span id="copy-pin-feedback" style="display:block;margin-top:.4rem;font-size:.8rem;color:#4ade80;opacity:0;transition:opacity .3s"></span>',
               '<span style="display:block;margin-top:.7rem;font-size:.85rem;line-height:1.5">A login page will open automatically — enter this code there to connect to the internet. If it does not open, visit <strong>www.preyone.com</strong> on your device.</span>'
             ].join('');
-            ].join('');
             // Wire copy PIN button
             var copyBtn = resultEl.querySelector('#copy-pin-btn');
             var feedback = resultEl.querySelector('#copy-pin-feedback');
@@ -350,9 +340,10 @@
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       const phone = phoneEl.value.trim();
-      var checkedRail = document.querySelector('input[name="paymentRail"]:checked');
-      var railKey = checkedRail ? checkedRail.value : 'ecocash';
-      var requiresPhone = (railKey === 'ecocash' || railKey === 'omari');
+      var railSelect = document.getElementById('pesepay-rail');
+      var railKey = railSelect ? getRailKey() : 'ecocash-usd';
+      var cfg = railConfig[railKey] || railConfig['ecocash-usd'];
+      var requiresPhone = cfg.requiresPhone;
 
       // Tier capture for $4.99+
       var price = parseFloat(packageData['data-amount']);
@@ -435,11 +426,8 @@
     const contactPhone = contactPhoneInput ? contactPhoneInput.value.trim() : phone;
     const macAddress = ruijieParams.get('mac') || ruijieParams.get('clientMac');
 
-    var checkedRail = document.querySelector('input[name="paymentRail"]:checked');
-    var paymentRail = checkedRail ? checkedRail.value : 'ecocash';
-    if (checkedRail && checkedRail.getAttribute('data-currency') === 'ZiG') {
-      paymentRail = 'ecocash';
-    }
+    var railSelect = document.getElementById('pesepay-rail');
+    var paymentRail = railSelect ? railSelect.value : 'ecocash';
 
     const paymentData = {
       tier: packageData['data-tier'],
