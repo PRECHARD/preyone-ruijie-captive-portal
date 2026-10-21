@@ -122,7 +122,9 @@ const SQL = `
   -- to in order to approve the EcoCash push; it is written on every initiate.
   ALTER TABLE payments ADD COLUMN IF NOT EXISTS pesepay_poll_url TEXT;
 
-  CREATE INDEX IF NOT EXISTS idx_payments_user_id ON payments (user_id);
+    ALTER TABLE payments ADD COLUMN IF NOT EXISTS ruijie_mint_attempts INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE payments ADD COLUMN IF NOT EXISTS ruijie_mint_error TEXT;
+CREATE INDEX IF NOT EXISTS idx_payments_user_id ON payments (user_id);
   CREATE INDEX IF NOT EXISTS idx_payments_status ON payments (status);
   CREATE INDEX IF NOT EXISTS idx_payments_pesepay_ref ON payments (pesepay_reference);
   CREATE INDEX IF NOT EXISTS idx_payments_merchant_ref ON payments (merchant_reference);

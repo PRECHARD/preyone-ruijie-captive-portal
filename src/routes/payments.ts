@@ -7,7 +7,6 @@ import { pool } from '../db/pool';
 import type { PoolClient } from 'pg';
 import { requireAdminAuth } from '../middleware/adminAuth';
 import {
-  initiateEcoCashPayment,
   initiatePesepayPayment,
   decryptResponse,
   isPesepayConfigured,
@@ -274,54 +273,69 @@ async function recordRuijieMintFailure(paymentId: string, pay: any, mintError: u
 // on the lock, re-reads status === 'completed' and returns the already-minted
 // voucher code instead of minting a second one (double-mint prevention).
 async function completePayment(paymentId: string): Promise<string> {
-  const client = await pool.connect();
-  // Hoisted so the catch block can describe the payment in the alert even
-  // though `pay` itself is scoped to the try.
-  let payRow: any = null;
+  // Idempotency: if already completed, return existing code without re-minting.
+  const existing = await pool.query(
+    "SELECT status, voucher_code FROM payments WHERE id = $1",
+    [paymentId]
+  );
+  if (existing.rows.length === 0) throw new Error('Payment not found');
+  if (existing.rows[0].status === 'completed' && existing.rows[0].voucher_code) {
+    return existing.rows[0].voucher_code;
+  }
+
+  // Circuit breaker variables
+  let code: string = '';
+  let voucherAlreadyMinted = false;
+  let ruijieSource: { ruijie_expiry: number | null; user_group_id: string; profile_uuid: string; comment: string } | null = null;
   let ruijieMintError: unknown = null;
-  try {
-    await client.query('BEGIN');
 
-    // duration_min / data_limit_gb / is_uncapped / bandwidth_mbps_* / max_devices
-    // live on `packages`, not `payments` — they must be pulled off the join or the
-    // voucher INSERT below silently receives undefined for every one of them.
-    const payment = await client.query(
-      `SELECT p.*, pk.tier_name, pk.price_amount, pk.duration_min, pk.data_limit_gb,
-              pk.is_uncapped, pk.bandwidth_mbps_up, pk.bandwidth_mbps_down, pk.max_devices
-       FROM payments p
-       JOIN packages pk ON pk.id = p.package_id
-       WHERE p.id = $1
-       FOR UPDATE OF p`,
-      [paymentId]
-    );
-    if (payment.rows.length === 0) {
-      await client.query('ROLLBACK');
-      throw new Error('Payment not found');
-    }
-    const pay = payment.rows[0];
-    payRow = pay;
+  // Circuit breaker: check if a Ruijie voucher was already minted for this payment
+  // (prevents duplicate mints if a previous attempt failed at the DB recording step)
+  const mintedCheck = await pool.query(
+    `SELECT code_no FROM ruijie_vouchers WHERE payment_id = $1 LIMIT 1`,
+    [paymentId]
+  );
+  if (mintedCheck.rows.length > 0) {
+    code = mintedCheck.rows[0].code_no;
+    voucherAlreadyMinted = true;
+    console.warn(`[completePayment] Voucher ${code} already minted for payment ${paymentId}. Reusing.`);
+  }
 
-    // Double-mint guard: another webhook may have completed this payment while
-    // we waited on the row lock. If so, return the existing voucher code and
-    // do NOT mint a second voucher.
-    if (pay.status === 'completed') {
-      await client.query('COMMIT');
-      if (pay.voucher_code) return pay.voucher_code;
-      throw new Error('Payment already completed but no voucher code recorded');
-    }
+  // Fetch payment details (outside transaction)
+  const paymentResult = await pool.query(
+    `SELECT p.*, pk.tier_name, pk.price_amount, pk.duration_min, pk.data_limit_gb,
+            pk.is_uncapped, pk.bandwidth_mbps_up, pk.bandwidth_mbps_down, pk.max_devices
+     FROM payments p
+     JOIN packages pk ON pk.id = p.package_id
+     WHERE p.id = $1`,
+    [paymentId]
+  );
+  if (paymentResult.rows.length === 0) {
+    throw new Error('Payment not found');
+  }
+  const pay = paymentResult.rows[0];
+  let payRow: any = pay;
+  payRow = pay;
 
-    if (!VALID_TRANSITIONS[pay.status]?.includes('completed')) {
-      await client.query('ROLLBACK');
-      throw new Error(`Payment cannot be completed from status '${pay.status}'`);
-    }
+  if (!VALID_TRANSITIONS[pay.status]?.includes('completed')) {
+    throw new Error(`Payment cannot be completed from status '${pay.status}'`);
+  }
 
-    // Pick the voucher source. Ruijie Cloud is the network's single source of
-    // access: when configured, the code MUST come from Ruijie (never a locally
-    // fabricated placeholder) and an unmapped tier fails loudly so the paid
-    // customer is never handed a code that cannot grant internet.
-    let code: string;
-    let ruijieSource: { ruijie_expiry: number | null; user_group_id: string; profile_uuid: string; comment: string } | null = null;
-    if (isRuijieCloudConfigured()) {
+  // Idempotency: already completed
+  if (pay.status === 'completed' && pay.voucher_code) {
+    return pay.voucher_code;
+  }
+
+  // --- Mint Ruijie voucher OUTSIDE the transaction (with retries) ---
+  const client = await pool.connect();
+
+  if (voucherAlreadyMinted) {
+    console.log(`[completePayment] Skipping mint - voucher already exists: ${code}`);
+    ruijieSource = null;
+  } else if (isRuijieCloudConfigured()) {
+    const MAX_RETRIES = 3;
+    let lastErr: unknown = null;
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
       try {
         const minted = await mintRuijieVoucherForTier(pay.tier_name, `Payment ${paymentId}`);
         code = minted.codeNo;
@@ -331,15 +345,63 @@ async function completePayment(paymentId: string): Promise<string> {
           profile_uuid: minted.profile,
           comment: minted.comment,
         };
+        lastErr = null;
+        break;
       } catch (err) {
-        // Remember why so the catch below can raise an operations alert once the
-        // transaction is safely rolled back.
-        ruijieMintError = err;
-        throw err;
+        lastErr = err;
+        if (attempt < MAX_RETRIES) {
+          const delay = Math.pow(2, attempt) * 500;
+          console.warn(`[completePayment] Ruijie mint attempt ${attempt}/${MAX_RETRIES} failed, retrying in ${delay}ms`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
       }
-    } else {
-      // Legacy local mint — only reachable while Ruijie Cloud is not configured.
-      code = await mintLegacyVoucher(client, pay);
+    }
+    if (lastErr) {
+      ruijieMintError = lastErr;
+      // Mark payment as failed
+      await pool.query(
+        `UPDATE payments SET status = 'failed', error_message = $2 WHERE id = $1 AND status = 'pending'`,
+        [paymentId, `Ruijie mint failed after ${MAX_RETRIES} retries: ${(lastErr as Error)?.message}`]
+      );
+      await pool.query(
+        `UPDATE transactions SET status = 'failed' WHERE payment_id = $1 AND status = 'pending'`,
+        [paymentId]
+      );
+      await recordRuijieMintFailure(paymentId, pay, lastErr);
+      throw lastErr;
+    }
+  } else {
+    // Legacy local mint (only when Ruijie Cloud is not configured)
+    code = await mintLegacyVoucher(client, pay);
+  }
+
+  try {
+    await client.query('BEGIN');
+
+    // Re-check: another process may have completed while we were minting
+    const recheck = await client.query(
+      `SELECT status, voucher_code FROM payments WHERE id = $1 FOR UPDATE`,
+      [paymentId]
+    );
+    if (recheck.rows.length === 0) {
+      await client.query('ROLLBACK');
+      throw new Error('Payment not found');
+    }
+    if (recheck.rows[0].status === 'completed') {
+      await client.query('COMMIT');
+      if (recheck.rows[0].voucher_code) return recheck.rows[0].voucher_code;
+      throw new Error('Payment already completed but no voucher code recorded');
+    }
+
+    // Record the Ruijie issuance for audit/reconciliation
+    if (ruijieSource) {
+      await client.query(
+        `INSERT INTO ruijie_vouchers
+          (code_no, tier_name, user_group_id, profile_uuid, ruijie_expiry, payment_id, source, comment)
+         VALUES ($1, $2, $3, $4, $5, $6, 'online', $7)
+         ON CONFLICT (code_no) DO NOTHING`,
+        [code, pay.tier_name, ruijieSource.user_group_id, ruijieSource.profile_uuid, ruijieSource.ruijie_expiry, paymentId, ruijieSource.comment]
+      );
     }
 
     // Record the Ruijie issuance for audit/reconciliation regardless of which
@@ -441,6 +503,20 @@ async function completePayment(paymentId: string): Promise<string> {
     } catch {
       // Ignore rollback failure — original error is what matters.
     }
+    // If minting succeeded but DB recording failed, log a critical alert
+    // because a Ruijie voucher was minted but not recorded locally.
+    if (!ruijieMintError && code) {
+      console.error(`[completePayment] DB recording failed after minting voucher ${code} for payment ${paymentId}. Voucher may be orphaned.`);
+      try {
+        await pool.query(
+          `INSERT INTO alerts (type, severity, title, message, target_type, target_id)
+           VALUES ($1, $2, $3, $4, $5, $6)`,
+          ['orphaned_voucher', 'critical', 'Voucher minted but not recorded',
+           `Payment ${paymentId} minted Ruijie voucher ${code} but DB recording failed. Voucher exists on Ruijie Cloud but not linked locally. Error: ${(err as Error)?.message}`,
+           'payment', String(paymentId)]
+        );
+      } catch { /* best-effort */ }
+    }
     // Only Ruijie mint failures are alerted: 'payment not found' and the
     // double-mint/transition guards are ordinary control flow, not incidents.
     if (ruijieMintError) {
@@ -457,8 +533,9 @@ async function completePayment(paymentId: string): Promise<string> {
  * Body: { tier, phone, currency?, fullName?, macAddress? }
  */
 paymentsRouter.post('/initiate', async (req: Request, res: Response) => {
-  const { tier, phone, fullName, currency } = req.body || {};
+  const { tier, phone, fullName, currency, paymentMethod: rawMethod } = req.body || {};
   const macAddress = req.body?.macAddress ?? null;
+  const paymentMethod = (rawMethod || 'ecocash').toLowerCase();
 
   if (!isPesepayConfigured()) {
     res.status(422).json({
@@ -468,7 +545,8 @@ paymentsRouter.post('/initiate', async (req: Request, res: Response) => {
   }
 
   const normalizedPhone = normalizeZwPhone(phone);
-  if (!isValidZwPhone(normalizedPhone)) {
+  const requiresPhone = ['ecocash', 'omari'].includes(paymentMethod);
+  if (requiresPhone && !isValidZwPhone(normalizedPhone)) {
     res.status(422).json({ error: 'Please enter a valid Zimbabwe phone number (e.g. 0771 327 202).' });
     return;
   }
@@ -526,7 +604,7 @@ paymentsRouter.post('/initiate', async (req: Request, res: Response) => {
       normalizedPhone,
       amount,
       resolvedCurrency,
-      'EcoCash (Pesepay)',
+      paymentMethod.charAt(0).toUpperCase() + paymentMethod.slice(1) + ' (Pesepay)',
       merchantReference,
       macAddress,
       webhookToken,
@@ -540,24 +618,22 @@ paymentsRouter.post('/initiate', async (req: Request, res: Response) => {
     `INSERT INTO transactions
       (payment_id, user_id, package_tier, amount, currency, payment_method, status, sold_by_name)
      VALUES ($1, $2, $3, $4, $5, $6, 'pending', 'Online')`,
-    [paymentId, user.id, pkg.tier_name, amount, resolvedCurrency, 'EcoCash (Pesepay)']
+    [paymentId, user.id, pkg.tier_name, amount, resolvedCurrency, paymentMethod.charAt(0).toUpperCase() + paymentMethod.slice(1) + ' (Pesepay)']
   );
 
   const baseUrl = (process.env.BASE_URL || 'https://wifi.preyone.com').replace(/\/$/, '');
 
   try {
-    const result = await initiateEcoCashPayment({
+    const result = await initiatePesepayPayment({
       amount,
-      currency: resolvedCurrency,
-      phone: normalizedPhone,
+      currencyCode: resolvedCurrency,
+      phone: requiresPhone ? normalizedPhone : (phone || ''),
+      fullName: fullName || 'GUEST',
+      email: '',
+      paymentMethod: paymentMethod as any,
       reference: merchantReference,
-      description: `${pkg.tier_name} — pre-paid internet access`,
-      // Pesepay redirects the customer's browser here once they have approved (or
-      // abandoned) the EcoCash push. It carries no token: the status token is
-      // minted server-side by /return so a mangled query string cannot break it.
+      reasonForPayment: `${pkg.tier_name} - pre-paid internet access`,
       returnUrl: `${baseUrl}/api/payments/return?ref=${encodeURIComponent(merchantReference)}`,
-      // Appended to resultUrl by pesepayService; Pesepay echoes it back.
-      webhookToken,
     });
 
     if (!result.success || !result.pollUrl) {
@@ -579,13 +655,13 @@ paymentsRouter.post('/initiate', async (req: Request, res: Response) => {
       `UPDATE payments
           SET pesepay_reference = $2, pesepay_poll_url = $3, error_message = NULL
         WHERE id = $1`,
-      [paymentId, result.transactionId ?? null, result.pollUrl]
+      [paymentId, result.referenceNumber ?? null, result.pollUrl]
     );
 
     res.status(200).json({
       paymentId,
       reference: merchantReference,
-      pesepayReference: result.transactionId ?? null,
+      pesepayReference: result.referenceNumber ?? null,
       // The client must navigate here: Pesepay hosts the EcoCash approval page.
       pesepayPollUrl: result.pollUrl,
       status: 'pending',
@@ -619,6 +695,7 @@ paymentsRouter.post('/initiate', async (req: Request, res: Response) => {
  * cannot mint a voucher.
  */
 paymentsRouter.post('/webhook', async (req: Request, res: Response) => {
+  console.log('[webhook] Received Pesepay callback');
   const body: Record<string, any> = req.body || {};
 
   // Pesepay may post a bare query string on some configurations; accept both.
@@ -674,6 +751,7 @@ paymentsRouter.post('/webhook', async (req: Request, res: Response) => {
   }
 
   const pay = rows[0];
+  console.log(`[webhook] Found payment ${pay.id}, status: ${pay.status}, ref: ${merchantRef}`);
 
   // When Pesepay did echo the token, it must match this payment's own token.
   if (token !== null && String(pay.webhook_token) !== String(token)) {
@@ -707,6 +785,7 @@ paymentsRouter.post('/webhook', async (req: Request, res: Response) => {
     }
     try {
       const voucherCode = await completePayment(pay.id);
+      console.log(`[webhook] Payment ${pay.id} completed with voucher ${voucherCode}`);
       res.json({ status: 'ok', voucherCode, state: 'completed' });
       return;
     } catch (err) {

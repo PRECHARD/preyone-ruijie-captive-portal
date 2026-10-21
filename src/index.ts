@@ -40,6 +40,12 @@ import { scheduleSubscriptionCron } from './jobs/subscriptionCron';
 const app = express();
 const PORT = process.env.PORT ?? 3000;
 
+// Startup validation: ONLINE_SALE_OWNER_ID must be set in production
+if (process.env.NODE_ENV === 'production' && !process.env.ONLINE_SALE_OWNER_ID) {
+  console.error('FATAL: ONLINE_SALE_OWNER_ID must be set in production. Refusing to boot.');
+  process.exit(1);
+}
+
 app.set('trust proxy', 1);
 
 app.use(

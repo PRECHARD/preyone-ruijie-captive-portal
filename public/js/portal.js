@@ -24,10 +24,13 @@
     // Create modal overlay
     const modal = document.createElement('div');
     modal.className = 'payment-modal-overlay';
+    var price = parseFloat(packageData['data-amount']);
+    var needsTierCapture = price >= 4.99;
+
     modal.innerHTML = `
       <div class="payment-modal">
         <button class="modal-close" aria-label="Close">&times;</button>
-        <h2>Make Preyone Payment: ${packageData['data-display-name']}</h2>
+        <h2>Make Preyone Payment</h2>
         <div class="modal-details">
           <p><strong>Package:</strong> ${packageData['data-tier']}</p>
           <p><strong>Price:</strong> $${packageData['data-amount']} USD (${packageData['data-period']})</p>
@@ -35,9 +38,44 @@
           <p><strong>Speed:</strong> ${packageData['data-bandwidth-down']} Mbps download</p>
         </div>
         <form class="modal-form" id="pesepay-form" novalidate>
+          <div class="rail-selector">
+            <label class="rail-option">
+              <input type="radio" name="paymentRail" value="ecocash" checked />
+              <span class="rail-label">EcoCash USD</span>
+            </label>
+            <label class="rail-option">
+              <input type="radio" name="paymentRail" value="ecocash" data-currency="ZiG" />
+              <span class="rail-label">EcoCash ZiG</span>
+            </label>
+            <label class="rail-option">
+              <input type="radio" name="paymentRail" value="innbucks" />
+              <span class="rail-label">InnBucks USD</span>
+            </label>
+            <label class="rail-option">
+              <input type="radio" name="paymentRail" value="paygo" />
+              <span class="rail-label">PayGo ZiG</span>
+            </label>
+            <label class="rail-option">
+              <input type="radio" name="paymentRail" value="omari" />
+              <span class="rail-label">O'mari USD</span>
+            </label>
+          </div>
+          ${needsTierCapture ? `
+          <div class="field" id="field-fullName">
+            <label for="pesepay-fullName">Full Name / Company Name</label>
+            <input type="text" id="pesepay-fullName" placeholder="Your name or company" autocomplete="name" required />
+            <div class="field-error" id="pesepay-fullName-error"></div>
+          </div>
+          <div class="field" id="field-contactPhone">
+            <label for="pesepay-contactPhone">Primary Contact Number</label>
+            <input type="tel" id="pesepay-contactPhone" placeholder="e.g. 0771 327 202" autocomplete="tel" required />
+            <div class="field-error" id="pesepay-contactPhone-error"></div>
+          </div>
+          ` : ''}
           <div class="field">
-            <label for="pesepay-phone">Zimbabwe Phone Number</label>
+            <label for="pesepay-phone" id="pesepay-phone-label">Zimbabwe Phone Number</label>
             <input type="tel" id="pesepay-phone" placeholder="e.g. 0771 327 202" autocomplete="tel" />
+            <div class="field-subtext" id="pesepay-subtext">Check your phone for the USSD payment prompt.</div>
             <div class="field-error" id="pesepay-phone-error"></div>
           </div>
           <button type="submit" id="confirm-payment-btn">
@@ -57,11 +95,45 @@
     const form = modal.querySelector('#pesepay-form');
     const phoneEl = form.querySelector('#pesepay-phone');
     const phoneErrorEl = form.querySelector('#pesepay-phone-error');
+    const phoneLabel = form.querySelector('#pesepay-phone-label');
+    const subtextEl = form.querySelector('#pesepay-subtext');
     const payBtn = form.querySelector('#confirm-payment-btn');
     const btnText = payBtn.querySelector('.btn-text');
     const btnSpinner = payBtn.querySelector('.btn-spinner');
     const statusEl = form.querySelector('#pesepay-status');
     const resultEl = form.querySelector('#pesepay-result');
+
+    // Rail selection config
+    var railConfig = {
+      'ecocash': { label: 'EcoCash Phone Number', subtext: 'Check your phone for the USSD payment prompt.', currency: 'USD' },
+      'ecocash-zig': { label: 'EcoCash Phone Number', subtext: 'Check your phone for the USSD payment prompt.', currency: 'ZiG' },
+      'innbucks': { label: 'InnBucks Account / Phone Number', subtext: 'Enter your InnBucks phone or ID to receive prompt.', currency: 'USD' },
+      'paygo': { label: 'PayGo Phone / Account Number', subtext: 'Enter your registered PayGo account number.', currency: 'ZiG' },
+      'omari': { label: 'O\'mari Phone or Card Number', subtext: 'Enter your O\'mari wallet phone number or O\'mari card number.', currency: 'USD' },
+    };
+
+    // Map radio values to rail keys
+    function getRailKey(radio) {
+      if (radio.value === 'ecocash' && radio.getAttribute('data-currency') === 'ZiG') return 'ecocash-zig';
+      return radio.value;
+    }
+
+    function updateRailUI() {
+      var checked = form.querySelector('input[name="paymentRail"]:checked');
+      if (!checked) return;
+      var key = getRailKey(checked);
+      var cfg = railConfig[key];
+      if (cfg) {
+        phoneLabel.textContent = cfg.label;
+        subtextEl.textContent = cfg.subtext;
+      }
+    }
+
+    // Attach rail change listeners
+    form.querySelectorAll('input[name="paymentRail"]').forEach(function(radio) {
+      radio.addEventListener('change', updateRailUI);
+    });
+    updateRailUI();
 
     function setLoading(loading, label) {
       payBtn.disabled = loading;
@@ -211,8 +283,38 @@
               '<strong style="font-size:1rem">Payment complete!</strong>',
               '<span style="display:block;margin:.6rem 0 .4rem;color:rgba(255,255,255,.75)">Your voucher code:</span>',
               '<code style="display:inline-block;font-size:1.25rem;letter-spacing:.12em;padding:.5rem .9rem;border-radius:10px;background:rgba(37,211,102,.12);border:1px solid rgba(37,211,102,.35);color:#4ade80;user-select:all">' + data.voucherCode + '</code>',
+              '<button type="button" id="copy-pin-btn" style="display:inline-flex;align-items:center;gap:.5rem;margin-top:.75rem;padding:.6rem 1.2rem;border-radius:10px;border:1px solid rgba(37,211,102,.4);background:rgba(37,211,102,.1);color:#4ade80;font-size:.9rem;font-weight:700;cursor:pointer;transition:all .2s">Copy Voucher PIN</button>',
+              '<span id="copy-pin-feedback" style="display:block;margin-top:.4rem;font-size:.8rem;color:#4ade80;opacity:0;transition:opacity .3s"></span>',
               '<span style="display:block;margin-top:.7rem;font-size:.85rem;line-height:1.5">A login page will open automatically — enter this code there to connect to the internet. If it does not open, visit <strong>www.preyone.com</strong> on your device.</span>'
             ].join('');
+            ].join('');
+            // Wire copy PIN button
+            var copyBtn = resultEl.querySelector('#copy-pin-btn');
+            var feedback = resultEl.querySelector('#copy-pin-feedback');
+            if (copyBtn) {
+              copyBtn.addEventListener('click', function() {
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                  navigator.clipboard.writeText(data.voucherCode).then(function() {
+                    if (feedback) { feedback.textContent = 'Copied to Clipboard! \u2713'; feedback.style.opacity = '1'; }
+                    setTimeout(function() { if (feedback) feedback.style.opacity = '0'; }, 2500);
+                  }).catch(function() {
+                    if (feedback) { feedback.textContent = 'Copy failed \u2014 select and copy manually'; feedback.style.opacity = '1'; }
+                  });
+                } else {
+                  var ta = document.createElement('textarea');
+                  ta.value = data.voucherCode;
+                  ta.style.position = 'fixed';
+                  ta.style.opacity = '0';
+                  document.body.appendChild(ta);
+                  ta.select();
+                  try { document.execCommand('copy'); if (feedback) { feedback.textContent = 'Copied to Clipboard! \u2713'; feedback.style.opacity = '1'; } }
+                  catch(e) { if (feedback) { feedback.textContent = 'Copy failed \u2014 select and copy manually'; feedback.style.opacity = '1'; } }
+                  document.body.removeChild(ta);
+                  setTimeout(function() { if (feedback) feedback.style.opacity = '0'; }, 2500);
+                }
+              });
+            }
+            return;
             return;
           }
           if (data.status === 'failed') {
@@ -248,7 +350,26 @@
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       const phone = phoneEl.value.trim();
-      if (!/^(\+?263|0)?7\d{8}$/.test(phone.replace(/[\s-]/g, ''))) {
+      var checkedRail = document.querySelector('input[name="paymentRail"]:checked');
+      var railKey = checkedRail ? checkedRail.value : 'ecocash';
+      var requiresPhone = (railKey === 'ecocash' || railKey === 'omari');
+
+      // Tier capture for $4.99+
+      var price = parseFloat(packageData['data-amount']);
+      if (price >= 4.99) {
+        var nameInput = document.getElementById('pesepay-fullName');
+        var contactInput = document.getElementById('pesepay-contactPhone');
+        if (nameInput && !nameInput.value.trim()) {
+          phoneErrorEl.textContent = 'Full name is required.';
+          return;
+        }
+        if (contactInput && !contactInput.value.trim()) {
+          phoneErrorEl.textContent = 'Contact number is required.';
+          return;
+        }
+      }
+
+      if (requiresPhone && !/^(\+?263|0)?7\d{8}$/.test(phone.replace(/[\s-]/g, ''))) {
         phoneErrorEl.textContent = 'Enter a valid Zimbabwe mobile number, e.g. 0771 327 202.';
         return;
       }
@@ -308,16 +429,26 @@
   }
 
   async function initiatePackagePayment(packageData, phone) {
-    const fullName = document.getElementById('fullName')?.value.trim() || 'Guest User';
+    const fullNameInput = document.getElementById('pesepay-fullName');
+    const contactPhoneInput = document.getElementById('pesepay-contactPhone');
+    const fullName = (fullNameInput ? fullNameInput.value.trim() : '') || 'Guest User';
+    const contactPhone = contactPhoneInput ? contactPhoneInput.value.trim() : phone;
     const macAddress = ruijieParams.get('mac') || ruijieParams.get('clientMac');
+
+    var checkedRail = document.querySelector('input[name="paymentRail"]:checked');
+    var paymentRail = checkedRail ? checkedRail.value : 'ecocash';
+    if (checkedRail && checkedRail.getAttribute('data-currency') === 'ZiG') {
+      paymentRail = 'ecocash';
+    }
 
     const paymentData = {
       tier: packageData['data-tier'],
       amount: parseFloat(packageData['data-amount']),
       currency: packageData['data-currency'],
-      phone,
-      fullName,
-      macAddress,
+      phone: phone || contactPhone,
+      fullName: fullName,
+      macAddress: macAddress,
+      paymentMethod: paymentRail,
     };
 
     const response = await fetch('/api/payments/initiate', {

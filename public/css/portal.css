@@ -3787,3 +3787,54 @@ a.footer-card:hover {
     gap: 0.75rem;
   }
 }
+
+/* === Multi-Rail Selector === */
+/* Multi-rail selector */
+.rail-selector {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 0.5rem;
+  margin-bottom: 1.25rem;
+}
+
+.rail-option {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.6rem 0.8rem;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-size: 0.8rem;
+}
+
+.rail-option:hover {
+  border-color: rgba(255, 0, 204, 0.4);
+  background: rgba(255, 0, 204, 0.06);
+}
+
+.rail-option input[type="radio"] {
+  accent-color: var(--pink);
+  width: 14px;
+  height: 14px;
+}
+
+.rail-option input[type="radio"]:checked + .rail-label {
+  color: var(--pink);
+  font-weight: 700;
+}
+
+.rail-label {
+  color: var(--text-muted);
+  font-weight: 500;
+  transition: color 0.2s;
+}
+
+.field-subtext {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-top: 0.3rem;
+  font-style: italic;
+}

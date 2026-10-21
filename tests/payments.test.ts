@@ -176,11 +176,12 @@ describe('Payments routes', () => {
         .mockResolvedValueOnce({ rows: [PKG] })                                // 1: package lookup
         .mockResolvedValueOnce({ rows: [{ id: 'existing-user' }] })            // 2: existing user
         .mockResolvedValueOnce({ rows: [{ id: 'pay-1' }] })                    // 3: INSERT payments
-        .mockResolvedValueOnce(undefined);                                    // 4: UPDATE pesepay_reference
-      (initiateEcoCashPayment as any).mockResolvedValue({
+        .mockResolvedValueOnce(undefined)                                    // 4: INSERT transactions
+        .mockResolvedValueOnce(undefined);                                    // 5: UPDATE pesepay_reference
+      (initiatePesepayPayment as any).mockResolvedValue({
         success: true,
         pollUrl: 'https://pay.pesepay.com/poll',
-        transactionId: 'PSE-1',
+        referenceNumber: 'PSE-1',
       });
 
       const res = await request(createApp())
@@ -195,8 +196,8 @@ describe('Payments routes', () => {
       expect(res.body.statusToken).toBeTruthy();
       expect(res.body.amount).toBe(34.99);
       expect(res.body.phone).toBe('263771327202');
-      expect(initiateEcoCashPayment as any).toHaveBeenCalledWith(
-        expect.objectContaining({ currency: 'USD', phone: '263771327202' })
+      expect(initiatePesepayPayment as any).toHaveBeenCalledWith(
+        expect.objectContaining({ currencyCode: 'USD', phone: '263771327202' })
       );
     });
 
@@ -207,7 +208,7 @@ describe('Payments routes', () => {
         .mockResolvedValueOnce({ rows: [{ id: 'new-user' }] })                 // 3: INSERT users
         .mockResolvedValueOnce({ rows: [{ id: 'pay-2' }] })                    // 4: INSERT payments
         .mockResolvedValueOnce(undefined);                                    // 5: UPDATE pesepay_reference
-      (initiateEcoCashPayment as any).mockResolvedValue({
+      (initiatePesepayPayment as any).mockResolvedValue({
         success: true,
         pollUrl: 'https://pay.pesepay.com/poll',
       });
@@ -225,8 +226,9 @@ describe('Payments routes', () => {
         .mockResolvedValueOnce({ rows: [PKG] })                                // 1: package lookup
         .mockResolvedValueOnce({ rows: [{ id: 'user-1' }] })                   // 2: existing user
         .mockResolvedValueOnce({ rows: [{ id: 'pay-3' }] })                    // 3: INSERT payments
-        .mockResolvedValueOnce(undefined);                                    // 4: UPDATE status=failed
-      (initiateEcoCashPayment as any).mockResolvedValue({
+        .mockResolvedValueOnce(undefined)                                    // 4: INSERT transactions
+        .mockResolvedValueOnce(undefined);                                    // 5: UPDATE status=failed
+      (initiatePesepayPayment as any).mockResolvedValue({
         success: false,
         error: 'Insufficient funds',
       });
@@ -309,13 +311,14 @@ describe('Payments routes', () => {
         amount: 10,
       });
 
-      (pool.query as any).mockResolvedValueOnce({
-        rows: [{ id: 'pay-1', status: 'pending', voucher_code: null, amount: 10, webhook_token: null }],
-      });
-
-      const client = await (pool as any).connect();
-      client.query
-        .mockResolvedValueOnce(undefined)                                    // 1: BEGIN
+      (pool.query as any)
+        .mockResolvedValueOnce({
+          rows: [{ id: 'pay-1', status: 'pending', voucher_code: null, amount: 10, webhook_token: null }],
+        })  // 0: webhook payment lookup
+        .mockResolvedValueOnce({
+          rows: [{ id: 'pay-1', status: 'pending', voucher_code: null }],
+        })  // 1: idempotency check
+        .mockResolvedValueOnce({ rows: [] })  // 2: circuit breaker check
         .mockResolvedValueOnce({
           rows: [
             {
@@ -334,17 +337,22 @@ describe('Payments routes', () => {
               max_devices: 1,
             },
           ],
-        })                                                                   // 2: SELECT payment FOR UPDATE
-        .mockResolvedValueOnce(undefined)                                    // 3: SAVEPOINT mint_voucher
-        .mockResolvedValueOnce({ rows: [{ id: 'v-1', code: 'CT-TESTCODE1' }] }) // 4: INSERT INTO vouchers
-        .mockResolvedValueOnce(undefined)                                    // 5: RELEASE SAVEPOINT
-        .mockResolvedValueOnce({ rows: [{ completed_at: new Date('2026-10-09T00:00:00Z') }] }) // 6: UPDATE payments RETURNING
-        .mockResolvedValueOnce(undefined)                                    // 7: INSERT INTO transactions
-        .mockResolvedValueOnce({ rows: [] })                                 // 8: resolveOnlineSaleOwner (CEO lookup)
-        .mockResolvedValueOnce({ rows: [] })                                 // 9: INSERT INTO vouchers (sale accounting)
-        .mockResolvedValueOnce({ rows: [] })                                 // 10: UPDATE vouchers SET sold_by
-        .mockResolvedValueOnce({ rows: [] })                                 // 11: INSERT INTO sales
-        .mockResolvedValueOnce(undefined);                                   // 12: COMMIT
+        });  // 3: fetch payment details
+
+      const client = await (pool as any).connect();
+      client.query
+        .mockResolvedValueOnce(undefined)                                    // legacy: SAVEPOINT mint_voucher
+        .mockResolvedValueOnce({ rows: [{ id: 'v-1', code: 'CT-TESTCODE1' }] }) // legacy: INSERT INTO vouchers
+        .mockResolvedValueOnce(undefined)                                    // legacy: RELEASE SAVEPOINT
+        .mockResolvedValueOnce(undefined)                                    // 1: BEGIN
+        .mockResolvedValueOnce({ rows: [{ status: 'pending', voucher_code: null }] })  // 2: recheck (idempotency)
+        .mockResolvedValueOnce({ rows: [{ completed_at: new Date('2026-10-09T00:00:00Z') }] }) // 3: UPDATE payments RETURNING
+        .mockResolvedValueOnce(undefined)                                    // 4: UPDATE transactions
+        .mockResolvedValueOnce({ rows: [] })                                 // 5: resolveOnlineSaleOwner (CEO lookup)
+        .mockResolvedValueOnce({ rows: [] })                                 // 6: INSERT INTO vouchers (sale accounting)
+        .mockResolvedValueOnce({ rows: [] })                                 // 7: UPDATE vouchers SET sold_by
+        .mockResolvedValueOnce({ rows: [] })                                 // 8: INSERT INTO sales
+        .mockResolvedValueOnce(undefined);                                   // 9: COMMIT
 
       const res = await request(createApp())
         .post('/api/payments/webhook')
