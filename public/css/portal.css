@@ -896,227 +896,6 @@ body.portal-body {
   animation: voucher-pulse 0.8s ease 3;
   border-color: #ff00cc !important;
 }
-/* portal/_modal.css */
-.payment-modal-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 9999;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 1rem;
-  background: rgba(0, 0, 0, 0.6);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  animation: modalFadeIn 0.3s ease;
-}
-
-@keyframes modalFadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-@keyframes modalSlideUp {
-  from {
-    opacity: 0;
-    transform: translateY(30px) scale(0.96);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-
-.payment-modal {
-  background: linear-gradient(145deg, #1a1a2e 0%, #16213e 100%);
-  border-radius: 20px;
-  padding: 2rem;
-  max-width: 440px;
-  width: 100%;
-  position: relative;
-  box-shadow:
-    0 25px 60px rgba(0, 0, 0, 0.5),
-    0 0 0 1px rgba(255, 255, 255, 0.06);
-  animation: modalSlideUp 0.35s ease 0.1s both;
-}
-
-.modal-close {
-  position: absolute;
-  top: 1rem;
-  right: 1rem;
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  border: none;
-  background: rgba(255, 255, 255, 0.08);
-  color: #fff;
-  font-size: 1.4rem;
-  line-height: 1;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: background 0.2s;
-}
-
-.modal-close:hover {
-  background: rgba(255, 255, 255, 0.18);
-}
-
-.payment-modal h2 {
-  font-family: 'Montserrat', sans-serif;
-  font-size: 1.3rem;
-  font-weight: 700;
-  color: #fff;
-  margin: 0 0 1.5rem;
-  padding-right: 2rem;
-  line-height: 1.3;
-}
-
-.modal-details {
-  background: rgba(255, 255, 255, 0.05);
-  border-radius: 12px;
-  padding: 1.25rem;
-  margin-bottom: 1.5rem;
-}
-
-.modal-details p {
-  margin: 0.4rem 0;
-  font-size: 0.9rem;
-  color: rgba(255, 255, 255, 0.75);
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.modal-details p strong {
-  color: #fff;
-  font-weight: 600;
-}
-
-.modal-form .field {
-  margin-bottom: 1.25rem;
-}
-
-.modal-form label {
-  display: block;
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: rgba(255, 255, 255, 0.7);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  margin-bottom: 0.4rem;
-}
-
-.modal-form input[type="tel"] {
-  width: 100%;
-  padding: 0.85rem 1rem;
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.06);
-  color: #fff;
-  font-size: 1rem;
-  font-family: 'Montserrat', sans-serif;
-  transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
-  box-sizing: border-box;
-}
-
-.modal-form input[type="tel"]:hover { border-color: rgba(106, 13, 173, 0.4); }
-.modal-form input[type="tel"]:focus {
-  outline: none;
-  border-color: var(--pink);
-  background: rgba(255, 0, 255, 0.04);
-  box-shadow: 0 0 0 2px rgba(255, 0, 255, 0.12), 0 0 20px rgba(255, 0, 255, 0.08);
-}
-
-.modal-form input[type="tel"]::placeholder {
-  color: rgba(255, 255, 255, 0.3);
-}
-
-#confirm-payment-btn {
-  width: 100%;
-  padding: 0.9rem;
-  border: none;
-  border-radius: 10px;
-  background: linear-gradient(135deg, #e94560 0%, #c23152 100%);
-  color: #fff;
-  font-size: 1rem;
-  font-weight: 700;
-  font-family: 'Montserrat', sans-serif;
-  cursor: pointer;
-  transition: transform 0.2s, box-shadow 0.2s;
-}
-
-#confirm-payment-btn:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 8px 25px rgba(233, 69, 96, 0.35);
-}
-
-#confirm-payment-btn:active {
-  transform: translateY(0);
-}
-
-.modal-notice {
-  text-align: center;
-  font-size: 0.75rem;
-  color: rgba(255, 255, 255, 0.4);
-  margin-top: 1rem;
-}
-
-.field-error {
-  font-size: 0.75rem;
-  color: #e94560;
-  margin-top: 0.3rem;
-}
-
-.field-success {
-  font-size: 0.85rem;
-  color: #25D366;
-  background: rgba(37, 211, 102, 0.08);
-  border: 1px solid rgba(37, 211, 102, 0.2);
-  border-radius: 8px;
-  padding: 0.75rem 1rem;
-  margin-bottom: 1rem;
-  text-align: center;
-  line-height: 1.5;
-}
-
-.pkg-action.pkg-action--selected {
-  transform: scale(1.05);
-  box-shadow:
-    0 0 0 3px #e94560,
-    0 0 30px rgba(233, 69, 96, 0.3);
-  position: relative;
-  z-index: 2;
-}
-
-.payment-modal-overlay--closing {
-  animation: modalFadeOut 0.25s ease forwards;
-}
-
-@keyframes modalFadeOut {
-  from { opacity: 1; }
-  to { opacity: 0; }
-}
-
-.payment-modal-overlay--closing .payment-modal {
-  animation: modalSlideDown 0.25s ease forwards;
-}
-
-@keyframes modalSlideDown {
-  from {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-  to {
-    opacity: 0;
-    transform: translateY(20px) scale(0.96);
-  }
-}
-
-body.modal-open {
-  overflow: hidden;
-}
 /* portal/_modal.css — ContiPay purchase flow additions */
 .modal-form select.field-select {
   width: 100%;
@@ -4232,4 +4011,520 @@ body.modal-open {
   color: var(--text-muted);
   margin-top: 0.3rem;
   font-style: italic;
+}
+
+/* === Payment Method Selectors === */
+/* Payment method selectors (glass cards) */
+.pay-methods {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.75rem;
+  border: none;
+  padding: 0;
+  margin: 0 0 1rem;
+}
+
+.pay-methods__legend {
+  font-size: 0.7rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--text-muted, #94a3b8);
+  margin-bottom: 0.75rem;
+  grid-column: 1 / -1;
+}
+
+.pay-method {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  min-width: 0;
+  padding: 0.8rem 0.9rem;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  cursor: pointer;
+  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+
+.pay-method:hover {
+  transform: translateY(-2px);
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.pay-method__input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  pointer-events: none;
+}
+
+.pay-method:has(.pay-method__input:checked) {
+  background: rgba(0, 212, 255, 0.06);
+  border-color: rgba(0, 212, 255, 0.65);
+  box-shadow: 0 0 18px rgba(0, 212, 255, 0.35);
+}
+
+.pay-method:has(.pay-method__input:focus-visible) {
+  outline: 2px solid var(--cyan, #00d4ff);
+  outline-offset: 2px;
+}
+
+.pay-method__logo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  flex-shrink: 0;
+}
+
+.pay-method__logo img {
+  max-height: 28px;
+  max-width: 84px;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+}
+
+.pay-method__fallback {
+  font-family: var(--display, 'Bebas Neue', sans-serif);
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.pay-method__fallback .ecocash-eco { color: #0d6efd; }
+.pay-method__fallback .ecocash-cash { color: #f22b3a; }
+.pay-method__fallback .visa-mark { letter-spacing: 0.1em; color: #f8fafc; }
+
+.pay-method__fallback .mastercard-mark {
+  position: relative;
+  display: inline-block;
+  width: 26px;
+  height: 16px;
+}
+
+.pay-method__fallback .mastercard-mark i {
+  position: absolute;
+  top: 1px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+}
+
+.pay-method__fallback .mastercard-mark i:first-child { left: 0; background: #eb001b; opacity: 0.9; }
+.pay-method__fallback .mastercard-mark i:last-child { right: 0; background: #f79e1b; opacity: 0.9; }
+
+.pay-method__name {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #e2e8f0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.pay-method__check {
+  margin-left: auto;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  position: relative;
+  transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+}
+
+.pay-method:has(.pay-method__input:checked) .pay-method__check {
+  border-color: transparent;
+  background: linear-gradient(135deg, #00d4ff, #ff00ff);
+  box-shadow: 0 0 12px rgba(0, 212, 255, 0.55);
+}
+
+.pay-method:has(.pay-method__input:checked) .pay-method__check::after {
+  content: '';
+  position: absolute;
+  left: 6px;
+  top: 3px;
+  width: 5px;
+  height: 9px;
+  border: solid #fff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+.pay-method:has(.pay-method__input:disabled) {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+}
+
+@media (max-width: 480px) {
+  .pay-methods {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.5rem;
+  }
+  .pay-method {
+    padding: 0.6rem 0.7rem;
+  }
+  .pay-method__name {
+    font-size: 0.75rem;
+  }
+}
+
+/* Payment method selected state - elevated + increased glow */
+.pay-method:has(.pay-method__input:checked) {
+  background: rgba(0, 212, 255, 0.1);
+  border-color: rgba(0, 212, 255, 0.85);
+  box-shadow: 0 0 28px rgba(0, 212, 255, 0.5), 0 0 60px rgba(255, 0, 204, 0.15);
+  transform: translateY(-3px) scale(1.03);
+  z-index: 2;
+}
+
+.pay-method:has(.pay-method__input:checked) .pay-method__check {
+  border-color: transparent;
+  background: linear-gradient(135deg, #00d4ff, #ff00ff);
+  box-shadow: 0 0 16px rgba(0, 212, 255, 0.7), 0 0 30px rgba(255, 0, 204, 0.3);
+}
+
+
+
+
+
+/* portal/_modal.css */
+/* Payment method selectors (glass cards) */
+.pay-methods {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  border: none;
+  padding: 0;
+  margin: 0 0 1rem;
+}
+
+.pay-methods__legend {
+  font-size: 0.7rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--text-muted, #94a3b8);
+  margin-bottom: 0.75rem;
+  grid-column: 1 / -1;
+}
+
+.pay-method {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+  padding: 0.4rem 0.6rem;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  cursor: pointer;
+  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+
+.pay-method:hover {
+  transform: translateY(-2px);
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.pay-method__input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  pointer-events: none;
+}
+
+.pay-method:has(.pay-method__input:checked) {
+  background: rgba(0, 212, 255, 0.08);
+  border-color: rgba(0, 212, 255, 0.7);
+  box-shadow: 0 0 15px rgba(0, 212, 255, 0.25);
+}
+
+.pay-method:has(.pay-method__input:focus-visible) {
+  outline: 2px solid var(--cyan, #00d4ff);
+  outline-offset: 2px;
+}
+
+.pay-method__logo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  flex-shrink: 0;
+}
+
+.pay-method__logo img {
+  max-height: 44px;
+  max-width: 120px;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+}
+
+.pay-method__fallback {
+  font-family: var(--display, 'Bebas Neue', sans-serif);
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.pay-method__fallback .ecocash-eco { color: #0d6efd; }
+.pay-method__fallback .ecocash-cash { color: #f22b3a; }
+.pay-method__fallback .visa-mark { letter-spacing: 0.1em; color: #f8fafc; }
+
+.pay-method__fallback .mastercard-mark {
+  position: relative;
+  display: inline-block;
+  width: 26px;
+  height: 16px;
+}
+
+.pay-method__fallback .mastercard-mark i {
+  position: absolute;
+  top: 1px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+}
+
+.pay-method__fallback .mastercard-mark i:first-child { left: 0; background: #eb001b; opacity: 0.9; }
+.pay-method__fallback .mastercard-mark i:last-child { right: 0; background: #f79e1b; opacity: 0.9; }
+
+.pay-method__name {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #e2e8f0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.pay-method__check {
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  position: relative;
+  transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+  font-weight: 900;
+  align-self: center;
+}
+
+.pay-method:has(.pay-method__input:checked) .pay-method__check {
+  border-color: transparent;
+  background: linear-gradient(135deg, #00d4ff, #ff00ff);
+  box-shadow: 0 0 20px rgba(0, 212, 255, 0.8), 0 0 40px rgba(255, 0, 204, 0.4);
+}
+
+.pay-method:has(.pay-method__input:checked) .pay-method__check::after {
+  content: '\2713';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 14px;
+  font-weight: 900;
+  color: #fff;
+  text-shadow: 0 0 8px rgba(255, 255, 255, 0.8);
+}
+
+.pay-method:has(.pay-method__input:disabled) {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+}
+
+@media (max-width: 480px) {
+  .pay-methods {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.5rem;
+  }
+  .pay-method {
+    padding: 0.6rem 0.7rem;
+  }
+  .pay-method__name {
+    font-size: 0.75rem;
+  }
+}
+
+/* Payment success state (in-modal voucher) */
+.pay-success {
+  text-align: center;
+  padding: 0.5rem 0.25rem 0.25rem;
+}
+.pay-success-icon {
+  width: 56px;
+  height: 56px;
+  margin: 0 auto 0.85rem;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.6rem;
+  font-weight: 900;
+  color: #0a0f2e;
+  background: linear-gradient(135deg, #4ade80, #22d3ee);
+  box-shadow: 0 0 24px rgba(74, 222, 128, 0.45);
+}
+.pay-success-title {
+  margin: 0 0 0.35rem;
+  font-size: 1.2rem;
+  font-weight: 800;
+  color: #fff;
+}
+.pay-success-sub {
+  margin: 0 0 1.1rem;
+  font-size: 0.85rem;
+  color: rgba(255, 255, 255, 0.65);
+  line-height: 1.45;
+}
+.pay-success-codebox {
+  background: rgba(37, 211, 102, 0.06);
+  border: 1px solid rgba(74, 222, 128, 0.35);
+  border-radius: 14px;
+  padding: 1rem 1rem 0.85rem;
+  margin-bottom: 1rem;
+}
+.pay-success-codelabel {
+  display: block;
+  font-size: 0.68rem;
+  letter-spacing: 0.18em;
+  color: #22d3ee;
+  font-weight: 800;
+  margin-bottom: 0.55rem;
+}
+.pay-success-coderow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+.pay-success-code {
+  font-family: 'Courier New', monospace;
+  font-size: 1.5rem;
+  font-weight: 900;
+  color: #4ade80;
+  letter-spacing: 0.12em;
+  text-shadow: 0 0 16px rgba(74, 222, 128, 0.45);
+  user-select: all;
+  word-break: break-all;
+}
+.pay-success-copy {
+  padding: 0.5rem 1rem;
+  border-radius: 10px;
+  border: 1px solid rgba(74, 222, 128, 0.5);
+  background: rgba(74, 222, 128, 0.12);
+  color: #4ade80;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.pay-success-copy:hover {
+  background: linear-gradient(135deg, #4ade80, #22d3ee);
+  color: #0a0f2e;
+  border-color: transparent;
+}
+.pay-success-feedback {
+  display: block;
+  margin-top: 0.5rem;
+  font-size: 0.78rem;
+  color: #4ade80;
+  opacity: 0;
+  transition: opacity 0.3s;
+  min-height: 1rem;
+}
+.pay-success-hint {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+/* Modal responsive */
+@media (max-width: 480px) {
+  .payment-modal {
+    padding: 1.25rem;
+    border-radius: 16px;
+    max-width: 95vw;
+  }
+  .payment-modal h2 {
+    font-size: 1.2rem;
+  }
+  .pay-methods {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.5rem;
+  }
+  .pay-method {
+    padding: 0.6rem 0.7rem;
+  }
+  .pay-method__name {
+    font-size: 0.75rem;
+  }
+  .pay-method__logo img {
+    max-height: 22px;
+    max-width: 60px;
+  }
+  .modal-details p {
+    font-size: 0.8rem;
+  }
+}
+
+@media (max-width: 360px) {
+  .payment-modal {
+    padding: 1rem;
+  }
+  .pay-methods {
+    grid-template-columns: 1fr;
+  }
+}
+
+
+/* Larger logos for InnBucks and O'mari */
+.pay-method__logo img.logo-large {
+  max-height: 44px;
+  max-width: 120px;
+}
+
+
+/* Selection persistence during processing */
+.pay-method.processing {
+  pointer-events: none;
+  opacity: 0.7;
+}
+
+.pay-method.processing:has(.pay-method__input:checked) {
+  opacity: 1;
+  border-color: rgba(0, 212, 255, 0.85);
+  box-shadow: 0 0 20px rgba(0, 212, 255, 0.5);
+}
+/* Payment modal overlay */
+.payment-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgba(10, 15, 29, 0.35);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  animation: modalFadeIn 0.3s ease;
+}
+
+@keyframes modalFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
