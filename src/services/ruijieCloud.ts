@@ -67,10 +67,13 @@ export interface RuijieVoucher {
   quotaMb?: number;
   usedQuotaMb?: number;
   usedTimeMin?: number;
+  usedCount?: number;
   timePeriodMin?: number;
   loginTime?: number;
+  firstUseTime?: number;
   currentClients?: number;
   maxClients?: number;
+  onlineStatus?: boolean | number | string;
   packageName?: string;
   disableStatus?: number;
 }
@@ -266,20 +269,23 @@ export async function getRuijieVouchers(input: GetRuijieVouchersInput = {}): Pro
     return list.map((v: any) => ({
       codeNo: String(v.codeNo ?? v.voucherCode ?? ''),
       voucherCode: v.voucherCode != null ? String(v.voucherCode) : v.codeNo != null ? String(v.codeNo) : undefined,
-      expiryTime: parseExpiry(v.expiryTime),
+      expiryTime: parseExpiry(v.expiryTime ?? v.expireTime ?? v.expire_time),
       profile: v.profile != null ? String(v.profile) : undefined,
       userGroupId: v.userGroupId != null ? String(v.userGroupId) : undefined,
       status: v.status != null ? String(v.status) : undefined,
       comment: v.comment != null ? String(v.comment) : undefined,
-      quotaMb: toNum(v.quota),
-      usedQuotaMb: toNum(v.usedQuota),
-      usedTimeMin: toNum(v.usedTime),
-      timePeriodMin: toNum(v.timePeriod),
-      loginTime: toNum(v.loginTime),
-      currentClients: toNum(v.currentClients),
+      quotaMb: toNum(v.quota ?? v.quotaMb),
+      usedQuotaMb: toNum(v.usedQuota ?? v.usedQuotaMb),
+      usedTimeMin: toNum(v.usedTime ?? v.usedTimeMin),
+      usedCount: toNum(v.usedCount ?? v.used_count),
+      timePeriodMin: toNum(v.timePeriod ?? v.timePeriodMin),
+      loginTime: toNum(v.loginTime ?? v.login_time),
+      firstUseTime: parseExpiry(v.firstUseTime ?? v.first_use_time ?? v.firstLoginTime),
+      currentClients: toNum(v.currentClients ?? v.current_clients),
       maxClients: toNum(v.maxClients),
+      onlineStatus: v.onlineStatus ?? v.online_status,
       packageName: v.packageName != null ? String(v.packageName) : undefined,
-      disableStatus: toNum(v.disableStatus),
+      disableStatus: toNum(v.disableStatus ?? v.disable_status),
     }));
   });
 }

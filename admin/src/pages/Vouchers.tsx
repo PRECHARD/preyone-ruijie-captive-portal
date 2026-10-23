@@ -41,7 +41,11 @@ interface Package {
     status?: string | null;
     first_redeemed_at?: string | null;
     activated_at?: string | null;
+    last_seen_at?: string | null;
+    ruijie_sync_status?: string | null;
+    ruijie_voucher_id?: string | null;
     max_devices?: number | null;
+    effective_max_devices?: number | null;
     device_count?: number;
     bound_macs?: string[] | null;
     devices?: Array<{
@@ -152,7 +156,7 @@ export default function Vouchers() {
   const [creating, setCreating] = useState(false);
 
   const [bulkTier, setBulkTier] = useState('');
-  const [bulkCount, setBulkCount] = useState(10);
+  const [bulkCount, setBulkCount] = useState(2);
   const [bulkPrice, setBulkPrice] = useState('');
   const [bulkPayMethod, setBulkPayMethod] = useState('Cash');
   const [bulkPayRef, setBulkPayRef] = useState('');
@@ -189,6 +193,8 @@ export default function Vouchers() {
   // Stamp of the last successful list sync, surfaced as the "Live" pill so an
   // operator can tell at a glance whether what they are reading is current.
   const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
+  const [listStatus, setListStatus] = useState('all');
+  const [syncingStatuses, setSyncingStatuses] = useState(false);
 
   const [toggleBusy, setToggleBusy] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Voucher | null>(null);
@@ -483,7 +489,7 @@ const codes = a.voucher_data?.codes;
   const handleBulk = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!bulkTier) { setBulkStatus({ type: 'error', msg: 'Select a package tier' }); return; }
-    if (bulkCount < 1 || bulkCount > 100) { setBulkStatus({ type: 'error', msg: 'Count must be 1-100' }); return; }
+    if (bulkCount < 2 || bulkCount > 100) { setBulkStatus({ type: 'error', msg: 'Count must be 2-100' }); return; }
     if (needsClockIn && !isClockedIn) { setBulkStatus({ type: 'error', msg: 'You must clock in before selling vouchers.' }); return; }
 
     // High-stakes gate (unit price: custom price, else package price)
@@ -596,6 +602,38 @@ const codes = a.voucher_data?.codes;
 
   const refreshVouchers = () => {
     api.get<{ vouchers: Voucher[] }>('/vouchers').then(d => setVouchers(d.vouchers)).catch(() => {});
+  };
+
+  const syncVoucherStatuses = async () => {
+    setSyncingStatuses(true);
+    try {
+      const result = await api.post<any>('/vouchers/sync-status');
+      if (result?.errors?.length) throw new Error(result.errors[0]);
+      const all: Voucher[] = [];
+      for (let page = 1; page <= 20; page++) {
+        const data = await api.get<{ vouchers: Voucher[] }>(`/vouchers?pageSize=200&page=${page}`);
+        const rows = data?.vouchers ?? [];
+        all.push(...rows);
+        if (rows.length < 200) break;
+      }
+      setVouchers(all);
+      setLastSyncedAt(new Date());
+      showToast({
+        title: 'Voucher statuses synced',
+        message: result?.skipped
+          ? 'Ruijie sync is not configured or is already running.'
+          : `${result?.updated ?? 0} of ${result?.matched ?? 0} matched vouchers refreshed.`,
+        type: 'success',
+      });
+    } catch (err: any) {
+      showToast({
+        title: 'Status sync failed',
+        message: err?.message || 'Please try again.',
+        type: 'error',
+      });
+    } finally {
+      setSyncingStatuses(false);
+    }
   };
 
   // Seeds the renew modal. Duration comes from the voucher's own package so a
@@ -859,6 +897,10 @@ const codes = a.voucher_data?.codes;
 
   const isRestrictedTier = selectedPkg && APPROVAL_TIERS.includes(selectedPkg.tier_name);
   const createDisabled = creating || (needsClockIn && !isClockedIn && !isRestrictedTier);
+  const listStatuses = ['all', 'Unused', 'Active', 'Expired', 'Disabled'];
+  const filteredVouchers = listStatus === 'all'
+    ? vouchers
+    : vouchers.filter(v => (v.status || 'Unknown') === listStatus);
 
   return (
     <div className="vouchers-page">
@@ -1072,10 +1114,10 @@ const codes = a.voucher_data?.codes;
             <div className="form-field" style={{ maxWidth: 130 }}>
               <label>Users</label>
               <div className="stepper">
-                <button type="button" className="stepper-btn" onClick={() => setBulkCount(c => Math.max(1, c - 5))} disabled={bulkCreating}>&minus;</button>
-                <input type="number" className="stepper-input" value={bulkCount} min="1" max="100"
-                  onChange={e => { const n = parseInt(e.target.value); if (!isNaN(n)) setBulkCount(Math.max(1, Math.min(100, n))); }} />
-                <button type="button" className="stepper-btn" onClick={() => setBulkCount(c => Math.min(100, c + 5))} disabled={bulkCreating}>+</button>
+                <button type="button" className="stepper-btn" onClick={() => setBulkCount(c => Math.max(2, c - 1))} disabled={bulkCreating}>&minus;</button>
+                <input type="number" className="stepper-input" value={bulkCount} min="2" max="100"
+                  onChange={e => { const n = parseInt(e.target.value); if (!isNaN(n)) setBulkCount(Math.max(2, Math.min(100, n))); }} />
+                <button type="button" className="stepper-btn" onClick={() => setBulkCount(c => Math.min(100, c + 1))} disabled={bulkCreating}>+</button>
               </div>
             </div>
             <div className="form-field" style={{ maxWidth: 190 }}>
@@ -1297,26 +1339,53 @@ const codes = a.voucher_data?.codes;
       )}
 
       {/* Voucher List */}
-      <div className="section-head" style={{ marginTop: '2rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem' }}>
+      <div className="section-head" style={{ marginTop: '2rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap' }}>
         <h2 className="section-head-title" style={{ margin: 0 }}>Voucher List</h2>
-        <span
-          className="live-pill"
-          title="Re-reads every 10 seconds, so redemptions, bound devices and statuses stay current without a manual reload."
-        >
-          <span className="live-dot" />
-          <span className="live-pill__label">Live</span>
-          <span className="live-pill__time">{lastSyncedAt ? `synced ${lastSyncedAt.toLocaleTimeString()}` : 'syncing…'}</span>
-        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+          <select
+            className="form-select"
+            aria-label="Filter vouchers by status"
+            value={listStatus}
+            onChange={e => setListStatus(e.target.value)}
+            style={{ width: 140, padding: '0.35rem 0.5rem', fontSize: '0.8rem' }}
+          >
+            {listStatuses.map(status => (
+              <option key={status} value={status}>{status === 'all' ? 'All statuses' : status}</option>
+            ))}
+          </select>
+          {canManageVoucher && (
+            <button
+              type="button"
+              className="btn-sm"
+              onClick={syncVoucherStatuses}
+              disabled={syncingStatuses}
+              title="Pull the latest usage, online state and expiry from Ruijie Cloud for online and staff-issued vouchers."
+            >
+              {syncingStatuses ? 'Syncing…' : 'Sync Statuses'}
+            </button>
+          )}
+          <span
+            className="live-pill"
+            title="Re-reads every 10 seconds, so redemptions, bound devices and statuses stay current without a manual reload."
+          >
+            <span className="live-dot" />
+            <span className="live-pill__label">Live</span>
+            <span className="live-pill__time">{lastSyncedAt ? `synced ${lastSyncedAt.toLocaleTimeString()}` : 'syncing…'}</span>
+          </span>
+        </div>
       </div>
       <div className="card card-table">
         {vouchers.length === 0 ? (
           <div className="table-empty"><p>No vouchers created yet.</p></div>
+        ) : filteredVouchers.length === 0 ? (
+          <div className="table-empty"><p>No vouchers match this status.</p></div>
         ) : (
           <table className="data-table">
             <thead><tr><th>Code</th><th>Status</th><th>Price</th><th>Duration</th><th>Bandwidth</th><th>Data</th><th>Max Uses</th><th>Used</th><th>Devices</th><th>Package</th><th>Created</th><th>Actions</th></tr></thead>
             <tbody>
-              {vouchers.map(v => {
+              {filteredVouchers.map(v => {
                 const bound = (v.device_count ?? 0) > 0;
+                const maxDevices = v.effective_max_devices ?? v.max_devices;
                 const uses = v.used_count || 0;
                 const maxUses = Math.max(1, v.max_uses || 1);
                 const usedPct = Math.min(100, Math.round((uses / maxUses) * 100));
@@ -1347,10 +1416,10 @@ const codes = a.voucher_data?.codes;
                   <td>
                     <span
                       className={`dev-chip ${bound ? 'dev-chip--live' : 'dev-chip--idle'}`}
-                      title={`${v.device_count ?? 0} of ${v.max_devices ?? '—'} device slots in use`}
+                      title={`${v.device_count ?? 0} of ${maxDevices ?? '—'} device slots in use`}
                     >
                       {bound && <span className="live-dot" />}
-                      {v.device_count ?? 0}/{v.max_devices ?? '—'}
+                      {v.device_count ?? 0}/{maxDevices ?? '—'}
                     </span>
                   </td>
                   <td>{v.package_tier || <span className="muted">—</span>}</td>
@@ -1485,6 +1554,7 @@ const codes = a.voucher_data?.codes;
 
       {detailVoucher && (() => {
         const v = detailVoucher;
+        const maxDevices = v.effective_max_devices ?? v.max_devices ?? null;
         const macs = Array.isArray(v.bound_macs) ? v.bound_macs : [];
         const gb = (b?: number | null) => (b == null ? null : (b / (1024 ** 3)).toFixed(2) + ' GB');
         const trafficUsed = gb(v.traffic_used_bytes);
@@ -1535,10 +1605,11 @@ const codes = a.voucher_data?.codes;
                 <div className="vd-cell"><span className="vd-label">Bandwidth</span><span className="vd-value">{v.bandwidth_mbps_up}/{v.bandwidth_mbps_down} Mbps</span></div>
                 <div className="vd-cell"><span className="vd-label">Data</span><span className="vd-value">{v.is_uncapped ? 'Unlimited' : (v.data_limit_gb ?? 'Unlimited') + ' GB'}</span></div>
                 <div className="vd-cell"><span className="vd-label">Uses</span><span className="vd-value">{v.used_count}/{v.max_uses}</span></div>
-                <div className="vd-cell"><span className="vd-label">Devices</span><span className="vd-value">{(v.device_count ?? 0)}/{v.max_devices ?? '—'}</span></div>
+                <div className="vd-cell"><span className="vd-label">Devices</span><span className="vd-value">{(v.device_count ?? 0)}/{maxDevices ?? '—'}</span></div>
                 <div className="vd-cell"><span className="vd-label">Package</span><span className="vd-value">{v.package_tier || '—'}</span></div>
                 <div className="vd-cell"><span className="vd-label">Created</span><span className="vd-value">{fmtDate(v.created_at)}</span></div>
                 <div className="vd-cell"><span className="vd-label">Activated</span><span className="vd-value">{v.activated_at ? fmtDate(v.activated_at) : '—'}</span></div>
+                <div className="vd-cell"><span className="vd-label">Last seen</span><span className="vd-value">{v.last_seen_at ? fmtDate(v.last_seen_at) : '—'}</span></div>
                 <div className="vd-cell"><span className="vd-label">First redeemed</span><span className="vd-value">{v.first_redeemed_at ? fmtDate(v.first_redeemed_at) : '—'}</span></div>
                 <div className="vd-cell"><span className="vd-label">Expires</span><span className="vd-value">{fmtDate(v.expires_at)}</span></div>
               </div>
@@ -1573,7 +1644,7 @@ const codes = a.voucher_data?.codes;
 
               <section className="vd-section">
                 <h4 className="vd-section-title">Device bindings</h4>
-                <p className="vd-count">{(v.device_count ?? macs.length)} of {v.max_devices ?? '—'} device slot{(v.max_devices ?? 2) === 1 ? '' : 's'} in use</p>
+                <p className="vd-count">{(v.device_count ?? macs.length)} of {maxDevices ?? '—'} device slot{(maxDevices ?? 2) === 1 ? '' : 's'} in use</p>
                 {devices.length > 0 ? (
                   <ul className="vd-macs">
                     {devices.map(d => (

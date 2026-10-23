@@ -153,6 +153,45 @@ describe('Admin routes', () => {
         expect.any(Array),
       );
     });
+
+    it('returns a paginated access-log page with request metadata and stable summary', async () => {
+      (pool.query as any)
+        .mockResolvedValueOnce({ rows: [{ n: 1 }] })
+        .mockResolvedValueOnce({
+          rows: [{ total: 3, accepts: 2, rejects: 1, stops: 0, sign_ins: 0, devices: 2 }],
+        })
+        .mockResolvedValueOnce({
+          rows: [{
+            id: '1',
+            event: 'radius_accept',
+            mac_address: 'AA:BB:CC:DD:EE:01',
+            request_method: 'GET',
+            request_url: '/api/radius/auth',
+            http_status: 200,
+            full_name: 'Alice',
+          }],
+        });
+
+      const res = await request(createApp())
+        .get('/api/admin/access-logs?event=radius_accept&range=7d&q=AA&page=2&pageSize=25');
+
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({
+        total: 1,
+        page: 2,
+        pageSize: 25,
+        summary: { total: 3, accepts: 2, rejects: 1, signIns: 0, devices: 2 },
+      });
+      expect(res.body.rows[0]).toMatchObject({
+        request_method: 'GET',
+        request_url: '/api/radius/auth',
+        http_status: 200,
+        full_name: 'Alice',
+      });
+      const [pageSql, pageParams] = (pool.query as any).mock.calls[2];
+      expect(pageSql).toContain('al.request_method');
+      expect(pageParams.slice(-2)).toEqual([25, 25]);
+    });
   });
 
   describe('POST /api/admin/vouchers', () => {

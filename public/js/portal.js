@@ -4,6 +4,91 @@
   // --- PACKAGE PURCHASE FLOW (Pesepay / EcoCash) ---
   const packageButtons = document.querySelectorAll('.pkg-action');
   const ruijieParams = new URLSearchParams(location.search);
+
+  // The customer normally reaches the portal from the Ruijie-hosted page. Keep
+  // that exact page URL (including its per-captive-session sessionId) so the
+  // success page can send the customer back to the same Ruijie portal instead
+  // of a stale hard-coded session.
+  const RUIJIE_PORTAL_PATH_PREFIX = '/download/static/advertisement/maccauth/';
+  const RUIJIE_PORTAL_STORAGE_KEY = 'preyone_ruijie_portal';
+  const RUIJIE_PORTAL_CONTEXT_TTL_MS = 30 * 60 * 1000;
+  const ruijiePortalContext = (function () {
+    function isRuijiePortal(url) {
+      return /(^|\.)ruijienetworks\.com$/i.test(url.hostname) &&
+        url.pathname.indexOf(RUIJIE_PORTAL_PATH_PREFIX) === 0;
+    }
+    function timestampOf(url) {
+      var direct = url.searchParams.get('timestamp');
+      if (direct) return direct;
+      var match = url.search.match(/[?&]timestamp=?(\d+)/i);
+      return match ? match[1] : '';
+    }
+    function remember(context) {
+      try {
+        localStorage.setItem(RUIJIE_PORTAL_STORAGE_KEY, JSON.stringify({
+          portalUrl: context.portalUrl,
+          sessionId: context.sessionId,
+          timestamp: context.timestamp,
+          savedAt: Date.now(),
+        }));
+      } catch (_err) {
+        /* storage can be unavailable in private mode */
+      }
+    }
+    function restore() {
+      try {
+        var saved = JSON.parse(localStorage.getItem(RUIJIE_PORTAL_STORAGE_KEY) || 'null');
+        if (!saved || !saved.portalUrl) return null;
+        if (Date.now() - Number(saved.savedAt) > RUIJIE_PORTAL_CONTEXT_TTL_MS) return null;
+        var url = new URL(saved.portalUrl, location.href);
+        if (!isRuijiePortal(url)) return null;
+        return {
+          portalUrl: url.href,
+          sessionId: saved.sessionId || '',
+          timestamp: saved.timestamp || '',
+        };
+      } catch (_err) {
+        return null;
+      }
+    }
+    var candidates = [
+      document.referrer,
+      location.href,
+      ruijieParams.get('login_url'),
+      ruijieParams.get('loginUrl'),
+    ];
+    for (var i = 0; i < candidates.length; i++) {
+      var raw = candidates[i];
+      if (!raw) continue;
+      try {
+        var url = new URL(raw, location.href);
+        if (!isRuijiePortal(url)) continue;
+        var sessionId = url.searchParams.get('sessionId') ||
+          url.searchParams.get('session_id') ||
+          url.searchParams.get('sessionid') || '';
+        var timestamp = timestampOf(url);
+        if (!sessionId && !timestamp) continue;
+        var context = { portalUrl: url.href, sessionId: sessionId, timestamp: timestamp };
+        remember(context);
+        return context;
+      } catch (_err) {
+        /* not a usable URL */
+      }
+    }
+    return restore();
+  })();
+
+  const inboundRuijieSessionId =
+    ruijieParams.get('sessionId') ||
+    ruijieParams.get('session_id') ||
+    ruijieParams.get('sessionid') || '';
+  const inboundRuijieTimestamp = (function () {
+    var direct = ruijieParams.get('timestamp');
+    if (direct) return direct;
+    var match = location.search.match(/[?&]timestamp=?(\d+)/i);
+    return match ? match[1] : '';
+  })();
+
   let selectedPackage = null;
   let paymentPollTimer = null;
   // Set once /status reports supportRequired, so the give-up message stops
@@ -359,6 +444,13 @@
         var value = ruijieParams.get(key);
         if (value) qs.set(key, value);
       });
+      if (ruijiePortalContext) {
+        qs.set('ruijiePortal', ruijiePortalContext.portalUrl);
+      }
+      var sessionId = (ruijiePortalContext && ruijiePortalContext.sessionId) || inboundRuijieSessionId;
+      var ruijieTimestamp = (ruijiePortalContext && ruijiePortalContext.timestamp) || inboundRuijieTimestamp;
+      if (sessionId) qs.set('sessionId', sessionId);
+      if (ruijieTimestamp) qs.set('timestamp', ruijieTimestamp);
 
       var pkg = selectedPackage || {};
       var packageName = data.packageName || data.tier || pkg['data-tier'] || 'Prepaid';

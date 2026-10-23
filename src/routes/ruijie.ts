@@ -99,8 +99,73 @@ export interface EnrichedSession extends RuijieOnlineUser {
   code: string | null;
   holderName: string | null;
   holderPhone: string | null;
+  /**
+   * Portal account matched by the client MAC. Holder fields above come from
+   * the voucher; these come from the signed-in users/wispr profile and are
+   * what the Accounts column shows when a voucher has no holder name.
+   */
+  accountName: string | null;
+  accountPhone: string | null;
+  accountSessionExpiresAt: string | null;
   /** Which local source produced `code` â€” null when nothing resolved. */
   bindingSource: BindingSource | null;
+}
+
+interface PortalAccount {
+  macKey: string;
+  fullName: string | null;
+  phone: string | null;
+  voucherCode: string | null;
+  sessionExpiresAt: string | null;
+}
+
+/**
+ * Batch-load portal accounts by MAC. Ruijie only reports MACs, while the
+ * customer name/phone live on users (and, for live WISPr sessions, on the
+ * wispr_profiles MAC). Joining them here keeps the session API as the single
+ * place that resolves an online client to an actual person.
+ */
+async function loadPortalAccounts(macs: Iterable<unknown>): Promise<Map<string, PortalAccount>> {
+  const out = new Map<string, PortalAccount>();
+  const keys = [...new Set([...macs].map(bindingMacKey).filter((k): k is string => !!k))];
+  if (keys.length === 0) return out;
+
+  try {
+    const { rows } = await pool.query(
+      `WITH accounts AS (
+         SELECT lower(regexp_replace(u.mac_address, '[^0-9a-fA-F]', '', 'g')) AS mac_key,
+                u.full_name, u.phone, u.voucher_code, u.session_expires_at, u.created_at
+           FROM users u
+          WHERE u.mac_address IS NOT NULL
+         UNION ALL
+         SELECT lower(regexp_replace(wp.mac_address, '[^0-9a-fA-F]', '', 'g')) AS mac_key,
+                u.full_name, u.phone, u.voucher_code, u.session_expires_at, u.created_at
+           FROM wispr_profiles wp
+           JOIN users u ON u.id = wp.user_id
+          WHERE wp.mac_address IS NOT NULL
+       )
+       SELECT DISTINCT ON (mac_key)
+              mac_key, full_name, phone, voucher_code, session_expires_at
+         FROM accounts
+        WHERE mac_key = ANY($1::text[])
+        ORDER BY mac_key, created_at DESC`,
+      [keys]
+    );
+    for (const row of rows) {
+      const key = bindingMacKey(row.mac_key);
+      if (!key) continue;
+      out.set(key, {
+        macKey: key,
+        fullName: row.full_name ?? null,
+        phone: row.phone ?? null,
+        voucherCode: row.voucher_code ?? null,
+        sessionExpiresAt: row.session_expires_at ? new Date(row.session_expires_at).toISOString() : null,
+      });
+    }
+  } catch (err) {
+    console.error('[RUIJIE API] portal account lookup failed:', err);
+  }
+  return out;
 }
 
 async function enrichSessions(sessions: RuijieOnlineUser[]): Promise<EnrichedSession[]> {
@@ -109,6 +174,9 @@ async function enrichSessions(sessions: RuijieOnlineUser[]): Promise<EnrichedSes
     code: null,
     holderName: null,
     holderPhone: null,
+    accountName: null,
+    accountPhone: null,
+    accountSessionExpiresAt: null,
     bindingSource: null,
   }));
   if (out.length === 0) return out;
@@ -126,7 +194,26 @@ async function enrichSessions(sessions: RuijieOnlineUser[]): Promise<EnrichedSes
       s.bindingSource = binding.source;
     }
 
-    // 2) Strict contract fallback: Ruijie reports the voucher code as
+    // 2) MAC -> portal account (name / phone / expiry). Also fills a gap when
+    //    the voucher resolver had no holder name, and recovers the PIN from
+    //    users.voucher_code if none of the four binding sources matched.
+    const accounts = await loadPortalAccounts(out.map((s) => s.mac));
+    for (const s of out) {
+      const key = bindingMacKey(s.mac);
+      const account = key ? accounts.get(key) : undefined;
+      if (!account) continue;
+      s.accountName = account.fullName;
+      s.accountPhone = account.phone;
+      s.accountSessionExpiresAt = account.sessionExpiresAt;
+      if (!s.holderName && account.fullName) s.holderName = account.fullName;
+      if (!s.holderPhone && account.phone) s.holderPhone = account.phone;
+      if (!s.code && account.voucherCode) {
+        s.code = account.voucherCode.toLowerCase();
+        s.bindingSource = 'users';
+      }
+    }
+
+    // 3) Strict contract fallback: Ruijie reports the voucher code as
     //    `userName` on some deployments. Accept it ONLY after confirming it
     //    exists on vouchers â€” otherwise the label stays hidden and the UI
     //    renders an em-dash rather than a fake PIN.
@@ -391,9 +478,9 @@ ruijieRouter.get('/vouchers/:code', async (req, res) => {
   try {
     const code = String(req.params.code ?? '').trim().toLowerCase();
     const { rows } = await pool.query(
-      `SELECT id, code, package_tier, holder_name, holder_phone, ruijie_sync_status,
-              ruijie_voucher_id, data_consumed_mb, last_accounting_sync, used_count,
-              expires_at, is_disabled, deleted_at
+      `SELECT id, code, package_tier, holder_name, holder_phone, last_seen_at,
+              ruijie_sync_status, ruijie_voucher_id, data_consumed_mb,
+              last_accounting_sync, used_count, expires_at, is_disabled, deleted_at
          FROM vouchers WHERE lower(code) = $1`,
       [code]
     );

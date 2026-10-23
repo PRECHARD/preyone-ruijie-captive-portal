@@ -209,6 +209,7 @@
 .un-consume__stat--critical { --uc-accent: var(--pink); }
 .un-consume__stat--exhausted { --uc-accent: var(--red); }
 .un-consume__stat--unlimited { --uc-accent: var(--purple, #a855f7); }
+.un-consume__stat--risk { --uc-accent: var(--red); }
 
 .un-consume__stat-num {
   font-family: var(--font-display);
@@ -291,6 +292,26 @@
   font-size: 0.7rem;
   font-variant-numeric: tabular-nums;
   color: var(--text-muted);
+}
+
+.un-consume__client {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 120px;
+}
+
+.un-consume__client span {
+  color: var(--text);
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+
+.un-consume__client em {
+  color: var(--text-dim);
+  font-size: 0.68rem;
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
 }
 
 .un-consume__used {

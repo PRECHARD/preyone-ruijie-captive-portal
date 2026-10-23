@@ -122,7 +122,12 @@ export default function SessionTable({
                     ) : (
                       <span className="wf-pin wf-pin--none">—</span>
                     )}
-                    {s.holderName && <span className="wf-holder">{s.holderName}</span>}
+                    {(s.accountName || s.holderName) && (
+                      <span className="wf-holder">
+                        {s.accountName || s.holderName}
+                        {(s.accountPhone || s.holderPhone) ? ` · ${s.accountPhone || s.holderPhone}` : ''}
+                      </span>
+                    )}
                   </div>
                 </td>
                 <td>

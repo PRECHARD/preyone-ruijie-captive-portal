@@ -76,14 +76,19 @@
         <canvas id="voucher-canvas" class="voucher-canvas" aria-hidden="true"></canvas>
 
         <div class="success-actions">
-          <button type="button" id="connectNowBtn" class="btn-primary success-connect-btn">
+          <button
+            type="button"
+            id="connectNowBtn"
+            class="btn-primary success-connect-btn"
+            data-ruijie-portal-base="https://portal-eu.ruijienetworks.com/download/static/advertisement/maccauth/customizefile/b2726dc01b864da599a95d6c24c006b1/dywns6juafnimjcdbps0a/index.html"
+          >
             <span id="connectBtnText">CONNECT NOW</span>
             <span id="connectBtnSpinner" class="spinner hidden" aria-hidden="true"></span>
           </button>
           <a id="downloadVoucherBtn" class="btn-secondary success-download-btn" download hidden>DOWNLOAD JPG</a>
         </div>
         <p id="connect-error" class="success-error hidden" role="alert"></p>
-        <p class="success-hint">Tap Connect Now once. We will authorise this device automatically.</p>
+        <p class="success-hint">Tap Connect Now to continue to the Wi-Fi portal and enter your PIN.</p>
       </section>
 
       <aside class="success-panel details-panel">
@@ -315,6 +320,71 @@
       var canvas = document.getElementById('voucher-canvas');
       var connecting = false;
 
+      function trustedRuijiePortal(raw) {
+        if (!raw) return null;
+        try {
+          var url = new URL(raw, window.location.href);
+          if (url.protocol !== 'https:') return null;
+          if (!/(^|\.)ruijienetworks\.com$/i.test(url.hostname)) return null;
+          if (url.pathname.indexOf('/download/static/advertisement/maccauth/') !== 0) return null;
+          return url;
+        } catch (_err) {
+          return null;
+        }
+      }
+
+      function storedRuijiePortalUrl() {
+        try {
+          var saved = JSON.parse(localStorage.getItem('preyone_ruijie_portal') || 'null');
+          if (!saved || !saved.portalUrl) return '';
+          if (Date.now() - Number(saved.savedAt) > 30 * 60 * 1000) return '';
+          var url = trustedRuijiePortal(saved.portalUrl);
+          return url ? url.href : '';
+        } catch (_err) {
+          return '';
+        }
+      }
+
+      // Prefer the exact Ruijie page the customer came from. If only the
+      // captive-session id survived, rebuild the same page URL from the base
+      // stored on the button.
+      function resolveRuijiePortalUrl() {
+        var candidates = [
+          params.get('ruijiePortal'),
+          params.get('loginUrl'),
+          params.get('login_url'),
+          document.referrer,
+        ];
+        for (var i = 0; i < candidates.length; i++) {
+          var candidate = trustedRuijiePortal(candidates[i]);
+          if (candidate) return candidate.href;
+        }
+
+        var stored = storedRuijiePortalUrl();
+        var sessionId = (params.get('sessionId') ||
+          params.get('session_id') ||
+          params.get('sessionid') || '').trim();
+        if (!sessionId) return stored;
+
+        var timestamp = (params.get('timestamp') || '').replace(/\D/g, '');
+        if (!timestamp) {
+          var match = window.location.search.match(/[?&]timestamp=?(\d+)/i);
+          if (match) timestamp = match[1];
+        }
+        if (!timestamp) timestamp = String(Date.now());
+
+        var base = connectBtn && connectBtn.getAttribute('data-ruijie-portal-base');
+        var target = trustedRuijiePortal(base);
+        if (!target) return stored;
+        target.search = '?timestamp' + encodeURIComponent(timestamp) +
+          '&sessionId=' + encodeURIComponent(sessionId);
+        return target.href;
+      }
+
+      // Exposed narrowly so the URL builder can be covered by the jsdom test
+      // without driving a real navigation.
+      window.__preyoneResolveRuijiePortal = resolveRuijiePortalUrl;
+
       function setConnectError(message) {
         if (!connectError) return;
         if (!message) {
@@ -438,6 +508,12 @@
 
         setConnectError('');
         setConnecting(true);
+
+        var ruijiePortalUrl = resolveRuijiePortalUrl();
+        if (ruijiePortalUrl) {
+          window.location.href = ruijiePortalUrl;
+          return;
+        }
 
         var storageKey = 'preyone_connect_' + voucherCode.toLowerCase();
         try {

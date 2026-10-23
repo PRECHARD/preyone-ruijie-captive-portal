@@ -62,10 +62,13 @@ const DEVICES_URL = '/service/api/maint/devices';
 const VOUCHER_SYNC_COLUMNS_SQL = `
   ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS holder_name TEXT;
   ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS holder_phone TEXT;
+  ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ;
   ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS ruijie_sync_status TEXT;
   ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS ruijie_voucher_id TEXT;
   ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS data_consumed_mb NUMERIC(12,2);
   ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS last_accounting_sync TIMESTAMPTZ;
+  ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS ruijie_active_clients INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS ruijie_max_clients INTEGER;
   CREATE INDEX IF NOT EXISTS idx_vouchers_ruijie_sync_status
     ON vouchers (ruijie_sync_status) WHERE ruijie_sync_status IS NOT NULL;
 `;
@@ -202,11 +205,12 @@ export async function ensureVoucherRuijieSchema(): Promise<void> {
         .query(
           `SELECT COUNT(*)::int AS n FROM information_schema.columns
             WHERE table_name = 'vouchers'
-              AND column_name IN ('holder_name','holder_phone','ruijie_sync_status',
-                                  'ruijie_voucher_id','data_consumed_mb','last_accounting_sync')`
+              AND column_name IN ('holder_name','holder_phone','last_seen_at','ruijie_sync_status',
+                                  'ruijie_voucher_id','data_consumed_mb','last_accounting_sync',
+                                  'ruijie_active_clients','ruijie_max_clients')`
         )
         .catch(() => ({ rows: [{ n: -1 }] }));
-      if (Number(rows[0]?.n) >= 6) return;
+      if (Number(rows[0]?.n) >= 9) return;
       await new Promise((r) => setTimeout(r, attempt * 750));
     }
   }

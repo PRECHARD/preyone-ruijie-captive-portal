@@ -127,14 +127,25 @@ export default function VoucherConsumptionTab() {
   const rows = useMemo(() => data?.rows ?? [], [data]);
   const summary = data?.summary;
 
-  // Search runs first (PIN or package), status chips narrow the result.
+  // Search runs first (PIN, package or client), status chips narrow the result.
   const searched = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return rows;
-    return rows.filter((r) => r.code.toLowerCase().includes(q) || (r.packageName || '').toLowerCase().includes(q));
+    return rows.filter((r) =>
+      r.code.toLowerCase().includes(q)
+      || (r.packageName || '').toLowerCase().includes(q)
+      || (r.holderName || '').toLowerCase().includes(q)
+      || (r.holderPhone || '').toLowerCase().includes(q)
+    );
   }, [rows, query]);
 
   const visible = useMemo(() => searched.filter((r) => matchesFilter(r, filter)), [searched, filter]);
+  const atRiskValue = useMemo(
+    () => rows
+      .filter((r) => r.status === 'low' || r.status === 'critical')
+      .reduce((sum, r) => sum + (Number(r.priceAmount) || 0), 0),
+    [rows]
+  );
 
   const openDetail = (row: VoucherConsumptionRow) => setDetail(row);
 
@@ -206,6 +217,12 @@ export default function VoucherConsumptionTab() {
             <div className="un-consume__stat-num">{summary.unlimited}</div>
             <div className="un-consume__stat-label">Unlimited</div>
           </div>
+          <div className="un-consume__stat un-consume__stat--risk">
+            <div className="un-consume__stat-num" style={{ fontSize: '1.35rem' }}>
+              ${atRiskValue.toFixed(2)}
+            </div>
+            <div className="un-consume__stat-label">At-risk value</div>
+          </div>
         </div>
       )}
 
@@ -215,7 +232,7 @@ export default function VoucherConsumptionTab() {
           <input
             type="search"
             className="un-consume__search"
-            placeholder="Search PIN or package…"
+            placeholder="Search PIN, package or client…"
             aria-label="Search voucher PIN or package"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -256,6 +273,7 @@ export default function VoucherConsumptionTab() {
               <tr>
                 <th>PIN</th>
                 <th>Package</th>
+                <th>Client</th>
                 <th>Used / Bundle</th>
                 <th>Consumption</th>
                 <th>Status</th>
@@ -277,6 +295,16 @@ export default function VoucherConsumptionTab() {
                     </span>
                   </td>
                   <td>{row.packageName || '—'}</td>
+                  <td>
+                    {row.holderName || row.holderPhone ? (
+                      <div className="un-consume__client">
+                        <span>{row.holderName || 'Unnamed'}</span>
+                        {row.holderPhone && <em>{row.holderPhone}</em>}
+                      </div>
+                    ) : (
+                      <span className="un-consume__muted">—</span>
+                    )}
+                  </td>
                   <td>{usedCell(row)}</td>
                   <td className="un-consume__barcell">
                     <div className="un-consume__bar" aria-hidden="true">
@@ -298,7 +326,13 @@ export default function VoucherConsumptionTab() {
                   </td>
                   <td>
                     {row.onlineNow
-                      ? <span className="badge badge--live"><span className="live-dot" />Online</span>
+                      ? (
+                        <span className="badge badge--live">
+                          <span className="live-dot" />
+                          {row.activeDevices ?? 1}
+                          {row.maxDevices ? `/${row.maxDevices}` : ''} online
+                        </span>
+                      )
                       : <span className="un-consume__muted">—</span>}
                   </td>
                   <td>

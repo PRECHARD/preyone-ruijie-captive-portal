@@ -130,8 +130,8 @@ export default function Reports({ onNavigate, canPeakHours }: Props = {}) {
     <div className="page">
       <div className="page-header">
         <div>
-          <h2 className="page-title">Reports</h2>
-          <p className="page-desc">Revenue, Sales & Handover Management</p>
+          <h2 className="page-title">Payment Logs</h2>
+          <p className="page-desc">Revenue, staff sales, cash handovers and Ruijie accounting reconciliation.</p>
         </div>
         {canPeakHours && onNavigate && (
           <div className="page-header-extra">
@@ -149,11 +149,11 @@ export default function Reports({ onNavigate, canPeakHours }: Props = {}) {
 
       {tab === 'revenue' && revenue && (
         <>
-          <div className="stats-grid stats-grid--compact" style={{ marginBottom: 20 }}>
-            <div className="stat-card stat-green"><span className="stat-label">Total Revenue</span><span className="stat-number"><span className="money">${Number(revenue.combinedRevenue || revenue.totalRevenue || 0).toFixed(2)} USD</span></span></div>
-            <div className="stat-card stat-orange"><span className="stat-label">Pending</span><span className="stat-number"><span className="money">${Number(revenue.pendingRevenue || 0).toFixed(2)} USD</span></span></div>
-            <div className="stat-card stat-blue"><span className="stat-label">Handover Approved</span><span className="stat-number"><span className="money">${Number(revenue.handoverApproved || 0).toFixed(2)} USD</span></span></div>
-            <div className="stat-card"><span className="stat-label">Handover Pending</span><span className="stat-number"><span className="money">${Number(revenue.handoverPending || 0).toFixed(2)} USD</span></span></div>
+          <div className="stats-grid stats-grid--compact stats-grid--hero" style={{ marginBottom: 20 }}>
+            <div className="stat-card stat-gold"><span className="stat-label">Total Revenue</span><span className="stat-number"><span className="money">${Number(revenue.combinedRevenue || revenue.totalRevenue || 0).toFixed(2)} USD</span></span></div>
+            <div className="stat-card stat-cyan"><span className="stat-label">Pending</span><span className="stat-number"><span className="money">${Number(revenue.pendingRevenue || 0).toFixed(2)} USD</span></span></div>
+            <div className="stat-card stat-green"><span className="stat-label">Handover Approved</span><span className="stat-number"><span className="money">${Number(revenue.handoverApproved || 0).toFixed(2)} USD</span></span></div>
+            <div className="stat-card stat-orange"><span className="stat-label">Handover Pending</span><span className="stat-number"><span className="money">${Number(revenue.handoverPending || 0).toFixed(2)} USD</span></span></div>
           </div>
 
           {revenue.byTier && (

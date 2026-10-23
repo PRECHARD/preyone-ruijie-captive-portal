@@ -164,8 +164,16 @@ CREATE INDEX IF NOT EXISTS idx_payments_user_id ON payments (user_id);
     mac_address TEXT,
     ip_address  INET,
     detail      TEXT,
+    request_url TEXT,
+    http_status INTEGER,
+    request_method TEXT,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
+  ALTER TABLE access_log ADD COLUMN IF NOT EXISTS request_url TEXT;
+  ALTER TABLE access_log ADD COLUMN IF NOT EXISTS http_status INTEGER;
+  ALTER TABLE access_log ADD COLUMN IF NOT EXISTS request_method TEXT;
+  CREATE INDEX IF NOT EXISTS idx_access_log_created_at ON access_log (created_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_access_log_event_created ON access_log (event, created_at DESC);
 
   CREATE TABLE IF NOT EXISTS voucher_redemptions (
     id            BIGSERIAL PRIMARY KEY,
@@ -1624,6 +1632,11 @@ CREATE INDEX IF NOT EXISTS idx_payments_user_id ON payments (user_id);
   -- users.session_expires_at â€” three different clocks, deliberately not merged.
   ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS activated_at TIMESTAMPTZ;
 
+  -- last_seen_at: most recent observation of remote voucher activity (Ruijie
+  -- login time, or NOW while the voucher has an online client). Kept separate
+  -- from activated_at, which is the FIRST use and must never move backwards.
+  ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ;
+
   -- is_disabled: manual kill switch. Deliberately separate from deleted_at so a
   -- disabled voucher stays visible and can be re-enabled, whereas a soft delete
   -- removes it from working views.
@@ -1673,8 +1686,10 @@ CREATE INDEX IF NOT EXISTS idx_payments_user_id ON payments (user_id);
 
   -- Derived status. Recomputed by Postgres on every read, so it can never disagree
   -- with used_count/expires_at. Precedence: a disabled or deleted code is Disabled
-  -- regardless of how it was used; then expiry; then whether it has been redeemed.
-  -- Note this deliberately has no "exhausted" state â€” a fully-redeemed code reads
+  -- regardless of how it was used; then expiry; then whether it has been redeemed
+  -- locally OR observed active on Ruijie (last_seen_at). The remote half matters
+  -- because gateway/Ruijie redemption never increments local used_count.
+  -- Note this deliberately has no "exhausted" state — a fully-redeemed code reads
   -- as Active, since the requested enum is Unused/Active/Expired/Disabled.
   CREATE OR REPLACE VIEW voucher_status AS
   SELECT
@@ -1682,7 +1697,7 @@ CREATE INDEX IF NOT EXISTS idx_payments_user_id ON payments (user_id);
     CASE
       WHEN v.is_disabled OR v.deleted_at IS NOT NULL              THEN 'Disabled'
       WHEN v.expires_at IS NOT NULL AND v.expires_at <= NOW()    THEN 'Expired'
-      WHEN v.used_count > 0                                       THEN 'Active'
+      WHEN v.used_count > 0 OR v.last_seen_at IS NOT NULL        THEN 'Active'
       ELSE 'Unused'
     END AS status
   FROM vouchers v;
@@ -1996,10 +2011,13 @@ CREATE INDEX IF NOT EXISTS idx_payments_user_id ON payments (user_id);
     await client.query(`
       ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS holder_name TEXT;
       ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS holder_phone TEXT;
+      ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ;
       ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS ruijie_sync_status TEXT;
       ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS ruijie_voucher_id TEXT;
       ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS data_consumed_mb NUMERIC(12,2);
       ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS last_accounting_sync TIMESTAMPTZ;
+      ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS ruijie_active_clients INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS ruijie_max_clients INTEGER;
       CREATE INDEX IF NOT EXISTS idx_vouchers_ruijie_sync_status
         ON vouchers (ruijie_sync_status) WHERE ruijie_sync_status IS NOT NULL;
     `);

@@ -328,6 +328,33 @@ describe('getRuijieVouchers', () => {
       disableStatus: 0,
     });
   });
+
+  it('accepts lifecycle aliases used by the admin status sync', async () => {
+    mocks.post.mockResolvedValueOnce({ status: 200, data: { code: 0, accessToken: 'tok' } });
+    mocks.get.mockResolvedValueOnce({
+      status: 200,
+      data: {
+        code: 0,
+        data: {
+          list: [{
+            voucherCode: 'abc123',
+            used_count: 2,
+            online_status: 'online',
+            first_use_time: 1792051811000,
+            expire_time: 4922215200000,
+          }],
+        },
+      },
+    });
+
+    const [v] = await getRuijieVouchers({ start: 0, pageSize: 100 });
+    expect(v).toMatchObject({
+      usedCount: 2,
+      onlineStatus: 'online',
+      firstUseTime: 1792051811000,
+      expiryTime: 4922215200000,
+    });
+  });
 });
 
 describe('getAllRuijieVouchers', () => {

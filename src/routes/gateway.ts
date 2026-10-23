@@ -60,20 +60,42 @@ export const gatewayRouter = Router();
  * Never throws: failing to record an auth decision must not change what
  * FreeRADIUS is told. Awaited so tests and crash-dumps see the write.
  */
+interface RadiusLogMeta {
+  requestMethod?: string;
+  requestUrl?: string;
+  httpStatus?: number;
+}
+
 async function recordRadiusAuth(
-  event: 'radius_accept' | 'radius_reject',
+  event: 'radius_accept' | 'radius_reject' | 'radius_stop',
   detail: string,
   mac: string,
-  userId?: string | null
+  userId?: string | null,
+  meta?: RadiusLogMeta
 ): Promise<void> {
   try {
     await pool.query(
-      `INSERT INTO access_log (user_id, event, mac_address, detail) VALUES ($1, $2, $3, $4)`,
-      [userId ?? null, event, mac || null, detail]
+      `INSERT INTO access_log
+         (user_id, event, mac_address, detail, request_method, request_url, http_status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [
+        userId ?? null,
+        event,
+        mac || null,
+        detail,
+        meta?.requestMethod ?? null,
+        meta?.requestUrl ?? null,
+        meta?.httpStatus ?? null,
+      ]
     );
   } catch (err) {
     console.error('RADIUS auth log write failed:', (err as Error).message);
   }
+}
+
+/** Request facts for the log row. `req.path` excludes query strings (MAC/PIN). */
+function radiusLogMeta(req: Request, httpStatus: number): RadiusLogMeta {
+  return { requestMethod: req.method, requestUrl: req.path, httpStatus };
 }
 
 // ── RADIUS auth endpoint (called by FreeRADIUS rest module) ──
@@ -119,7 +141,7 @@ gatewayRouter.get('/api/radius/auth', async (req: Request, res: Response) => {
           `RADIUS: rejected ${macClean} — data quota exhausted ` +
           `(${row.data_used_bytes}/${row.data_quota_bytes} bytes)`
         );
-        await recordRadiusAuth('radius_reject', 'quota_exhausted', rawMac || macClean, row.user_id);
+        await recordRadiusAuth('radius_reject', 'quota_exhausted', rawMac || macClean, row.user_id, radiusLogMeta(req, 403));
         // 403 makes rlm_rest emit an explicit reject. 404 would mean "no such
         // session" and would be indistinguishable from an unknown MAC.
         return res.status(403).json({
@@ -128,7 +150,7 @@ gatewayRouter.get('/api/radius/auth', async (req: Request, res: Response) => {
         });
       }
 
-      await recordRadiusAuth('radius_accept', 'mac_session', rawMac || macClean, row.user_id);
+      await recordRadiusAuth('radius_accept', 'mac_session', rawMac || macClean, row.user_id, radiusLogMeta(req, 200));
       return res.json(buildRadAttrs(row));
     }
 
@@ -180,7 +202,7 @@ gatewayRouter.get('/api/radius/auth', async (req: Request, res: Response) => {
               `RADIUS: rejected ${deviceMac} for voucher ${v.code} — ` +
               `data quota exhausted (${v.data_used_bytes}/${v.data_quota_bytes} bytes)`
             );
-            await recordRadiusAuth('radius_reject', 'quota_exhausted', rawMac || deviceMac, v.user_id);
+            await recordRadiusAuth('radius_reject', 'quota_exhausted', rawMac || deviceMac, v.user_id, radiusLogMeta(req, 403));
             return res.status(403).json({
               error: 'data quota exhausted',
               'control:Auth-Type': 'Reject',
@@ -191,7 +213,7 @@ gatewayRouter.get('/api/radius/auth', async (req: Request, res: Response) => {
             `RADIUS: device ${deviceMac} authorized via voucher ${v.code} ` +
             `(${outcome.activeDevices}/${outcome.limit} devices${outcome.bound ? ', newly bound' : ''})`
           );
-          await recordRadiusAuth('radius_accept', 'voucher_code', rawMac || deviceMac, v.user_id);
+          await recordRadiusAuth('radius_accept', 'voucher_code', rawMac || deviceMac, v.user_id, radiusLogMeta(req, 200));
           return res.json(buildRadAttrs(v));
         }
 
@@ -202,12 +224,12 @@ gatewayRouter.get('/api/radius/auth', async (req: Request, res: Response) => {
             `RADIUS: rejected ${deviceMac} for voucher ${v.code} — ` +
             `device limit ${outcome.limit} reached`
           );
-          await recordRadiusAuth('radius_reject', 'device_limit', rawMac || deviceMac, v.user_id);
+          await recordRadiusAuth('radius_reject', 'device_limit', rawMac || deviceMac, v.user_id, radiusLogMeta(req, 404));
         }
       }
     }
 
-    await recordRadiusAuth('radius_reject', 'no_session', rawMac || macClean, null);
+    await recordRadiusAuth('radius_reject', 'no_session', rawMac || macClean, null, radiusLogMeta(req, 404));
     return res.status(404).json({ error: 'session not found' });
   } catch (err) {
     console.error('RADIUS auth error:', err);
@@ -259,6 +281,13 @@ gatewayRouter.get('/api/radius/acct', async (req: Request, res: Response) => {
              LIMIT 1
            )`,
           [mac]
+        );
+        await recordRadiusAuth(
+          'radius_stop',
+          `session=${sessionId || 'n/a'} in=${inputOctets} out=${outputOctets}`,
+          mac,
+          null,
+          radiusLogMeta(req, 200)
         );
       }
     }

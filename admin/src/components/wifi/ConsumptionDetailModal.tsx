@@ -46,6 +46,7 @@ interface VoucherSaleDetail {
   first_redeemed_at?: string | null;
   activated_at?: string | null;
   max_devices?: number | null;
+  effective_max_devices?: number | null;
   device_count?: number;
   devices?: Array<{
     mac_address: string;
@@ -192,6 +193,7 @@ export default function ConsumptionDetailModal({ code, row, onClose }: Props) {
   const redemptionAt = sale?.redemption_at || sale?.first_redeemed_at || null;
   const trafficUsed = gb(sale?.traffic_used_bytes);
   const trafficTotal = gb(sale?.traffic_total_bytes);
+  const maxDevices = sale?.effective_max_devices ?? sale?.max_devices ?? null;
 
   return (
     <Modal open={!!code} onClose={onClose} title={code ? `Voucher ${lc(code)}` : 'Voucher'} wide>
@@ -271,7 +273,7 @@ export default function ConsumptionDetailModal({ code, row, onClose }: Props) {
               <div className="vd-cell"><span className="vd-label">Bandwidth</span><span className="vd-value">{sale.bandwidth_mbps_up}/{sale.bandwidth_mbps_down} Mbps</span></div>
               <div className="vd-cell"><span className="vd-label">Data</span><span className="vd-value">{sale.is_uncapped ? 'Unlimited' : (sale.data_limit_gb ?? 'Unlimited') + ' GB'}</span></div>
               <div className="vd-cell"><span className="vd-label">Uses</span><span className="vd-value">{sale.used_count}/{sale.max_uses}</span></div>
-              <div className="vd-cell"><span className="vd-label">Devices</span><span className="vd-value">{(sale.device_count ?? 0)}/{sale.max_devices ?? '—'}</span></div>
+              <div className="vd-cell"><span className="vd-label">Devices</span><span className="vd-value">{(sale.device_count ?? 0)}/{maxDevices ?? '—'}</span></div>
               <div className="vd-cell"><span className="vd-label">Package</span><span className="vd-value">{sale.package_tier || '—'}</span></div>
               <div className="vd-cell"><span className="vd-label">Created</span><span className="vd-value">{fmtDate(sale.created_at)}</span></div>
               <div className="vd-cell"><span className="vd-label">Activated</span><span className="vd-value">{fmtDate(sale.activated_at)}</span></div>
@@ -295,7 +297,7 @@ export default function ConsumptionDetailModal({ code, row, onClose }: Props) {
             {(sale.devices?.length ?? 0) > 0 && (
               <section className="vd-section">
                 <h4 className="vd-section-title">Device bindings</h4>
-                <p className="vd-count">{sale.device_count ?? sale.devices?.length} of {sale.max_devices ?? '—'} device slot{(sale.max_devices ?? 2) === 1 ? '' : 's'} in use</p>
+                <p className="vd-count">{sale.device_count ?? sale.devices?.length} of {maxDevices ?? '—'} device slot{(maxDevices ?? 2) === 1 ? '' : 's'} in use</p>
                 <ul className="vd-macs">
                   {sale.devices!.map((d) => (
                     <li key={d.mac_address}>

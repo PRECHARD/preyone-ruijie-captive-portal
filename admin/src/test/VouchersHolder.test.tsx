@@ -138,7 +138,7 @@ describe('Vouchers holder capture (>= $4.99 gate + Edit Holder)', () => {
     await waitFor(() =>
       expect(api.post).toHaveBeenCalledWith('/vouchers/bulk', expect.objectContaining({
         packageTier: 'PreCore',
-        count: 10,
+        count: 2,
         holderName: 'Bulk Buyer',
       }))
     );
@@ -321,5 +321,45 @@ describe('Voucher list liveness', () => {
     expect(within(off).getByText('Disabled')).toHaveClass('badge--no');
     expect(within(off).queryByText('In use')).toBeNull();
     expect(within(off).getByText('0/2')).toHaveClass('dev-chip--idle');
+  });
+
+  it('filters the unified voucher list by lifecycle status', async () => {
+    listState.rows = [
+      { ...listState.defaultRow, id: 'v-unused', code: 'unused-code', status: 'Unused' },
+      { ...listState.defaultRow, id: 'v-active', code: 'active-code', status: 'Active', used_count: 1 },
+      { ...listState.defaultRow, id: 'v-expired', code: 'expired-code', status: 'Expired' },
+    ];
+    render(<Vouchers />);
+
+    await rowOf('unused-code');
+    fireEvent.change(screen.getByLabelText('Filter vouchers by status'), { target: { value: 'Active' } });
+
+    expect(screen.getByRole('button', { name: 'View details for voucher active-code' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'View details for voucher unused-code' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'View details for voucher expired-code' })).toBeNull();
+  });
+});
+
+describe('Bulk voucher quantity controls', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    authState.role = 'Manager';
+    authState.permissions = [];
+  });
+
+  it('defaults to 2, steps by one and never goes below 2', async () => {
+    render(<Vouchers />);
+
+    const label = await screen.findByText('Users');
+    const field = label.closest('.form-field') as HTMLElement;
+    const input = field.querySelector('input[type="number"]') as HTMLInputElement;
+    const [minus, plus] = within(field).getAllByRole('button') as HTMLButtonElement[];
+
+    expect(input.value).toBe('2');
+    fireEvent.click(plus);
+    expect(input.value).toBe('3');
+    fireEvent.click(minus);
+    fireEvent.click(minus);
+    expect(input.value).toBe('2');
   });
 });

@@ -98,6 +98,10 @@ export interface WifiSession {
   code: string | null;
   holderName: string | null;
   holderPhone: string | null;
+  /** Portal account matched by MAC (GET /api/ruijie/sessions only). */
+  accountName?: string | null;
+  accountPhone?: string | null;
+  accountSessionExpiresAt?: string | null;
   /** Which local source produced `code`. */
   bindingSource?: string | null;
 
@@ -172,11 +176,17 @@ export type ConsumptionStatus =
 export interface VoucherConsumptionRow {
   code: string;
   packageName: string | null;
+  /** Local voucher holder details, joined by PIN. Null for Ruijie-only codes. */
+  holderName?: string | null;
+  holderPhone?: string | null;
+  priceAmount?: number | null;
   usedMB: number | null;
   totalMB: number | null;
   pct: number | null;
   status: ConsumptionStatus;
   onlineNow: boolean;
+  activeDevices?: number;
+  maxDevices?: number | null;
   alertsSent: { t80: number; t95: number };
   lastAlertAt: string | Date | null;
 }

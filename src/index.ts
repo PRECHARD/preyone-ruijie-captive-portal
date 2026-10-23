@@ -36,6 +36,7 @@ import { scheduleAccessLogCleanup } from './services/accessLogCleanup';
 import { scheduleHandoverReminders } from './services/handoverReminder';
 import { startVoucherMonitor } from './services/voucherMonitorService';
 import { startVoucherPoolWorker } from './services/voucherPool';
+import { startRuijieVoucherStatusWorker } from './services/ruijieVoucherStatusSync';
 import { scheduleSubscriptionCron } from './jobs/subscriptionCron';
 
 const app = express();
@@ -483,6 +484,14 @@ app.listen(PORT, () => {
     startRuijieAccountingPolling();
   } catch (err) {
     console.error('Ruijie accounting polling failed to start:', err);
+  }
+
+  // Mirror Ruijie usage/online/expiry into local vouchers so the admin list
+  // shows the same lifecycle for online-paid and staff-issued codes.
+  try {
+    startRuijieVoucherStatusWorker();
+  } catch (err) {
+    console.error('Ruijie voucher status sync failed to start:', err);
   }
 
   if (process.env.ENABLE_SESSION_CLEANUP !== 'false') {

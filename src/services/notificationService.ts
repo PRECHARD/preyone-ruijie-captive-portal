@@ -825,3 +825,174 @@ export async function sendAdminLoginCode(email: string, fullName: string, code: 
     'Preyone', 'admin@preyone.com'
   );
 }
+
+// -- Cash handover notifications -------------------------------------------------
+export interface CashHandoverEmailData {
+  handoverId: string;
+  staffName: string;
+  amount: number;
+  saleCount: number;
+  submittedAt?: string | Date | null;
+  decidedBy?: string | null;
+  remainingCount?: number;
+  remainingAmount?: number;
+}
+
+function escapeHandoverText(value: unknown): string {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function handoverEmailHtml(
+  data: CashHandoverEmailData,
+  mode: 'submitted' | 'approved' | 'rejected'
+): string {
+  const approved = mode === 'approved';
+  const rejected = mode === 'rejected';
+  const adminUrl = (process.env.ADMIN_BASE_URL || 'https://admin.preyone.com').replace(/\/$/, '');
+  const baseUrl = (process.env.BASE_URL || 'https://wifi.preyone.com').replace(/\/$/, '');
+  const logoUrl = `${baseUrl}/images/preyonenoneglow-logo-zoom-800.png`;
+  const statusColor = approved ? '#22e6a8' : rejected ? '#ff4d6d' : '#00ccff';
+  const statusBg = approved ? 'rgba(34,230,168,0.12)' : rejected ? 'rgba(255,77,109,0.12)' : 'rgba(0,204,255,0.12)';
+  const title = approved ? 'Cash handover approved' : rejected ? 'Cash handover rejected' : 'Cash handover submitted';
+  const lead = approved
+    ? 'The handover has been approved and the cash is now confirmed.'
+    : rejected
+      ? 'The handover was rejected. The sales have been returned to pending and must be resubmitted.'
+      : 'A staff cash handover is waiting for manager or CEO approval.';
+  const stamp = data.submittedAt ? new Date(data.submittedAt).toLocaleString() : new Date().toLocaleString();
+  const remaining = data.remainingCount != null
+    ? `<tr>
+         <td style="padding:9px 0;color:#94a3b8;font-size:13px">Still pending</td>
+         <td style="padding:9px 0;color:#f8fbff;font-size:13px;font-weight:600;text-align:right">${data.remainingCount} sale(s) &middot; $${Number(data.remainingAmount || 0).toFixed(2)}</td>
+       </tr>`
+    : '';
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="supported-color-schemes" content="dark">
+  <title>${title}</title>
+</head>
+<body style="margin:0;padding:0;background:#05070d;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#05070d">
+    <tr>
+      <td align="center" style="padding:36px 16px">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width:540px;width:100%">
+          <tr>
+            <td style="background:#0a0f1d;border:1px solid #1c2740;border-radius:16px;overflow:hidden">
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                <tr><td style="height:3px;background:linear-gradient(90deg,#00ccff,#ff2d95);font-size:1px;line-height:1px">&nbsp;</td></tr>
+              </table>
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                <tr>
+                  <td style="padding:30px 32px 0;font-family:'Segoe UI',Arial,sans-serif">
+                    <img src="${logoUrl}" alt="Preyone UltraNet" width="180" style="display:block;width:180px;max-width:100%;height:auto;margin:0 0 18px" />
+                    <div style="font-size:11px;letter-spacing:2px;text-transform:uppercase;color:#00ccff;font-weight:700">Preyone UltraNet</div>
+                    <h1 style="margin:8px 0 0;font-size:23px;line-height:1.3;color:#f8fbff">${title}</h1>
+                    <p style="margin:10px 0 0;font-size:14px;line-height:1.6;color:#94a3b8">${lead}</p>
+                  </td>
+                </tr>
+              </table>
+
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                <tr>
+                  <td style="padding:20px 32px 0">
+                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#111827;border:1px solid #263049;border-radius:12px">
+                      <tr>
+                        <td align="center" style="padding:22px 16px 20px;font-family:'Segoe UI',Arial,sans-serif">
+                          <div style="font-size:11px;letter-spacing:1.6px;text-transform:uppercase;color:#64748b">Handover amount</div>
+                          <div style="margin-top:6px;font-size:34px;line-height:1;font-weight:700;color:#f8fbff">$${Number(data.amount || 0).toFixed(2)}</div>
+                          <div style="margin-top:12px;display:inline-block;padding:5px 12px;border-radius:999px;background:${statusBg};color:${statusColor};font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase">${mode}</div>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                <tr>
+                  <td style="padding:16px 32px 0;font-family:'Segoe UI',Arial,sans-serif">
+                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                      <tr>
+                        <td style="padding:9px 0;color:#94a3b8;font-size:13px">Staff</td>
+                        <td style="padding:9px 0;color:#f8fbff;font-size:13px;font-weight:600;text-align:right">${escapeHandoverText(data.staffName)}</td>
+                      </tr>
+                      <tr>
+                        <td style="padding:9px 0;color:#94a3b8;font-size:13px">Sales</td>
+                        <td style="padding:9px 0;color:#f8fbff;font-size:13px;font-weight:600;text-align:right">${data.saleCount} sale(s)</td>
+                      </tr>
+                      <tr>
+                        <td style="padding:9px 0;color:#94a3b8;font-size:13px">Submitted</td>
+                        <td style="padding:9px 0;color:#f8fbff;font-size:13px;font-weight:600;text-align:right">${escapeHandoverText(stamp)}</td>
+                      </tr>
+                      ${data.decidedBy ? `<tr>
+                        <td style="padding:9px 0;color:#94a3b8;font-size:13px">${approved ? 'Approved' : 'Rejected'} by</td>
+                        <td style="padding:9px 0;color:#f8fbff;font-size:13px;font-weight:600;text-align:right">${escapeHandoverText(data.decidedBy)}</td>
+                      </tr>` : ''}
+                      ${remaining}
+                    </table>
+                  </td>
+                </tr>
+              </table>
+
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                <tr>
+                  <td align="center" style="padding:24px 32px 0">
+                    <a href="${adminUrl}/#/ultranet/reports" style="display:inline-block;background:#00ccff;color:#031018;padding:11px 24px;border-radius:8px;text-decoration:none;font-family:'Segoe UI',Arial,sans-serif;font-size:13px;font-weight:700">Open Payment Logs</a>
+                  </td>
+                </tr>
+                <tr>
+                  <td align="center" style="padding:26px 32px 30px;font-family:'Segoe UI',Arial,sans-serif;font-size:11px;line-height:1.7;color:#475569">
+                    Handover reference: ${escapeHandoverText(data.handoverId)}<br>
+                    &copy; ${new Date().getFullYear()} Preyone Enterprises. All rights reserved.
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+}
+
+export async function sendCashHandoverSubmittedEmail(
+  recipients: string[],
+  data: CashHandoverEmailData
+): Promise<boolean> {
+  const to = [...new Set(recipients.map((e) => e.trim().toLowerCase()).filter(Boolean))];
+  if (to.length === 0) return false;
+  return sendMail(
+    to.join(', '),
+    `Cash handover awaiting approval - $${Number(data.amount || 0).toFixed(2)}`,
+    handoverEmailHtml(data, 'submitted'),
+    'Preyone',
+    'admin@preyone.com'
+  );
+}
+
+export async function sendCashHandoverDecisionEmail(
+  recipients: string[],
+  decision: 'approved' | 'rejected',
+  data: CashHandoverEmailData
+): Promise<boolean> {
+  const to = [...new Set(recipients.map((e) => e.trim().toLowerCase()).filter(Boolean))];
+  if (to.length === 0) return false;
+  return sendMail(
+    to.join(', '),
+    `Cash handover ${decision} - $${Number(data.amount || 0).toFixed(2)}`,
+    handoverEmailHtml(data, decision),
+    'Preyone',
+    'admin@preyone.com'
+  );
+}

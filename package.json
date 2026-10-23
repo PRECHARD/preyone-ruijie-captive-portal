@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
     "build": "tsc",
+    "build:admin": "npm --prefix admin run build",
     "start": "node dist/index.js",
     "migrate": "node -r ts-node/register src/db/migrate.ts",
     "optimize:portal": "node scripts/optimize-portal-images.mjs",
@@ -14,6 +15,7 @@
     "cleanup-logs": "node -r ts-node/register src/cleanup-logs.ts",
     "purge:retry-vouchers": "node -r ts-node/register/transpile-only scripts/purge-retry-vouchers.ts",
     "seed:vouchers": "node -r ts-node/register/transpile-only scripts/seed-voucher-pool.ts",
+    "sync:vouchers": "node -r ts-node/register/transpile-only scripts/sync-voucher-statuses.ts",
     "test": "vitest run",
     "test:e2e": "vitest run --config vitest.e2e.config.ts",
     "verify:route-templates": "ts-node -T scripts/verify-route-templates.ts"

@@ -5,7 +5,12 @@ import { pool } from '../db/pool';
 import { requireAdminAuth, requireRole } from '../middleware/adminAuth';
 import { PERMISSIONS, requirePermission, scopeUserVoucherCodeCondition, scopeVoucherCondition } from '../middleware/rbac';
 import { recordAuditLog } from './adminAuth';
-import { sendAdminApprovedNotification, sendAdminRejectedNotification } from '../services/notificationService';
+import {
+  sendAdminApprovedNotification,
+  sendAdminRejectedNotification,
+  sendCashHandoverDecisionEmail,
+  sendCashHandoverSubmittedEmail,
+} from '../services/notificationService';
 import { isRuijieCloudConfigured, mintRuijieVoucherForTier } from '../services/ruijieMint';
 import {
   getStaffDailySalesItemized,
@@ -21,6 +26,7 @@ import {
   getRecentActivity,
 } from '../db/sales';
 import { RuijieApiError } from '../services/ruijieCloud';
+import { syncRuijieVoucherStatuses } from '../services/ruijieVoucherStatusSync';
 import ExcelJS from 'exceljs';
 import path from 'path';
 import fs from 'fs';
@@ -96,6 +102,117 @@ adminRouter.get('/access-log', async (req: Request, res: Response) => {
   query += ' ORDER BY al.created_at DESC LIMIT 1000';
   const { rows } = await pool.query(query, params);
   res.json(rows);
+});
+
+const ACCESS_LOG_EVENTS = ['login', 'radius_accept', 'radius_reject', 'radius_stop'] as const;
+
+// Paginated event stream for the Access Logs page. Kept separate from the
+// legacy /access-log array endpoint so existing consumers and tests are
+// untouched. Filters run in SQL so totals cover the whole range, not just the
+// current page; `summary` deliberately ignores the event chip so the chip
+// counts stay stable while one event type is selected.
+adminRouter.get('/access-logs', async (req: Request, res: Response) => {
+  const event = typeof req.query.event === 'string' ? req.query.event : 'all';
+  const range = typeof req.query.range === 'string' ? req.query.range : '7d';
+  const q = typeof req.query.q === 'string' ? req.query.q.trim().slice(0, 120) : '';
+  const parsedSize = parseInt(String(req.query.pageSize ?? ''), 10);
+  const pageSize = Number.isFinite(parsedSize) ? Math.min(Math.max(parsedSize, 1), 200) : 50;
+  const parsedPage = parseInt(String(req.query.page ?? ''), 10);
+  const page = Number.isFinite(parsedPage) ? Math.max(parsedPage, 1) : 1;
+
+  const buildFilters = (includeEvent: boolean) => {
+    const params: any[] = [];
+    const clauses: string[] = [];
+
+    const scope = scopeVoucherCondition(req, params);
+    if (scope) clauses.push(scope);
+
+    if (range === 'today') {
+      clauses.push(`al.created_at >= date_trunc('day', NOW())`);
+    } else if (range === '7d' || range === '30d') {
+      params.push(range === '7d' ? 7 : 30);
+      clauses.push(`al.created_at >= NOW() - ($${params.length}::int * INTERVAL '1 day')`);
+    }
+
+    if (q) {
+      params.push(`%${q}%`);
+      const i = params.length;
+      clauses.push(`(
+        u.full_name ILIKE $${i} OR al.mac_address ILIKE $${i} OR
+        al.ip_address::text ILIKE $${i} OR al.detail ILIKE $${i} OR
+        al.event ILIKE $${i} OR al.request_url ILIKE $${i} OR
+        al.request_method ILIKE $${i} OR al.http_status::text ILIKE $${i}
+      )`);
+    }
+
+    if (includeEvent && event !== 'all') {
+      if (event === 'other') {
+        clauses.push(`al.event NOT IN (${ACCESS_LOG_EVENTS.map((_, i) => `$${params.length + i + 1}`).join(', ')})`);
+        params.push(...ACCESS_LOG_EVENTS);
+      } else if ((ACCESS_LOG_EVENTS as readonly string[]).includes(event)) {
+        params.push(event);
+        clauses.push(`al.event = $${params.length}`);
+      }
+    }
+
+    return { clauses, params };
+  };
+
+  const from = `
+    FROM access_log al
+    LEFT JOIN users u ON u.id = al.user_id
+    LEFT JOIN vouchers v ON UPPER(u.voucher_code) = UPPER(v.code)
+  `;
+  const whereSql = (clauses: string[]) => clauses.length ? ` WHERE ${clauses.join(' AND ')}` : '';
+
+  const pageFilters = buildFilters(true);
+  const summaryFilters = buildFilters(false);
+  const pageWhere = whereSql(pageFilters.clauses);
+  const summaryWhere = whereSql(summaryFilters.clauses);
+
+  const [countRes, summaryRes] = await Promise.all([
+    pool.query(`SELECT count(*)::int AS n ${from} ${pageWhere}`, pageFilters.params),
+    pool.query(
+      `SELECT COUNT(*)::int AS total,
+              COUNT(*) FILTER (WHERE al.event = 'radius_accept')::int AS accepts,
+              COUNT(*) FILTER (WHERE al.event = 'radius_reject')::int AS rejects,
+              COUNT(*) FILTER (WHERE al.event = 'radius_stop')::int AS stops,
+              COUNT(*) FILTER (WHERE al.event = 'login')::int AS sign_ins,
+              (COUNT(DISTINCT regexp_replace(upper(al.mac_address), '[^0-9A-F]', '', 'g'))
+                FILTER (WHERE al.mac_address IS NOT NULL))::int AS devices
+         ${from} ${summaryWhere}`,
+      summaryFilters.params
+    ),
+  ]);
+  const total: number = countRes.rows[0]?.n ?? 0;
+
+  const limitIdx = pageFilters.params.length + 1;
+  const offsetIdx = pageFilters.params.length + 2;
+  const { rows } = await pool.query(
+    `SELECT al.id, al.event, al.mac_address, al.ip_address, al.detail,
+            al.request_url, al.http_status, al.request_method, al.created_at,
+            u.full_name
+       ${from} ${pageWhere}
+      ORDER BY al.created_at DESC, al.id DESC
+      LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
+    [...pageFilters.params, pageSize, (page - 1) * pageSize]
+  );
+
+  const s = summaryRes.rows[0] ?? {};
+  res.json({
+    rows,
+    total,
+    page,
+    pageSize,
+    summary: {
+      total: Number(s.total ?? 0),
+      accepts: Number(s.accepts ?? 0),
+      rejects: Number(s.rejects ?? 0),
+      stops: Number(s.stops ?? 0),
+      signIns: Number(s.sign_ins ?? 0),
+      devices: Number(s.devices ?? 0),
+    },
+  });
 });
 
 adminRouter.get('/packages', async (_req: Request, res: Response) => {
@@ -356,7 +473,18 @@ adminRouter.get('/vouchers', async (req: Request, res: Response) => {
               v.activated_at,
               (SELECT MIN(vr.created_at) FROM voucher_redemptions vr WHERE vr.voucher_id = v.id)
             ) AS first_redeemed_at,
-            COALESCE(dev.device_count, 0) AS device_count,
+            -- "In use" prefers the fresh Ruijie roster count; the local binding
+            -- table is only a fallback for codes that have never been synced.
+            CASE WHEN v.ruijie_sync_status = 'synced'
+                 THEN COALESCE(v.ruijie_active_clients, 0)
+                 ELSE COALESCE(dev.device_count, 0) END AS device_count,
+            COALESCE(
+              NULLIF(v.ruijie_max_clients, 0),
+              NULLIF(v.max_devices, 0),
+              (SELECT p.max_devices FROM packages p
+                WHERE p.tier_name = v.package_tier AND p.deleted_at IS NULL
+                LIMIT 1)
+            ) AS effective_max_devices,
             dev.bound_macs,
             dev.devices,
             red.redemptions,
@@ -371,6 +499,18 @@ adminRouter.get('/vouchers', async (req: Request, res: Response) => {
 
   res.json({ vouchers: rows, total, page, pageSize });
 });
+
+// Pull the latest Ruijie lifecycle counters for every local voucher matched by
+// code. Additive: only used_count / activated_at / last_seen_at / expires_at
+// and the Ruijie sync markers are written; payment and pool metadata are not.
+adminRouter.post(
+  '/vouchers/sync-status',
+  requirePermission(PERMISSIONS.COMPANY_ADMIN),
+  async (_req: Request, res: Response) => {
+    const result = await syncRuijieVoucherStatuses({ force: true });
+    res.json(result);
+  }
+);
 
 /**
  * Load a voucher for mutation, enforcing the Staff scope so a staff account can
@@ -2453,6 +2593,59 @@ adminRouter.get('/staff/stats', async (req: Request, res: Response) => {
 // Cash Handover Routes (Staff → Manager/CEO)
 // ═══════════════════════════════════════════════════════
 
+const HANDOVER_EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+
+/**
+ * Who receives a handover email: the staff member (confirmation / decision)
+ * plus the management reviewers. CASH_HANDOVER_RECIPIENTS overrides the
+ * management side with an explicit comma/semicolon separated list; otherwise
+ * every approved CEO/Manager account is used. Falls back to admin@preyone.com
+ * so a production with no manager account still notifies someone.
+ */
+async function cashHandoverRecipients(staffEmail?: string | null): Promise<string[]> {
+  const out = new Set<string>();
+  const configured = (process.env.CASH_HANDOVER_RECIPIENTS || '')
+    .split(/[,;]/)
+    .map((email) => email.trim().toLowerCase())
+    .filter((email) => HANDOVER_EMAIL_RE.test(email));
+
+  for (const email of configured) out.add(email);
+
+  if (configured.length === 0) {
+    try {
+      const { rows } = await pool.query(
+        `SELECT email FROM admin_users
+          WHERE role IN ('CEO', 'Manager') AND approved = TRUE
+            AND deleted_at IS NULL AND email IS NOT NULL`
+      );
+      for (const row of rows) {
+        const email = String(row.email || '').trim().toLowerCase();
+        if (HANDOVER_EMAIL_RE.test(email)) out.add(email);
+      }
+    } catch (err) {
+      console.error('Handover recipient lookup failed:', err);
+    }
+  }
+
+  if (out.size === 0) out.add('admin@preyone.com');
+  if (staffEmail && HANDOVER_EMAIL_RE.test(staffEmail.trim().toLowerCase())) {
+    out.add(staffEmail.trim().toLowerCase());
+  }
+  return [...out];
+}
+
+async function staffEmailFor(staffId: string): Promise<string | null> {
+  try {
+    const { rows } = await pool.query(
+      `SELECT email FROM admin_users WHERE id = $1 AND deleted_at IS NULL`,
+      [staffId]
+    );
+    return rows[0]?.email ?? null;
+  } catch {
+    return null;
+  }
+}
+
 // Get sales available for handover (Staff's unhanded sales)
 adminRouter.get('/cash-handovers/available-sales', async (req: Request, res: Response) => {
   const { rows } = await pool.query(
@@ -2527,6 +2720,16 @@ adminRouter.post('/cash-handovers', async (req: Request, res: Response) => {
       );
     } catch (_) { /* best-effort */ }
 
+    void cashHandoverRecipients(req.adminUser!.email)
+      .then((recipients) => sendCashHandoverSubmittedEmail(recipients, {
+        handoverId: handover.id,
+        staffName: req.adminUser!.fullName,
+        amount: totalAmount,
+        saleCount: sales.length,
+        submittedAt: handover.created_at,
+      }))
+      .catch((err) => console.error('Handover submitted email failed:', err));
+
     res.status(201).json({ message: `Handover of $${totalAmount.toFixed(2)} submitted for approval`, handover });
   } catch (err) {
     await client.query('ROLLBACK');
@@ -2596,6 +2799,20 @@ adminRouter.post('/cash-handovers/:id/approve', requirePermission(PERMISSIONS.CO
       ? `Your handover of $${parseFloat(existing[0].total_amount).toFixed(2)} was approved by ${req.adminUser!.fullName}. You still have ${remaining} pending cash sale(s) ($${remainingTotal.toFixed(2)}) to hand over before you can clock out.`
       : `Your handover of $${parseFloat(existing[0].total_amount).toFixed(2)} was approved by ${req.adminUser!.fullName}. Your sales are fully handed over — you can now clock out.`;
     await insertAlert('cash_handover_approved', 'success', 'Handover Approved', msg, 'cash_handover', id, existing[0].staff_id);
+
+    const staffEmail = await staffEmailFor(existing[0].staff_id);
+    void cashHandoverRecipients(staffEmail)
+      .then((recipients) => sendCashHandoverDecisionEmail(recipients, 'approved', {
+        handoverId: id,
+        staffName: existing[0].staff_name,
+        amount: parseFloat(existing[0].total_amount),
+        saleCount: existing[0].sale_count,
+        submittedAt: existing[0].created_at,
+        decidedBy: req.adminUser!.fullName,
+        remainingCount: remaining,
+        remainingAmount: remainingTotal,
+      }))
+      .catch((err) => console.error('Handover approved email failed:', err));
   }
 
   res.json({ message: 'Cash handover approved' });
@@ -2639,6 +2856,20 @@ adminRouter.post('/cash-handovers/:id/reject', requirePermission(PERMISSIONS.COM
       await insertAlert('cash_handover_rejected', 'warning', 'Handover Rejected',
         `Your handover of $${parseFloat(existing[0].total_amount).toFixed(2)} was rejected by ${req.adminUser!.fullName}. The ${existing[0].sale_count} sale(s) are back to pending — submit a new handover before clocking out.`,
         'cash_handover', id, existing[0].staff_id);
+
+      const staffEmail = await staffEmailFor(existing[0].staff_id);
+      void cashHandoverRecipients(staffEmail)
+        .then((recipients) => sendCashHandoverDecisionEmail(recipients, 'rejected', {
+          handoverId: id,
+          staffName: existing[0].staff_name,
+          amount: parseFloat(existing[0].total_amount),
+          saleCount: existing[0].sale_count,
+          submittedAt: existing[0].created_at,
+          decidedBy: req.adminUser!.fullName,
+          remainingCount: existing[0].sale_count,
+          remainingAmount: parseFloat(existing[0].total_amount),
+        }))
+        .catch((err) => console.error('Handover rejected email failed:', err));
     }
 
     res.json({ message: 'Cash handover rejected. Sales returned to pending.' });

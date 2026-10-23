@@ -102,18 +102,47 @@ voucherAnalyticsRouter.get('/', async (_req: Request, res: Response) => {
     alertMap.set(row.voucher_code, entry);
   }
 
+  const codes = vouchers
+    .map((v) => String(v.voucherCode ?? '').trim().toLowerCase())
+    .filter(Boolean);
+  const localByCode = new Map<string, { holderName: string | null; holderPhone: string | null; priceAmount: number | null; packageTier: string | null }>();
+  if (codes.length > 0) {
+    const { rows: localRows } = await pool.query(
+      `SELECT lower(code) AS code, holder_name, holder_phone, price_amount, package_tier
+         FROM vouchers
+        WHERE lower(code) = ANY($1::text[]) AND deleted_at IS NULL`,
+      [[...new Set(codes)]]
+    );
+    for (const row of localRows) {
+      localByCode.set(String(row.code), {
+        holderName: row.holder_name ?? null,
+        holderPhone: row.holder_phone ?? null,
+        priceAmount: row.price_amount == null ? null : Number(row.price_amount),
+        packageTier: row.package_tier ?? null,
+      });
+    }
+  }
+
   const rows = sortConsumptionRows(vouchers.map((v) => {
     const pct = voucherPct(v);
     const code = v.voucherCode || '';
+    const local = localByCode.get(code.toLowerCase());
     const alerts = alertMap.get(code) || { t80: 0, t95: 0, lastAt: null as Date | null };
     return {
       code,
-      packageName: v.packageName ?? null,
+      packageName: v.packageName ?? local?.packageTier ?? null,
+      holderName: local?.holderName ?? null,
+      holderPhone: local?.holderPhone ?? null,
+      priceAmount: local?.priceAmount ?? null,
       usedMB: v.usedQuotaMb ?? null,
       totalMB: v.quotaMb ?? null,
       pct: pct == null ? null : Math.round(pct * 10) / 10,
       status: consumptionStatus(v, pct),
       onlineNow: (v.currentClients ?? 0) > 0,
+      activeDevices: Math.max(0, Math.trunc(Number(v.currentClients ?? 0))),
+      maxDevices: Number.isFinite(Number(v.maxClients)) && Number(v.maxClients) > 0
+        ? Math.trunc(Number(v.maxClients))
+        : null,
       alertsSent: { t80: alerts.t80, t95: alerts.t95 },
       lastAlertAt: alerts.lastAt,
     };
