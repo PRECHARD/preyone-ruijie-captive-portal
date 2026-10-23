@@ -32,7 +32,18 @@ interface DashboardData {
   };
   sales24h: { hour: string; count: number; revenue: number }[];
   byTier: { package_tier: string; count: number; total: number }[];
-  recentSales: { voucher_code: string; amount: number; currency: string; sold_by_name: string; sold_at: string }[];
+  recentSales: {
+    voucher_code: string;
+    amount: number;
+    currency: string;
+    sold_by_name: string;
+    sold_at: string;
+    payment_method?: string;
+    payment_reference?: string;
+    package_tier?: string;
+    client_name?: string;
+    client_phone?: string;
+  }[];
 }
 
 interface StaffStats {
@@ -288,12 +299,18 @@ export default function Dashboard({ onNavigate }: { onNavigate?: (s: string) => 
               <div className="card-header">Recent Sales</div>
               <div className="card-table" style={{ maxHeight: 320, overflowY: 'auto' }}>
                 <table className="data-table">
-                  <thead><tr><th>Code</th><th>Amount</th><th>Sold By</th><th>Time</th></tr></thead>
+                  <thead><tr><th>Code</th><th>Client</th><th>Package</th><th>Amount</th><th>Method</th><th>Sold By</th><th>Time</th></tr></thead>
                   <tbody>
                     {data.recentSales.map((s, i) => (
                       <tr key={i}>
                         <td><span className="code-cell">{s.voucher_code}</span></td>
-                        <td><span className="money money--sm">${Number(s.amount || 0).toFixed(2)} USD</span></td>
+                        <td>
+                          <div style={{ fontWeight: 600 }}>{s.client_name || '—'}</div>
+                          {s.client_phone && <div className="muted">{s.client_phone}</div>}
+                        </td>
+                        <td>{s.package_tier || '—'}</td>
+                        <td><span className="money money--sm">${Number(s.amount || 0).toFixed(2)} {s.currency || 'USD'}</span></td>
+                        <td>{s.payment_method || '—'}</td>
                         <td>{s.sold_by_name || '—'}</td>
                         <td className="muted">{fmtTimeAgo(s.sold_at)}</td>
                       </tr>

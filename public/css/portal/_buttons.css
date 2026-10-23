@@ -158,16 +158,6 @@
   background: transparent;
 }
 
-.hero-connect-btn:hover {
-  transform: scale(1.05);
-  filter: brightness(1.2);
-  box-shadow: 0 0 20px rgba(255, 0, 204, 0.4);
-}
-
-.hero-connect-btn:active {
-  transform: scale(0.95);
-}
-
 .action-group {
   display: flex;
   flex-direction: column;

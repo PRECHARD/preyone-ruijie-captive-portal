@@ -175,16 +175,21 @@ export default function Reports({ onNavigate, canPeakHours }: Props = {}) {
               <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', fontWeight: 600, fontSize: 13 }}>Recent Transactions</div>
               <div className="card-table">
                 <table className="data-table">
-                  <thead><tr><th>Date</th><th>Voucher</th><th>Package</th><th>Amount</th><th>Sold By</th><th>Status</th></tr></thead>
+<thead><tr><th>Date</th><th>Voucher</th><th>Client</th><th>Package</th><th>Amount</th><th>Method</th><th>Sold By</th><th>Status</th></tr></thead>
                   <tbody>
                     {revenue.recentTransactions.map((t: any, i: number) => (
                       <tr key={i}>
-                        <td>{t.created_at ? new Date(t.created_at).toLocaleString() : '—'}</td>
-                        <td><span className="code-cell">{t.code || t.voucher_code}</span></td>
-                        <td>{t.package_tier || t.tier || '—'}</td>
-                        <td><span className="money money--sm">${Number(t.price_amount || t.amount || 0).toFixed(2)} USD</span></td>
-                        <td>{t.sold_by_name || t.sold_by || '—'}</td>
-                        <td>{t.handover_status === 'approved' ? <Badge variant="approved">Approved</Badge> : t.handover_status === 'pending' ? <Badge variant="pending">Pending</Badge> : <Badge variant="default">—</Badge>}</td>
+                        <td>{t.created_at ? new Date(t.created_at).toLocaleString() : '-'}</td>
+                        <td><span className="code-cell">{t.code || t.voucher_code || '-'}</span></td>
+                        <td>
+                          <div style={{ fontWeight: 600 }}>{t.user_name || '—'}</div>
+                          {t.user_phone && <div className="muted">{t.user_phone}</div>}
+                        </td>
+                        <td>{t.package_tier || t.tier || '-'}</td>
+                        <td><span className="money money--sm">${Number(t.price_amount || t.amount || 0).toFixed(2)} {t.currency || 'USD'}</span></td>
+                        <td>{t.payment_method || '-'}{t.payment_reference ? <div className="muted">{t.payment_reference}</div> : null}</td>
+                        <td>{t.sold_by_name || t.sold_by || '-'}</td>
+                        <td>{t.status === 'completed' ? <Badge variant="approved">Completed</Badge> : t.status === 'pending' ? <Badge variant="pending">Pending</Badge> : <Badge variant="default">{t.status || '-'}</Badge>}</td>
                       </tr>
                     ))}
                   </tbody>

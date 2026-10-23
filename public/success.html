@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Connected â€” Preyone UltraNet Wiâ€‘Fi</title>
+  <title>Connected | Preyone UltraNet Wi-Fi</title>
   <link rel="icon" type="image/png" href="/favicon/favicon-96x96.png" sizes="96x96" />
   <link rel="icon" type="image/svg+xml" href="/favicon/favicon.svg" />
   <link rel="shortcut icon" href="/favicon/favicon.ico" />
@@ -12,12 +12,12 @@
   <meta name="apple-mobile-web-app-title" content="Preyone" />
   <link rel="manifest" href="/favicon/site.webmanifest" />
   <link
-    href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Montserrat:wght@500;700&family=Satisfy&display=swap"
+    href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Montserrat:wght@500;600;700;800;900&family=Satisfy&display=swap"
     rel="stylesheet">
-  <link rel="stylesheet" href="/css/portal.css?v=28" />
+  <link rel="stylesheet" href="/css/portal.css?v=46" />
 </head>
 
-<body class="portal-body">
+<body class="portal-body success-body">
   <div class="body-loading hidden" id="bodyLoading">
     <div class="loading-spinner">
       <div class="loading-spinner-inner">
@@ -30,18 +30,8 @@
     </div>
     <div class="loading-text">Connecting to Preyone...</div>
   </div>
-  <svg aria-hidden="true" style="position:absolute;width:0;height:0">
-    <defs>
-      <linearGradient id="ring-grad" x1="0%" y1="0%" x2="100%" y2="100%">
-        <stop offset="0%" stop-color="#71ff2f" />
-        <stop offset="50%" stop-color="#13d8ff" />
-        <stop offset="100%" stop-color="#367cff" />
-      </linearGradient>
-    </defs>
-  </svg>
 
-  <!-- Sticky Header -->
-  <header class="portal-header">
+  <header class="portal-header success-header">
     <div class="brand-banner">
       <img src="/images/preyonenoneglow-logo-optimized.png" alt="Preyone" class="brand-logo-img" width="1200" height="600" decoding="async" />
     </div>
@@ -50,629 +40,207 @@
     </div>
   </header>
 
-  <main class="portal-shell">
-    
-    <!-- Success Header -->
-    <div class="card card--success">
+  <main class="portal-shell success-shell">
+    <section class="card card--success success-hero">
       <div class="success-glow"></div>
-      <div class="brand">
-        <div class="success-icon-wrapper">
-          <svg class="wifi-icon--success" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
-            <polyline points="20 6 9 17 4 12" />
-          </svg>
-        </div>
-        <h1 class="bebas-font">PAYMENT CONFIRMED</h1>
-        <p class="subtitle cursive-font">Your Preyone UltraNet WiFi session is now active.</p>
-      </div>
-    </div>
-
-    <!-- Voucher Code & Card -->
-    <div class="voucher-section">
-      <div id="voucher-code-display" class="voucher-code-block" style="display:none">
-        <div class="voucher-code-hero">
-          <span class="voucher-code-hero-label">YOUR VOUCHER PIN</span>
-          <div class="voucher-code-hero-box">
-            <span id="voucher-code-text" class="voucher-code-hero-text"></span>
-            <button id="copyVoucherBtn" class="voucher-copy-hero-btn" title="Copy to clipboard">
-              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
-              </svg>
-              <span id="copyLabel">Copy PIN</span>
-            </button>
-          </div>
-          <p class="voucher-code-hint">Enter this PIN on the login page to connect immediately</p>
-        </div>
-      </div>
-      <div id="voucher-card-container" class="voucher-card-wrapper"></div>
-      <div class="voucher-actions">
-        <button id="downloadVoucherBtn" class="btn-primary" style="display:none">DOWNLOAD VOUCHER</button>
-      </div>
-    </div>
-
-    <!-- Session Details -->
-    <div class="card card--success">
-      <!-- Ring Timer -->
-      <div class="ring-timer-wrapper">
-        <svg class="ring-timer-svg" viewBox="0 0 160 160">
-          <circle class="ring-bg" cx="80" cy="80" r="68" />
-          <circle class="ring-fg" id="ring-fg" cx="80" cy="80" r="68"
-            stroke-dasharray="427.26" stroke-dashoffset="0" />
+      <div class="success-icon-wrapper">
+        <svg class="wifi-icon--success" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true">
+          <polyline points="20 6 9 17 4 12" />
         </svg>
-        <div class="ring-timer-center">
-          <span class="ring-label">TIME LEFT</span>
-          <span class="ring-value" id="timer-display">--:--:--</span>
-        </div>
       </div>
+      <p class="success-eyebrow">PREYONE ULTRANET WIFI</p>
+      <h1 class="bebas-font">PAYMENT CONFIRMED</h1>
+      <p class="subtitle cursive-font">Your voucher is ready. Connect in one tap.</p>
+    </section>
 
-      <!-- Data Usage -->
-      <div class="data-usage-section" id="data-usage-section">
-        <div class="data-usage-header">
-          <span class="data-usage-label">DATA USAGE</span>
-          <span class="data-usage-numbers" id="data-usage-numbers">â€” / â€”</span>
+    <div class="success-layout">
+      <section class="success-panel voucher-panel">
+        <div id="voucher-code-display" class="voucher-code-block">
+          <div class="voucher-code-hero">
+            <span class="voucher-code-hero-label">YOUR VOUCHER PIN</span>
+            <div class="voucher-code-hero-box">
+              <span id="voucher-code-text" class="voucher-code-hero-text"></span>
+              <button type="button" id="copyVoucherBtn" class="voucher-copy-hero-btn" title="Copy voucher PIN">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                  <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
+                </svg>
+                <span id="copyLabel">Copy PIN</span>
+              </button>
+            </div>
+            <p class="voucher-code-hint">Keep this PIN. It is your proof of purchase and your backup login.</p>
+          </div>
         </div>
-        <div class="data-bar-track">
-          <div class="data-bar-fill" id="data-bar-fill" style="width:0%"></div>
-        </div>
-        <div class="data-usage-footer">
-          <span id="data-usage-pct">0%</span>
-          <span id="data-usage-remaining">â€” remaining</span>
-        </div>
-      </div>
 
-      <div class="status-grid">
-        <div class="status-item">
-          <span class="label">STATUS</span>
-          <span class="value value--active">â— ACTIVE</span>
-        </div>
-        <div class="status-item">
-          <span class="label">SESSION REMAINING</span>
-          <span class="value value--timer" id="timer-display-text">--:--:--</span>
-        </div>
-        <div class="status-item">
-          <span class="label">NETWORK</span>
-          <span class="value">Preyone UltraNet Wi-Fi</span>
-        </div>
-      </div>
+        <img id="voucher-jpg-preview" class="voucher-jpg-preview" alt="Preyone voucher" hidden />
+        <canvas id="voucher-canvas" class="voucher-canvas" aria-hidden="true"></canvas>
 
-      <div class="session-details" id="session-details">
-        <div class="detail-row">
-          <span class="detail-label">Speed</span>
-          <span class="detail-value" id="detail-speed">â€”</span>
-        </div>
-        <div class="detail-row">
-          <span class="detail-label">Data Allowance</span>
-          <span class="detail-value" id="detail-data">â€”</span>
-        </div>
-        <div class="detail-row">
-          <span class="detail-label">Session Started</span>
-          <span class="detail-value" id="detail-started">â€”</span>
-        </div>
-        <div class="detail-row">
-          <span class="detail-label">Expires</span>
-          <span class="detail-value" id="detail-expires">â€”</span>
-        </div>
-      </div>
-
-      <div class="action-group">
-        <a href="http://www.preyone.com" class="btn-primary" id="startBrowsingBtn">START BROWSING</a>
-        <!-- Href is filled in from the gateway's ?mac=&voucher= params by the
-             script below, so it deep-links straight into the PWA usage portal
-             with the session already identified. Hidden until then. -->
-        <a id="trackDataBtn" href="/data" class="btn-secondary" hidden>TRACK MY DATA</a>
-        <a id="manageAccountLink" href="/login" class="btn-secondary" target="_blank" rel="noopener">MANAGE ACCOUNT</a>
-        <button type="button" class="btn-secondary" id="successSignUpBtn">SIGN UP</button>
-      </div>
-    </div>
-
-    <section class="signup-section hidden" id="signup-section">
-      <div class="section-heading">
-        <div>
-          <p class="section-eyebrow">Create your Preyone account</p>
-          <h2>Sign Up</h2>
-        </div>
-        <div class="section-note">Register to buy packages, manage your account, and track your sessions.</div>
-      </div>
-      <div class="signup-card">
-        <form id="signup-form" novalidate>
-          <div class="field">
-            <label for="fullName">Full Name</label>
-            <input id="fullName" name="fullName" type="text" autocomplete="name" placeholder="Your full name" required />
-            <span class="field-error" id="err-fullName"></span>
-          </div>
-          <div class="field">
-            <label for="phone">Phone Number</label>
-            <input id="phone" name="phone" type="tel" autocomplete="tel" placeholder="+263 771 327 202" required />
-            <span class="field-error" id="err-phone"></span>
-          </div>
-          <div class="field">
-            <label for="email">Email</label>
-            <input id="email" name="email" type="email" autocomplete="email" placeholder="you@example.com" required />
-            <span class="field-error" id="err-email"></span>
-          </div>
-          <div class="field">
-            <label for="suPassword">Set Password <span class="optional">(for future sign-ins)</span></label>
-            <input id="suPassword" name="password" type="password" autocomplete="new-password" placeholder="8+ chars, upper, lower, number &amp; special" minlength="8" />
-            <span class="field-error" id="err-suPassword"></span>
-          </div>
-          <div class="field">
-            <label for="suPasswordConfirm">Confirm Password</label>
-            <input id="suPasswordConfirm" name="passwordConfirm" type="password" autocomplete="new-password" placeholder="Re-enter password" />
-            <span class="field-error" id="err-suPasswordConfirm"></span>
-          </div>
-          <div class="field field--checkbox">
-            <label class="checkbox-label">
-              <input id="acceptedTos" name="acceptedTos" type="checkbox" required />
-              <span>I agree to the <a href="/terms.html" target="_blank" rel="noopener">Terms of Service</a>.</span>
-            </label>
-            <span class="field-error" id="err-acceptedTos"></span>
-          </div>
-          <div id="signup-form-error" class="field-error hidden"></div>
-          <button type="submit" id="signup-submit-btn">
-            <span id="signup-btn-text">Create Account</span>
-            <span id="signup-btn-spinner" class="spinner hidden" aria-hidden="true"></span>
+        <div class="success-actions">
+          <button type="button" id="connectNowBtn" class="btn-primary success-connect-btn">
+            <span id="connectBtnText">CONNECT NOW</span>
+            <span id="connectBtnSpinner" class="spinner hidden" aria-hidden="true"></span>
           </button>
-        </form>
-      </div>
-    </section>
+          <a id="downloadVoucherBtn" class="btn-secondary success-download-btn" download hidden>DOWNLOAD JPG</a>
+        </div>
+        <p id="connect-error" class="success-error hidden" role="alert"></p>
+        <p class="success-hint">Tap Connect Now once. We will authorise this device automatically.</p>
+      </section>
 
-    <!-- Signup Success Message -->
-    <section class="signup-section hidden" id="register-success-section">
-      <div class="section-heading">
-        <div>
-          <p class="section-eyebrow">Account Created</p>
-          <h2>Welcome to Preyone!</h2>
-        </div>
-      </div>
-      <div class="signup-card">
-        <div style="text-align:center;padding:2rem 1rem">
-          <svg viewBox="0 0 24 24" width="64" height="64" fill="none" stroke="#16a34a" stroke-width="2" style="margin-bottom:1rem">
-            <circle cx="12" cy="12" r="11"/>
-            <polyline points="7,12 10,15 17,9"/>
-          </svg>
-          <h3 style="font-size:1.25rem;margin:0 0 0.75rem">Your sign up has been successful!</h3>
-          <p style="color:#aaa;margin:0 0 0.5rem">Thank you for signing up for Preyone UltraNet WiFi.</p>
-          <p style="color:#aaa;margin:0 0 1.5rem">A verification email has been sent to:</p>
-          <p style="font-size:1.1rem;font-weight:600;color:#71ff2f;margin:0 0 1.5rem;word-break:break-all" id="registered-email"></p>
-          <div style="background:rgba(22,163,74,0.1);border:1px solid rgba(22,163,74,0.3);border-radius:8px;padding:1rem;margin-bottom:1.5rem;text-align:left">
-            <p style="margin:0 0 0.5rem;color:#ccc;font-size:0.9rem"><strong>Next steps:</strong></p>
-            <ol style="margin:0;padding-left:1.25rem;color:#ccc;font-size:0.9rem">
-              <li style="margin-bottom:0.25rem">Check your email inbox (and spam folder)</li>
-              <li style="margin-bottom:0.25rem">Click the <strong style="color:#71ff2f">Verify Email</strong> button in the email</li>
-              <li style="margin-bottom:0.25rem">Return here and click Sign In to manage your account</li>
-            </ol>
+      <aside class="success-panel details-panel">
+        <h2 class="bebas-font">TRANSACTION DETAILS</h2>
+        <div class="success-detail-grid">
+          <div class="success-detail">
+            <span class="success-detail-label">Package</span>
+            <span class="success-detail-value" id="detail-package">&mdash;</span>
           </div>
-          <a href="/login" class="btn-primary" style="display:inline-block;text-decoration:none">Sign In to Your Account</a>
+          <div class="success-detail">
+            <span class="success-detail-label">Data</span>
+            <span class="success-detail-value" id="detail-data">&mdash;</span>
+          </div>
+          <div class="success-detail">
+            <span class="success-detail-label">Validity</span>
+            <span class="success-detail-value" id="detail-duration">&mdash;</span>
+          </div>
+          <div class="success-detail">
+            <span class="success-detail-label">Amount Paid</span>
+            <span class="success-detail-value" id="detail-amount">&mdash;</span>
+          </div>
+          <div class="success-detail">
+            <span class="success-detail-label">Reference</span>
+            <span class="success-detail-value success-detail-value--ref" id="detail-reference">&mdash;</span>
+          </div>
+          <div class="success-detail">
+            <span class="success-detail-label">Customer</span>
+            <span class="success-detail-value" id="detail-customer">&mdash;</span>
+          </div>
+          <div class="success-detail success-detail--wide">
+            <span class="success-detail-label">Contact</span>
+            <span class="success-detail-value" id="detail-contact">&mdash;</span>
+          </div>
         </div>
-      </div>
-    </section>
-    
+        <a href="/manage-account" class="btn-secondary success-account-btn">MANAGE ACCOUNT</a>
+        <a href="/data" class="success-track-link" id="trackDataBtn" hidden>TRACK MY DATA</a>
+      </aside>
+    </div>
   </main>
 
-<footer class="portal-footer main-footer">
-        <div class="footer-grid">
-          <div class="footer-col brand-col">
-            <a aria-label="Preyone — home" href="https://wifi.preyone.com/" target="_blank" rel="noopener noreferrer">
-              <img
-                src="/images/preyonelogomainzw.png"
-                alt="Preyone"
-                class="footer-brand-mark"
-                width="2048"
-                height="1140"
-                loading="lazy"
-                decoding="async"
-              />
+  <footer class="portal-footer main-footer success-footer">
+    <div class="footer-grid">
+      <div class="footer-col brand-col">
+        <a aria-label="Preyone home" href="https://wifi.preyone.com/" target="_blank" rel="noopener noreferrer">
+          <img
+            src="/images/preyonelogomainzw.png"
+            alt="Preyone"
+            class="footer-brand-mark"
+            width="2048"
+            height="1140"
+            loading="lazy"
+            decoding="async"
+          />
+        </a>
+        <p class="footer-tagline">
+          High-speed satellite connectivity across Zimbabwe. Powered by Starlink Business
+          Priority infrastructure.
+        </p>
+      </div>
+
+      <div class="footer-col">
+        <h3>GET IN TOUCH</h3>
+        <div class="footer-contact-cards">
+          <a href="mailto:support@preyone.com" class="footer-card glass">
+            <span class="footer-card-icon footer-card-icon--cyan">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="m22 7-8.991 5.727a2 2 0 0 1-2.009 0L2 7"></path>
+                <rect x="2" y="4" width="20" height="16" rx="2"></rect>
+              </svg>
+            </span>
+            <span class="footer-card-text">
+              <span class="footer-card-label">Email</span>
+              <span class="footer-card-value">support@preyone.com</span>
+            </span>
+          </a>
+          <a href="tel:+263771327202" class="footer-card glass">
+            <span class="footer-card-icon footer-card-icon--cyan">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M13.832 16.568a1 1 0 0 0 1.213-.303l.355-.465A2 2 0 0 1 17 15h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2A18 18 0 0 1 2 4a2 2 0 0 1 2-2h3a2 2 0 0 1 2 2v3a2 2 0 0 1-.8 1.6l-.468.351a1 1 0 0 0-.292 1.233 14 14 0 0 0 6.392 6.384"></path>
+              </svg>
+            </span>
+            <span class="footer-card-text">
+              <span class="footer-card-label">Call Us</span>
+              <span class="footer-card-value">+263 771 327 202</span>
+            </span>
+          </a>
+          <div class="footer-card glass">
+            <span class="footer-card-icon footer-card-icon--violet">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0"></path>
+                <circle cx="12" cy="10" r="3"></circle>
+              </svg>
+            </span>
+            <span class="footer-card-text">
+              <span class="footer-card-label">Location</span>
+              <span class="footer-card-value">Harare, Zimbabwe</span>
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <div class="footer-col">
+        <h3>QUICK LINKS</h3>
+        <ul class="footer-links">
+          <li><a href="/data">Check My Data</a></li>
+          <li><a href="https://wifi.preyone.com/site/" target="_blank" rel="noopener">Main Website</a></li>
+          <li><a href="/terms.html" target="_blank" rel="noopener">Terms of Service</a></li>
+          <li><a href="/manage-account">Manage Account</a></li>
+        </ul>
+      </div>
+
+      <div class="footer-col">
+        <h3>FOLLOW US</h3>
+        <div class="footer-follow-panel glass">
+          <div class="footer-follow-links">
+            <a href="https://www.facebook.com/preyoneenterprise" class="social-icon social-icon-facebook" title="Facebook" target="_blank" rel="noopener">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true">
+                <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
+              </svg>
             </a>
-            <p class="footer-tagline">
-              High-speed satellite connectivity across Zimbabwe. Powered by Starlink Business
-              Priority infrastructure.
-            </p>
-          </div>
-
-          <div class="footer-col">
-            <h3>GET IN TOUCH</h3>
-            <div class="footer-contact-cards">
-              <a href="mailto:support@preyone.com" class="footer-card glass">
-                <span class="footer-card-icon footer-card-icon--cyan">
-                  <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <path d="m22 7-8.991 5.727a2 2 0 0 1-2.009 0L2 7"></path>
-                    <rect x="2" y="4" width="20" height="16" rx="2"></rect>
-                  </svg>
-                </span>
-                <span class="footer-card-text">
-                  <span class="footer-card-label">Email</span>
-                  <span class="footer-card-value">support@preyone.com</span>
-                </span>
-              </a>
-              <a href="tel:+263771327202" class="footer-card glass">
-                <span class="footer-card-icon footer-card-icon--cyan">
-                  <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <path d="M13.832 16.568a1 1 0 0 0 1.213-.303l.355-.465A2 2 0 0 1 17 15h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2A18 18 0 0 1 2 4a2 2 0 0 1 2-2h3a2 2 0 0 1 2 2v3a2 2 0 0 1-.8 1.6l-.468.351a1 1 0 0 0-.292 1.233 14 14 0 0 0 6.392 6.384"></path>
-                  </svg>
-                </span>
-                <span class="footer-card-text">
-                  <span class="footer-card-label">Call Us</span>
-                  <span class="footer-card-value">+263 771 327 202</span>
-                </span>
-              </a>
-              
-              <div class="footer-card glass">
-                <span class="footer-card-icon footer-card-icon--violet">
-                  <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <path d="M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0"></path>
-                    <circle cx="12" cy="10" r="3"></circle>
-                  </svg>
-                </span>
-                <span class="footer-card-text">
-                  <span class="footer-card-label">Location</span>
-                  <span class="footer-card-value">Harare, Zimbabwe</span>
-                </span>
-              </div>
-            </div>
-          </div>
-
-          <div class="footer-col">
-            <h3>QUICK LINKS</h3>
-            <ul class="footer-links">
-              <li>
-                <a href="https://wifi.preyone.com/data">
-                  <svg class="icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <path d="M21 12a9 9 0 1 1-9-9" />
-                    <polyline points="21 3 21 9 15 9" />
-                    <path d="M12 7v5l3 3" />
-                  </svg>
-                  Check My Data
-                </a>
-              </li>
-              <li>
-                <a href="https://wifi.preyone.com/site/" target="_blank" rel="noopener">
-                  <svg class="icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <circle cx="12" cy="12" r="10" />
-                    <line x1="2" y1="12" x2="22" y2="12" />
-                    <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
-                  </svg>
-                  Main Website
-                </a>
-              </li>
-              <li>
-                <a href="https://wifi.preyone.com/terms.html" target="_blank" rel="noopener">
-                  <svg class="icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                    <polyline points="14 2 14 8 20 8" />
-                    <line x1="16" y1="13" x2="8" y2="13" />
-                    <line x1="16" y1="17" x2="8" y2="17" />
-                  </svg>
-                  Terms of Service
-                </a>
-              </li>
-              <li>
-                <a href="#packages-heading">
-                  <svg class="icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <rect x="3" y="3" width="7" height="7" rx="1" />
-                    <rect x="14" y="3" width="7" height="7" rx="1" />
-                    <rect x="3" y="14" width="7" height="7" rx="1" />
-                    <rect x="14" y="14" width="7" height="7" rx="1" />
-                  </svg>
-                  View Packages
-                </a>
-              </li>
-            </ul>
-          </div>
-
-          <div class="footer-col">
-            <h3>FOLLOW US</h3>
-            <div class="footer-follow-panel glass">
-              <div class="footer-follow-links">
-                
-                <a href="https://www.facebook.com/preyoneenterprise" class="social-icon social-icon-facebook" title="Facebook" target="_blank" rel="noopener">
-                  <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
-                    <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
-                  </svg>
-                </a>
-                <a href="https://www.instagram.com/preyoneenterprise" class="social-icon social-icon-instagram" title="Instagram" target="_blank" rel="noopener">
-                  <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <rect x="2" y="2" width="20" height="20" rx="5" ry="5" />
-                    <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z" />
-                    <line x1="17.5" y1="6.5" x2="17.51" y2="6.5" />
-                  </svg>
-                </a>
-                <a href="https://x.com/preyonetech" class="social-icon social-icon-x" title="X (Twitter)" target="_blank" rel="noopener">
-                  <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
-                    <path d="M18.901 1.153h3.68l-8.04 9.19L24 22.846h-7.406l-5.8-7.584-6.638 7.584H.474l8.6-9.83L0 1.154h7.594l5.243 6.932 6.064-6.932zm-1.292 19.494h2.039L6.486 3.24H4.298l13.311 17.407z" />
-                  </svg>
-                </a>
-                <a href="https://youtube.com/@preyonenterprises" class="social-icon social-icon-youtube" title="YouTube" target="_blank" rel="noopener">
-                  <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
-                    <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0.502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" />
-                  </svg>
-                </a>
-              </div>
-            </div>
+            <a href="https://www.instagram.com/preyoneenterprise" class="social-icon social-icon-instagram" title="Instagram" target="_blank" rel="noopener">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <rect x="2" y="2" width="20" height="20" rx="5" ry="5" />
+                <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z" />
+                <line x1="17.5" y1="6.5" x2="17.51" y2="6.5" />
+              </svg>
+            </a>
+            <a href="https://x.com/preyonetech" class="social-icon social-icon-x" title="X (Twitter)" target="_blank" rel="noopener">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true">
+                <path d="M18.901 1.153h3.68l-8.04 9.19L24 22.846h-7.406l-5.8-7.584-6.638 7.584H.474l8.6-9.83L0 1.154h7.594l5.243 6.932 6.064-6.932zm-1.292 19.494h2.039L6.486 3.24H4.298l13.311 17.407z" />
+              </svg>
+            </a>
+            <a href="https://youtube.com/@preyonenterprises" class="social-icon social-icon-youtube" title="YouTube" target="_blank" rel="noopener">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true">
+                <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" />
+              </svg>
+            </a>
           </div>
         </div>
+      </div>
+    </div>
 
-        <div class="footer-bottom">
-          <div class="legal-row">
-            <p>&copy; <span id="current-year"></span> Preyone Enterprises. All Rights Reserved.</p>
-            <div class="payment-badges">
-              <span class="secure-pay-label">Secure Payments</span>
-              <span class="pay-logos">
-
-                <span class="pay-logo pay-logo--visa">VISA</span>
-                <span class="pay-logo pay-logo--mastercard"><span class="mastercard-mark" aria-hidden="true"><i></i><i></i></span><span>Mastercard</span></span>
-                <span class="pay-logo pay-logo--ecocash"><span class="ecocash-mark"><span class="ecocash-eco">Eco</span><span class="ecocash-cash">Cash</span></span></span>
-              </span>
-            </div>
-          </div>
+    <div class="footer-bottom">
+      <div class="legal-row">
+        <p>&copy; 2026 Preyone Enterprises. All Rights Reserved.</p>
+        <div class="payment-badges">
+          <span class="secure-pay-label">Secure Payments</span>
+          <span class="pay-logos">
+            <span class="pay-logo pay-logo--visa">VISA</span>
+            <span class="pay-logo pay-logo--mastercard"><span class="mastercard-mark" aria-hidden="true"><i></i><i></i></span><span>Mastercard</span></span>
+            <span class="pay-logo pay-logo--ecocash"><span class="ecocash-mark"><span class="ecocash-eco">Eco</span><span class="ecocash-cash">Cash</span></span></span>
+          </span>
         </div>
-      </footer>
+      </div>
+    </div>
+  </footer>
 
-  <script src="/js/portal.js?v=8"></script>
-  <script src="/js/voucher-card.js"></script>
-  <script>
-    document.addEventListener('DOMContentLoaded', function () {
-      var params = new URLSearchParams(location.search);
-      var code = (params.get('voucher') || '').toLowerCase();
-      var sessionToken = params.get('token');
-      var dataLimitGb = params.get('dataLimit') ? parseFloat(params.get('dataLimit')) : null;
-      var isUncapped = params.get('uncapped') === 'true';
-
-      // â”€â”€ Render Voucher Card â”€â”€
-      if (code) {
-        var data = {
-          code: code,
-          package_tier: params.get('pkg') || 'Prepaid',
-          price_amount: null,
-          duration_min: parseInt(params.get('dur')) || 60,
-          data_limit_gb: dataLimitGb,
-          is_uncapped: isUncapped,
-          bandwidth_mbps_up: parseInt(params.get('bwUp')) || 0,
-          bandwidth_mbps_down: parseInt(params.get('bwDown')) || 0,
-        };
-
-        renderVoucherToContainer('voucher-card-container', data);
-
-        // â”€â”€ Voucher code text + copy â”€â”€
-        var voucherCodeDisplay = document.getElementById('voucher-code-display');
-        var voucherCodeText = document.getElementById('voucher-code-text');
-        var copyVoucherBtn = document.getElementById('copyVoucherBtn');
-        var copyLabel = document.getElementById('copyLabel');
-        voucherCodeText.textContent = code;
-        voucherCodeDisplay.style.display = '';
-
-        copyVoucherBtn.addEventListener('click', function () {
-          if (navigator.clipboard && navigator.clipboard.writeText) {
-            navigator.clipboard.writeText(code).then(function () {
-              copyLabel.textContent = 'Copied!';
-              setTimeout(function () { copyLabel.textContent = 'Copy'; }, 2000);
-            });
-          } else {
-            // Fallback
-            var ta = document.createElement('textarea');
-            ta.value = code;
-            ta.style.position = 'fixed';
-            ta.style.left = '-9999px';
-            document.body.appendChild(ta);
-            ta.select();
-            document.execCommand('copy');
-            document.body.removeChild(ta);
-            copyLabel.textContent = 'Copied!';
-            setTimeout(function () { copyLabel.textContent = 'Copy'; }, 2000);
-          }
-        });
-
-        var dlBtn = document.getElementById('downloadVoucherBtn');
-        dlBtn.style.display = 'inline-flex';
-        dlBtn.addEventListener('click', function () {
-          downloadVoucherPNG(data);
-        });
-      }
-
-      // â”€â”€ Helpers â”€â”€
-      function formatBytes(bytes) {
-        if (bytes == null) return 'â€”';
-        if (bytes < 1024) return bytes + ' B';
-        if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
-        if (bytes < 1073741824) return (bytes / 1048576).toFixed(2) + ' MB';
-        return (bytes / 1073741824).toFixed(2) + ' GB';
-      }
-
-      function formatDuration(ms) {
-        if (ms <= 0) return '00:00:00';
-        var totalSec = Math.floor(ms / 1000);
-        var h = Math.floor(totalSec / 3600);
-        var m = Math.floor((totalSec % 3600) / 60);
-        var s = totalSec % 60;
-        return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
-      }
-
-      // â”€â”€ Ring Timer SVG circumference â”€â”€
-      var RING_CIRCUMFERENCE = 2 * Math.PI * 68; // r=68 â†’ 427.26
-
-      function updateRing(pct) {
-        var ring = document.getElementById('ring-fg');
-        if (!ring) return;
-        var offset = RING_CIRCUMFERENCE * (1 - Math.min(pct, 1));
-        ring.style.strokeDashoffset = offset;
-      }
-
-      // â”€â”€ Timer & Data Polling â”€â”€
-      var timerEl = document.getElementById('timer-display');
-      var timerTextEl = document.getElementById('timer-display-text');
-      var expiresAt = params.get('expires');
-      var endTime = expiresAt ? new Date(expiresAt).getTime() : null;
-      var totalDuration = parseInt(params.get('dur')) * 60 * 1000 || 1;
-
-      function updateTimer() {
-        if (!endTime) {
-          if (timerEl) timerEl.textContent = 'UNLIMITED';
-          if (timerTextEl) timerTextEl.textContent = 'UNLIMITED';
-          return;
-        }
-        var now = Date.now();
-        var diff = endTime - now;
-        var elapsed = totalDuration - diff;
-        var pct = Math.min(Math.max(elapsed / totalDuration, 0), 1);
-        var str = formatDuration(diff);
-
-        if (timerEl) timerEl.textContent = str;
-        if (timerTextEl) timerTextEl.textContent = str;
-        updateRing(1 - pct);
-
-        if (diff <= 0) {
-          if (timerEl) timerEl.textContent = '00:00:00';
-          if (timerTextEl) timerTextEl.textContent = '00:00:00';
-          updateRing(1);
-        }
-      }
-
-      updateTimer();
-      setInterval(updateTimer, 1000);
-
-      // â”€â”€ Fill session details from URL (fallback) â”€â”€
-      var detailSpeed = document.getElementById('detail-speed');
-      var detailData = document.getElementById('detail-data');
-      var detailExpires = document.getElementById('detail-expires');
-
-      var bwUp = params.get('bwUp');
-      var bwDown = params.get('bwDown');
-      if (detailSpeed) detailSpeed.textContent = bwUp && bwDown ? bwUp + ' Mbps \u2191 / ' + bwDown + ' Mbps \u2193' : '\u2014';
-      if (detailData) detailData.textContent = isUncapped ? 'Unlimited' : (dataLimitGb ? dataLimitGb + ' GB' : '\u2014');
-      if (detailExpires && endTime) detailExpires.textContent = new Date(endTime).toLocaleString([], { hour12: false, dateStyle: 'medium', timeStyle: 'medium' });
-
-      // â”€â”€ Live Status Polling â”€â”€
-      var dataUsageSection = document.getElementById('data-usage-section');
-      var dataUsageNumbers = document.getElementById('data-usage-numbers');
-      var dataBarFill = document.getElementById('data-bar-fill');
-      var dataUsagePct = document.getElementById('data-usage-pct');
-      var dataUsageRemaining = document.getElementById('data-usage-remaining');
-      var detailStarted = document.getElementById('detail-started');
-
-      function pollStatus() {
-        if (!sessionToken) return;
-        fetch('/api/auth/status?token=' + encodeURIComponent(sessionToken))
-          .then(function (r) { return r.json(); })
-          .then(function (json) {
-            if (!json.active) return;
-
-            // Update expires from server
-            if (json.expiresAt) {
-              endTime = new Date(json.expiresAt).getTime();
-              if (detailExpires) detailExpires.textContent = new Date(endTime).toLocaleString([], { hour12: false, dateStyle: 'medium', timeStyle: 'medium' });
-            }
-
-            // Data usage
-            var used = json.bytesUsed;
-            var total = json.bytesTotal;
-            var limitGb = json.dataLimitGb;
-
-            if (used != null && dataUsageNumbers) {
-              var usedStr = formatBytes(used);
-              var totalStr = json.isUncapped ? 'Unlimited' : (total != null ? formatBytes(total) : (limitGb ? limitGb + ' GB' : 'â€”'));
-              dataUsageNumbers.textContent = usedStr + ' / ' + totalStr;
-
-              if (dataBarFill && total != null && total > 0) {
-                var pct = Math.min((used / total) * 100, 100);
-                dataBarFill.style.width = pct + '%';
-                if (dataUsagePct) dataUsagePct.textContent = pct.toFixed(1) + '%';
-                if (dataUsageRemaining) dataUsageRemaining.textContent = formatBytes(Math.max(total - used, 0)) + ' remaining';
-              }
-            }
-
-            // Session started (estimate from voucher info)
-            if (json.voucherCode && detailStarted) {
-              detailStarted.textContent = 'Just now';
-            }
-          })
-          .catch(function () { /* silent */ });
-      }
-
-      // Initial poll + every 10 seconds
-      pollStatus();
-      setInterval(pollStatus, 10000);
-
-      // â”€â”€ Gateway Authorization Trigger â”€â”€
-      // POST to ext_login (not GET redirect) because the gateway's ext_login needs
-      // a form POST with username/password to trigger RADIUS auth, which then calls
-      // FreeRADIUS â†’ our REST API â†’ validates session â†’ returns Accept.
-      // A GET redirect shows "Login Success" visually but does NOT apply authorization.
-      var loginUrl = params.get('loginUrl');
-      var origUrl = params.get('origUrl');
-      var cliMacRaw = params.get('mac') || params.get('client_mac');
-      var cliMacClean = cliMacRaw ? cliMacRaw.replace(/[:-]/g, '').toUpperCase() : null;
-      var nasMacRaw = params.get('nas_mac');
-      var nasIp = params.get('nasip') || params.get('nas_ip');
-      var ssid = params.get('ssid');
-      var voucherCode = params.get('voucher');
-
-      var gwRedirectTimer = null;
-
-      function goToExtLogin() {
-        if (!loginUrl) {
-          var fb = origUrl || 'http://preyone.com';
-          if (!/^https?:\/\//i.test(fb)) fb = 'http://' + fb;
-          location.href = fb;
-          return;
-        }
-        // Build hidden form and POST to ext_login to trigger RADIUS auth
-        var code = voucherCode || cliMacRaw || '';
-        var raw = cliMacRaw || '';
-        var clean = cliMacClean || '';
-        var f = document.createElement('form');
-        f.method = 'POST';
-        f.action = loginUrl;
-        f.style.display = 'none';
-        var fields = {
-          client_mac: raw,
-          mac: clean,
-          nas_ip: nasIp || '',
-          nas_mac: nasMacRaw || '',
-          ssid: ssid || '',
-          username: code,
-          password: code,
-          url: origUrl || 'http://preyone.com',
-          redirect: origUrl || 'http://preyone.com'
-        };
-        for (var k in fields) {
-          var i = document.createElement('input');
-          i.type = 'hidden';
-          i.name = k;
-          i.value = fields[k];
-          f.appendChild(i);
-        }
-        document.body.appendChild(f);
-        f.submit();
-      }
-
-      // Auto-redirect to ext_login after 5 seconds (gives user time to download voucher)
-      if (loginUrl) {
-        gwRedirectTimer = setTimeout(goToExtLogin, 5000);
-      }
-
-      var startBtn = document.getElementById('startBrowsingBtn');
-      if (startBtn) {
-        startBtn.addEventListener('click', function () {
-          if (gwRedirectTimer) clearTimeout(gwRedirectTimer);
-          goToExtLogin();
-        });
-      }
-
-      // ── Deep-link into the PWA usage portal ──
-      // Carries the gateway's mac + voucher across so /data opens already
-      // identified (and persists them to localStorage for later visits).
-      // `code` and `cliMacRaw` are the values parsed from the gateway query
-      // string further up. Hidden when neither is present, so a manual visit
-      // to success.html does not show a dead button.
-      var trackBtn = document.getElementById('trackDataBtn');
-      if (trackBtn && (code || cliMacRaw)) {
-        var trackQs = new URLSearchParams();
-        if (cliMacRaw) trackQs.set('mac', cliMacRaw);
-        if (code) trackQs.set('voucher', code);
-        trackBtn.href = '/data?' + trackQs.toString();
-        trackBtn.hidden = false;
-      }
-    });
-  </script>
-  <!-- WhatsApp FAB -->
   <a
     href="https://wa.me/263771327202"
     class="whatsapp-fab"
@@ -686,6 +254,277 @@
     </svg>
   </a>
 
+  <script src="/js/voucher-card.js"></script>
+  <script>
+    (function () {
+      'use strict';
+
+      var params = new URLSearchParams(window.location.search);
+      var voucherCode = (params.get('voucher') || '').trim();
+      var packageName = params.get('pkg') || 'Prepaid';
+      var durationMin = parseInt(params.get('dur'), 10);
+      var dataLimitGb = params.get('dataLimit') ? parseFloat(params.get('dataLimit')) : null;
+      var isUncapped = params.get('uncapped') === 'true';
+      var bandwidthUp = parseInt(params.get('bwUp'), 10) || 0;
+      var bandwidthDown = parseInt(params.get('bwDown'), 10) || 0;
+      var amount = params.get('amount');
+      var currency = params.get('currency') || 'USD';
+      var reference = params.get('ref') || '';
+      var clientName = params.get('name') || '';
+      var clientPhone = params.get('phone') || '';
+      var paymentId = params.get('paymentId') || '';
+      var gatewayKeys = [
+        'mac', 'client_mac', 'clientMac', 'ip', 'client_ip', 'wlanuserip', 'res', 'userurl',
+        'url', 'origUrl', 'login_url', 'loginUrl', 'nas_ip', 'nasip', 'nas_mac', 'ssid', 'gw_id', 'gw_sn',
+      ];
+
+      var gatewayQuery = new URLSearchParams();
+      gatewayKeys.forEach(function (key) {
+        var value = params.get(key);
+        if (value) gatewayQuery.set(key, value);
+      });
+      if (!gatewayQuery.get('url')) {
+        gatewayQuery.set('url', gatewayQuery.get('userurl') || (window.location.origin + '/manage-account'));
+      }
+
+      var hasGateway = Boolean(
+        gatewayQuery.get('login_url') || gatewayQuery.get('loginUrl') ||
+        gatewayQuery.get('mac') || gatewayQuery.get('client_mac') || gatewayQuery.get('clientMac')
+      );
+
+      var voucherData = {
+        code: voucherCode || 'PREYONE',
+        package_tier: packageName,
+        client_name: clientName || 'Preyone Customer',
+        price_amount: amount,
+        duration_min: durationMin || 0,
+        data_limit_gb: dataLimitGb,
+        is_uncapped: isUncapped,
+        bandwidth_mbps_up: bandwidthUp,
+        bandwidth_mbps_down: bandwidthDown,
+      };
+
+      var connectBtn = document.getElementById('connectNowBtn');
+      var connectBtnText = document.getElementById('connectBtnText');
+      var connectBtnSpinner = document.getElementById('connectBtnSpinner');
+      var connectError = document.getElementById('connect-error');
+      var copyBtn = document.getElementById('copyVoucherBtn');
+      var copyLabel = document.getElementById('copyLabel');
+      var downloadBtn = document.getElementById('downloadVoucherBtn');
+      var preview = document.getElementById('voucher-jpg-preview');
+      var canvas = document.getElementById('voucher-canvas');
+      var connecting = false;
+
+      function setConnectError(message) {
+        if (!connectError) return;
+        if (!message) {
+          connectError.textContent = '';
+          connectError.classList.add('hidden');
+          return;
+        }
+        connectError.textContent = message;
+        connectError.classList.remove('hidden');
+      }
+
+      function setConnecting(active) {
+        connecting = active;
+        if (connectBtn) connectBtn.disabled = active;
+        if (connectBtnText) connectBtnText.textContent = active ? 'CONNECTING...' : 'CONNECT NOW';
+        if (connectBtnSpinner) connectBtnSpinner.classList.toggle('hidden', !active);
+      }
+
+      function formatDuration(minutes) {
+        if (!minutes || minutes <= 0) return '\u2014';
+        if (minutes < 60) return minutes + ' min';
+        var hours = Math.floor(minutes / 60);
+        var mins = minutes % 60;
+        return hours + ' hr' + (mins ? ' ' + mins + ' min' : '');
+      }
+
+      function formatAmount(value, curr) {
+        var number = parseFloat(value);
+        if (!Number.isFinite(number)) return '\u2014';
+        var symbol = curr === 'USD' ? '$' : '';
+        return symbol + number.toFixed(2) + (symbol ? '' : ' ' + curr);
+      }
+
+      function fillDetails() {
+        var packageEl = document.getElementById('detail-package');
+        var dataEl = document.getElementById('detail-data');
+        var durationEl = document.getElementById('detail-duration');
+        var amountEl = document.getElementById('detail-amount');
+        var referenceEl = document.getElementById('detail-reference');
+        var customerEl = document.getElementById('detail-customer');
+        var contactEl = document.getElementById('detail-contact');
+
+        if (packageEl) packageEl.textContent = packageName;
+        if (dataEl) dataEl.textContent = isUncapped ? 'Unlimited' : (dataLimitGb ? dataLimitGb + ' GB' : '\u2014');
+        if (durationEl) durationEl.textContent = formatDuration(durationMin);
+        if (amountEl) amountEl.textContent = formatAmount(amount, currency);
+        if (referenceEl) referenceEl.textContent = reference || paymentId || '\u2014';
+        if (customerEl) customerEl.textContent = clientName || '\u2014';
+        if (contactEl) contactEl.textContent = clientPhone || '\u2014';
+      }
+
+      async function renderVoucher() {
+        if (!voucherCode || !canvas || !preview || !window.drawVoucherCanvas) return;
+        try {
+          await window.drawVoucherCanvas(canvas, voucherData, 'Preyone Enterprises');
+          var jpeg = canvas.toDataURL('image/jpeg', 0.92);
+          preview.src = jpeg;
+          preview.hidden = false;
+          if (downloadBtn) {
+            downloadBtn.href = jpeg;
+            downloadBtn.download = 'preyone-voucher-' + voucherCode.toLowerCase() + '.jpg';
+            downloadBtn.hidden = false;
+          }
+        } catch (_err) {
+          if (downloadBtn) downloadBtn.hidden = true;
+        }
+      }
+
+      function copyVoucher() {
+        if (!voucherCode) return;
+        var done = function () {
+          if (copyLabel) copyLabel.textContent = 'Copied to clipboard';
+          setTimeout(function () {
+            if (copyLabel) copyLabel.textContent = 'Copy PIN';
+          }, 2200);
+        };
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(voucherCode).then(done).catch(function () {
+            fallbackCopy(voucherCode, done);
+          });
+        } else {
+          fallbackCopy(voucherCode, done);
+        }
+      }
+
+      function fallbackCopy(text, done) {
+        var input = document.createElement('textarea');
+        input.value = text;
+        input.style.position = 'fixed';
+        input.style.left = '-9999px';
+        document.body.appendChild(input);
+        input.select();
+        try { document.execCommand('copy'); } catch (_err) { /* ignore */ }
+        document.body.removeChild(input);
+        done();
+      }
+
+      async function syncAccount(sessionToken) {
+        try {
+          var response = await fetch('/api/auth/session-exchange', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sessionToken: sessionToken }),
+          });
+          if (!response.ok) return;
+          var json = await response.json();
+          if (json.token) localStorage.setItem('portal_token', json.token);
+          if (json.user) localStorage.setItem('portal_user', JSON.stringify(json.user));
+          localStorage.setItem('preyone_session_token', sessionToken);
+        } catch (_err) {
+          /* the gateway redirect still works without the account token */
+        }
+      }
+
+      async function connectNow() {
+        if (connecting) return;
+        if (!voucherCode) {
+          setConnectError('No voucher was found. Return to the portal and try again.');
+          return;
+        }
+
+        setConnectError('');
+        setConnecting(true);
+
+        var storageKey = 'preyone_connect_' + voucherCode.toLowerCase();
+        try {
+          var saved = JSON.parse(localStorage.getItem(storageKey) || 'null');
+          if (saved && saved.sessionToken && saved.redirectUrl) {
+            await syncAccount(saved.sessionToken);
+            window.location.href = hasGateway ? saved.redirectUrl : '/manage-account';
+            return;
+          }
+        } catch (_err) {
+          localStorage.removeItem(storageKey);
+        }
+
+        var body = {
+          fullName: clientName || 'Preyone Customer',
+          voucherCode: voucherCode,
+          acceptedTos: true,
+        };
+        if (clientPhone) body.phone = clientPhone;
+
+        try {
+          var response = await fetch('/api/auth/signup?' + gatewayQuery.toString(), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          });
+          var json = await response.json().catch(function () { return {}; });
+          if (!response.ok) {
+            var message = json.error || (json.errors && json.errors[0] && json.errors[0].msg);
+            setConnectError(message || 'We could not activate this voucher. Please try again.');
+            setConnecting(false);
+            return;
+          }
+
+          if (json.redirectUrl) {
+            localStorage.setItem(storageKey, JSON.stringify({
+              sessionToken: json.sessionToken,
+              redirectUrl: json.redirectUrl,
+            }));
+          }
+          if (json.sessionToken) {
+            localStorage.setItem('preyone_session_token', json.sessionToken);
+            await syncAccount(json.sessionToken);
+          }
+
+          if (hasGateway && json.redirectUrl) {
+            window.location.href = json.redirectUrl;
+          } else {
+            window.location.href = '/manage-account';
+          }
+        } catch (_err) {
+          setConnectError('Network error \u2014 check your connection and try again.');
+          setConnecting(false);
+        }
+      }
+
+      if (!voucherCode) {
+        var codeEl = document.getElementById('voucher-code-text');
+        if (codeEl) codeEl.textContent = 'NO VOUCHER';
+        if (connectBtn) connectBtn.disabled = true;
+        if (copyBtn) copyBtn.disabled = true;
+        setConnectError('No voucher was found. Return to the portal and try again.');
+      } else {
+        var codeText = document.getElementById('voucher-code-text');
+        if (codeText) codeText.textContent = voucherCode;
+        var trackBtn = document.getElementById('trackDataBtn');
+        if (trackBtn) {
+          var trackQuery = new URLSearchParams();
+          trackQuery.set('voucher', voucherCode);
+          var mac = gatewayQuery.get('mac') || gatewayQuery.get('client_mac') || gatewayQuery.get('clientMac');
+          if (mac) trackQuery.set('mac', mac);
+          trackBtn.href = '/data?' + trackQuery.toString();
+          trackBtn.hidden = false;
+        }
+      }
+
+      fillDetails();
+      if ('requestAnimationFrame' in window) {
+        requestAnimationFrame(function () { setTimeout(renderVoucher, 0); });
+      } else {
+        setTimeout(renderVoucher, 0);
+      }
+
+      if (copyBtn) copyBtn.addEventListener('click', copyVoucher);
+      if (connectBtn) connectBtn.addEventListener('click', connectNow);
+    })();
+  </script>
 </body>
 
 </html>

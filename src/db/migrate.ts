@@ -285,6 +285,13 @@ CREATE INDEX IF NOT EXISTS idx_payments_user_id ON payments (user_id);
   ALTER TABLE transactions ADD COLUMN IF NOT EXISTS sold_by_name TEXT;
   CREATE INDEX IF NOT EXISTS idx_transactions_package_tier ON transactions (package_tier);
 
+  -- Online payments are CEO sales, never anonymous. Older rows were recorded
+  -- as "Online" before the owner was resolved, which made the admin console
+  -- attribute them to nobody.
+  UPDATE transactions
+     SET sold_by_name = 'Prechard Muvirimi'
+   WHERE sold_by_name IS NULL OR sold_by_name = 'Online';
+
   CREATE TABLE IF NOT EXISTS settings (
     key         TEXT PRIMARY KEY,
     value       TEXT NOT NULL,
@@ -326,6 +333,7 @@ CREATE INDEX IF NOT EXISTS idx_payments_user_id ON payments (user_id);
 
   CREATE INDEX IF NOT EXISTS idx_sales_sold_by ON sales (sold_by);
   CREATE INDEX IF NOT EXISTS idx_sales_sold_at ON sales (sold_at);
+  CREATE INDEX IF NOT EXISTS idx_sales_voucher_code ON sales (voucher_code);
 
   -- Renewals/resales: re-arming an expired voucher books a SECOND row here, so
   -- the revenue never falls out of the numbers (every report reads FROM sales).
@@ -1523,6 +1531,20 @@ CREATE INDEX IF NOT EXISTS idx_payments_user_id ON payments (user_id);
   CREATE UNIQUE INDEX IF NOT EXISTS idx_ruijie_vouchers_code_no ON ruijie_vouchers (code_no);
   CREATE INDEX IF NOT EXISTS idx_ruijie_vouchers_payment ON ruijie_vouchers (payment_id);
   CREATE INDEX IF NOT EXISTS idx_ruijie_vouchers_tier ON ruijie_vouchers (tier_name);
+
+  -- Pre-minted Ruijie stock. A row is 'available' while it sits in the pool,
+  -- 'assigned' once an online payment claims it, and 'retired' when ops decide
+  -- it must never be sold. Legacy rows (created before the pool) stay NULL and
+  -- are excluded from availability, so the pool only ever hands out codes it
+  -- minted itself. The partial index keeps the claim query O(1) per tier.
+  ALTER TABLE ruijie_vouchers ADD COLUMN IF NOT EXISTS pool_status TEXT;
+  ALTER TABLE ruijie_vouchers ADD COLUMN IF NOT EXISTS assigned_at TIMESTAMPTZ;
+  CREATE INDEX IF NOT EXISTS idx_ruijie_vouchers_pool_available
+    ON ruijie_vouchers (tier_name, created_at)
+    WHERE pool_status = 'available';
+  CREATE INDEX IF NOT EXISTS idx_ruijie_vouchers_pool_status
+    ON ruijie_vouchers (pool_status)
+    WHERE pool_status IS NOT NULL;
 
   -- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• Multi-device Voucher Binding â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   -- One voucher code can authorize several devices (a phone, a laptop, a TV).

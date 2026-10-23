@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <title>Log In — Preyone UltraNet Wi-Fi</title>
+  <title>Log In ï¿½ Preyone UltraNet Wi-Fi</title>
   <link rel="icon" type="image/png" href="/favicon/favicon-96x96.png" sizes="96x96" />
   <link rel="icon" type="image/svg+xml" href="/favicon/favicon.svg" />
   <link rel="shortcut icon" href="/favicon/favicon.ico" />
@@ -18,7 +18,7 @@
   <link
     href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Montserrat:wght@500;600;700;800&family=Satisfy&display=swap"
     rel="stylesheet">
-  <link rel="stylesheet" href="/css/portal.css?v=28" />
+  <link rel="stylesheet" href="/css/portal.css?v=46" />
   <style>
     .login-container {
       max-width: 440px;
@@ -238,7 +238,7 @@
         }
         // Success - store token and redirect
         if (json.token) {
-          localStorage.setItem('portalToken', json.token);
+          localStorage.setItem('portal_token', json.token);
           document.cookie = 'portal_token=' + json.token + '; path=/; domain=.preyone.com; max-age=604800; SameSite=Lax';
         }
         successEl.textContent = 'Login successful! Redirecting...';

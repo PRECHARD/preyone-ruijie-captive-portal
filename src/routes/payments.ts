@@ -8,6 +8,7 @@ import type { PoolClient } from 'pg';
 import { requireAdminAuth } from '../middleware/adminAuth';
 import {
   initiatePesepayPayment,
+  authorizeOmariPayment,
   decryptResponse,
   isPesepayConfigured,
   verifyPaymentStatus,
@@ -19,8 +20,8 @@ import {
   PESEPAY_FAILED_STATUSES,
 } from '../services/pesepayService';
 import type { PesepayCurrency, PesepayRail } from '../services/pesepayService';
-import { RuijieApiError } from '../services/ruijieCloud';
 import { isRuijieCloudConfigured, findRuijieProfile, mintRuijieVoucherForTier } from '../services/ruijieMint';
+import { claimPooledVoucher, refillVoucherPool } from '../services/voucherPool';
 import { requireStarlinkAuth } from '../middleware/starlinkAuth';
 import { createStarlinkInvoice, applyStarlinkPayment, getStarlinkKit } from '../db/starlink';
 import { PLAN_TIERS } from './subscription';
@@ -157,6 +158,11 @@ async function mintLegacyVoucher(client: PoolClient, pay: LegacyMintContext): Pr
 
 type SaleOwner = { id: string; fullName: string };
 
+// Online sales belong to the CEO. The name is stored on the transaction at
+// initiation (before the gateway confirms) so the admin console never shows an
+// anonymous "Online" seller, even while a payment is still pending.
+const DEFAULT_ONLINE_SALE_OWNER_NAME = 'Prechard Muvirimi';
+
 // A sale must always be attributable to a person, exactly like a staff-created
 // voucher is. Portal/gateway payments belong to the CEO by default; the
 // ONLINE_SALE_OWNER_ID override lets ops reassign them without a redeploy.
@@ -195,83 +201,38 @@ function normalizeSaleMethod(raw?: string | null): string {
   return value;
 }
 
-// Record an operations alert when a Ruijie Cloud voucher could not be minted for
-// a payment that HAS already been charged by Pesepay. Without this the failure is
-// invisible: the transaction rolls back, the payment stays 'pending', and the
-// customer has paid but received nothing.
-//
-// Two properties matter:
-//  1. It runs AFTER the rollback, on its own connection — a row inserted inside
-//     the doomed transaction would be rolled back with it and the alert lost.
-//  2. It never throws. Failing to record the failure must not replace the real
-//     error the caller needs to see.
-async function recordRuijieMintFailure(paymentId: string, pay: any, mintError: unknown): Promise<void> {
-  const code = mintError instanceof RuijieApiError ? String(mintError.code) : 'unknown';
-  const detail = (mintError as Error)?.message || String(mintError);
-
-  // Two independent best-effort writes: a failure of one must not skip the other.
-  // The alert is for operations; the marker is what the customer's own status
-  // poll reads to show the "taking longer than expected" screen.
-  await Promise.all([
-    (async () => {
-      try {
-        const reference = pay.pesepay_reference || 'not recorded';
-        // phone_number is on the payment row; email lives on users.
-        let email: string | null = null;
-        try {
-          const u = await pool.query('SELECT email FROM users WHERE id = $1', [pay.user_id]);
-          email = u.rows[0]?.email ?? null;
-        } catch {
-          // Contact lookup is best-effort; never block the alert on it.
-        }
-        const contact = [pay.phone_number, email].filter(Boolean).join(' / ') || 'no contact on file';
-        await pool.query(
-          `INSERT INTO alerts (type, severity, title, message, target_type, target_id)
-           VALUES ($1, $2, $3, $4, $5, $6)`,
-          [
-            'ruijie_mint_failure',
-            'critical',
-            'Ruijie voucher mint failed — customer has paid',
-            [
-              `Payment ${paymentId} (${pay.tier_name}) was charged by Pesepay but no Ruijie voucher could be issued.`,
-              `Pesepay reference: ${reference}.`,
-              `Customer contact: ${contact}.`,
-              `Amount: ${pay.amount} ${pay.currency}.`,
-              `Ruijie error [${code}]: ${detail}`,
-              `Action: issue the code manually or refund, then complete the payment.`,
-            ].join(' '),
-            'payment',
-            String(paymentId),
-          ]
-        );
-      } catch (alertErr) {
-        console.error('Failed to record ruijie_mint_failure alert', alertErr);
-      }
-    })(),
-    (async () => {
-      try {
-        // Guarded on status='pending' so a late-arriving webhook retry that has
-        // already completed the payment is never downgraded. completePayment
-        // clears error_message on success, so this marker self-heals.
-        await pool.query(
-          `UPDATE payments SET error_message = $2 WHERE id = $1 AND status = 'pending'`,
-          [paymentId, `${RUIJIE_MINT_PENDING_PREFIX}${code}: ${detail}`]
-        );
-      } catch (markerErr) {
-        console.error('Failed to mark payment for support follow-up', markerErr);
-      }
-    })(),
-  ]);
+async function recordVoucherPoolFallback(
+  paymentId: string,
+  pay: any,
+  voucherCode: string,
+  mintError: unknown
+): Promise<void> {
+  try {
+    await pool.query(
+      `INSERT INTO alerts (type, severity, title, message, target_type, target_id)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [
+        'ruijie_mint_fallback',
+        'warning',
+        'Local fallback voucher issued',
+        `Payment ${paymentId} (${pay.tier_name}) completed with local voucher ${voucherCode}. ` +
+          `The stock pool was empty and the 3s Ruijie direct mint failed: ${(mintError as Error)?.message ?? String(mintError)}`,
+        'payment',
+        String(paymentId),
+      ]
+    );
+  } catch (err) {
+    console.error('Failed to record local voucher fallback alert', err);
+  }
 }
 
-// Complete a payment: mint a voucher, close the payment, record a transaction.
-// Returns the voucher code on success.
+// Complete a payment: claim or mint a voucher, close the payment, record the
+// transaction and sale. Returns the voucher code on success.
 //
-// Runs inside a single PostgreSQL transaction that takes a row-level lock on
-// the payment (SELECT ... FOR UPDATE) BEFORE minting. Concurrent webhook
-// callbacks for the same payment therefore serialize: the second caller blocks
-// on the lock, re-reads status === 'completed' and returns the already-minted
-// voucher code instead of minting a second one (double-mint prevention).
+// The payment row is locked (SELECT ... FOR UPDATE) before claiming stock or
+// minting, so concurrent webhook/status callbacks for the same payment
+// serialize: the second caller re-reads status === 'completed' and returns the
+// existing code instead of claiming or minting a second voucher.
 async function completePayment(paymentId: string): Promise<string> {
   // Idempotency: if already completed, return existing code without re-minting.
   const existing = await pool.query(
@@ -287,7 +248,7 @@ async function completePayment(paymentId: string): Promise<string> {
   let code: string = '';
   let voucherAlreadyMinted = false;
   let ruijieSource: { ruijie_expiry: number | null; user_group_id: string; profile_uuid: string; comment: string } | null = null;
-  let ruijieMintError: unknown = null;
+  let poolFallbackError: unknown = null;
 
   // Circuit breaker: check if a Ruijie voucher was already minted for this payment
   // (prevents duplicate mints if a previous attempt failed at the DB recording step)
@@ -314,8 +275,6 @@ async function completePayment(paymentId: string): Promise<string> {
     throw new Error('Payment not found');
   }
   const pay = paymentResult.rows[0];
-  let payRow: any = pay;
-  payRow = pay;
 
   if (!VALID_TRANSITIONS[pay.status]?.includes('completed')) {
     throw new Error(`Payment cannot be completed from status '${pay.status}'`);
@@ -326,51 +285,13 @@ async function completePayment(paymentId: string): Promise<string> {
     return pay.voucher_code;
   }
 
-  // --- Mint Ruijie voucher OUTSIDE the transaction (with retries) ---
+  const ruijieConfigured = isRuijieCloudConfigured();
   const client = await pool.connect();
 
   if (voucherAlreadyMinted) {
     console.log(`[completePayment] Skipping mint - voucher already exists: ${code}`);
     ruijieSource = null;
-  } else if (isRuijieCloudConfigured()) {
-    const MAX_RETRIES = 3;
-    let lastErr: unknown = null;
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-      try {
-        const minted = await mintRuijieVoucherForTier(pay.tier_name, `Payment ${paymentId}`);
-        code = minted.codeNo;
-        ruijieSource = {
-          ruijie_expiry: minted.expiryTime ?? null,
-          user_group_id: minted.userGroupId,
-          profile_uuid: minted.profile,
-          comment: minted.comment,
-        };
-        lastErr = null;
-        break;
-      } catch (err) {
-        lastErr = err;
-        if (attempt < MAX_RETRIES) {
-          const delay = Math.pow(2, attempt) * 500;
-          console.warn(`[completePayment] Ruijie mint attempt ${attempt}/${MAX_RETRIES} failed, retrying in ${delay}ms`);
-          await new Promise(resolve => setTimeout(resolve, delay));
-        }
-      }
-    }
-    if (lastErr) {
-      ruijieMintError = lastErr;
-      // Mark payment as failed
-      await pool.query(
-        `UPDATE payments SET status = 'failed', error_message = $2 WHERE id = $1 AND status = 'pending'`,
-        [paymentId, `Ruijie mint failed after ${MAX_RETRIES} retries: ${(lastErr as Error)?.message}`]
-      );
-      await pool.query(
-        `UPDATE transactions SET status = 'failed' WHERE payment_id = $1 AND status = 'pending'`,
-        [paymentId]
-      );
-      await recordRuijieMintFailure(paymentId, pay, lastErr);
-      throw lastErr;
-    }
-  } else {
+  } else if (!ruijieConfigured) {
     // Legacy local mint (only when Ruijie Cloud is not configured)
     code = await mintLegacyVoucher(client, pay);
   }
@@ -393,6 +314,34 @@ async function completePayment(paymentId: string): Promise<string> {
       throw new Error('Payment already completed but no voucher code recorded');
     }
 
+    if (ruijieConfigured && !voucherAlreadyMinted) {
+      const claimed = await claimPooledVoucher(client, pay.tier_name, paymentId);
+      if (claimed) {
+        code = claimed.code_no;
+        console.log(`[completePayment] Claimed pooled voucher ${code} for payment ${paymentId}`);
+      } else {
+        try {
+          const minted = await mintRuijieVoucherForTier(pay.tier_name, `Payment ${paymentId}`, {
+            timeoutMs: 3000,
+          });
+          code = minted.codeNo;
+          ruijieSource = {
+            ruijie_expiry: minted.expiryTime ?? null,
+            user_group_id: minted.userGroupId,
+            profile_uuid: minted.profile,
+            comment: minted.comment,
+          };
+        } catch (err) {
+          poolFallbackError = err;
+          console.error(
+            `[completePayment] Ruijie stock exhausted and direct mint failed for ${paymentId}; issuing local fallback`,
+            err
+          );
+          code = await mintLegacyVoucher(client, pay);
+        }
+      }
+    }
+
     // Record the Ruijie issuance for audit/reconciliation
     if (ruijieSource) {
       await client.query(
@@ -404,19 +353,8 @@ async function completePayment(paymentId: string): Promise<string> {
       );
     }
 
-    // Record the Ruijie issuance for audit/reconciliation regardless of which
-    // path minted it (null fields for the legacy local path).
-    if (ruijieSource) {
-      await client.query(
-        `INSERT INTO ruijie_vouchers
-          (code_no, tier_name, user_group_id, profile_uuid, ruijie_expiry, payment_id, source, comment)
-         VALUES ($1, $2, $3, $4, $5, $6, 'online', $7)`,
-        [code, pay.tier_name, ruijieSource.user_group_id, ruijieSource.profile_uuid, ruijieSource.ruijie_expiry, paymentId, ruijieSource.comment]
-      );
-    }
-
     // RETURNING: `pay` was read before this UPDATE, so its completed_at is still
-    // NULL — the voucher and sale rows must carry the real completion time, not
+    // NULL â€” the voucher and sale rows must carry the real completion time, not
     // a stale one, or the sale lands on the wrong day in the revenue report.
     const { rows: completedRows } = await client.query(
       `UPDATE payments
@@ -435,10 +373,10 @@ async function completePayment(paymentId: string): Promise<string> {
       [paymentId, code]
     );
 
-    // ── Account for the sale ────────────────────────────────────────────────
+    // â”€â”€ Account for the sale â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // The Ruijie Cloud path mints the code remotely and never created a local
     // `vouchers` row, so a paid voucher was invisible to the admin voucher list
-    // and no `sales` row was ever written — the customer paid and nobody could
+    // and no `sales` row was ever written â€” the customer paid and nobody could
     // see it. Both writes happen here, inside this transaction, so a completed
     // payment is always attributed to a seller.
     const owner = await resolveOnlineSaleOwner(client);
@@ -486,7 +424,7 @@ async function completePayment(paymentId: string): Promise<string> {
       [
         code,
         owner?.id ?? null,
-        owner?.fullName ?? 'Online',
+        owner?.fullName ?? DEFAULT_ONLINE_SALE_OWNER_NAME,
         pay.amount,
         pay.currency || 'USD',
         normalizeSaleMethod(pay.payment_method),
@@ -496,16 +434,23 @@ async function completePayment(paymentId: string): Promise<string> {
     );
 
     await client.query('COMMIT');
+
+    if (poolFallbackError) {
+      void recordVoucherPoolFallback(paymentId, pay, code, poolFallbackError);
+    }
+    if (ruijieConfigured) {
+      void refillVoucherPool().catch((err) => console.error('[voucher-pool] post-sale refill failed', err));
+    }
     return code;
   } catch (err) {
     try {
       await client.query('ROLLBACK');
     } catch {
-      // Ignore rollback failure — original error is what matters.
+      // Ignore rollback failure â€” original error is what matters.
     }
     // If minting succeeded but DB recording failed, log a critical alert
     // because a Ruijie voucher was minted but not recorded locally.
-    if (!ruijieMintError && code) {
+    if (ruijieSource && code) {
       console.error(`[completePayment] DB recording failed after minting voucher ${code} for payment ${paymentId}. Voucher may be orphaned.`);
       try {
         await pool.query(
@@ -517,11 +462,6 @@ async function completePayment(paymentId: string): Promise<string> {
         );
       } catch { /* best-effort */ }
     }
-    // Only Ruijie mint failures are alerted: 'payment not found' and the
-    // double-mint/transition guards are ordinary control flow, not incidents.
-    if (ruijieMintError) {
-      await recordRuijieMintFailure(paymentId, payRow, ruijieMintError);
-    }
     throw err;
   } finally {
     client.release();
@@ -530,12 +470,136 @@ async function completePayment(paymentId: string): Promise<string> {
 
 /**
  * POST /api/payments/initiate
- * Body: { tier, phone, currency?, fullName?, macAddress? }
+ *
+ * Accepts the standardized portal payload:
+ *   { payment_rail, account_identifier, client_name, client_phone, amount, package_id }
+ *
+ * The gateway call is queued and the HTTP response is returned immediately with
+ * a transaction_id. The portal polls /status while Pesepay processes the charge.
  */
+type CustomerPaymentRail = 'ecocash' | 'innbucks' | 'omari';
+
+const CUSTOMER_RAIL_ALIASES: Record<string, { rail: CustomerPaymentRail; currency?: PesepayCurrency }> = {
+  ecocash: { rail: 'ecocash' },
+  ecocash_usd: { rail: 'ecocash', currency: 'USD' },
+  innbucks: { rail: 'innbucks' },
+  innbucks_usd: { rail: 'innbucks', currency: 'USD' },
+  omari: { rail: 'omari' },
+  omari_usd: { rail: 'omari', currency: 'USD' },
+};
+
+function resolveCustomerRail(raw: unknown): { rail: CustomerPaymentRail; currency?: PesepayCurrency } | null {
+  const key = String(raw ?? 'ecocash').trim().toLowerCase().replace(/[\s-]+/g, '_');
+  return CUSTOMER_RAIL_ALIASES[key] ?? null;
+}
+
+async function failPaymentInitiation(paymentId: string, message: string): Promise<void> {
+  await pool.query(
+    `UPDATE payments SET status = 'failed', error_message = $2 WHERE id = $1 AND status = 'pending'`,
+    [paymentId, message]
+  );
+  await pool.query(
+    `UPDATE transactions SET status = 'failed' WHERE payment_id = $1 AND status = 'pending'`,
+    [paymentId]
+  );
+}
+
+interface QueuedPaymentInitiation {
+  paymentId: string;
+  rail: CustomerPaymentRail;
+  amount: number;
+  currency: PesepayCurrency;
+  phone: string;
+  fullName: string;
+  merchantReference: string;
+  tierName: string;
+  returnUrl: string;
+}
+
+interface PaymentInitiationOutcome {
+  success: boolean;
+  referenceNumber?: string;
+  authorizationCode?: string;
+  pollUrl?: string;
+  instructions?: string;
+  status?: string;
+  error?: string;
+}
+
+async function runPaymentInitiation(job: QueuedPaymentInitiation): Promise<PaymentInitiationOutcome> {
+  try {
+    const result = await initiatePesepayPayment({
+      amount: job.amount,
+      currencyCode: job.currency,
+      phone: job.phone,
+      fullName: job.fullName,
+      email: '',
+      paymentMethod: job.rail,
+      reference: job.merchantReference,
+      reasonForPayment: `${job.tierName} - pre-paid internet access`,
+      returnUrl: job.returnUrl,
+    });
+
+    // The authorization rails only need a reference to continue; a poll URL is
+    // useful but not mandatory for them. EcoCash keeps the original contract.
+    const needsPollUrl = job.rail === 'ecocash';
+    const hasEnoughToContinue =
+      Boolean(result.pollUrl) || (Boolean(result.referenceNumber) && job.rail !== 'ecocash');
+    if (!result.success || (needsPollUrl && !result.pollUrl) || !hasEnoughToContinue) {
+      const message = result.error || 'Pesepay did not return a payment page';
+      if (result.detail) {
+        console.error(`Payment ${job.paymentId} initiation transport failure: ${result.detail}`);
+      }
+      await failPaymentInitiation(job.paymentId, message);
+      return { success: false, error: message };
+    }
+
+    if (job.rail === 'omari' && !result.referenceNumber) {
+      const message = 'Pesepay did not return an O\'mari authorization reference.';
+      await failPaymentInitiation(job.paymentId, message);
+      return { success: false, error: message };
+    }
+
+    await pool.query(
+      `UPDATE payments
+          SET pesepay_reference = $2, pesepay_poll_url = $3, error_message = NULL
+        WHERE id = $1`,
+      [job.paymentId, result.referenceNumber ?? null, result.pollUrl]
+    );
+
+    return {
+      success: true,
+      referenceNumber: result.referenceNumber,
+      authorizationCode: result.authorizationCode,
+      pollUrl: result.pollUrl,
+      instructions: result.instructions,
+      status: result.status,
+    };
+  } catch (err) {
+    const message = (err as Error).message || 'Payment provider request failed';
+    console.error(`Payment ${job.paymentId} initiation failed`, err);
+    try {
+      await failPaymentInitiation(job.paymentId, message);
+    } catch (updateErr) {
+      console.error(`Payment ${job.paymentId} failed to record initiation failure`, updateErr);
+    }
+    return { success: false, error: message };
+  }
+}
+
+async function processQueuedPaymentInitiation(job: QueuedPaymentInitiation): Promise<void> {
+  const outcome = await runPaymentInitiation(job);
+  if (!outcome.success) {
+    console.error(`Payment ${job.paymentId} queued initiation failed: ${outcome.error || 'unknown error'}`);
+  }
+}
+
 paymentsRouter.post('/initiate', async (req: Request, res: Response) => {
-  const { tier, phone, fullName, currency, paymentMethod: rawMethod } = req.body || {};
+  const packageRef = String(req.body?.package_id || req.body?.tier || '').trim();
+  const rawPhone = req.body?.account_identifier || req.body?.client_phone || req.body?.phone;
+  const fullName = req.body?.client_name || req.body?.fullName;
   const macAddress = req.body?.macAddress ?? null;
-  const paymentMethod = (rawMethod || 'ecocash').toLowerCase();
+  const railConfig = resolveCustomerRail(req.body?.payment_rail || req.body?.paymentMethod);
 
   if (!isPesepayConfigured()) {
     res.status(422).json({
@@ -544,8 +608,14 @@ paymentsRouter.post('/initiate', async (req: Request, res: Response) => {
     return;
   }
 
-  const normalizedPhone = normalizeZwPhone(phone);
-  const requiresPhone = ['ecocash', 'omari'].includes(paymentMethod);
+  if (!railConfig) {
+    res.status(422).json({ error: 'Unsupported payment method.' });
+    return;
+  }
+  const paymentMethod = railConfig.rail;
+
+  const normalizedPhone = normalizeZwPhone(rawPhone);
+  const requiresPhone = paymentMethod === 'ecocash' || paymentMethod === 'omari';
   if (requiresPhone && !isValidZwPhone(normalizedPhone)) {
     res.status(422).json({ error: 'Please enter a valid Zimbabwe phone number (e.g. 0771 327 202).' });
     return;
@@ -554,8 +624,10 @@ paymentsRouter.post('/initiate', async (req: Request, res: Response) => {
   const pkgResult = await pool.query(
     `SELECT id, tier_name, price_amount, price_currency, duration_min, data_limit_gb,
             is_uncapped, bandwidth_mbps_up, bandwidth_mbps_down, max_devices
-     FROM packages WHERE tier_name = $1 LIMIT 1`,
-    [tier]
+     FROM packages
+     WHERE tier_name = $1 OR id::text = $1
+     LIMIT 1`,
+    [packageRef]
   );
   if (pkgResult.rows.length === 0) {
     res.status(422).json({ error: 'Unknown package tier.' });
@@ -576,12 +648,20 @@ paymentsRouter.post('/initiate', async (req: Request, res: Response) => {
     }
   }
 
+  const requestCurrency = normalizeGatewayCurrency(req.body?.currency || pkg.price_currency || 'USD');
+  if (!requestCurrency) {
+    res.status(422).json({ error: 'Unsupported payment currency.' });
+    return;
+  }
+  // The *_usd aliases are explicit: they must stay USD even if the package row
+  // carries a different settlement currency.
+  const resolvedCurrency = railConfig.currency ?? requestCurrency;
+
   const user = await getOrCreateUserByPhone(normalizedPhone, fullName);
   // Sub-dollar tiers (0.99 PreLite) are billed as a flat 1.00: EcoCash settles in
   // whole dollars. The payments row stores the SAME value sent to Pesepay so the
   // webhook's amount-match check compares against the actual charge.
   const amount = normalizePaymentAmount(Number(pkg.price_amount));
-  const resolvedCurrency = String(currency || pkg.price_currency || 'USD').toUpperCase();
 
   // Pesepay has no signed-callback scheme of its own on this integration, so we
   // mint a per-payment token and append it to resultUrl. Pesepay echoes resultUrl
@@ -617,71 +697,201 @@ paymentsRouter.post('/initiate', async (req: Request, res: Response) => {
   await pool.query(
     `INSERT INTO transactions
       (payment_id, user_id, package_tier, amount, currency, payment_method, status, sold_by_name)
-     VALUES ($1, $2, $3, $4, $5, $6, 'pending', 'Online')`,
-    [paymentId, user.id, pkg.tier_name, amount, resolvedCurrency, paymentMethod.charAt(0).toUpperCase() + paymentMethod.slice(1) + ' (Pesepay)']
+     VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7)`,
+    [paymentId, user.id, pkg.tier_name, amount, resolvedCurrency, paymentMethod.charAt(0).toUpperCase() + paymentMethod.slice(1) + ' (Pesepay)', DEFAULT_ONLINE_SALE_OWNER_NAME]
   );
 
   const baseUrl = (process.env.BASE_URL || 'https://wifi.preyone.com').replace(/\/$/, '');
+  const returnUrl = `${baseUrl}/api/payments/return?ref=${encodeURIComponent(merchantReference)}`;
+  const statusToken = jwt.sign(
+    { paymentId, type: 'status' },
+    getJwtSecret(),
+    { algorithm: 'HS256', expiresIn: '2h' }
+  );
 
-  try {
-    const result = await initiatePesepayPayment({
-      amount,
-      currencyCode: resolvedCurrency,
-      phone: requiresPhone ? normalizedPhone : (phone || ''),
-      fullName: fullName || 'GUEST',
-      email: '',
-      paymentMethod: paymentMethod as any,
-      reference: merchantReference,
-      reasonForPayment: `${pkg.tier_name} - pre-paid internet access`,
-      returnUrl: `${baseUrl}/api/payments/return?ref=${encodeURIComponent(merchantReference)}`,
+  const initiationJob: QueuedPaymentInitiation = {
+    paymentId,
+    rail: paymentMethod,
+    amount,
+    currency: resolvedCurrency,
+    phone: normalizedPhone,
+    fullName: fullName || 'GUEST',
+    merchantReference,
+    tierName: pkg.tier_name,
+    returnUrl,
+  };
+
+  // EcoCash keeps the original async contract: the USSD push runs in the
+  // background and the portal polls /status. InnBucks and O'mari have a second
+  // customer step (authorization code / OTP), so their gateway reference must
+  // be known BEFORE the response is sent.
+  if (paymentMethod === 'ecocash') {
+    setImmediate(() => {
+      void processQueuedPaymentInitiation(initiationJob);
     });
 
-    if (!result.success || !result.pollUrl) {
-      const message = result.error || 'Pesepay did not return a payment page';
-      if (result.detail) {
-        console.error(`Payment ${paymentId} initiation transport failure: ${result.detail}`);
-      }
-      await pool.query(
-        `UPDATE payments SET status = 'failed', error_message = $2 WHERE id = $1`,
-        [paymentId, message]
-      );
-      res.status(502).json({ error: message, status: 'failed', paymentId });
+    res.status(200).json({
+      success: true,
+      transaction_id: paymentId,
+      paymentId,
+      reference: merchantReference,
+      referenceNumber: null,
+      authorizationCode: null,
+      pollUrl: null,
+      instructions: null,
+      requires_pin: false,
+      status: 'pending',
+      statusToken,
+      amount,
+      phone: normalizedPhone,
+      rail: paymentMethod,
+      currency: resolvedCurrency,
+      message: 'Payment request queued. Approve the prompt on your phone to complete the payment.',
+    });
+    return;
+  }
+
+  const outcome = await runPaymentInitiation(initiationJob);
+  if (!outcome.success) {
+    res.status(502).json({
+      success: false,
+      transaction_id: paymentId,
+      paymentId,
+      status: 'failed',
+      error: outcome.error || 'We could not start that payment. Please try again.',
+    });
+    return;
+  }
+
+  res.status(200).json({
+    success: true,
+    transaction_id: paymentId,
+    paymentId,
+    reference: merchantReference,
+    referenceNumber: outcome.referenceNumber ?? null,
+    authorizationCode: outcome.authorizationCode ?? null,
+    pollUrl: outcome.pollUrl ?? null,
+    instructions: outcome.instructions ?? null,
+    requires_pin: paymentMethod === 'omari',
+    status: 'pending',
+    statusToken,
+    amount,
+    phone: normalizedPhone,
+    rail: paymentMethod,
+    currency: resolvedCurrency,
+    message:
+      paymentMethod === 'omari'
+        ? "We sent an authorization PIN to your phone. Enter it below to complete the payment."
+        : 'Payment request created. Enter the authorization code in your InnBucks app.',
+  });
+});
+
+/**
+ * POST /api/payments/authorize
+ *
+ * Second leg of the O'mari flow. The initiate call has already sent the OTP to
+ * the payer, and returned a signed status token plus Pesepay's referenceNumber.
+ * This endpoint spends that OTP, then the portal polls /status so the normal
+ * webhook/reconciliation path mints the voucher exactly once.
+ */
+const paymentAuthorizeLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 12,
+  message: { error: 'Too many authorization attempts, please wait a moment.' },
+});
+
+paymentsRouter.post('/authorize', paymentAuthorizeLimiter, async (req: Request, res: Response) => {
+  const paymentId = String(req.body?.transaction_id || req.body?.paymentId || '').trim();
+  const pin = String(req.body?.pin || req.body?.otp || '').trim();
+  const queryToken = req.query.token as string | undefined;
+  const bodyToken = req.body?.token as string | undefined;
+  const authHeader = req.headers.authorization;
+  const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+  const token = bearerToken || bodyToken || queryToken;
+
+  if (!token) {
+    res.status(401).json({ error: 'Authentication required' });
+    return;
+  }
+  if (!paymentId) {
+    res.status(422).json({ error: 'Payment id is required' });
+    return;
+  }
+
+  let decoded: any;
+  try {
+    decoded = jwt.verify(token, getJwtSecret(), { algorithms: ['HS256'] });
+  } catch {
+    res.status(401).json({ error: 'Invalid or expired token' });
+    return;
+  }
+  if (decoded.paymentId !== paymentId) {
+    res.status(403).json({ error: 'Token does not match this payment' });
+    return;
+  }
+
+  if (!/^\d{4,8}$/.test(pin)) {
+    res.status(422).json({ error: 'Enter the numeric authorization PIN sent to your phone.' });
+    return;
+  }
+
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, status, voucher_code, payment_method, pesepay_reference
+       FROM payments
+       WHERE id::text = $1`,
+      [paymentId]
+    );
+    if (rows.length === 0) {
+      res.status(404).json({ error: 'Payment not found' });
       return;
     }
 
-    // Keep Pesepay's own reference for reconciliation, and the hosted page URL so
-    // support can re-send a customer to the prompt they abandoned.
-    await pool.query(
-      `UPDATE payments
-          SET pesepay_reference = $2, pesepay_poll_url = $3, error_message = NULL
-        WHERE id = $1`,
-      [paymentId, result.referenceNumber ?? null, result.pollUrl]
-    );
+    const pay = rows[0];
+    if (pay.status === 'completed' && pay.voucher_code) {
+      res.status(200).json({
+        success: true,
+        status: 'completed',
+        voucherCode: pay.voucher_code,
+      });
+      return;
+    }
+    if (pay.status !== 'pending') {
+      res.status(409).json({ error: 'This payment can no longer be authorized.' });
+      return;
+    }
+    if (!String(pay.payment_method || '').toLowerCase().includes('omari')) {
+      res.status(422).json({ error: 'This payment method does not use an authorization PIN.' });
+      return;
+    }
+    if (!pay.pesepay_reference) {
+      res.status(409).json({ error: 'The payment reference is not ready yet. Please try again.' });
+      return;
+    }
+
+    const auth = await authorizeOmariPayment(String(pay.pesepay_reference), pin);
+    if (!auth.success) {
+      const message = auth.error || 'The authorization PIN was not accepted. Please try again.';
+      if (auth.detail) console.error(`Payment ${paymentId} O'mari authorization detail: ${auth.detail}`);
+      await failPaymentInitiation(paymentId, message);
+      res.status(422).json({ success: false, status: 'failed', error: message });
+      return;
+    }
 
     res.status(200).json({
-      paymentId,
-      reference: merchantReference,
-      pesepayReference: result.referenceNumber ?? null,
-      // The client must navigate here: Pesepay hosts the EcoCash approval page.
-      pesepayPollUrl: result.pollUrl,
-      status: 'pending',
-      statusToken: jwt.sign({ paymentId, type: 'status' }, getJwtSecret(), { algorithm: 'HS256', expiresIn: '2h' }),
-      amount,
-      phone: normalizedPhone,
-      message: 'Approve the EcoCash request on your phone to complete the payment.',
+      success: true,
+      status: 'processing',
+      referenceNumber: auth.referenceNumber ?? pay.pesepay_reference,
+      message: auth.message || 'Authorization accepted. Waiting for the payment to complete.',
     });
   } catch (err) {
-    const message = (err as Error).message || 'Payment provider request failed';
-    await pool.query(
-      `UPDATE payments SET status = 'failed', error_message = $2 WHERE id = $1`,
-      [paymentId, message]
-    );
-    res.status(502).json({ error: message, status: 'failed', paymentId, statusToken: jwt.sign({ paymentId, type: 'status' }, getJwtSecret(), { algorithm: 'HS256', expiresIn: '2h' }) });
+    console.error('O\'mari authorization failed', err);
+    res.status(500).json({ error: 'We could not authorize that payment. Please try again.' });
   }
 });
 
 /**
- * POST /api/payments/webhook — Pesepay server-to-server callback (resultUrl).
+ * POST /api/payments/webhook â€” Pesepay server-to-server callback (resultUrl).
  *
  * Pesepay POSTs `{ payload: "<AES-CBC ciphertext>" }`. We decrypt it with
  * PESEPAY_ENCRYPTION_KEY, which is the authentication step: a payload that does
@@ -690,7 +900,7 @@ paymentsRouter.post('/initiate', async (req: Request, res: Response) => {
  *
  * The decrypted body carries the merchantReference we generated at initiate,
  * which is the lookup key. A per-payment webhook token is ALSO required when
- * present, because Pesepay echoes resultUrl back — defence in depth so that
+ * present, because Pesepay echoes resultUrl back â€” defence in depth so that
  * even a replayed, correctly-encrypted payload for an unrelated reference
  * cannot mint a voucher.
  */
@@ -825,12 +1035,12 @@ paymentsRouter.post('/webhook', async (req: Request, res: Response) => {
     return;
   }
 
-  // Still pending (AWAITING / PROCESSING) — acknowledge so Pesepay stops re-posting.
+  // Still pending (AWAITING / PROCESSING) â€” acknowledge so Pesepay stops re-posting.
   res.json({ status: 'ok', state: 'pending' });
 });
 
 /**
- * GET /api/payments/return — the customer's browser comes back here from
+ * GET /api/payments/return â€” the customer's browser comes back here from
  * Pesepay's hosted page once they have approved or abandoned the EcoCash push.
  *
  * The authoritative completion happens in the webhook above; this only forwards
@@ -896,11 +1106,23 @@ paymentsRouter.get('/return', async (req: Request, res: Response) => {
 });
 
 /**
- * GET /api/payments/status/:paymentId — polling endpoint for the portal.
+ * GET /api/payments/status?id=... (legacy: /status/:paymentId)
+ *
+ * Polling endpoint for the portal. Requires the signed status token returned by
+ * /initiate. Reconciles pending payments against the gateway so the voucher can
+ * self-mint even if the server-to-server webhook is delayed.
  */
-paymentsRouter.get('/status/:paymentId', async (req: Request, res: Response) => {
+async function handlePaymentStatus(
+  req: Request,
+  res: Response,
+  paymentId: string,
+  referenceNumber?: string
+): Promise<void> {
   try {
-    const { paymentId } = req.params;
+    if (!paymentId && !referenceNumber) {
+      res.status(422).json({ error: 'Payment id is required' });
+      return;
+    }
 
     // Require a signed status token or valid session JWT to prevent payment ID enumeration
     const authHeader = req.headers.authorization;
@@ -911,47 +1133,75 @@ paymentsRouter.get('/status/:paymentId', async (req: Request, res: Response) => 
       res.status(401).json({ error: 'Authentication required' });
       return;
     }
+
+    let decoded: any;
     try {
-      const decoded = jwt.verify(token, getJwtSecret(), { algorithms: ['HS256'] }) as any;
-      if (decoded.paymentId !== paymentId) {
-        res.status(403).json({ error: 'Token does not match this payment' });
-        return;
-      }
+      decoded = jwt.verify(token, getJwtSecret(), { algorithms: ['HS256'] });
     } catch {
       res.status(401).json({ error: 'Invalid or expired token' });
       return;
     }
+    if (paymentId && decoded.paymentId !== paymentId) {
+      res.status(403).json({ error: 'Token does not match this payment' });
+      return;
+    }
 
-    const { rows } = await pool.query(
-      `SELECT p.id, p.status, p.amount, p.completed_at, p.voucher_code, p.pesepay_reference, p.error_message, pk.tier_name
-       FROM payments p JOIN packages pk ON pk.id = p.package_id
-       WHERE p.id = $1`,
-      [paymentId]
-    );
+    const { rows } = referenceNumber
+      ? await pool.query(
+          `SELECT p.id, p.status, p.amount, p.currency, p.completed_at, p.voucher_code, p.pesepay_reference,
+                  p.error_message, pk.tier_name, pk.display_name AS package_name, pk.data_limit_gb,
+                  pk.is_uncapped, pk.duration_min, pk.bandwidth_mbps_up, pk.bandwidth_mbps_down,
+                  u.full_name AS client_name, COALESCE(p.phone_number, u.phone) AS client_phone
+           FROM payments p
+           JOIN packages pk ON pk.id = p.package_id
+           JOIN users u ON u.id = p.user_id
+           WHERE p.pesepay_reference = $1
+           ORDER BY p.created_at DESC
+           LIMIT 1`,
+          [referenceNumber]
+        )
+      : await pool.query(
+          `SELECT p.id, p.status, p.amount, p.currency, p.completed_at, p.voucher_code, p.pesepay_reference,
+                  p.error_message, pk.tier_name, pk.display_name AS package_name, pk.data_limit_gb,
+                  pk.is_uncapped, pk.duration_min, pk.bandwidth_mbps_up, pk.bandwidth_mbps_down,
+                  u.full_name AS client_name, COALESCE(p.phone_number, u.phone) AS client_phone
+           FROM payments p
+           JOIN packages pk ON pk.id = p.package_id
+           JOIN users u ON u.id = p.user_id
+           WHERE p.id::text = $1`,
+          [paymentId]
+        );
 
     if (rows.length === 0) {
       res.status(404).json({ error: 'Payment not found' });
       return;
     }
 
+    // A reference lookup is still authorized by the token minted at initiate.
+    if (decoded.paymentId !== rows[0].id) {
+      res.status(403).json({ error: 'Token does not match this payment' });
+      return;
+    }
+    const resolvedPaymentId = String(rows[0].id);
+
     // Seamless EcoCash has no hosted page, so the customer never hits /return.
     // If the webhook also stalls, /status is the only heartbeat left - reconcile
     // against the gateway here so the voucher self-mints while the portal polls.
-    // Rate-gated so repeated 3s polls stay cheap for Pesepay.
+    // Rate-gated so repeated 2s polls stay cheap for Pesepay.
     let pay = rows[0];
     if (pay.status === 'pending' && pay.pesepay_reference) {
       const now = Date.now();
-      const nextAllowed = (lastReconcileAt.get(paymentId) || 0) + RECONCILE_GAP_MS;
-      if (now >= nextAllowed && !reconciling.has(paymentId)) {
-        reconciling.add(paymentId);
-        lastReconcileAt.set(paymentId, now);
+      const nextAllowed = (lastReconcileAt.get(resolvedPaymentId) || 0) + RECONCILE_GAP_MS;
+      if (now >= nextAllowed && !reconciling.has(resolvedPaymentId)) {
+        reconciling.add(resolvedPaymentId);
+        lastReconcileAt.set(resolvedPaymentId, now);
         try {
           const check = await verifyPaymentStatus(pay.pesepay_reference);
           const parsed = parsePesepayStatus(check.status);
           if (check.found && parsed.state === 'completed') {
             try {
-              const voucherCode = await completePayment(paymentId);
-              console.log(`Reconciled payment ${paymentId} on status poll -> ${voucherCode}`);
+              const voucherCode = await completePayment(resolvedPaymentId);
+              console.log(`Reconciled payment ${resolvedPaymentId} on status poll -> ${voucherCode}`);
             } catch (err) {
               // A concurrent webhook may have just completed it; re-read below.
               console.error('Status poll completion failed', err);
@@ -960,28 +1210,29 @@ paymentsRouter.get('/status/:paymentId', async (req: Request, res: Response) => 
             await pool.query(
               `UPDATE payments SET status = $2, error_message = $3
                WHERE id = $1 AND status = 'pending'`,
-              [paymentId, parsed.state, `Gateway reported ${parsed.label} (status check)`]
+              [resolvedPaymentId, parsed.state, `Gateway reported ${parsed.label} (status check)`]
             );
             await pool.query(
               `UPDATE transactions SET status = $2
                WHERE payment_id = $1 AND status = 'pending'`,
-              [paymentId, parsed.state]
+              [resolvedPaymentId, parsed.state]
             );
           }
         } catch (err) {
           console.error('Status poll reconciliation failed', err);
         } finally {
-          reconciling.delete(paymentId);
+          reconciling.delete(resolvedPaymentId);
         }
       }
       const fresh = await pool.query(
-        'SELECT status, completed_at, voucher_code, error_message FROM payments WHERE id = $1',
-        [paymentId]
+        'SELECT status, completed_at, voucher_code, error_message FROM payments WHERE id::text = $1',
+        [resolvedPaymentId]
       );
       if (fresh.rows.length > 0) pay = { ...pay, ...fresh.rows[0] };
     }
 
     res.json({
+      transaction_id: pay.id,
       paymentId: pay.id,
       status: pay.status,
       amount: pay.amount,
@@ -990,18 +1241,40 @@ paymentsRouter.get('/status/:paymentId', async (req: Request, res: Response) => 
       // Lets the portal re-open the correct package modal after the customer
       // returns from Pesepay's hosted page.
       tier: pay.tier_name,
+      packageName: pay.package_name ?? pay.tier_name ?? null,
+      dataLimitGb: pay.data_limit_gb != null ? Number(pay.data_limit_gb) : null,
+      isUncapped: Boolean(pay.is_uncapped),
+      durationMin: pay.duration_min != null ? Number(pay.duration_min) : null,
+      bandwidthMbpsUp: pay.bandwidth_mbps_up != null ? Number(pay.bandwidth_mbps_up) : null,
+      bandwidthMbpsDown: pay.bandwidth_mbps_down != null ? Number(pay.bandwidth_mbps_down) : null,
+      clientName: pay.client_name ?? null,
+      clientPhone: pay.client_phone ?? null,
+      currency: pay.currency ?? null,
       // The customer has paid but Ruijie could not issue a code yet. The portal
       // swaps its waiting copy for a "still working on it" panel and keeps
       // polling, because a later poll may reconcile successfully.
       supportRequired: String(pay.error_message || '').startsWith('ruijie_mint_pending: '),
       // Shown to the customer as proof of purchase in support conversations.
       reference: pay.pesepay_reference ?? null,
+      referenceNumber: pay.pesepay_reference ?? null,
     });
   } catch (err) {
+    console.error('Status lookup failed', err);
     res.status(500).json({ error: 'Status lookup failed' });
   }
+}
+
+// Query-string form is the documented portal contract: /status?id=<paymentId>
+paymentsRouter.get('/status', (req: Request, res: Response) => {
+  const id = String(req.query.id || req.query.paymentId || '').trim();
+  const reference = String(req.query.referenceNumber || req.query.reference || '').trim();
+  void handlePaymentStatus(req, res, id, reference || undefined);
 });
 
+// Kept for older clients and the ?pay=&tok= return flow.
+paymentsRouter.get('/status/:paymentId', (req: Request, res: Response) => {
+  void handlePaymentStatus(req, res, String(req.params.paymentId || '').trim());
+});
 
 // ===========================================================================
 // Multi-rail Pesepay gateway (invoices, POS shifts, company
@@ -1604,7 +1877,7 @@ paymentsRouter.post('/pesepay/callback', async (req: Request, res: Response) => 
   }
 });
 
-// ── Subscription renewal webhook ───────────────────────────────────────────
+// â”€â”€ Subscription renewal webhook â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // POST /api/payments/pesepay/webhook
 //
 // Point the Pesepay dashboard webhook at this URL for PLAN RENEWALS
@@ -1781,7 +2054,7 @@ paymentsRouter.post('/pesepay/webhook', async (req: Request, res: Response) => {
 });
 
 // ===========================================================================
-// Starlink portal � Pese checkout (POST /api/payments/pese/checkout)
+// Starlink portal ï¿½ Pese checkout (POST /api/payments/pese/checkout)
 //
 // Serves the three portal actions: Wallet Top Up, Data Top Up and Kit
 // Purchase. Authenticated with the starlink-customer JWT (never the admin
@@ -1883,7 +2156,7 @@ paymentsRouter.post('/pese/checkout', requireStarlinkAuth, async (req: Request, 
 
   const returnUrl = safeStarlinkReturnUrl(body.returnUrl) || starlinkDefaultReturnUrl();
 
-  // Tenant: the portal company (same singleton rule as /pesepay/initiate) �
+  // Tenant: the portal company (same singleton rule as /pesepay/initiate) ï¿½
   // never taken from the request body.
   const { rows: companyRows } = await pool.query('SELECT id FROM companies ORDER BY created_at LIMIT 1');
   const tenantId = companyRows[0]?.id ?? null;

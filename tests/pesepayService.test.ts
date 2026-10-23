@@ -4,6 +4,7 @@ import {
   decryptResponse,
   initiateEcoCashPayment,
   initiatePesepayPayment,
+  authorizeOmariPayment,
   verifyPaymentStatus,
   normalizePesepayCurrency,
   normalizeGatewayCurrency,
@@ -333,6 +334,23 @@ describe('initiatePesepayPayment', () => {
     expect(result.success).toBe(true);
   });
 
+  it('extracts the InnBucks authorization code from the response metadata', async () => {
+    mockRequest.mockResolvedValue(
+      ok({
+        referenceNumber: 'I-2',
+        transactionStatus: 'PENDING',
+        transactionMetadata: { authorization_code: 'A1B2C3' },
+        instructions: 'Open InnBucks and enter the code.',
+      })
+    );
+
+    const result = await initiatePesepayPayment({ ...base, paymentMethod: 'innbucks' });
+
+    expect(result.success).toBe(true);
+    expect(result.authorizationCode).toBe('A1B2C3');
+    expect(result.instructions).toBe('Open InnBucks and enter the code.');
+  });
+
   it('rejects a rail the merchant cannot settle in that currency', async () => {
     const result = await initiatePesepayPayment({ ...base, paymentMethod: 'paygo' });
 
@@ -378,6 +396,58 @@ describe('initiatePesepayPayment', () => {
 
     expect(result.success).toBe(false);
     expect(result.referenceNumber).toBeUndefined();
+  });
+});
+
+describe('authorizeOmariPayment', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env.PESEPAY_OMARI_CHARGE_URL = 'https://api.pesepay.com/api/omari/v1/payments/charge';
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+    delete process.env.PESEPAY_OMARI_CHARGE_URL;
+  });
+
+  it('posts the OTP and reference as plain JSON without encryption', async () => {
+    mockRequest.mockResolvedValue(
+      ok({ referenceNumber: 'OM-1', transactionStatus: 'SUCCESS' })
+    );
+
+    const result = await authorizeOmariPayment('OM-1', '123456');
+
+    expect(result.success).toBe(true);
+    const call = mockRequest.mock.calls[0][0];
+    expect(call).toMatchObject({
+      url: 'https://api.pesepay.com/api/omari/v1/payments/charge',
+      method: 'POST',
+    });
+    expect(JSON.parse(call.body as string)).toEqual({
+      otp: '123456',
+      referenceNumber: 'OM-1',
+    });
+  });
+
+  it('returns a retryable failure when the provider rejects the OTP', async () => {
+    mockRequest.mockResolvedValue(
+      ok({ transactionStatus: 'AUTHORIZATION_FAILED', message: 'Incorrect PIN' })
+    );
+
+    const result = await authorizeOmariPayment('OM-1', '000000');
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe('Incorrect PIN');
+  });
+
+  it('never leaks a transport error', async () => {
+    mockRequest.mockRejectedValue(new Error('socket hang up'));
+
+    const result = await authorizeOmariPayment('OM-1', '123456');
+
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/could not reach/i);
+    expect(result.detail).toContain('socket hang up');
   });
 });
 

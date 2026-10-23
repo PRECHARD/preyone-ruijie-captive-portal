@@ -153,9 +153,12 @@
     if (iv !== issuedByName) iv += '..';
     ctx.fillText(iv, 38, fy + 18);
     ctx.fillStyle = 'rgba(255,255,255,0.45)'; ctx.font = '600 8px Montserrat, sans-serif';
-    ctx.fillText('Location', 220, fy);
+    ctx.fillText('CLIENT', 220, fy);
     ctx.fillStyle = '#ffffff'; ctx.font = '600 13px Montserrat, sans-serif';
-    ctx.fillText('Chitungwiza', 220, fy + 18);
+    var cn = (data.client_name || 'Preyone Customer');
+    while (ctx.measureText(cn).width > 140 && cn.length > 2) { cn = cn.slice(0, -1); }
+    if (cn !== (data.client_name || 'Preyone Customer')) cn += '..';
+    ctx.fillText(cn, 220, fy + 18);
     ctx.fillStyle = 'rgba(255,255,255,0.45)'; ctx.font = '600 8px Montserrat, sans-serif';
     ctx.fillText('Valid Until', 380, fy);
     ctx.fillStyle = '#ffffff'; ctx.font = '600 13px Montserrat, sans-serif';

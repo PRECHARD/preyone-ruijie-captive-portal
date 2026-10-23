@@ -1,4 +1,4 @@
-﻿import * as CryptoJS from 'crypto-js';
+import * as CryptoJS from 'crypto-js';
 import { lenientRequest } from '../utils/lenientHttp';
 
 interface PesepayConfig {
@@ -43,6 +43,12 @@ export const PESEPAY_FAILED_STATUSES = [
   'EXPIRED',
   'ERROR',
   'UNPAID',
+  'TIME_OUT',
+  'TIMEOUT',
+  'AUTHORIZATION_FAILED',
+  'INSUFFICIENT_FUNDS',
+  'SERVICE_UNAVAILABLE',
+  'REVERSED',
 ];
 
 export function isPesepayConfigured(): boolean {
@@ -516,9 +522,19 @@ export interface PesepayGatewayResponse {
   status?: string;
   statusDescription?: string;
   instructions?: string;
+  /** Short code the payer enters in the InnBucks app to authorize PZW212. */
+  authorizationCode?: string;
   error?: string;
   /** Server-side diagnostic. Logged, never returned to the customer. */
   detail?: string;
+}
+
+function firstString(...values: unknown[]): string | undefined {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) return value.trim();
+    if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  }
+  return undefined;
 }
 
 export async function initiatePesepayPayment(
@@ -605,14 +621,43 @@ export async function initiatePesepayPayment(
       return { success: false, error: 'No payment response received from provider' };
     }
 
+    const metadata =
+      result.transactionMetadata ||
+      result.transaction_metadata ||
+      result.paymentMetadata ||
+      result.metadata ||
+      {};
+
+    const authorizationCode = firstString(
+      result.authorizationCode,
+      result.authorization_code,
+      result.paymentAuthorizationCode,
+      result.payment_authorization_code,
+      metadata.authorizationCode,
+      metadata.authorization_code,
+      metadata.paymentAuthorizationCode,
+      metadata.payment_authorization_code
+    );
+
+    const instructions = firstString(
+      result.instructions,
+      result.paymentInstructions,
+      result.payment_instructions,
+      result.customerInstruction,
+      metadata.instructions,
+      metadata.paymentInstructions,
+      metadata.payment_instructions
+    );
+
     return {
       success: true,
-      referenceNumber: result.referenceNumber || result.reference,
+      referenceNumber: firstString(result.referenceNumber, result.reference, metadata.referenceNumber),
       redirectUrl: result.redirectUrl,
       pollUrl: result.pollUrl,
       status: result.transactionStatus || result.status,
       statusDescription: result.transactionStatusDescription,
-      instructions: result.instructions,
+      instructions,
+      authorizationCode,
     };
   } catch (error: unknown) {
     console.error('Pesepay gateway initiation error:', error);
@@ -626,3 +671,104 @@ export async function initiatePesepayPayment(
   }
 }
 
+
+export interface OmariAuthorizationResponse {
+  success: boolean;
+  status?: string;
+  message?: string;
+  referenceNumber?: string;
+  providerReference?: string;
+  error?: string;
+  /** Server-side diagnostic. Logged, never returned to the customer. */
+  detail?: string;
+}
+
+/**
+ * Second leg of the O'mari (PZW216) flow: spend the OTP that Pesepay sent to
+ * the payer. This endpoint is deliberately NOT encrypted and does not take the
+ * integration key - it is the plain JSON Omari charge API documented by
+ * Pesepay:
+ *
+ *   POST https://api.pesepay.com/api/omari/v1/payments/charge
+ *   { "otp": "123456", "referenceNumber": "..." }
+ *
+ * The caller must already hold the payment row's referenceNumber from the
+ * initiate call. There is intentionally no PIN logging here.
+ */
+export async function authorizeOmariPayment(
+  referenceNumber: string,
+  otp: string
+): Promise<OmariAuthorizationResponse> {
+  try {
+    if (!referenceNumber || !otp) {
+      return { success: false, error: 'A payment reference and OTP are required.' };
+    }
+
+    const url =
+      process.env.PESEPAY_OMARI_CHARGE_URL ||
+      'https://api.pesepay.com/api/omari/v1/payments/charge';
+
+    const response = await lenientRequest({
+      url,
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', accept: 'application/json' },
+      body: JSON.stringify({ otp, referenceNumber }),
+      timeoutMs: 30000,
+    });
+
+    const raw = response.json || {};
+    let data = raw;
+    if (raw?.payload) {
+      const key = process.env.PESEPAY_ENCRYPTION_KEY || '';
+      const decrypted = key ? decryptResponse(raw.payload, key) : null;
+      if (decrypted) data = decrypted;
+    }
+
+    const status = firstString(
+      data.transactionStatus,
+      data.transaction_status,
+      data.status,
+      data.paymentProviderStatus
+    );
+    const providerMessage = firstString(
+      data.paymentProviderMessage,
+      data.message,
+      data.error,
+      data.description
+    );
+
+    if (response.status >= 400) {
+      console.error('Omari charge API error:', response.status, data);
+      return {
+        success: false,
+        status,
+        error: providerMessage || 'The authorization code was not accepted. Please try again.',
+        detail: `HTTP ${response.status}`,
+      };
+    }
+
+    const normalizedStatus = String(status || '').toUpperCase();
+    if (data.success === false || PESEPAY_FAILED_STATUSES.includes(normalizedStatus)) {
+      return {
+        success: false,
+        status: normalizedStatus || status,
+        error: providerMessage || 'The authorization code was not accepted. Please try again.',
+      };
+    }
+
+    return {
+      success: true,
+      status: normalizedStatus || status || 'PENDING',
+      message: providerMessage || 'Authorization accepted. Waiting for the payment to complete.',
+      referenceNumber: firstString(data.referenceNumber, data.reference, referenceNumber),
+      providerReference: firstString(data.paymentProviderReference, data.providerReference),
+    };
+  } catch (error: unknown) {
+    console.error('Omari authorization error:', error);
+    return {
+      success: false,
+      error: 'We could not reach the payment provider. Please try again.',
+      detail: error instanceof Error ? error.message : 'Unknown error',
+    };
+  }
+}

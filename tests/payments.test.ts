@@ -33,6 +33,7 @@ vi.mock('../src/services/pesepayService', async (importOriginal) => {
     ...actual,
     initiateEcoCashPayment: vi.fn(),
     initiatePesepayPayment: vi.fn(),
+    authorizeOmariPayment: vi.fn(),
     decryptResponse: vi.fn(),
     verifyPaymentStatus: vi.fn(),
   };
@@ -40,6 +41,12 @@ vi.mock('../src/services/pesepayService', async (importOriginal) => {
 
 vi.mock('../src/services/ruijieService', () => ({
   bypassRuijieFirewall: vi.fn().mockResolvedValue(true),
+}));
+
+vi.mock('../src/services/ruijieMint', () => ({
+  isRuijieCloudConfigured: vi.fn().mockReturnValue(false),
+  findRuijieProfile: vi.fn(),
+  mintRuijieVoucherForTier: vi.fn(),
 }));
 
 // /pesepay/initiate must reject unauthenticated callers, so the auth guard is
@@ -81,9 +88,11 @@ import { paymentsRouter } from '../src/routes/payments';
 import {
   initiateEcoCashPayment,
   initiatePesepayPayment,
+  authorizeOmariPayment,
   decryptResponse,
   verifyPaymentStatus,
 } from '../src/services/pesepayService';
+import { isRuijieCloudConfigured, mintRuijieVoucherForTier } from '../src/services/ruijieMint';
 
 function createApp() {
   const app = express();
@@ -99,25 +108,22 @@ describe('Payments routes', () => {
 
   describe('POST /api/payments/initiate', () => {
     const validBody = {
-      tier: 'PreMAX',
-      displayName: 'Pro',
+      payment_rail: 'ecocash_usd',
+      account_identifier: '+263771327202',
+      client_name: 'John Doe',
+      client_phone: '+263771327202',
       amount: 34.99,
+      package_id: 'PreMAX',
       currency: 'USD',
-      billingPeriod: 'monthly',
-      dataLimitGb: 100,
-      isUncapped: false,
-      bandwidthUp: 10,
-      bandwidthDown: 10,
-      phone: '+263771327202',
-      fullName: 'John Doe',
       macAddress: 'AA:BB:CC:DD:EE:FF',
-      ipAddress: '10.0.0.5',
     };
 
     beforeEach(() => {
       // Prod's /initiate drives everything through pool.query (no client
       // transaction), so the once-queue has to start empty for every case.
       (pool.query as any).mockReset();
+      (initiatePesepayPayment as any).mockReset();
+      (authorizeOmariPayment as any).mockReset();
       process.env.PESEPAY_INTEGRATION_KEY = 'test-integration-key';
       process.env.PESEPAY_ENCRYPTION_KEY = '0123456789abcdef0123456789abcdef';
     });
@@ -134,6 +140,12 @@ describe('Payments routes', () => {
       bandwidth_mbps_down: 10,
       max_devices: 1,
     };
+
+    // Let the queued setImmediate job and its DB write reach completion.
+    async function flushQueue() {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
 
     it('returns 422 when Pesepay is not configured', async () => {
       delete process.env.PESEPAY_INTEGRATION_KEY;
@@ -153,7 +165,7 @@ describe('Payments routes', () => {
     it('returns 422 for an invalid Zimbabwe phone number', async () => {
       const res = await request(createApp())
         .post('/api/payments/initiate')
-        .send({ ...validBody, phone: '12345' });
+        .send({ ...validBody, account_identifier: '12345' });
 
       expect(res.status).toBe(422);
       expect(res.body.error).toMatch(/valid Zimbabwe phone/i);
@@ -171,34 +183,61 @@ describe('Payments routes', () => {
       expect(res.body.error).toMatch(/Unknown package tier/i);
     });
 
-    it('handles existing user by phone', async () => {
+    it('returns 200 immediately with transaction_id and queues the gateway call', async () => {
       (pool.query as any)
         .mockResolvedValueOnce({ rows: [PKG] })                                // 1: package lookup
         .mockResolvedValueOnce({ rows: [{ id: 'existing-user' }] })            // 2: existing user
         .mockResolvedValueOnce({ rows: [{ id: 'pay-1' }] })                    // 3: INSERT payments
-        .mockResolvedValueOnce(undefined)                                    // 4: INSERT transactions
-        .mockResolvedValueOnce(undefined);                                    // 5: UPDATE pesepay_reference
-      (initiatePesepayPayment as any).mockResolvedValue({
-        success: true,
-        pollUrl: 'https://pay.pesepay.com/poll',
-        referenceNumber: 'PSE-1',
-      });
+        .mockResolvedValueOnce(undefined);                                    // 4: INSERT transactions
+
+      let resolveGateway!: (value: any) => void;
+      const gatewayResult = new Promise((resolve) => { resolveGateway = resolve; });
+      (initiatePesepayPayment as any).mockReturnValue(gatewayResult);
 
       const res = await request(createApp())
         .post('/api/payments/initiate')
         .send(validBody);
 
+      // The response must not wait for the gateway promise.
       expect(res.status).toBe(200);
+      expect(res.body.transaction_id).toBe('pay-1');
+      expect(res.body.paymentId).toBe('pay-1');
       expect(res.body.status).toBe('pending');
-      expect(res.body.pesepayPollUrl).toBe('https://pay.pesepay.com/poll');
       expect(res.body.reference).toMatch(/^PREY-[0-9A-F]{16}$/);
-      // The client needs this to poll /status, which refuses unauthenticated reads.
       expect(res.body.statusToken).toBeTruthy();
       expect(res.body.amount).toBe(34.99);
       expect(res.body.phone).toBe('263771327202');
-      expect(initiatePesepayPayment as any).toHaveBeenCalledWith(
-        expect.objectContaining({ currencyCode: 'USD', phone: '263771327202' })
+      expect(res.body.rail).toBe('ecocash');
+      expect(res.body.currency).toBe('USD');
+
+      const transactionInsert = (pool.query as any).mock.calls.find(
+        ([sql]: [string]) => typeof sql === 'string' && sql.includes('INSERT INTO transactions')
       );
+      expect(transactionInsert).toBeTruthy();
+      expect(transactionInsert![1][6]).toBe('Prechard Muvirimi');
+
+      resolveGateway({
+        success: true,
+        pollUrl: 'https://pay.pesepay.com/poll',
+        referenceNumber: 'PSE-1',
+      });
+      await flushQueue();
+
+      expect(initiatePesepayPayment as any).toHaveBeenCalledWith(
+        expect.objectContaining({
+          paymentMethod: 'ecocash',
+          currencyCode: 'USD',
+          phone: '263771327202',
+          reference: res.body.reference,
+        })
+      );
+      const refUpdate = (pool.query as any).mock.calls.find(
+        ([sql]: [string]) => typeof sql === 'string' && sql.includes('pesepay_reference = $2')
+      );
+      expect(refUpdate).toBeTruthy();
+      expect(refUpdate![1][0]).toBe('pay-1');
+      expect(refUpdate![1][1]).toBe('PSE-1');
+      expect(refUpdate![1][2]).toBe('https://pay.pesepay.com/poll');
     });
 
     it('creates new user when phone not found', async () => {
@@ -207,7 +246,7 @@ describe('Payments routes', () => {
         .mockResolvedValueOnce({ rows: [] })                                   // 2: no existing user
         .mockResolvedValueOnce({ rows: [{ id: 'new-user' }] })                 // 3: INSERT users
         .mockResolvedValueOnce({ rows: [{ id: 'pay-2' }] })                    // 4: INSERT payments
-        .mockResolvedValueOnce(undefined);                                    // 5: UPDATE pesepay_reference
+        .mockResolvedValueOnce(undefined);                                    // 5: INSERT transactions
       (initiatePesepayPayment as any).mockResolvedValue({
         success: true,
         pollUrl: 'https://pay.pesepay.com/poll',
@@ -219,15 +258,16 @@ describe('Payments routes', () => {
 
       expect(res.status).toBe(200);
       expect(res.body.status).toBe('pending');
+      expect(res.body.transaction_id).toBe('pay-2');
+      await flushQueue();
     });
 
-    it('handles Pesepay failure gracefully', async () => {
+    it('keeps the 200 response but records a failed payment when the queued gateway call fails', async () => {
       (pool.query as any)
         .mockResolvedValueOnce({ rows: [PKG] })                                // 1: package lookup
         .mockResolvedValueOnce({ rows: [{ id: 'user-1' }] })                   // 2: existing user
         .mockResolvedValueOnce({ rows: [{ id: 'pay-3' }] })                    // 3: INSERT payments
-        .mockResolvedValueOnce(undefined)                                    // 4: INSERT transactions
-        .mockResolvedValueOnce(undefined);                                    // 5: UPDATE status=failed
+        .mockResolvedValueOnce(undefined);                                    // 4: INSERT transactions
       (initiatePesepayPayment as any).mockResolvedValue({
         success: false,
         error: 'Insufficient funds',
@@ -237,9 +277,214 @@ describe('Payments routes', () => {
         .post('/api/payments/initiate')
         .send(validBody);
 
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe('pending');
+
+      await vi.waitFor(() => {
+        const failedPayment = (pool.query as any).mock.calls.some(
+          ([sql, params]: [string, any[]]) =>
+            typeof sql === 'string' &&
+            sql.includes("UPDATE payments SET status = 'failed'") &&
+            params?.[0] === 'pay-3' &&
+            params?.[1] === 'Insufficient funds'
+        );
+        expect(failedPayment).toBe(true);
+      });
+    });
+
+    it.each([
+      ['ecocash_usd', 'ecocash'],
+      ['innbucks_usd', 'innbucks'],
+      ['omari_usd', 'omari'],
+    ])('maps %s to the %s gateway handler', async (rail, handler) => {
+      (pool.query as any)
+        .mockResolvedValueOnce({ rows: [PKG] })
+        .mockResolvedValueOnce({ rows: [{ id: 'existing-user' }] })
+        .mockResolvedValueOnce({ rows: [{ id: 'pay-' + handler }] })
+        .mockResolvedValueOnce(undefined);
+      (initiatePesepayPayment as any).mockResolvedValue({
+        success: true,
+        pollUrl: 'https://pay.pesepay.com/poll',
+        referenceNumber: 'PSE-' + handler,
+      });
+
+      const res = await request(createApp())
+        .post('/api/payments/initiate')
+        .send({ ...validBody, payment_rail: rail });
+
+      expect(res.status).toBe(200);
+      expect(res.body.rail).toBe(handler);
+      expect(res.body.currency).toBe('USD');
+      if (handler === 'omari') {
+        expect(res.body.requires_pin).toBe(true);
+        expect(res.body.referenceNumber).toBe('PSE-omari');
+      } else {
+        expect(res.body.requires_pin).toBe(false);
+      }
+      await vi.waitFor(() => {
+        expect(initiatePesepayPayment as any).toHaveBeenCalledWith(
+          expect.objectContaining({ paymentMethod: handler, currencyCode: 'USD' })
+        );
+      });
+      await flushQueue();
+    });
+
+    it('returns the InnBucks authorization code immediately', async () => {
+      (pool.query as any)
+        .mockResolvedValueOnce({ rows: [PKG] })
+        .mockResolvedValueOnce({ rows: [{ id: 'existing-user' }] })
+        .mockResolvedValueOnce({ rows: [{ id: 'pay-inn' }] })
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce(undefined);
+      (initiatePesepayPayment as any).mockResolvedValue({
+        success: true,
+        pollUrl: 'https://pay.pesepay.com/poll',
+        referenceNumber: 'PSE-INN-1',
+        authorizationCode: 'A1B2C3',
+        instructions: 'Open InnBucks and enter the code.',
+      });
+
+      const res = await request(createApp())
+        .post('/api/payments/initiate')
+        .send({ ...validBody, payment_rail: 'innbucks_usd' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.referenceNumber).toBe('PSE-INN-1');
+      expect(res.body.authorizationCode).toBe('A1B2C3');
+      expect(res.body.instructions).toBe('Open InnBucks and enter the code.');
+      expect(res.body.requires_pin).toBe(false);
+      const refUpdate = (pool.query as any).mock.calls.find(
+        ([sql]: [string]) => typeof sql === 'string' && sql.includes('pesepay_reference = $2')
+      );
+      expect(refUpdate![1]).toEqual(['pay-inn', 'PSE-INN-1', 'https://pay.pesepay.com/poll']);
+    });
+
+    it('fails a synchronous initiation when the gateway cannot start it', async () => {
+      (pool.query as any)
+        .mockResolvedValueOnce({ rows: [PKG] })
+        .mockResolvedValueOnce({ rows: [{ id: 'existing-user' }] })
+        .mockResolvedValueOnce({ rows: [{ id: 'pay-bad' }] })
+        .mockResolvedValueOnce(undefined);
+      (initiatePesepayPayment as any).mockResolvedValue({
+        success: false,
+        error: 'Payment provider unavailable',
+      });
+
+      const res = await request(createApp())
+        .post('/api/payments/initiate')
+        .send({ ...validBody, payment_rail: 'innbucks_usd' });
+
       expect(res.status).toBe(502);
-      expect(res.body.status).toBe('failed');
-      expect(res.body.error).toBe('Insufficient funds');
+      expect(res.body.success).toBe(false);
+      expect(res.body.error).toBe('Payment provider unavailable');
+    });
+  });
+
+  describe('POST /api/payments/authorize', () => {
+    const statusToken = (paymentId: string) =>
+      jwt.sign({ paymentId, type: 'status' }, process.env.JWT_SECRET as string, {
+        algorithm: 'HS256',
+      });
+
+    const omariRow = {
+      id: 'pay-omari',
+      status: 'pending',
+      voucher_code: null,
+      payment_method: 'Omari (Pesepay)',
+      pesepay_reference: 'PSE-OMARI-1',
+    };
+
+    beforeEach(() => {
+      (pool.query as any).mockReset();
+      (authorizeOmariPayment as any).mockReset();
+    });
+
+    it('requires a status token', async () => {
+      const res = await request(createApp())
+        .post('/api/payments/authorize')
+        .send({ transaction_id: 'pay-omari', pin: '1234' });
+
+      expect(res.status).toBe(401);
+      expect(pool.query as any).not.toHaveBeenCalled();
+    });
+
+    it('rejects a token issued for another payment before touching the DB', async () => {
+      const res = await request(createApp())
+        .post('/api/payments/authorize')
+        .send({
+          transaction_id: 'pay-omari',
+          pin: '1234',
+          token: statusToken('pay-other'),
+        });
+
+      expect(res.status).toBe(403);
+      expect(pool.query as any).not.toHaveBeenCalled();
+    });
+
+    it('rejects a non-numeric PIN before touching the DB', async () => {
+      const res = await request(createApp())
+        .post('/api/payments/authorize')
+        .send({
+          transaction_id: 'pay-omari',
+          pin: 'abcd',
+          token: statusToken('pay-omari'),
+        });
+
+      expect(res.status).toBe(422);
+      expect(pool.query as any).not.toHaveBeenCalled();
+    });
+
+    it('spends the OTP and returns processing for a pending O\'mari payment', async () => {
+      (pool.query as any).mockResolvedValueOnce({ rows: [omariRow] });
+      (authorizeOmariPayment as any).mockResolvedValue({
+        success: true,
+        status: 'SUCCESS',
+        message: 'Authorization accepted.',
+        referenceNumber: 'PSE-OMARI-1',
+      });
+
+      const res = await request(createApp())
+        .post('/api/payments/authorize')
+        .send({
+          transaction_id: 'pay-omari',
+          pin: '123456',
+          token: statusToken('pay-omari'),
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.status).toBe('processing');
+      expect(authorizeOmariPayment as any).toHaveBeenCalledWith('PSE-OMARI-1', '123456');
+    });
+
+    it('marks the payment failed when the provider rejects the OTP', async () => {
+      (pool.query as any).mockResolvedValue({ rows: [omariRow] });
+      (authorizeOmariPayment as any).mockResolvedValue({
+        success: false,
+        status: 'AUTHORIZATION_FAILED',
+        error: 'Incorrect PIN',
+      });
+
+      const res = await request(createApp())
+        .post('/api/payments/authorize')
+        .send({
+          transaction_id: 'pay-omari',
+          pin: '0000',
+          token: statusToken('pay-omari'),
+        });
+
+      expect(res.status).toBe(422);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error).toBe('Incorrect PIN');
+      const failed = (pool.query as any).mock.calls.some(
+        ([sql, params]: [string, any[]]) =>
+          typeof sql === 'string' &&
+          sql.includes("SET status = 'failed'") &&
+          params?.[0] === 'pay-omari' &&
+          params?.[1] === 'Incorrect PIN'
+      );
+      expect(failed).toBe(true);
     });
   });
 
@@ -363,6 +608,192 @@ describe('Payments routes', () => {
       expect(res.body.voucherCode).toBe('CT-TESTCODE1');
     });
 
+    it('records a Ruijie-minted voucher exactly once', async () => {
+      (decryptResponse as any).mockReturnValue({
+        merchantReference: 'REF-RUIJIE',
+        transactionStatus: 'SUCCESS',
+        amount: 1,
+      });
+      (isRuijieCloudConfigured as any).mockReturnValueOnce(true);
+      (mintRuijieVoucherForTier as any).mockResolvedValueOnce({
+        codeNo: 'RJ-TESTCODE1',
+        userGroupId: 'group-1',
+        profile: 'profile-1',
+        expiryTime: null,
+        comment: 'Payment pay-ruijie',
+      });
+
+      (pool.query as any)
+        .mockResolvedValueOnce({
+          rows: [{ id: 'pay-ruijie', status: 'pending', voucher_code: null, amount: 1, webhook_token: null }],
+        })
+        .mockResolvedValueOnce({ rows: [{ status: 'pending', voucher_code: null }] })
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce({
+          rows: [
+            {
+              id: 'pay-ruijie',
+              user_id: 'user-1',
+              tier_name: 'PreLite',
+              amount: 1,
+              currency: 'USD',
+              payment_method: 'Ecocash (Pesepay)',
+              status: 'pending',
+              duration_min: 1440,
+              data_limit_gb: 5,
+              is_uncapped: false,
+              bandwidth_mbps_up: 5,
+              bandwidth_mbps_down: 5,
+              max_devices: 1,
+            },
+          ],
+        });
+
+      const client = await (pool as any).connect();
+      client.query
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce({ rows: [{ status: 'pending', voucher_code: null }] })
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce({ rows: [{ completed_at: new Date('2026-10-22T18:31:45Z') }] })
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce({ rows: [{ id: 'owner-1', full_name: 'Prechard Muvirimi' }] })
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce(undefined);
+
+      const res = await request(createApp())
+        .post('/api/payments/webhook')
+        .send({ payload: 'encrypted-string' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.voucherCode).toBe('RJ-TESTCODE1');
+      const ruijieInserts = client.query.mock.calls.filter(([sql]: [string]) =>
+        String(sql).includes('INSERT INTO ruijie_vouchers')
+      );
+      expect(ruijieInserts).toHaveLength(1);
+    });
+
+    it('claims a pre-minted pooled voucher without calling Ruijie', async () => {
+      (decryptResponse as any).mockReturnValue({
+        merchantReference: 'REF-POOL',
+        transactionStatus: 'SUCCESS',
+        amount: 1,
+      });
+      (isRuijieCloudConfigured as any).mockReturnValueOnce(true);
+
+      (pool.query as any)
+        .mockResolvedValueOnce({
+          rows: [{ id: 'pay-pool', status: 'pending', voucher_code: null, amount: 1, webhook_token: null }],
+        })
+        .mockResolvedValueOnce({ rows: [{ status: 'pending', voucher_code: null }] })
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce({
+          rows: [
+            {
+              id: 'pay-pool',
+              user_id: 'user-1',
+              tier_name: 'PreLite',
+              amount: 1,
+              currency: 'USD',
+              payment_method: 'Ecocash (Pesepay)',
+              status: 'pending',
+              duration_min: 1440,
+              data_limit_gb: 5,
+              is_uncapped: false,
+              bandwidth_mbps_up: 5,
+              bandwidth_mbps_down: 5,
+              max_devices: 1,
+            },
+          ],
+        });
+
+      const client = await (pool as any).connect();
+      client.query
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce({ rows: [{ status: 'pending', voucher_code: null }] })
+        .mockResolvedValueOnce({
+          rows: [{ code_no: 'POOL-TEST1', tier_name: 'PreLite', user_group_id: 'g', profile_uuid: 'p', ruijie_expiry: null }],
+        })
+        .mockResolvedValueOnce({ rows: [{ completed_at: new Date('2026-10-22T18:31:45Z') }] })
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce({ rows: [{ id: 'owner-1', full_name: 'Prechard Muvirimi' }] })
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce(undefined);
+
+      const res = await request(createApp())
+        .post('/api/payments/webhook')
+        .send({ payload: 'encrypted-string' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.voucherCode).toBe('POOL-TEST1');
+      expect(mintRuijieVoucherForTier).not.toHaveBeenCalled();
+    });
+
+    it('issues a local fallback voucher when the pool is empty and Ruijie fails', async () => {
+      (decryptResponse as any).mockReturnValue({
+        merchantReference: 'REF-FALLBACK',
+        transactionStatus: 'SUCCESS',
+        amount: 1,
+      });
+      (isRuijieCloudConfigured as any).mockReturnValueOnce(true);
+      (mintRuijieVoucherForTier as any).mockRejectedValueOnce(new Error('Ruijie timeout'));
+
+      (pool.query as any)
+        .mockResolvedValueOnce({
+          rows: [{ id: 'pay-fallback', status: 'pending', voucher_code: null, amount: 1, webhook_token: null }],
+        })
+        .mockResolvedValueOnce({ rows: [{ status: 'pending', voucher_code: null }] })
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce({
+          rows: [
+            {
+              id: 'pay-fallback',
+              user_id: 'user-1',
+              tier_name: 'PreLite',
+              amount: 1,
+              currency: 'USD',
+              payment_method: 'Ecocash (Pesepay)',
+              status: 'pending',
+              duration_min: 1440,
+              data_limit_gb: 5,
+              is_uncapped: false,
+              bandwidth_mbps_up: 5,
+              bandwidth_mbps_down: 5,
+              max_devices: 1,
+            },
+          ],
+        })
+        .mockResolvedValue({ rows: [] });
+
+      const client = await (pool as any).connect();
+      client.query
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce({ rows: [{ status: 'pending', voucher_code: null }] })
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce({ rows: [{ id: 'v-fallback', code: 'CT-FALLBACK1' }] })
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce({ rows: [{ completed_at: new Date('2026-10-22T18:31:45Z') }] })
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce({ rows: [{ id: 'owner-1', full_name: 'Prechard Muvirimi' }] })
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce(undefined);
+
+      const res = await request(createApp())
+        .post('/api/payments/webhook')
+        .send({ payload: 'encrypted-string' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.voucherCode).toBe('CT-FALLBACK1');
+      expect(mintRuijieVoucherForTier).toHaveBeenCalledTimes(1);
+    });
+
     it('marks a gateway failure as failed without minting a voucher', async () => {
       (decryptResponse as any).mockReturnValue({
         merchantReference: 'REF-002',
@@ -457,6 +888,15 @@ describe('Payments routes', () => {
             completed_at: new Date().toISOString(),
             voucher_code: 'CT-ABCD2345',
             tier_name: 'PreMAX',
+            package_name: 'PreMAX Monthly',
+            data_limit_gb: '50.00',
+            is_uncapped: false,
+            duration_min: 43200,
+            bandwidth_mbps_up: 10,
+            bandwidth_mbps_down: 50,
+            client_name: 'John Doe',
+            client_phone: '+263771327202',
+            currency: 'USD',
             error_message: null,
           },
         ],
@@ -471,6 +911,38 @@ describe('Payments routes', () => {
       expect(res.body.voucherCode).toBe('CT-ABCD2345');
       expect(res.body.reference).toBe('REF-1');
       expect(res.body.supportRequired).toBe(false);
+      expect(res.body.transaction_id).toBe('pay-1');
+      expect(res.body.packageName).toBe('PreMAX Monthly');
+      expect(res.body.dataLimitGb).toBe(50);
+      expect(res.body.clientName).toBe('John Doe');
+      expect(res.body.clientPhone).toBe('+263771327202');
+      expect(res.body.durationMin).toBe(43200);
+    });
+
+    it('supports the query-string status contract used by the portal', async () => {
+      (pool.query as any).mockResolvedValue({
+        rows: [
+          {
+            id: 'pay-1',
+            status: 'pending',
+            pesepay_reference: null,
+            amount: 34.99,
+            completed_at: null,
+            voucher_code: null,
+            tier_name: 'PreMAX',
+            error_message: null,
+          },
+        ],
+      });
+
+      const res = await request(createApp())
+        .get('/api/payments/status')
+        .query({ id: 'pay-1', token: statusToken('pay-1') });
+
+      expect(res.status).toBe(200);
+      expect(res.body.paymentId).toBe('pay-1');
+      expect(res.body.transaction_id).toBe('pay-1');
+      expect(res.body.status).toBe('pending');
     });
 
     it('returns 404 for unknown payment', async () => {

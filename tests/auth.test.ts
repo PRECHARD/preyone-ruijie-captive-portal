@@ -135,6 +135,52 @@ describe('POST /api/auth/signup', () => {
   });
 });
 
+describe('POST /api/auth/session-exchange', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('requires a session token', async () => {
+    const res = await request(createApp())
+      .post('/api/auth/session-exchange')
+      .send({});
+
+    expect(res.status).toBe(422);
+  });
+
+  it('rejects an unknown or expired session token', async () => {
+    (pool.query as any).mockResolvedValueOnce({ rows: [] });
+
+    const res = await request(createApp())
+      .post('/api/auth/session-exchange')
+      .send({ sessionToken: 'expired-token' });
+
+    expect(res.status).toBe(401);
+  });
+
+  it('returns a portal JWT for an active voucher session', async () => {
+    const future = new Date(Date.now() + 3600000).toISOString();
+    (pool.query as any).mockResolvedValueOnce({
+      rows: [{
+        id: 'user-1',
+        full_name: 'John Doe',
+        phone: '+263771327202',
+        email: null,
+        session_expires_at: future,
+      }],
+    });
+
+    const res = await request(createApp())
+      .post('/api/auth/session-exchange')
+      .send({ sessionToken: 'active-token' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.token).toBeTruthy();
+    expect(res.body.user.id).toBe('user-1');
+    expect(res.body.user.hasActiveSession).toBe(true);
+  });
+});
+
 describe('POST /api/auth/register', () => {
   beforeEach(() => {
     vi.clearAllMocks();

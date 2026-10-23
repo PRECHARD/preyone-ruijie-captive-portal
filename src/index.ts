@@ -35,6 +35,7 @@ import { ensureVoucherRuijieSchema, startRuijieAccountingPolling } from './servi
 import { scheduleAccessLogCleanup } from './services/accessLogCleanup';
 import { scheduleHandoverReminders } from './services/handoverReminder';
 import { startVoucherMonitor } from './services/voucherMonitorService';
+import { startVoucherPoolWorker } from './services/voucherPool';
 import { scheduleSubscriptionCron } from './jobs/subscriptionCron';
 
 const app = express();
@@ -283,7 +284,7 @@ app.use((req, res, next) => {
     res.setHeader('X-Captive-Portal', 'true');
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
     // Let known non-static routes pass through to their route handlers
-    if (['/login', '/account', '/forgot-password', '/reset-password', '/connect'].includes(req.path)) {
+    if (['/login', '/account', '/manage-account', '/forgot-password', '/reset-password', '/connect'].includes(req.path)) {
       return next();
     }
     // Strip Range header — the gateway preserves original request headers (e.g. from video streaming)
@@ -506,6 +507,10 @@ app.listen(PORT, () => {
   // Hybrid multi-tier voucher alerts (80% / 95%). In-process timer; the
   // (voucher, tier) claim in the DB makes it exactly-once across clusters.
   startVoucherMonitor();
+
+  // Keep a small pre-minted Ruijie stock per active tier. The advisory lock
+  // makes the sweep safe across all PM2 cluster workers.
+  startVoucherPoolWorker();
 
   // 3-tier subscription dunning: 3-day warning, 1-day urgent notice and
   // suspension on expiry, every day at midnight.

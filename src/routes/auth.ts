@@ -443,6 +443,55 @@ authRouter.post('/portal-login', loginLimiter, async (req: Request, res: Respons
 });
 
 // ── Portal Me (authenticated) ─────────────────────────────────────────
+// Exchange a redeemed voucher session token for the portal JWT used by
+// /manage-account. The success page calls this after one-touch redemption so
+// the customer lands on an authenticated account dashboard without a password.
+authRouter.post('/session-exchange', async (req: Request, res: Response) => {
+  try {
+    const sessionToken = String(req.body?.sessionToken || '').trim();
+    if (!sessionToken) {
+      res.status(422).json({ error: 'Session token is required' });
+      return;
+    }
+
+    const { rows } = await pool.query(
+      `SELECT id, full_name, phone, email, session_expires_at
+       FROM users
+       WHERE session_token = $1 AND session_expires_at > NOW()
+       LIMIT 1`,
+      [sessionToken]
+    );
+    if (rows.length === 0) {
+      res.status(401).json({ error: 'Invalid or expired session' });
+      return;
+    }
+
+    const user = rows[0];
+    const portalToken = jwt.sign(
+      { id: user.id, phone: user.phone, role: 'portal' },
+      getJwtSecret(),
+      { expiresIn: '7d' }
+    );
+    setPreyoneCookie(res, portalToken);
+
+    res.json({
+      token: portalToken,
+      sessionToken,
+      sessionExpiresAt: user.session_expires_at,
+      user: {
+        id: user.id,
+        fullName: user.full_name,
+        phone: user.phone,
+        email: user.email,
+        hasActiveSession: true,
+      },
+    });
+  } catch (err) {
+    console.error('Session exchange error:', err);
+    res.status(500).json({ error: 'Session exchange failed.' });
+  }
+});
+
 authRouter.get('/me', async (req: Request, res: Response) => {
   try {
     const authHeader = req.headers.authorization;

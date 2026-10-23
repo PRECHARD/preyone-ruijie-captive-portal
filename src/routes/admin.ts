@@ -62,7 +62,8 @@ async function staffRuijieMint(packageTier: string, comment: string): Promise<St
 
 const RUIJIE_VOUCHER_AUDIT_SQL = `INSERT INTO ruijie_vouchers
   (code_no, tier_name, user_group_id, profile_uuid, ruijie_expiry, payment_id, source, comment)
-  VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`;
+  VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+  ON CONFLICT (code_no) DO NOTHING`;
 
 adminRouter.get('/users', async (req: Request, res: Response) => {
   if (req.adminUser!.role === 'Staff') {
@@ -179,10 +180,16 @@ adminRouter.post('/vouchers', async (req: Request, res: Response) => {
 
   const { rows } = await pool.query(
     `INSERT INTO vouchers (code, duration_min, max_uses, expires_at, data_limit_gb, is_uncapped, bandwidth_mbps_up, bandwidth_mbps_down, sold_by, price_amount, package_tier, max_devices, holder_name, holder_phone, ruijie_sync_status, ruijie_voucher_id)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16) RETURNING *`,
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+     ON CONFLICT (code) DO NOTHING
+     RETURNING *`,
     [voucherCode, durationMin, maxUses, expiresAt ?? null, dataLimitGb, isUncapped, bandwidthUp, bandwidthDown, soldBy, priceAmount ?? null, resolvedPackageTier, maxDevices,
      holderNameValue, holderPhoneValue, ruijieMint ? 'synced' : null, ruijieMint ? ruijieMint.code : null]
   );
+  if (rows.length === 0) {
+    res.status(409).json({ error: 'A voucher with that code already exists.' });
+    return;
+  }
 
   if (ruijieMint) {
     await pool.query(RUIJIE_VOUCHER_AUDIT_SQL, [
@@ -1268,10 +1275,20 @@ adminRouter.get('/revenue', requirePermission(PERMISSIONS.COMPANY_ADMIN), async 
     GROUP BY package_tier ORDER BY total DESC
   `);
   const { rows: recentTx } = await pool.query(`
-    SELECT t.id, t.package_tier, t.amount, t.currency, t.status, t.created_at, t.completed_at,
-           u.full_name AS user_name, t.sold_by_name
+    SELECT t.id, t.package_tier, t.voucher_code, t.amount, t.currency, t.payment_method,
+           t.status, t.created_at, t.completed_at,
+           u.full_name AS user_name, u.phone AS user_phone,
+           COALESCE(s.sold_by_name, 'Prechard Muvirimi') AS sold_by_name,
+           s.payment_reference
     FROM transactions t
     LEFT JOIN users u ON u.id = t.user_id
+    LEFT JOIN LATERAL (
+      SELECT sold_by_name, payment_reference
+      FROM sales
+      WHERE voucher_code = t.voucher_code
+      ORDER BY sold_at DESC
+      LIMIT 1
+    ) s ON TRUE
     ORDER BY t.created_at DESC LIMIT 100
   `);
   res.json({
@@ -1309,8 +1326,19 @@ adminRouter.get('/dashboard/sales', requirePermission(PERMISSIONS.COMPANY_ADMIN)
     FROM sales s GROUP BY s.sold_by_name ORDER BY total DESC
   `);
   const { rows: recent } = await pool.query(`
-    SELECT s.voucher_code, s.amount, s.currency, s.sold_by_name, s.sold_at
-    FROM sales s ORDER BY s.sold_at DESC LIMIT 50
+    SELECT s.voucher_code, s.amount, s.currency, s.sold_by_name, s.sold_at,
+           s.payment_method, s.payment_reference, v.package_tier,
+           u.full_name AS client_name, u.phone AS client_phone
+    FROM sales s
+    LEFT JOIN vouchers v ON v.id = s.voucher_id
+    LEFT JOIN LATERAL (
+      SELECT full_name, phone
+      FROM users
+      WHERE voucher_code = s.voucher_code
+      ORDER BY created_at DESC
+      LIMIT 1
+    ) u ON TRUE
+    ORDER BY s.sold_at DESC LIMIT 50
   `);
   res.json({ daily: daily[0], weekly: weekly[0], monthly: monthly[0], total: total[0], byStaff, recent });
 });
@@ -2119,9 +2147,12 @@ adminRouter.post('/vouchers/bulk', async (req: Request, res: Response) => {
 
       const { rows } = await client.query(
         `INSERT INTO vouchers (code, duration_min, max_uses, expires_at, data_limit_gb, is_uncapped, bandwidth_mbps_up, bandwidth_mbps_down, sold_by, price_amount, package_tier, max_devices, holder_name, holder_phone)
-         VALUES ($1, $2, 1, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING *`,
+         VALUES ($1, $2, 1, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+         ON CONFLICT (code) DO NOTHING
+         RETURNING *`,
         [code, pkg.duration_min, expiresAt || null, pkg.data_limit_gb, pkg.is_uncapped, pkg.bandwidth_mbps_up, pkg.bandwidth_mbps_down, req.adminUser!.id, priceAmount || null, packageTier, pkg.max_devices, holderNameValue, holderPhoneValue]
       );
+      if (rows.length === 0) continue;
 
       if (ruijieMints.length > i) {
         await client.query(RUIJIE_VOUCHER_AUDIT_SQL, [
@@ -2295,10 +2326,13 @@ adminRouter.post('/vouchers/approvals/:id/approve', requirePermission(PERMISSION
 
       const { rows: vrows } = await client.query(
         `INSERT INTO vouchers (code, duration_min, max_uses, expires_at, data_limit_gb, is_uncapped, bandwidth_mbps_up, bandwidth_mbps_down, sold_by, price_amount, package_tier, max_devices)
-         VALUES ($1, $2, $3, NULL, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
+         VALUES ($1, $2, $3, NULL, $4, $5, $6, $7, $8, $9, $10, $11)
+         ON CONFLICT (code) DO NOTHING
+         RETURNING *`,
          [voucherCode, pkg.duration_min, approval.max_uses || 1, pkg.data_limit_gb, pkg.is_uncapped, pkg.bandwidth_mbps_up, pkg.bandwidth_mbps_down,
           approval.requested_by, approval.price_amount || null, approval.package_tier, pkg.max_devices]
       );
+      if (vrows.length === 0) continue;
 
       if (ruijieMints.length > i) {
         await client.query(RUIJIE_VOUCHER_AUDIT_SQL, [

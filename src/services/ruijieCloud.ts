@@ -206,6 +206,8 @@ export interface CreateRuijieVoucherInput {
   profile: string;
   userGroupId: string;
   comment?: string;
+  /** Per-request timeout. The default axios client timeout is 15s. */
+  timeoutMs?: number;
 }
 
 export async function createRuijieVoucher(input: CreateRuijieVoucherInput): Promise<RuijieVoucher> {
@@ -218,7 +220,10 @@ export async function createRuijieVoucher(input: CreateRuijieVoucherInput): Prom
     const res = await client().post(
       `${VOUCHER_CREATE_URL}/${cfg.groupId}?access_token=${encodeURIComponent(accessToken)}`,
       { quantity: 1, profile: input.profile, userGroupId: input.userGroupId, comment },
-      { headers: { 'Content-Type': 'application/json' } }
+      {
+        headers: { 'Content-Type': 'application/json' },
+        ...(input.timeoutMs != null ? { timeout: input.timeoutMs } : {}),
+      }
     );
     failIfNotZero(res.data, `voucher/create (groupId=${cfg.groupId}) -> HTTP ${res.status}`);
     const vd = resolveVoucherData(res.data);

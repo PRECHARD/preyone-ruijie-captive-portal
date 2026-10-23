@@ -53,7 +53,8 @@ export interface MintedRuijieVoucher {
  */
 export async function mintRuijieVoucherForTier(
   tierName: string,
-  comment?: string
+  comment?: string,
+  options: { timeoutMs?: number } = {}
 ): Promise<MintedRuijieVoucher> {
   const profile = await findRuijieProfile(tierName);
   if (!profile) {
@@ -64,6 +65,7 @@ export async function mintRuijieVoucherForTier(
     profile: profile.ruijie_profile_uuid,
     userGroupId: profile.ruijie_user_group_id,
     comment: cleanComment,
+    timeoutMs: options.timeoutMs,
   });
   return {
     codeNo: voucher.codeNo,

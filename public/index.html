@@ -33,7 +33,7 @@
   <link
     href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Montserrat:wght@500;600;700;800&family=Satisfy&display=swap"
     rel="stylesheet">
-  <link rel="stylesheet" href="/css/portal.css?v=28" />
+  <link rel="stylesheet" href="/css/portal.css?v=46" />
   <!-- Header logo is the largest paint on the portal. Preload the variant a
        phone will actually pick so discovery does not wait on the parser. -->
   <link
@@ -49,7 +49,7 @@
 </head>
 
 <body class="portal-body">
-  <div class="body-loading" id="bodyLoading">
+  <div class="body-loading" id="bodyLoading" style="display:none;">
     <div class="loading-spinner">
       <div class="loading-spinner-inner">
         <picture>
@@ -83,7 +83,7 @@
         <span class="brand-signature">Fadaya nePreyone UltraNet Wifi</span>
       </div>
       <div class="header-auth">
-        <a href="/manage-account" class="header-login-btn">Log In</a>
+        <a href="/login" class="header-login-btn">Log In</a>
       </div>
     </header>
 
@@ -175,7 +175,7 @@
             <p>Registered email: <strong id="registered-email"></strong></p>
             <p><a href="/manage-account">Go to your account</a></p>
           </div>
-          <p class="signup-link">Already have an account? <a href="/manage-account">Log in</a></p>
+          <p class="signup-link">Already have an account? <a href="/login">Log in</a></p>
         </div>
       </aside>
 
@@ -615,7 +615,7 @@
     }
   })();
   </script>
-  <script src="/js/portal.js?v=8"></script>
+  <script src="/js/portal.js?v=27"></script>
   <script>
   // ── Captive-portal alert injection ──────────────────────────────────────
   // The gateway bounces a blocked customer straight back to this page, so it
