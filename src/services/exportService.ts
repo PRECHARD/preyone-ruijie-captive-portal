@@ -221,17 +221,21 @@ export function buildSalesWorkbook(opts: {
   }
 
   // Masthead: official logo on the left, company name beside it (row 1).
+  // Resolve + register the logo once: the Commissions sheet reuses the same
+  // media id so the emailed workbook carries one copy, not two (~140 KB saved).
   const logoFile = resolveBrandLogo();
+  let logoId: number | null = null;
   if (logoFile) {
     try {
-      const logoId = wb.addImage({ filename: logoFile, extension: 'png' });
+      logoId = wb.addImage({ filename: logoFile, extension: 'png' });
       ws.addImage(logoId, { tl: { col: 0, row: 0 }, ext: { width: 168, height: 63 } });
       ws.getRow(1).height = 50;
     } catch {
       /* corrupt/unreadable image - fall back to a text header */
+      logoId = null;
     }
   }
-  const brandFirstCol = logoFile && columns.length >= 4 ? 3 : 1;
+  const brandFirstCol = logoId != null && columns.length >= 4 ? 3 : 1;
   const brandCell = `${String.fromCharCode(64 + brandFirstCol)}1`;
   ws.mergeCells(`${brandCell}:${lastCol}1`);
   ws.getCell(brandCell).value = brand;
@@ -320,7 +324,7 @@ export function buildSalesWorkbook(opts: {
   totalRow.getCell(4).font = { name: 'Calibri', size: 14, bold: true, color: { argb: BRAND_WHITE } };
 
   if (opts.commissions) {
-    addCommissionSheet(wb, opts.commissions, { brand, company });
+    addCommissionSheet(wb, opts.commissions, { brand, company }, logoId);
   }
 
   return wb;
@@ -342,7 +346,9 @@ export interface CommissionSheetInput {
 function addCommissionSheet(
   wb: ExcelJS.Workbook,
   input: CommissionSheetInput,
-  branding: { brand: string; company: { name?: string | null; email?: string | null; website?: string | null } }
+  branding: { brand: string; company: { name?: string | null; email?: string | null; website?: string | null } },
+  /** Media id already registered on the workbook; reusing it avoids a duplicate image. */
+  logoId: number | null = null
 ): void {
   const headers = ['Staff', 'Role', 'Sales', 'Gross', 'Commission %', 'Commission Due'];
   const widths = [30, 14, 10, 18, 16, 18];
@@ -356,10 +362,8 @@ function addCommissionSheet(
     }
   }
 
-  const logoFile = resolveBrandLogo();
-  if (logoFile) {
+  if (logoId != null) {
     try {
-      const logoId = wb.addImage({ filename: logoFile, extension: 'png' });
       ws.addImage(logoId, { tl: { col: 0, row: 0 }, ext: { width: 168, height: 63 } });
       ws.getRow(1).height = 50;
     } catch {

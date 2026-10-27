@@ -173,6 +173,11 @@ describe('buildSalesWorkbook - Month-End branding', () => {
     expect(cells).toContain('CEO');
     expect(cells).toContain('Staff Sales & Commission Report');
     expect(cells).toContain('TOTAL');
+
+    // The logo media is registered once and reused by both sheets: an emailed
+    // workbook must not carry two copies of the same image.
+    const media = (wb.model as unknown as { media?: unknown[] }).media ?? [];
+    expect(media.length).toBeLessThanOrEqual(1);
   });
 
   it('still builds a text-only masthead when no logo asset resolves', () => {
