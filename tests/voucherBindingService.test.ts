@@ -5,8 +5,11 @@ vi.mock('../src/db/pool', () => ({ pool: { query } }));
 
 import {
   bindingMacKey,
+  normalizeMac,
+  resolveSessionAccounts,
   resolveVoucherBinding,
   resolveVoucherBindings,
+  resolveVoucherCodesByIp,
   verifyVoucherCode,
   verifyVoucherCodes,
 } from '../src/services/voucherBindingService';
@@ -210,6 +213,152 @@ describe('voucherBindingService', () => {
       expect(query).toHaveBeenCalledTimes(1);
       expect(query.mock.calls[0][1]).toEqual([['y43dzw']]);
       expect([...verified.values()]).toEqual(['y43dzw']);
+    });
+  });
+
+  describe('normalizeMac', () => {
+    it('is the shared lowercase 12-hex key used by both resolvers', () => {
+      expect(normalizeMac('AA:BB:CC:DD:EE:FF')).toBe('aabbccddeeff');
+      expect(normalizeMac('aabb.ccdd.eeff')).toBe('aabbccddeeff');
+      expect(normalizeMac('aabbccddeeff')).toBe('aabbccddeeff');
+      expect(normalizeMac('not-a-mac')).toBeNull();
+      expect(normalizeMac(null)).toBeNull();
+    });
+  });
+
+  describe('resolveVoucherCodesByIp', () => {
+    it('maps a recent portal IP to its voucher code', async () => {
+      query.mockResolvedValue({
+        rows: [{ ip: '192.168.1.5', code: 'ip1', name: null, phone: null, expires_at: null }],
+        rowCount: 1,
+      });
+
+      const byIp = await resolveVoucherCodesByIp(['::ffff:192.168.1.5']);
+
+      expect(byIp.get('192.168.1.5')).toBe('ip1');
+    });
+  });
+
+  describe('resolveSessionAccounts — direct code → MAC → IP', () => {
+    it('resolves a direct Ruijie PIN before MAC or IP and attaches data/devices', async () => {
+      query.mockImplementation(async (sql: string) => {
+        const s = String(sql);
+        if (s.includes('ARRAY_AGG(DISTINCT mac)')) {
+          return { rows: [{ code: 'direct1', device_count: 2, device_macs: [MAC_UPPER, '112233445566'] }], rowCount: 1 };
+        }
+        if (s.includes('data_limit_gb')) {
+          return { rows: [{ code: 'direct1', holder_name: 'Ada', holder_phone: '+263', data_limit_gb: '10', is_uncapped: false, data_consumed_mb: '1024' }], rowCount: 1 };
+        }
+        if (s.includes('data_used_bytes')) return { rows: [], rowCount: 0 };
+        if (s.includes('SELECT lower(code) AS code') && s.includes('FROM vouchers')) {
+          return { rows: [{ code: 'direct1' }], rowCount: 1 };
+        }
+        if (s.includes('FROM voucher_devices')) {
+          return { rows: [{ mac_norm: MAC_UPPER, voucher_code: 'mac1' }], rowCount: 1 };
+        }
+        if (s.includes('host(u.ip_address)')) {
+          return { rows: [{ ip: '192.168.1.5', code: 'ip1', name: 'IP', phone: null, expires_at: null }], rowCount: 1 };
+        }
+        if (s.includes('FROM mac_whitelist')) return { rows: [{ mac: MAC_LOWER }], rowCount: 1 };
+        return { rows: [], rowCount: 0 };
+      });
+
+      const [account] = await resolveSessionAccounts([
+        { mac: MAC_LOWER, ip: '192.168.1.5', codeCandidates: ['direct1'] },
+      ]);
+
+      expect(account.code).toBe('direct1');
+      expect(account.matchedBy).toBe('code');
+      expect(account.bindingSource).toBe('ruijie_user_name');
+      expect(account.authMethod).toBe('VOUCHER');
+      expect(account.dataLimitBytes).toBe(10 * 1024 * 1024 * 1024);
+      expect(account.dataUsedBytes).toBe(1024 * 1024 * 1024);
+      expect(account.dataLeftBytes).toBe(9 * 1024 * 1024 * 1024);
+      expect(account.activeDeviceCount).toBe(2);
+      expect(account.deviceMacs).toEqual([MAC_LOWER, '112233445566']);
+      // Direct code wins, so the MAC/IP stages never run.
+      expect(query.mock.calls.some(([sql]) => String(sql).includes('host(u.ip_address)'))).toBe(false);
+      expect(query.mock.calls.some(([sql]) => String(sql).includes('FROM voucher_devices') && !String(sql).includes('ARRAY_AGG'))).toBe(false);
+    });
+
+    it('falls back to the MAC binding when no direct PIN is reported', async () => {
+      query.mockImplementation(async (sql: string) => {
+        const s = String(sql);
+        if (s.includes('ARRAY_AGG(DISTINCT mac)')) {
+          return { rows: [{ code: 'mac1', device_count: 1, device_macs: [MAC_UPPER] }], rowCount: 1 };
+        }
+        if (s.includes('data_limit_gb')) {
+          return { rows: [{ code: 'mac1', holder_name: 'MAC Holder', holder_phone: null, data_limit_gb: null, is_uncapped: true, data_consumed_mb: null }], rowCount: 1 };
+        }
+        if (s.includes('data_used_bytes')) return { rows: [], rowCount: 0 };
+        if (s.includes('FROM voucher_devices')) {
+          return { rows: [{ mac_norm: MAC_UPPER, voucher_code: 'mac1' }], rowCount: 1 };
+        }
+        if (s.includes('holder_name')) {
+          return { rows: [{ code: 'mac1', holder_name: 'MAC Holder', holder_phone: null }], rowCount: 1 };
+        }
+        if (s.includes('host(u.ip_address)')) {
+          return { rows: [{ ip: '192.168.1.5', code: 'ip1', name: 'IP', phone: null, expires_at: null }], rowCount: 1 };
+        }
+        return { rows: [], rowCount: 0 };
+      });
+
+      const [account] = await resolveSessionAccounts([
+        { mac: MAC_LOWER, ip: '192.168.1.5', codeCandidates: ['Samsung Galaxy A24'] },
+      ]);
+
+      expect(account.code).toBe('mac1');
+      expect(account.matchedBy).toBe('mac');
+      expect(account.bindingSource).toBe('voucher_devices');
+      expect(account.isUncapped).toBe(true);
+      expect(account.dataLeftBytes).toBeNull();
+      expect(query.mock.calls.some(([sql]) => String(sql).includes('host(u.ip_address)'))).toBe(false);
+    });
+
+    it('falls back to the recent IP/portal authorization when MAC is unbound', async () => {
+      query.mockImplementation(async (sql: string) => {
+        const s = String(sql);
+        if (s.includes('ARRAY_AGG(DISTINCT mac)')) {
+          return { rows: [{ code: 'ip1', device_count: 1, device_macs: [MAC_UPPER] }], rowCount: 1 };
+        }
+        if (s.includes('data_limit_gb')) {
+          return { rows: [{ code: 'ip1', holder_name: null, holder_phone: null, data_limit_gb: '5', is_uncapped: false, data_consumed_mb: '100' }], rowCount: 1 };
+        }
+        if (s.includes('data_used_bytes')) return { rows: [], rowCount: 0 };
+        if (s.includes('host(u.ip_address)')) {
+          return { rows: [{ ip: '192.168.1.5', code: 'ip1', name: 'Portal User', phone: '+263', expires_at: new Date('2030-01-01T00:00:00Z') }], rowCount: 1 };
+        }
+        return { rows: [], rowCount: 0 };
+      });
+
+      const [account] = await resolveSessionAccounts([
+        { mac: MAC_LOWER, ip: '192.168.1.5', codeCandidates: [] },
+      ]);
+
+      expect(account.code).toBe('ip1');
+      expect(account.matchedBy).toBe('ip');
+      expect(account.bindingSource).toBe('ip_session');
+      expect(account.accountName).toBe('Portal User');
+      expect(account.holderName).toBe('Portal User');
+      expect(account.accountSessionExpiresAt).toBe('2030-01-01T00:00:00.000Z');
+    });
+
+    it('classifies an unbound client as MAC_AUTO and flags the whitelist', async () => {
+      query.mockImplementation(async (sql: string) => {
+        if (String(sql).includes('FROM mac_whitelist')) {
+          return { rows: [{ mac: MAC_LOWER }], rowCount: 1 };
+        }
+        return { rows: [], rowCount: 0 };
+      });
+
+      const [account] = await resolveSessionAccounts([
+        { mac: MAC_LOWER, ip: null, codeCandidates: [] },
+      ]);
+
+      expect(account.code).toBeNull();
+      expect(account.authMethod).toBe('MAC_AUTO');
+      expect(account.macWhitelisted).toBe(true);
+      expect(query.mock.calls.some(([sql]) => String(sql).includes('host(u.ip_address)'))).toBe(false);
     });
   });
 });

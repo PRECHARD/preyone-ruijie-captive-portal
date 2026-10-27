@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { ViewMode, WifiSession } from '../../types/wifi';
-import { formatMac, formatRate } from '../../utils/format';
+import { formatMac, formatRate, fmtBytes } from '../../utils/format';
 import { getDeviceIcon } from './deviceIcons';
 import {
   authMethodOf,
@@ -30,6 +30,9 @@ const SOURCES: Record<string, string> = {
   users: 'Signups',
   voucher_redemptions: 'Redemptions',
   voucher_devices: 'MAC bindings',
+  wispr_profiles: 'WISPr session',
+  ruijie_user_name: 'Ruijie PIN',
+  ip_session: 'Portal IP session',
 };
 
 /**
@@ -128,10 +131,26 @@ export default function SessionTable({
                         {(s.accountPhone || s.holderPhone) ? ` · ${s.accountPhone || s.holderPhone}` : ''}
                       </span>
                     )}
+                    {s.isUncapped ? (
+                      <span className="wf-data-left">Unlimited data</span>
+                    ) : s.dataLeftBytes != null ? (
+                      <span className="wf-data-left">{fmtBytes(s.dataLeftBytes)} left</span>
+                    ) : null}
+                    {(s.activeDeviceCount ?? 0) > 0 && (
+                      <span
+                        className="wf-devices"
+                        title={(s.deviceMacs ?? []).map((mac) => formatMac(mac)).join(', ') || undefined}
+                      >
+                        {s.activeDeviceCount} {s.activeDeviceCount === 1 ? 'device' : 'devices'}
+                      </span>
+                    )}
                   </div>
                 </td>
                 <td>
-                  <span className={`wf-auth wf-auth--${authMethodOf(s) === 'Voucher' ? 'voucher' : 'mac'}`}>
+                  <span
+                    className={`wf-auth wf-auth--${authMethodOf(s) === 'VOUCHER' ? 'voucher' : 'mac'}`}
+                    title={s.macWhitelisted ? 'MAC whitelist / bypass' : undefined}
+                  >
                     {authMethodOf(s)}
                   </span>
                 </td>
@@ -254,6 +273,27 @@ export default function SessionTable({
                 <div>
                   <dt>Uptime</dt>
                   <dd>{active.onlineTimeSec != null ? `${Math.floor(active.onlineTimeSec / 60)}m` : '—'}</dd>
+                </div>
+                <div>
+                  <dt>Auth</dt>
+                  <dd>
+                    {authMethodOf(active)}
+                    {active.macWhitelisted ? ' · whitelist' : ''}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Data Left</dt>
+                  <dd>
+                    {active.isUncapped
+                      ? 'Unlimited'
+                      : active.dataLeftBytes != null
+                        ? fmtBytes(active.dataLeftBytes)
+                        : '—'}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Bound Devices</dt>
+                  <dd>{active.activeDeviceCount ? String(active.activeDeviceCount) : '—'}</dd>
                 </div>
               </>
             )}

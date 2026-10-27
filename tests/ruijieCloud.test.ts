@@ -7,6 +7,7 @@ import {
   getRuijieVouchers,
   getAllRuijieVouchers,
   isRuijieCloudConfigured,
+  isRateLimitError,
   resetRuijieCloudCache,
 } from '../src/services/ruijieCloud';
 
@@ -382,6 +383,26 @@ describe('getAllRuijieVouchers', () => {
 
     const all = await getAllRuijieVouchers();
     expect(all).toHaveLength(1);
+    expect(mocks.get).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('rate limiting (code 44)', () => {
+  it('recognises the Ruijie "Too many requests" envelope', () => {
+    expect(isRateLimitError(new RuijieApiError(44, 'voucher/getList (groupId=1) -> HTTP 200: Too many requests.'))).toBe(true);
+    expect(isRateLimitError(new RuijieApiError('unknown', 'Too many requests'))).toBe(true);
+    expect(isRateLimitError(new RuijieApiError('config', 'not configured'))).toBe(false);
+    // Plain errors are not Ruijie envelopes; do not treat any message as quota.
+    expect(isRateLimitError(new Error('Too many requests'))).toBe(false);
+  });
+
+  it('puts reads into a cooldown so background sweeps stop hammering the quota', async () => {
+    mocks.post.mockResolvedValue({ status: 200, data: { code: 0, accessToken: 'tok' } });
+    mocks.get.mockResolvedValueOnce({ status: 200, data: { code: 44, msg: 'Too many requests' } });
+
+    await expect(getRuijieVouchers({ start: 0, pageSize: 10 })).rejects.toMatchObject({ code: 44 });
+    // Second read is refused locally without another upstream call.
+    await expect(getRuijieVouchers({ start: 0, pageSize: 10 })).rejects.toMatchObject({ code: 44 });
     expect(mocks.get).toHaveBeenCalledTimes(1);
   });
 });

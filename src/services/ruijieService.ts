@@ -6,7 +6,7 @@ import {
   RuijieApiError,
   withTokenRefresh,
 } from './ruijieCloud';
-import { resolveVoucherBindings, verifyVoucherCodes } from './voucherBindingService';
+import { resolveVoucherBindings, resolveVoucherCodesByIp, verifyVoucherCodes } from './voucherBindingService';
 
 /**
  * Call Ruijie authentication URL to apply WISPr parameters and unlock a MAC
@@ -231,6 +231,8 @@ export interface RuijieOnlineUser {
    * displaying it as one.
    */
   username: string | null;
+  /** Raw `account` field when Ruijie reports one separately — may be the PIN. */
+  account: string | null;
   sessionId: string | null;
   usedMb: number | null;
   upMb: number | null;
@@ -286,6 +288,7 @@ function parseOnlineUser(u: Record<string, unknown>): RuijieOnlineUser {
   // flowUpDown / wifiUpDown are session-cumulative BYTES (verified live).
   const total = pickEntry(u, ['flowUpDown', 'wifiUpDown', 'usedBytes', 'useBytes', 'totalFlow', 'flow', 'usedFlow', 'bytes', 'traffic', 'usedMb']);
   const code = pick(u, ['userName', 'username', 'name', 'account', 'code', 'voucherCode', 'codeNo']);
+  const account = pick(u, ['account', 'userAccount']);
   const ip = pick(u, ['ip', 'userIp', 'ipAddress', 'hostIp', 'clientIp']);
   const sid = pick(u, ['onlineId', 'sessionId', 'sessionToken', 'id', 'token']);
   const ssid = pick(u, ['ssid', 'ssidName']);
@@ -300,6 +303,7 @@ function parseOnlineUser(u: Record<string, unknown>): RuijieOnlineUser {
     mac,
     ip: ip != null ? String(ip) : null,
     username: code != null ? String(code) : null,
+    account: account != null ? String(account) : null,
     sessionId: sid != null ? String(sid) : null,
     usedMb: total ? toMb(total[1], total[0]) : null,
     upMb: up ? toMb(up[1], up[0]) : null,
@@ -640,11 +644,14 @@ export async function syncAccountingData(): Promise<AccountingSyncResult> {
   for (const rec of records) if (rec.mac && rec.usedMb !== null) macUsage.set(rec.mac, Math.max(macUsage.get(rec.mac) ?? 0, rec.usedMb));
   for (const u of online) if (u.mac && u.usedMb !== null) macUsage.set(u.mac, Math.max(macUsage.get(u.mac) ?? 0, u.usedMb));
 
+  const matchedMacs = new Set<string>();
   if (macTargets.length > 0) {
     try {
       const bindings = await resolveVoucherBindings(macTargets);
       for (const [key, binding] of bindings) {
-        if (binding.code) bump(binding.code, macUsage.get(key) ?? null);
+        if (!binding.code) continue;
+        matchedMacs.add(key);
+        bump(binding.code, macUsage.get(key) ?? null);
       }
     } catch (err) {
       result.errors.push(`mac attribution: ${errMsg(err)}`);
@@ -653,17 +660,45 @@ export async function syncAccountingData(): Promise<AccountingSyncResult> {
 
   // Ruijie's `userName` counts only after it is confirmed to be a real
   // voucher code — it is usually a device/person label, and blindly bumping
-  // it wrote usage rows against codes that do not exist.
+  // it wrote usage rows against codes that do not exist. `account` is checked
+  // too because some deployments put the PIN there instead.
   try {
-    const verified = await verifyVoucherCodes(online.map((u) => u.username));
+    const verified = await verifyVoucherCodes(online.flatMap((u) => [u.username, u.account]));
     if (verified.size > 0) {
       for (const u of online) {
-        const code = u.username ? verified.get(String(u.username).trim().toLowerCase()) : undefined;
+        const code = [u.username, u.account]
+          .map((candidate) => String(candidate ?? '').trim().toLowerCase())
+          .map((candidate) => verified.get(candidate))
+          .find((candidate): candidate is string => !!candidate);
         if (code) bump(code, u.usedMb);
       }
     }
   } catch (err) {
     result.errors.push(`username attribution: ${errMsg(err)}`);
+  }
+
+  // IP fallback: a record whose MAC is not bound yet can still be attributed
+  // through the portal authorization that used the same IP in the last 24h.
+  const ipTargets = [
+    ...new Set(
+      records
+        .filter((rec) => !matchedMacs.has(normalizeRuijieMac(rec.mac)) && rec.ip)
+        .map((rec) => String(rec.ip))
+    ),
+  ];
+  if (ipTargets.length > 0) {
+    try {
+      const byIp = await resolveVoucherCodesByIp(ipTargets);
+      for (const rec of records) {
+        if (!rec.ip || rec.code) continue;
+        if (matchedMacs.has(normalizeRuijieMac(rec.mac))) continue;
+        const key = rec.ip.startsWith('::ffff:') ? rec.ip.slice(7) : rec.ip;
+        const code = byIp.get(key);
+        if (code) bump(code, rec.usedMb);
+      }
+    } catch (err) {
+      result.errors.push(`ip attribution: ${errMsg(err)}`);
+    }
   }
 
   if (usageByCode.size === 0) return result;
@@ -829,6 +864,16 @@ export function startRuijieAccountingPolling(): void {
     console.log('[RUIJIE ACCT] Periodic accounting sync disabled (RUIJIE_ACCOUNTING_INTERVAL_MIN<=0).');
     return;
   }
+  // Ruijie's quota cannot survive sub-5-minute sweeps (it answers code 44 long
+  // before the traffic looks heavy). Clamp rather than disable, so a stale
+  // RUIJIE_ACCOUNTING_INTERVAL_MIN=1 on a box cannot re-exhaust the tenant.
+  const SAFE_MIN_MINUTES = 5;
+  const safeMinutes = Math.max(SAFE_MIN_MINUTES, minutes);
+  if (safeMinutes !== minutes) {
+    console.warn(
+      `[RUIJIE ACCT] RUIJIE_ACCOUNTING_INTERVAL_MIN=${minutes} is below the safe floor; using ${safeMinutes} min.`
+    );
+  }
   if (!isRuijieCloudConfigured()) {
     console.log('[RUIJIE ACCT] Ruijie Cloud not configured — accounting polling idle (local DB unaffected).');
     return;
@@ -848,9 +893,9 @@ export function startRuijieAccountingPolling(): void {
     }
   };
 
-  accountingTimer = setInterval(tick, minutes * 60_000);
+  accountingTimer = setInterval(tick, safeMinutes * 60_000);
   accountingTimer.unref?.();
   // First reconciliation shortly after boot (staggered past DB warm-up).
   setTimeout(tick, 30_000).unref?.();
-  console.log(`[RUIJIE ACCT] Periodic accounting sync enabled (every ${minutes} min).`);
+  console.log(`[RUIJIE ACCT] Periodic accounting sync enabled (every ${safeMinutes} min).`);
 }

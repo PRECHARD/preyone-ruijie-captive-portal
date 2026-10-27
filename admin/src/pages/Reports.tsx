@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api, ruijieApi } from '../api/client';
+import { useAuth } from '../context/AuthContext';
 import { showToast } from '../utils/toast';
 import Spinner from '../components/Spinner';
 import EmptyState from '../components/EmptyState';
@@ -8,6 +9,10 @@ import Badge from '../components/Badge';
 type Props = { onNavigate?: (s: string) => void; canPeakHours?: boolean };
 
 export default function Reports({ onNavigate, canPeakHours }: Props = {}) {
+  const { user } = useAuth();
+  // "Send Now" hits a SYSTEM_DEVELOPER endpoint (CEO/developer only). Managers
+  // can read every report but must not be shown a button that 403s.
+  const canSendReport = ['CEO', 'SUPER_ADMIN', 'COMPANY_ADMIN'].includes(user?.role || '');
   const [tab, setTab] = useState('revenue');
   const [revenue, setRevenue] = useState<any>(null);
   const [staffSales, setStaffSales] = useState<any>(null);
@@ -18,6 +23,10 @@ export default function Reports({ onNavigate, canPeakHours }: Props = {}) {
   const [acctStatus, setAcctStatus] = useState<any>(null);
   const [acctVouchers, setAcctVouchers] = useState<any[]>([]);
   const [syncing, setSyncing] = useState(false);
+
+  // ── Month-End report sub-tab ──
+  const [monthEnd, setMonthEnd] = useState<any>(null);
+  const [sendingReport, setSendingReport] = useState(false);
 
   const loadAccounting = useCallback(() => {
     ruijieApi.get('/status').then(setAcctStatus).catch(() => {});
@@ -84,10 +93,54 @@ export default function Reports({ onNavigate, canPeakHours }: Props = {}) {
     try { setRevenue(await api.get('/revenue')); } catch { /* ignore */ }
     try { setStaffSales(await api.get('/staff-sales')); } catch { /* ignore */ }
     try { setPending(await api.get('/cash-handovers/pending')); } catch { /* ignore */ }
+    try { setMonthEnd(await api.get('/reports/month-end')); } catch { /* ignore */ }
     setLoading(false);
   }, []);
 
   useEffect(() => { loadData(); const t = setInterval(loadData, 30000); return () => clearInterval(t); }, [loadData]);
+
+  /** Stream an authenticated report file (Excel/CSV) to the device. */
+  const downloadReport = async (path: string, fileName: string) => {
+    const token = api.getToken();
+    if (!token) return;
+    try {
+      const res = await fetch(`/api/admin${path}`, { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) {
+        let msg = 'Download failed';
+        try { const err = await res.json(); msg = err.error || msg; } catch { /* non-JSON */ }
+        throw new Error(msg);
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (e: any) {
+      showToast({ title: 'Download Failed', message: e.message, type: 'error' });
+    }
+  };
+
+  const sendMonthEndNow = async () => {
+    setSendingReport(true);
+    try {
+      const result = await api.post<any>('/reports/month-end/send', {});
+      showToast({
+        title: result?.sent ? 'Report Sent' : 'Report Not Sent',
+        message: result?.sent
+          ? `Delivered to ${(result.recipients || []).join(', ')}`
+          : (result?.error || 'SMTP is not configured on this server.'),
+        type: result?.sent ? 'success' : 'warning',
+      });
+    } catch (e: any) {
+      showToast({ title: 'Send Failed', message: e.message, type: 'error' });
+    } finally {
+      setSendingReport(false);
+    }
+  };
 
   const approveHandover = async (id: string) => {
     try { await api.post(`/cash-handovers/${id}/approve`); showToast({ title: 'Approved', message: 'Handover approved successfully', type: 'success' }); } catch { /* ignore */ }
@@ -140,20 +193,37 @@ export default function Reports({ onNavigate, canPeakHours }: Props = {}) {
         )}
       </div>
 
-      <div className="auth-tabs" style={{ marginBottom: 16 }}>
-        <button className={`auth-tab ${tab === 'revenue' ? 'active' : ''}`} onClick={() => setTab('revenue')}>Revenue</button>
-        <button className={`auth-tab ${tab === 'sales' ? 'active' : ''}`} onClick={() => setTab('sales')}>Staff Sales</button>
-        <button className={`auth-tab ${tab === 'handovers' ? 'active' : ''}`} onClick={() => setTab('handovers')}>Handovers ({pending.length})</button>
-        <button className={`auth-tab ${tab === 'accounting' ? 'active' : ''}`} onClick={() => setTab('accounting')}>Accounting</button>
+      <div className="glass-tabs" style={{ marginBottom: 16 }} role="tablist" aria-label="Payment log sections">
+        <button type="button" role="tab" aria-selected={tab === 'revenue'} className={'glass-tab' + (tab === 'revenue' ? ' active' : '')} onClick={() => setTab('revenue')}>Revenue</button>
+        <button type="button" role="tab" aria-selected={tab === 'sales'} className={'glass-tab' + (tab === 'sales' ? ' active' : '')} onClick={() => setTab('sales')}>Staff Sales</button>
+        <button type="button" role="tab" aria-selected={tab === 'handovers'} className={'glass-tab' + (tab === 'handovers' ? ' active' : '')} onClick={() => setTab('handovers')}>Handovers ({pending.length})</button>
+        <button type="button" role="tab" aria-selected={tab === 'accounting'} className={'glass-tab' + (tab === 'accounting' ? ' active' : '')} onClick={() => setTab('accounting')}>Accounting</button>
+        <button type="button" role="tab" aria-selected={tab === 'month-end'} className={'glass-tab' + (tab === 'month-end' ? ' active' : '')} onClick={() => setTab('month-end')}>Month-End</button>
       </div>
 
       {tab === 'revenue' && revenue && (
         <>
-          <div className="stats-grid stats-grid--compact stats-grid--hero" style={{ marginBottom: 20 }}>
-            <div className="stat-card stat-gold"><span className="stat-label">Total Revenue</span><span className="stat-number"><span className="money">${Number(revenue.combinedRevenue || revenue.totalRevenue || 0).toFixed(2)} USD</span></span></div>
-            <div className="stat-card stat-cyan"><span className="stat-label">Pending</span><span className="stat-number"><span className="money">${Number(revenue.pendingRevenue || 0).toFixed(2)} USD</span></span></div>
-            <div className="stat-card stat-green"><span className="stat-label">Handover Approved</span><span className="stat-number"><span className="money">${Number(revenue.handoverApproved || 0).toFixed(2)} USD</span></span></div>
-            <div className="stat-card stat-orange"><span className="stat-label">Handover Pending</span><span className="stat-number"><span className="money">${Number(revenue.handoverPending || 0).toFixed(2)} USD</span></span></div>
+          <div className="glass-stats">
+            <div className="glass-stat glass-stat--gold">
+              <span className="glass-stat__label">Total Revenue</span>
+              <span className="glass-stat__value glass-stat__value--gold">${Number(revenue.combinedRevenue || revenue.totalRevenue || 0).toFixed(2)}</span>
+              <span className="glass-stat__meta">USD · vouchers + online</span>
+            </div>
+            <div className="glass-stat">
+              <span className="glass-stat__label">Pending</span>
+              <span className="glass-stat__value glass-stat__value--cyan">${Number(revenue.pendingRevenue || 0).toFixed(2)}</span>
+              <span className="glass-stat__meta">Awaiting capture</span>
+            </div>
+            <div className="glass-stat glass-stat--green">
+              <span className="glass-stat__label">Handover Approved</span>
+              <span className="glass-stat__value glass-stat__value--green">${Number(revenue.handoverApproved || 0).toFixed(2)}</span>
+              <span className="glass-stat__meta">Reconciled</span>
+            </div>
+            <div className="glass-stat glass-stat--violet">
+              <span className="glass-stat__label">Handover Pending</span>
+              <span className="glass-stat__value glass-stat__value--violet">${Number(revenue.handoverPending || 0).toFixed(2)}</span>
+              <span className="glass-stat__meta">With staff</span>
+            </div>
           </div>
 
           {revenue.byTier && (
@@ -295,24 +365,24 @@ export default function Reports({ onNavigate, canPeakHours }: Props = {}) {
       )}
       {tab === 'accounting' && (
         <>
-          <div className="stats-grid stats-grid--compact" style={{ marginBottom: 20 }}>
-            <div className="stat-card stat-blue">
-              <span className="stat-label">Vouchers With Usage</span>
-              <span className="stat-number">{acctStatus?.vouchers?.withUsage ?? '—'}</span>
+          <div className="glass-stats">
+            <div className="glass-stat">
+              <span className="glass-stat__label">Vouchers With Usage</span>
+              <span className="glass-stat__value glass-stat__value--cyan">{acctStatus?.vouchers?.withUsage ?? '—'}</span>
             </div>
-            <div className="stat-card stat-green">
-              <span className="stat-label">Synced To Cloud</span>
-              <span className="stat-number">{acctStatus?.vouchers?.bySyncStatus?.synced ?? '—'}</span>
+            <div className="glass-stat glass-stat--green">
+              <span className="glass-stat__label">Synced To Cloud</span>
+              <span className="glass-stat__value glass-stat__value--green">{acctStatus?.vouchers?.bySyncStatus?.synced ?? '—'}</span>
             </div>
-            <div className="stat-card stat-orange">
-              <span className="stat-label">Missing / Pending</span>
-              <span className="stat-number">
+            <div className="glass-stat glass-stat--gold">
+              <span className="glass-stat__label">Missing / Pending</span>
+              <span className="glass-stat__value glass-stat__value--gold" style={{ fontSize: '1.5rem' }}>
                 {acctStatus ? `${acctStatus.vouchers.bySyncStatus.missing} / ${acctStatus.vouchers.bySyncStatus.pending}` : '—'}
               </span>
             </div>
-            <div className="stat-card">
-              <span className="stat-label">Last Accounting Sync</span>
-              <span className="stat-number" style={{ fontSize: 15 }}>
+            <div className="glass-stat glass-stat--violet">
+              <span className="glass-stat__label">Last Accounting Sync</span>
+              <span className="glass-stat__value glass-stat__value--violet" style={{ fontSize: '1.05rem', fontWeight: 700 }}>
                 {acctStatus?.lastAccountingSync ? new Date(acctStatus.lastAccountingSync).toLocaleString() : 'never'}
               </span>
             </div>
@@ -361,6 +431,127 @@ export default function Reports({ onNavigate, canPeakHours }: Props = {}) {
               </div>
             )}
           </div>
+        </>
+      )}
+      {tab === 'month-end' && (
+        <>
+          <div className="glass-stats">
+            <div className="glass-stat glass-stat--gold">
+              <span className="glass-stat__label">Period Revenue</span>
+              <span className="glass-stat__value glass-stat__value--gold">
+                ${Number(monthEnd?.totalRevenue || 0).toFixed(2)}
+              </span>
+              <span className="glass-stat__meta">{monthEnd?.period?.label || 'Previous month'}</span>
+            </div>
+            <div className="glass-stat">
+              <span className="glass-stat__label">Sales Count</span>
+              <span className="glass-stat__value glass-stat__value--cyan">{monthEnd?.salesCount ?? '—'}</span>
+              <span className="glass-stat__meta">
+                Avg ${Number(monthEnd?.averageSale || 0).toFixed(2)}
+              </span>
+            </div>
+            <div className="glass-stat glass-stat--violet">
+              <span className="glass-stat__label">Staff Commissions</span>
+              <span className="glass-stat__value glass-stat__value--violet">
+                ${Number(monthEnd?.staffCommissionTotal || 0).toFixed(2)}
+              </span>
+              <span className="glass-stat__meta">{monthEnd?.staffCommissions?.length ?? 0} staff with a rate</span>
+            </div>
+            <div className="glass-stat glass-stat--green">
+              <span className="glass-stat__label">Reconciliation</span>
+              <span className="glass-stat__value glass-stat__value--green" style={{ fontSize: '1.6rem' }}>
+                {monthEnd?.reconciliationStatus || '—'}
+              </span>
+              <span className="glass-stat__meta">
+                Difference ${Number(monthEnd?.reconciliationDifference || 0).toFixed(2)}
+              </span>
+            </div>
+          </div>
+
+          <div className="glass-panel" style={{ marginBottom: 20 }}>
+            <div className="glass-panel__head">
+              <span>Month-End Report · runs automatically on the 3rd at 08:00</span>
+            </div>
+            <div className="glass-panel__body">
+              <p style={{ margin: '0 0 14px', fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.7 }}>
+                The auto-email covers the previous calendar month and attaches the same ledger these
+                buttons download. Columns: Timestamp · Voucher Code · Package Tier · Amount · Payment Rail ·
+                Staff / Sold By · Status.
+              </p>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                <button
+                  type="button"
+                  className="btn-glass btn-glass--gold"
+                  onClick={() => downloadReport('/reports/month-end.xlsx', `Preyone_MonthEnd_${(monthEnd?.period?.label || 'report').replace(/\s+/g, '_')}.xlsx`)}
+                >
+                  Download Excel
+                </button>
+                <button
+                  type="button"
+                  className="btn-glass"
+                  onClick={() => downloadReport('/reports/month-end.csv', `Preyone_MonthEnd_${(monthEnd?.period?.label || 'report').replace(/\s+/g, '_')}.csv`)}
+                >
+                  Download CSV
+                </button>
+                <button
+                  type="button"
+                  className="btn-glass"
+                  onClick={() => {
+                    const token = api.getToken();
+                    if (!token) return;
+                    fetch('/api/admin/reports/preview', { headers: { Authorization: `Bearer ${token}` } })
+                      .then((res) => res.text())
+                      .then((html) => {
+                        const w = window.open('', '_blank', 'noopener,noreferrer,width=900,height=800');
+                        if (w) { w.document.write(html); w.document.close(); }
+                      })
+                      .catch(() => showToast({ title: 'Preview Failed', message: 'Could not render the report email.', type: 'error' }));
+                  }}
+                >
+                  Preview Email
+                </button>
+                <button
+                  type="button"
+                  className="btn-glass"
+                  onClick={() => downloadReport('/reports/staff.xlsx', `Preyone_StaffReport_${(monthEnd?.period?.label || 'report').replace(/\s+/g, '_')}.xlsx`)}
+                >
+                  Staff Commission Excel
+                </button>
+                {canSendReport && (
+                  <button
+                    type="button"
+                    className="btn-glass btn-glass--gold"
+                    onClick={sendMonthEndNow}
+                    disabled={sendingReport}
+                  >
+                    {sendingReport ? 'Sending…' : 'Send Now'}
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {monthEnd?.rows?.length > 0 && (
+            <div className="card">
+              <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', fontWeight: 600, fontSize: 13 }}>
+                Ledger Preview ({monthEnd.rows.length} row{monthEnd.rows.length === 1 ? '' : 's'})
+              </div>
+              <div className="card-table">
+                <table className="data-table">
+                  <thead>
+                    <tr>{(monthEnd.columns || []).map((c: string) => <th key={c}>{c}</th>)}</tr>
+                  </thead>
+                  <tbody>
+                    {monthEnd.rows.slice(0, 100).map((row: (string | number)[], i: number) => (
+                      <tr key={i}>
+                        {row.map((cell, j) => <td key={j}>{String(cell)}</td>)}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </>
       )}
     </div>

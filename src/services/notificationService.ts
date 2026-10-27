@@ -55,22 +55,62 @@ function emailFooter(): string {
 }
 
 // ── Generic email helper ──────────────────────────────────────────────
-async function sendMail(to: string, subject: string, html: string, fromName?: string, fromEmail?: string, attachments?: Array<{ filename: string; content: Buffer; cid: string }>): Promise<boolean> {
+async function sendMail(to: string | string[], subject: string, html: string, fromName?: string, fromEmail?: string, attachments?: Array<{ filename: string; content: Buffer; cid?: string }>): Promise<boolean> {
   const t = getTransporter();
   if (!t) {
-    console.log('[NOTIFICATION] Email not sent (SMTP not configured). To:', to);
+    console.log('[NOTIFICATION] Email not sent (SMTP not configured). To:', Array.isArray(to) ? to.join(', ') : to);
     return false;
   }
   const email = fromEmail || process.env.SMTP_FROM || 'info@preyone.com';
   const from = fromName ? `"${fromName}" <${email}>` : email;
   try {
     await t.sendMail({ from, to, subject, html, attachments });
-    console.log('[NOTIFICATION] Email sent to', to, '-', subject);
+    console.log('[NOTIFICATION] Email sent to', Array.isArray(to) ? to.join(', ') : to, '-', subject);
     return true;
   } catch (err) {
     console.error('[NOTIFICATION] Email send failed:', err);
     return false;
   }
+}
+
+/**
+ * Public, attachment-capable sender for scheduled/administrative mail (the
+ * Month-End report and friends). Additive wrapper over the private helper so
+ * the legacy notification templates keep their exact behaviour.
+ */
+export async function sendTransactionalEmail(opts: {
+  to: string | string[];
+  subject: string;
+  html: string;
+  fromName?: string;
+  fromEmail?: string;
+  attachments?: Array<{ filename: string; content: Buffer; cid?: string }>;
+}): Promise<boolean> {
+  const recipients = (Array.isArray(opts.to) ? opts.to : [opts.to])
+    .map((value) => String(value || '').trim())
+    .filter(Boolean);
+  if (recipients.length === 0) return false;
+  return sendMail(
+    recipients,
+    opts.subject,
+    opts.html,
+    opts.fromName ?? 'Preyone UltraNet',
+    opts.fromEmail ?? 'admin@preyone.com',
+    opts.attachments
+  );
+}
+
+/** Exported so the report templates reuse the same masthead/footer genre. */
+export function buildEmailShell(title: string, bodyHtml: string): string {
+  return `<div style="background:#0a0f1d;padding:0;margin:0">
+    ${emailHeader(title)}
+    <div style="background:#0a0f1d;padding:8px 24px 32px">
+      <div style="max-width:640px;margin:0 auto;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.10);border-radius:16px;padding:28px 24px;-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px)">
+        ${bodyHtml}
+      </div>
+    </div>
+    ${emailFooter()}
+  </div>`;
 }
 
 // ── Admin signup: confirmation to the new user ────────────────────────
@@ -972,13 +1012,13 @@ export async function sendCashHandoverSubmittedEmail(
 ): Promise<boolean> {
   const to = [...new Set(recipients.map((e) => e.trim().toLowerCase()).filter(Boolean))];
   if (to.length === 0) return false;
-  return sendMail(
-    to.join(', '),
-    `Cash handover awaiting approval - $${Number(data.amount || 0).toFixed(2)}`,
-    handoverEmailHtml(data, 'submitted'),
-    'Preyone',
-    'admin@preyone.com'
+  const staff = String(data.staffName || '').trim() || 'Staff';
+  const subject = `Cash handover awaiting approval - ${staff} - $${Number(data.amount || 0).toFixed(2)}`;
+  const html = handoverEmailHtml(data, 'submitted');
+  const results = await Promise.all(
+    to.map((email) => sendMail(email, subject, html, 'Preyone', 'admin@preyone.com'))
   );
+  return results.some(Boolean);
 }
 
 export async function sendCashHandoverDecisionEmail(
@@ -988,11 +1028,344 @@ export async function sendCashHandoverDecisionEmail(
 ): Promise<boolean> {
   const to = [...new Set(recipients.map((e) => e.trim().toLowerCase()).filter(Boolean))];
   if (to.length === 0) return false;
-  return sendMail(
-    to.join(', '),
-    `Cash handover ${decision} - $${Number(data.amount || 0).toFixed(2)}`,
-    handoverEmailHtml(data, decision),
-    'Preyone',
-    'admin@preyone.com'
+  const staff = String(data.staffName || '').trim() || 'Staff';
+  const subject = `Cash handover ${decision} - ${staff} - $${Number(data.amount || 0).toFixed(2)}`;
+  const html = handoverEmailHtml(data, decision);
+  const results = await Promise.all(
+    to.map((email) => sendMail(email, subject, html, 'Preyone', 'admin@preyone.com'))
   );
+  return results.some(Boolean);
+}
+
+export interface OnlinePaymentEmailData {
+  paymentId: string;
+  merchantReference?: string | null;
+  gatewayReference?: string | null;
+  gateway?: string | null;
+  channel?: string | null;
+  paymentMethod: string;
+  status: string;
+  amount: number | string;
+  currency: string;
+  initiatedAt?: string | Date | null;
+  completedAt?: string | Date | null;
+  customerName?: string | null;
+  customerPhone?: string | null;
+  customerEmail?: string | null;
+  clientMac?: string | null;
+  packageTier: string;
+  packageName?: string | null;
+  durationMin?: number | null;
+  dataLimitGb?: number | null;
+  isUncapped?: boolean | null;
+  bandwidthUpMbps?: number | null;
+  bandwidthDownMbps?: number | null;
+  maxDevices?: number | null;
+  voucherCode: string;
+  voucherExpiry?: string | number | null;
+  saleId?: string | null;
+  soldByName?: string | null;
+  saleType?: string | null;
+  taxAmount?: number | null;
+  gatewayFee?: number | null;
+}
+
+function escapeEmailText(value: unknown): string {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function emailMoney(amount: number | string | null | undefined, currency?: string | null): string {
+  const n = Number(amount);
+  const value = Number.isFinite(n)
+    ? n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    : '0.00';
+  return `${String(currency || 'USD').toUpperCase()} ${value}`;
+}
+
+function emailDateTime(value: string | number | Date | null | undefined): { harare: string; utc: string } {
+  if (value === null || value === undefined || value === '') {
+    return { harare: 'Not recorded', utc: 'Not recorded' };
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return { harare: String(value), utc: String(value) };
+  }
+  const format = (timeZone: string) =>
+    date.toLocaleString('en-GB', {
+      timeZone,
+      year: 'numeric',
+      month: 'short',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      timeZoneName: 'short',
+    });
+  return { harare: format('Africa/Harare'), utc: format('UTC') };
+}
+
+function emailDuration(minutes: number | null | undefined): string {
+  const n = Number(minutes);
+  if (!Number.isFinite(n) || n <= 0) return 'Not recorded';
+  if (n >= 1440) {
+    const days = n / 1440;
+    return `${Number.isInteger(days) ? days : days.toFixed(1)} day${days === 1 ? '' : 's'}`;
+  }
+  if (n >= 60) {
+    const hours = n / 60;
+    return `${Number.isInteger(hours) ? hours : hours.toFixed(1)} hour${hours === 1 ? '' : 's'}`;
+  }
+  return `${n} minute${n === 1 ? '' : 's'}`;
+}
+
+function emailDataAllowance(gb: number | null | undefined, uncapped: boolean | null | undefined): string {
+  if (uncapped) return 'Uncapped';
+  const n = Number(gb);
+  return Number.isFinite(n) && n > 0 ? `${n.toLocaleString('en-US')} GB` : 'Not recorded';
+}
+
+function emailVoucherExpiry(value: string | number | null | undefined): string {
+  if (value === null || value === undefined || value === '') return 'Not supplied';
+  const raw = String(value);
+  if (typeof value === 'number' || /^\d+$/.test(raw)) {
+    const n = Number(value);
+    const date = new Date(n < 1_000_000_000_000 ? n * 1000 : n);
+    if (!Number.isNaN(date.getTime())) return emailDateTime(date).harare;
+  }
+  return emailDateTime(value).harare;
+}
+
+function onlineDetailRow(
+  label: string,
+  value: unknown,
+  options: { mono?: boolean; accent?: boolean } = {}
+): string {
+  const empty = value === null || value === undefined || value === '';
+  const text = empty ? 'Not captured' : String(value);
+  return `<tr>
+    <td style="padding:8px 0;color:#94a3b8;font-size:13px;vertical-align:top">${escapeEmailText(label)}</td>
+    <td style="padding:8px 0 8px 16px;color:${options.accent ? '#71ff2f' : '#f8fbff'};font-size:13px;font-weight:600;text-align:right;${options.mono ? "font-family:'Consolas','Courier New',monospace;" : ''}word-break:break-word">${escapeEmailText(text)}</td>
+  </tr>`;
+}
+
+function onlineSectionHeader(title: string, note?: string): string {
+  return `<tr>
+    <td colspan="2" style="padding:24px 0 4px">
+      <div style="font-size:10px;letter-spacing:1.7px;text-transform:uppercase;color:#00ccff;font-weight:700">${escapeEmailText(title)}</div>
+      ${note ? `<div style="margin-top:4px;font-size:11px;line-height:1.5;color:#64748b">${escapeEmailText(note)}</div>` : ''}
+    </td>
+  </tr>`;
+}
+
+function onlinePaymentEmailHtml(data: OnlinePaymentEmailData): string {
+  const adminUrl = (process.env.ADMIN_BASE_URL || 'https://admin.preyone.com').replace(/\/$/, '');
+  const baseUrl = (process.env.BASE_URL || 'https://wifi.preyone.com').replace(/\/$/, '');
+  const logoUrl = `${baseUrl}/images/preyonenoneglow-logo-zoom-800.png`;
+  const amount = Number(data.amount);
+  const amountText = emailMoney(amount, data.currency);
+  const gatewayFee = data.gatewayFee == null ? null : Number(data.gatewayFee);
+  const taxAmount = data.taxAmount == null ? null : Number(data.taxAmount);
+  const netSettlement = Number.isFinite(amount) ? amount - (gatewayFee ?? 0) : 0;
+  const revenue = Number.isFinite(amount) ? amount - (taxAmount ?? 0) : 0;
+  const initiated = emailDateTime(data.initiatedAt);
+  const completed = emailDateTime(data.completedAt);
+  const packageLabel = data.packageName && data.packageName !== data.packageTier
+    ? `${data.packageTier} - ${data.packageName}`
+    : data.packageTier;
+  const method = String(data.paymentMethod || '').trim() || 'Online payment';
+  const gateway = String(data.gateway || 'Pesepay').trim();
+  const channel = String(data.channel || 'Preyone WiFi Portal (wifi.preyone.com)').trim();
+  const status = String(data.status || 'completed').trim().toUpperCase();
+  const customer = String(data.customerName || data.customerPhone || 'Guest').trim();
+  const speed = [
+    data.bandwidthDownMbps != null ? `${data.bandwidthDownMbps} Mbps down` : null,
+    data.bandwidthUpMbps != null ? `${data.bandwidthUpMbps} Mbps up` : null,
+  ].filter(Boolean).join(' / ') || 'Not recorded';
+
+  const taxLine = taxAmount != null
+    ? `<tr>
+        <td style="padding:8px 0;color:#94a3b8;font-size:13px">Tax component</td>
+        <td style="padding:8px 0 8px 16px;color:#f8fbff;font-size:13px;font-weight:600;text-align:right">${escapeEmailText(emailMoney(taxAmount, data.currency))}</td>
+      </tr>`
+    : onlineDetailRow('Tax component', 'Not captured');
+
+  const taxLedgerLine = taxAmount != null
+    ? `<tr>
+        <td style="padding:7px 0;color:#94a3b8;font-size:12px;width:34px">Cr</td>
+        <td style="padding:7px 0;color:#cbd5e1;font-size:12px">Tax payable</td>
+        <td style="padding:7px 0;color:#f8fbff;font-size:12px;font-weight:600;text-align:right">${escapeEmailText(emailMoney(taxAmount, data.currency))}</td>
+      </tr>`
+    : '';
+
+  const optionalCustomerEmail = data.customerEmail
+    ? onlineDetailRow('Customer email', data.customerEmail)
+    : '';
+  const optionalMac = data.clientMac
+    ? onlineDetailRow('Client MAC address', data.clientMac, { mono: true })
+    : '';
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="supported-color-schemes" content="dark">
+  <title>Payment received</title>
+</head>
+<body style="margin:0;padding:0;background:#05070d;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#05070d">
+    <tr>
+      <td align="center" style="padding:36px 16px">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width:600px;width:100%">
+          <tr>
+            <td style="background:#0a0f1d;border:1px solid #1c2740;border-radius:16px;overflow:hidden">
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                <tr><td style="height:3px;background:linear-gradient(90deg,#00ccff,#ff2d95);font-size:1px;line-height:1px">&nbsp;</td></tr>
+              </table>
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                <tr>
+                  <td style="padding:30px 32px 0;font-family:'Segoe UI',Arial,sans-serif">
+                    <img src="${logoUrl}" alt="Preyone UltraNet" width="180" style="display:block;width:180px;max-width:100%;height:auto;margin:0 0 18px" />
+                    <div style="font-size:11px;letter-spacing:2px;text-transform:uppercase;color:#00ccff;font-weight:700">Preyone UltraNet</div>
+                    <h1 style="margin:8px 0 0;font-size:23px;line-height:1.3;color:#f8fbff">Payment received</h1>
+                    <p style="margin:10px 0 0;font-size:14px;line-height:1.6;color:#94a3b8">A customer payment has been settled and the voucher was issued successfully.</p>
+                  </td>
+                </tr>
+              </table>
+
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                <tr>
+                  <td style="padding:20px 32px 0">
+                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#111827;border:1px solid #263049;border-radius:12px">
+                      <tr>
+                        <td align="center" style="padding:22px 16px 20px;font-family:'Segoe UI',Arial,sans-serif">
+                          <div style="font-size:11px;letter-spacing:1.6px;text-transform:uppercase;color:#64748b">Gross amount received</div>
+                          <div style="margin-top:6px;font-size:34px;line-height:1;font-weight:700;color:#f8fbff">${escapeEmailText(amountText)}</div>
+                          <div style="margin-top:12px;display:inline-block;padding:5px 12px;border-radius:999px;background:rgba(34,230,168,0.12);color:#22e6a8;font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase">${escapeEmailText(status)}</div>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                <tr>
+                  <td style="padding:0 32px;font-family:'Segoe UI',Arial,sans-serif">
+                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                      ${onlineSectionHeader('Transaction details', 'Gateway, settlement, and audit references')}
+                      ${onlineDetailRow('Payment ID', data.paymentId, { mono: true })}
+                      ${onlineDetailRow('Merchant reference', data.merchantReference, { mono: true })}
+                      ${onlineDetailRow('Gateway reference', data.gatewayReference, { mono: true })}
+                      ${onlineDetailRow('Gateway', gateway)}
+                      ${onlineDetailRow('Channel', channel)}
+                      ${onlineDetailRow('Payment method', method)}
+                      ${onlineDetailRow('Initiated (Harare)', initiated.harare)}
+                      ${onlineDetailRow('Completed (Harare)', completed.harare)}
+                      ${onlineDetailRow('Completed (UTC)', completed.utc)}
+
+                      ${onlineSectionHeader('Customer and access', 'Payer and device attribution')}
+                      ${onlineDetailRow('Customer', customer)}
+                      ${onlineDetailRow('Customer phone', data.customerPhone)}
+                      ${optionalCustomerEmail}
+                      ${optionalMac}
+
+                      ${onlineSectionHeader('Product and voucher', 'What the customer paid for and received')}
+                      ${onlineDetailRow('Package', packageLabel)}
+                      ${onlineDetailRow('Duration', emailDuration(data.durationMin))}
+                      ${onlineDetailRow('Data allowance', emailDataAllowance(data.dataLimitGb, data.isUncapped))}
+                      ${onlineDetailRow('Speed', speed)}
+                      ${onlineDetailRow('Max devices', data.maxDevices)}
+                      ${onlineDetailRow('Voucher code', data.voucherCode, { mono: true, accent: true })}
+                      ${onlineDetailRow('Voucher expiry', emailVoucherExpiry(data.voucherExpiry))}
+
+                      ${onlineSectionHeader('Accounting and reconciliation', 'Revenue recognised on voucher issuance')}
+                      ${onlineDetailRow('Gross amount received', amountText)}
+                      ${onlineDetailRow('Gateway fee', gatewayFee == null ? 'Not captured' : emailMoney(gatewayFee, data.currency))}
+                      ${onlineDetailRow('Net settlement', gatewayFee == null ? `${emailMoney(netSettlement, data.currency)} (before gateway fees)` : emailMoney(netSettlement, data.currency))}
+                      ${taxLine}
+                      ${onlineDetailRow('Revenue recognised', emailMoney(revenue, data.currency))}
+                      ${onlineDetailRow('Revenue recognition', 'On voucher issuance')}
+                      ${onlineDetailRow('Sale reference', data.saleId, { mono: true })}
+                      ${onlineDetailRow('Attributed to', data.soldByName)}
+                      ${onlineDetailRow('Sale type', data.saleType || 'new')}
+                      ${onlineDetailRow('Sale timestamp', completed.harare)}
+                      ${onlineDetailRow('Control check', 'Payment = sale = voucher value: Matched', { accent: true })}
+                    </table>
+                  </td>
+                </tr>
+              </table>
+
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                <tr>
+                  <td style="padding:18px 32px 0;font-family:'Segoe UI',Arial,sans-serif">
+                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#0b1324;border:1px solid #263049;border-radius:10px">
+                      <tr>
+                        <td colspan="3" style="padding:14px 16px 8px;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:#64748b;font-weight:700">Ledger posting (gross)</td>
+                      </tr>
+                      <tr>
+                        <td style="padding:7px 0 7px 16px;color:#94a3b8;font-size:12px;width:34px">Dr</td>
+                        <td style="padding:7px 0;color:#cbd5e1;font-size:12px">Pesepay clearing / cash-in-transit</td>
+                        <td style="padding:7px 16px 7px 0;color:#f8fbff;font-size:12px;font-weight:600;text-align:right">${escapeEmailText(emailMoney(amount, data.currency))}</td>
+                      </tr>
+                      <tr>
+                        <td style="padding:7px 0 7px 16px;color:#94a3b8;font-size:12px;width:34px">Cr</td>
+                        <td style="padding:7px 0;color:#cbd5e1;font-size:12px">WiFi access revenue</td>
+                        <td style="padding:7px 16px 7px 0;color:#f8fbff;font-size:12px;font-weight:600;text-align:right">${escapeEmailText(emailMoney(revenue, data.currency))}</td>
+                      </tr>
+                      ${taxLedgerLine}
+                      <tr>
+                        <td style="padding:8px 0 12px 16px;color:#64748b;font-size:12px;width:34px"></td>
+                        <td style="padding:8px 0 12px;color:#94a3b8;font-size:11px">Control total</td>
+                        <td style="padding:8px 16px 12px 0;color:#71ff2f;font-size:12px;font-weight:700;text-align:right">${escapeEmailText(emailMoney(amount, data.currency))}</td>
+                      </tr>
+                    </table>
+                    <p style="margin:10px 0 0;font-size:11px;line-height:1.6;color:#64748b">Gateway fees and taxes are shown only when captured by the payment record. Reconcile them against the Pesepay settlement statement before closing the period.</p>
+                  </td>
+                </tr>
+              </table>
+
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                <tr>
+                  <td align="center" style="padding:24px 32px 0">
+                    <a href="${adminUrl}/#/ultranet/reports" style="display:inline-block;background:#00ccff;color:#031018;padding:11px 24px;border-radius:8px;text-decoration:none;font-family:'Segoe UI',Arial,sans-serif;font-size:13px;font-weight:700">Open Payment Logs</a>
+                  </td>
+                </tr>
+                <tr>
+                  <td align="center" style="padding:26px 32px 30px;font-family:'Segoe UI',Arial,sans-serif;font-size:11px;line-height:1.7;color:#475569">
+                    Payment reference: ${escapeEmailText(data.paymentId)}<br>
+                    Automated transaction advice. Retain for reconciliation.<br>
+                    &copy; ${new Date().getFullYear()} Preyone Enterprises. All rights reserved.
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+}
+
+export async function sendOnlinePaymentReceiptEmail(
+  recipients: string[],
+  data: OnlinePaymentEmailData
+): Promise<boolean> {
+  const to = [...new Set(recipients.map((e) => e.trim().toLowerCase()).filter(Boolean))];
+  if (to.length === 0) return false;
+  const amount = emailMoney(data.amount, data.currency);
+  const packageName = String(data.packageTier || 'WiFi').trim();
+  const subject = `Payment received - ${amount} - ${packageName} - ${data.voucherCode}`;
+  const html = onlinePaymentEmailHtml(data);
+  const results = await Promise.all(
+    to.map((email) => sendMail(email, subject, html, 'Preyone', 'admin@preyone.com'))
+  );
+  return results.some(Boolean);
 }

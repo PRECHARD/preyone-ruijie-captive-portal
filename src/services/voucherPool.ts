@@ -127,6 +127,70 @@ export async function claimPooledVoucher(
   return (rows[0] as ClaimedPoolVoucher | undefined) ?? null;
 }
 
+/**
+ * Staff-sale counterpart of claimPooledVoucher.
+ *
+ * Ruijie's API quota can be exhausted for minutes at a time ("code 44: Too many
+ * requests"), and a sale must not fail just because a mint is briefly blocked.
+ * The pool already holds genuine, tier-matched codes minted ahead of time, so a
+ * throttled mint falls back to the oldest usable one. No payment_id is set —
+ * this is a counter sale, not an online checkout.
+ */
+export async function claimPooledVoucherForStaff(
+  tierName: string,
+  comment?: string | null
+): Promise<ClaimedPoolVoucher | null> {
+  const { rows } = await pool.query(
+    `WITH candidate AS (
+       SELECT id
+         FROM ruijie_vouchers
+        WHERE tier_name = $1
+          AND pool_status = 'available'
+          AND payment_id IS NULL
+          AND (ruijie_expiry IS NULL OR ruijie_expiry > (EXTRACT(EPOCH FROM NOW()) * 1000)::bigint)
+        ORDER BY created_at ASC, code_no ASC
+        FOR UPDATE SKIP LOCKED
+        LIMIT 1
+     )
+     UPDATE ruijie_vouchers rv
+        SET pool_status = 'assigned',
+            assigned_at = NOW(),
+            source = 'staff',
+            comment = COALESCE($2, rv.comment)
+       FROM candidate c
+      WHERE rv.id = c.id
+      RETURNING rv.code_no, rv.tier_name, rv.user_group_id, rv.profile_uuid, rv.ruijie_expiry`,
+    [tierName, comment ?? null]
+  );
+  return (rows[0] as ClaimedPoolVoucher | undefined) ?? null;
+}
+
+/**
+ * Give unused pool claims back to stock.
+ *
+ * A claim is committed the moment it is made, so a sale that aborts afterwards
+ * (a drained pool mid-bulk, a rolled-back transaction, a duplicate code) would
+ * otherwise strand real inventory in `pool_status='assigned'` with no voucher
+ * row behind it — never sellable again. Codes that are not from the pool are
+ * ignored, so callers can pass every mint they hold.
+ */
+export async function releasePooledVouchers(codeNos: string[]): Promise<number> {
+  if (codeNos.length === 0) return 0;
+  const { rowCount } = await pool.query(
+    `UPDATE ruijie_vouchers
+        SET pool_status = 'available',
+            assigned_at = NULL,
+            source = 'seed',
+            comment = 'Pool ' || COALESCE(tier_name, '')
+      WHERE code_no = ANY($1::text[])
+        AND pool_status = 'assigned'
+        AND payment_id IS NULL
+        AND source = 'staff'`,
+    [codeNos]
+  );
+  return rowCount ?? 0;
+}
+
 export async function refillVoucherPool(
   options: { force?: boolean } = {}
 ): Promise<VoucherPoolRefillResult> {

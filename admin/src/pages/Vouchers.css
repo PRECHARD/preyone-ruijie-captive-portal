@@ -923,22 +923,23 @@
 
 .vd-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
 }
 
 .vd-cell {
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  padding: 8px 10px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid var(--border);
+  gap: 2px;
+  min-width: 0;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 8px;
 }
 
 .vd-label {
-  font-size: 0.6rem;
+  font-size: 0.62rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -946,9 +947,14 @@
 }
 
 .vd-value {
-  font-size: 0.85rem;
+  font-size: 0.75rem;
+  line-height: 1.35;
   color: var(--text);
   overflow-wrap: anywhere;
+}
+
+@media (max-width: 560px) {
+  .vd-grid { grid-template-columns: 1fr; }
 }
 
 .vd-mono {
@@ -1004,8 +1010,38 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   margin-top: 10px;
+}
+
+.vd-actions .btn-sm,
+.vd-actions .btn-action {
+  padding: 7px 11px;
+  border-radius: 999px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.vd-actions .btn-action--wa {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  justify-content: center;
+  border-radius: 999px;
+  color: #06130b;
+  background: linear-gradient(135deg, #25d366, #00ccff);
+  border-color: transparent;
+  box-shadow: 0 0 14px rgba(37, 211, 102, 0.28);
+}
+
+.vd-actions .btn-action--wa:hover {
+  background: linear-gradient(135deg, #2ef27a, #22ddff);
+  border-color: transparent;
+  box-shadow: 0 0 20px rgba(37, 211, 102, 0.45);
+}
+
+.vd-actions .btn-action--wa .vd-action-label {
+  display: none;
 }
 
 /* ── Renew / Resell modal ────────────────────────────────────────────────── */

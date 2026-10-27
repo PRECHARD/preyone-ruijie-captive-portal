@@ -24,7 +24,8 @@ export type BindingSource =
   | 'voucher_redemptions'
   | 'wispr_profiles'
   | 'users'
-  | 'ruijie_user_name';
+  | 'ruijie_user_name'
+  | 'ip_session';
 
 export interface VoucherBinding {
   /** Lowercased voucher code, or null when nothing resolved. */
@@ -46,9 +47,14 @@ export const UNBOUND: Readonly<VoucherBinding> = Object.freeze({
  * Accepts any spelling Ruijie or Postgres may hand us — colon, dash, dot
  * (macaddr style `0cb5.27ed.fef4`), uppercase, or bare.
  */
+export function normalizeMac(raw: unknown): string | null {
+  const hex = String(raw ?? '').replace(/[^0-9a-fA-F]/g, '').toLowerCase();
+  return /^[0-9a-f]{12}$/.test(hex) ? hex : null;
+}
+
+/** Back-compat alias — both names are the same canonical lowercase 12-hex key. */
 export function bindingMacKey(raw: unknown): string | null {
-  const hex = String(raw ?? '').replace(/[^0-9a-fA-F]/g, '').toUpperCase();
-  return /^[0-9A-F]{12}$/.test(hex) ? hex.toLowerCase() : null;
+  return normalizeMac(raw);
 }
 
 /** voucher_devices.mac_norm is stored UPPERCASE — keep that spelling for the indexed lookup. */
@@ -283,4 +289,421 @@ export async function verifyVoucherCodes(
     console.error('[VoucherBinding] code verification failed:', err);
   }
   return out;
+}
+
+// ===========================================================================
+// Session identity resolution — direct code → MAC binding → IP/portal.
+//
+// Active Sessions already knew a client's MAC and (usually) an IP, but the
+// resolver only ever consulted MAC sources. Ruijie can report the voucher PIN
+// itself in `userName`/`account`; when it does, that is the strongest signal
+// and must win over any stale MAC binding. Portal signups also leave an IP on
+// `users`/`access_log`, which covers clients whose MAC was never bound.
+// ===========================================================================
+
+export type AccountMatchSource = 'code' | 'mac' | 'ip';
+
+export interface SessionIdentityInput {
+  mac?: unknown;
+  ip?: unknown;
+  /** Ruijie `userName`/`account` labels — verified against vouchers.code. */
+  codeCandidates?: unknown[];
+}
+
+export interface SessionAccount {
+  code: string | null;
+  holderName: string | null;
+  holderPhone: string | null;
+  bindingSource: BindingSource | null;
+  matchedBy: AccountMatchSource | null;
+  accountName: string | null;
+  accountPhone: string | null;
+  accountSessionExpiresAt: string | null;
+  dataLimitBytes: number | null;
+  dataUsedBytes: number | null;
+  dataLeftBytes: number | null;
+  isUncapped: boolean | null;
+  activeDeviceCount: number;
+  deviceMacs: string[];
+  authMethod: 'VOUCHER' | 'MAC_AUTO';
+  macWhitelisted: boolean;
+}
+
+function emptyAccount(): SessionAccount {
+  return {
+    code: null,
+    holderName: null,
+    holderPhone: null,
+    bindingSource: null,
+    matchedBy: null,
+    accountName: null,
+    accountPhone: null,
+    accountSessionExpiresAt: null,
+    dataLimitBytes: null,
+    dataUsedBytes: null,
+    dataLeftBytes: null,
+    isUncapped: null,
+    activeDeviceCount: 0,
+    deviceMacs: [],
+    authMethod: 'MAC_AUTO',
+    macWhitelisted: false,
+  };
+}
+
+/** Canonical IPv4 key; strips the IPv4-mapped IPv6 prefix Ruijie sometimes sends. */
+function ipKey(raw: unknown): string | null {
+  const value = String(raw ?? '').trim();
+  if (!value || value === '0.0.0.0') return null;
+  return value.startsWith('::ffff:') ? value.slice(7) : value;
+}
+
+function isoOrNull(value: unknown): string | null {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(String(value));
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+interface IpAccountRow {
+  ip: string;
+  code: string;
+  name: string | null;
+  phone: string | null;
+  expiresAt: string | null;
+}
+
+/**
+ * Last-resort lookup: recent portal authorizations keyed by client IP.
+ * Covers clients that were never MAC-bound (e.g. a gateway that reports a
+ * different MAC spelling) while staying inside a 24h window so stale users
+ * from another DHCP lease cannot hijack the session.
+ */
+async function resolveIpAccounts(ips: string[]): Promise<Map<string, IpAccountRow>> {
+  const out = new Map<string, IpAccountRow>();
+  if (ips.length === 0) return out;
+  try {
+    const { rows } = await pool.query(
+      `WITH recent AS (
+         SELECT host(u.ip_address) AS ip, lower(u.voucher_code) AS code,
+                u.full_name AS name, u.phone,
+                u.session_expires_at AS expires_at, u.created_at AS seen_at
+           FROM users u
+          WHERE u.ip_address IS NOT NULL AND u.voucher_code IS NOT NULL
+            AND (u.session_expires_at > NOW() OR u.created_at > NOW() - INTERVAL '24 hours')
+         UNION ALL
+         SELECT host(al.ip_address), lower(u.voucher_code),
+                u.full_name, u.phone,
+                u.session_expires_at, al.created_at
+           FROM access_log al
+           JOIN users u ON u.id = al.user_id
+          WHERE al.ip_address IS NOT NULL AND u.voucher_code IS NOT NULL
+            AND al.created_at > NOW() - INTERVAL '24 hours'
+       )
+       SELECT DISTINCT ON (ip) ip, code, name, phone, expires_at
+         FROM recent
+        WHERE ip = ANY($1::text[])
+        ORDER BY ip, seen_at DESC`,
+      [ips]
+    );
+    for (const row of rows) {
+      const ip = ipKey(row.ip);
+      const code = String(row.code ?? '').trim().toLowerCase();
+      if (!ip || !code) continue;
+      out.set(ip, {
+        ip,
+        code,
+        name: row.name ?? null,
+        phone: row.phone ?? null,
+        expiresAt: isoOrNull(row.expires_at),
+      });
+    }
+  } catch (err) {
+    console.error('[VoucherBinding] ip/portal lookup failed:', err);
+  }
+  return out;
+}
+
+/** Convenience wrapper for accounting attribution: IP → verified voucher code. */
+export async function resolveVoucherCodesByIp(ips: Iterable<unknown>): Promise<Map<string, string>> {
+  const keys = [...new Set([...ips].map(ipKey).filter((k): k is string => k !== null))];
+  const accounts = await resolveIpAccounts(keys);
+  const out = new Map<string, string>();
+  for (const [ip, account] of accounts) out.set(ip, account.code);
+  return out;
+}
+
+interface VoucherDataRow {
+  code: string;
+  holderName: string | null;
+  holderPhone: string | null;
+  dataLimitBytes: number | null;
+  dataUsedBytes: number | null;
+  isUncapped: boolean;
+}
+
+/**
+ * Remaining-data math for a batch of codes. `vouchers.data_consumed_mb` is the
+ * accounting authority; when it is still null (never synced) we fall back to
+ * the live WISPr profile counters.
+ */
+async function loadVoucherData(codes: string[]): Promise<Map<string, VoucherDataRow>> {
+  const out = new Map<string, VoucherDataRow>();
+  if (codes.length === 0) return out;
+
+  const base = new Map<string, Record<string, unknown>>();
+  try {
+    const { rows } = await pool.query(
+      `SELECT lower(code) AS code, holder_name, holder_phone,
+              data_limit_gb, is_uncapped, data_consumed_mb
+         FROM vouchers
+        WHERE lower(code) = ANY($1::text[]) AND deleted_at IS NULL`,
+      [codes]
+    );
+    for (const row of rows) {
+      const code = String(row.code ?? '').trim().toLowerCase();
+      if (code) base.set(code, row);
+    }
+  } catch (err) {
+    console.error('[VoucherBinding] voucher data lookup failed:', err);
+  }
+
+  const usage = new Map<string, { usedBytes: number | null; quotaBytes: number | null }>();
+  try {
+    const { rows } = await pool.query(
+      `SELECT lower(u.voucher_code) AS code,
+              COALESCE(SUM(wp.data_used_bytes) FILTER (
+                WHERE wp.session_end IS NULL OR wp.session_start > NOW() - INTERVAL '24 hours'
+              ), 0)::bigint AS used_bytes,
+              MAX(wp.data_quota_bytes)::bigint AS quota_bytes
+         FROM users u
+         JOIN wispr_profiles wp ON wp.user_id = u.id
+        WHERE lower(u.voucher_code) = ANY($1::text[])
+        GROUP BY lower(u.voucher_code)`,
+      [codes]
+    );
+    for (const row of rows) {
+      const code = String(row.code ?? '').trim().toLowerCase();
+      if (!code) continue;
+      usage.set(code, {
+        usedBytes: row.used_bytes === null || row.used_bytes === undefined ? null : Number(row.used_bytes),
+        quotaBytes: row.quota_bytes === null || row.quota_bytes === undefined ? null : Number(row.quota_bytes),
+      });
+    }
+  } catch (err) {
+    console.error('[VoucherBinding] voucher usage lookup failed:', err);
+  }
+
+  for (const code of codes) {
+    const row = base.get(code);
+    if (!row) continue;
+    const isUncapped = Boolean(row.is_uncapped);
+    const limitGb = row.data_limit_gb === null || row.data_limit_gb === undefined ? null : Number(row.data_limit_gb);
+    const consumedMb = row.data_consumed_mb === null || row.data_consumed_mb === undefined ? null : Number(row.data_consumed_mb);
+    const profile = usage.get(code);
+    const limitBytes = isUncapped
+      ? null
+      : limitGb !== null && Number.isFinite(limitGb)
+        ? Math.round(limitGb * 1024 * 1024 * 1024)
+        : profile?.quotaBytes ?? null;
+    const usedBytes = consumedMb !== null && Number.isFinite(consumedMb)
+      ? Math.round(consumedMb * 1024 * 1024)
+      : profile?.usedBytes ?? null;
+    out.set(code, {
+      code,
+      holderName: (row.holder_name as string | null) ?? null,
+      holderPhone: (row.holder_phone as string | null) ?? null,
+      dataLimitBytes: limitBytes,
+      dataUsedBytes: usedBytes,
+      isUncapped,
+    });
+  }
+  return out;
+}
+
+/** All active MACs tied to each code — explicit bindings plus historical profiles. */
+async function loadVoucherDevices(codes: string[]): Promise<Map<string, { count: number; macs: string[] }>> {
+  const out = new Map<string, { count: number; macs: string[] }>();
+  if (codes.length === 0) return out;
+  try {
+    const { rows } = await pool.query(
+      `WITH devices AS (
+         SELECT lower(voucher_code) AS code, mac_norm AS mac
+           FROM voucher_devices
+          WHERE is_active = TRUE
+         UNION
+         SELECT lower(u.voucher_code), upper(regexp_replace(u.mac_address, '[^0-9a-fA-F]', '', 'g'))
+           FROM users u
+          WHERE u.voucher_code IS NOT NULL AND u.mac_address IS NOT NULL
+         UNION
+         SELECT lower(u.voucher_code), upper(regexp_replace(wp.mac_address, '[^0-9a-fA-F]', '', 'g'))
+           FROM wispr_profiles wp
+           JOIN users u ON u.id = wp.user_id
+          WHERE u.voucher_code IS NOT NULL AND wp.mac_address IS NOT NULL
+       )
+       SELECT code,
+              COUNT(DISTINCT mac)::int AS device_count,
+              ARRAY_AGG(DISTINCT mac) AS device_macs
+         FROM devices
+        WHERE code = ANY($1::text[]) AND length(mac) = 12
+        GROUP BY code`,
+      [codes]
+    );
+    for (const row of rows) {
+      const code = String(row.code ?? '').trim().toLowerCase();
+      if (!code) continue;
+      const macs = Array.isArray(row.device_macs)
+        ? row.device_macs
+            .map((mac: unknown) => normalizeMac(mac))
+            .filter((mac: string | null): mac is string => mac !== null)
+        : [];
+      out.set(code, { count: Number(row.device_count) || macs.length, macs });
+    }
+  } catch (err) {
+    console.error('[VoucherBinding] voucher device lookup failed:', err);
+  }
+  return out;
+}
+
+async function loadWhitelistedMacs(macs: string[]): Promise<Set<string>> {
+  const out = new Set<string>();
+  if (macs.length === 0) return out;
+  try {
+    const { rows } = await pool.query(
+      `SELECT DISTINCT lower(regexp_replace(mac_address, '[^0-9a-fA-F]', '', 'g')) AS mac
+         FROM mac_whitelist
+        WHERE lower(regexp_replace(mac_address, '[^0-9a-fA-F]', '', 'g')) = ANY($1::text[])`,
+      [macs]
+    );
+    for (const row of rows) {
+      const mac = normalizeMac(row.mac);
+      if (mac) out.add(mac);
+    }
+  } catch (err) {
+    console.error('[VoucherBinding] mac whitelist lookup failed:', err);
+  }
+  return out;
+}
+
+/**
+ * Resolve a batch of live sessions using the required precedence:
+ *   1. direct voucher code reported by Ruijie (`userName`/`account`)
+ *   2. MAC binding (voucher_devices → redemptions → WISPr → users)
+ *   3. IP/portal authorization seen in the last 24h
+ *
+ * Also attaches holder/account details, remaining data, multi-device links and
+ * the AUTH classification. Every stage degrades independently; a failed lookup
+ * just leaves that field null instead of failing the whole sessions page.
+ */
+export async function resolveSessionAccounts(
+  sessions: SessionIdentityInput[]
+): Promise<SessionAccount[]> {
+  const results = sessions.map(() => emptyAccount());
+  if (sessions.length === 0) return results;
+
+  const macs = sessions.map((session) => normalizeMac(session.mac));
+  const ips = sessions.map((session) => ipKey(session.ip));
+
+  // 1) Direct code match — the PIN reported by Ruijie wins over stale bindings.
+  const candidates = sessions.flatMap((session) =>
+    (session.codeCandidates ?? []).map((candidate) => String(candidate ?? '').trim()).filter(Boolean)
+  );
+  if (candidates.length > 0) {
+    const verified = await verifyVoucherCodes(candidates);
+    sessions.forEach((session, index) => {
+      for (const candidate of session.codeCandidates ?? []) {
+        const code = verified.get(String(candidate ?? '').trim().toLowerCase());
+        if (!code) continue;
+        results[index].code = code;
+        results[index].bindingSource = 'ruijie_user_name';
+        results[index].matchedBy = 'code';
+        results[index].authMethod = 'VOUCHER';
+        break;
+      }
+    });
+  }
+
+  // 2) MAC binding — explicit device binding, redemption, WISPr, then users.
+  const unresolvedMacs = [
+    ...new Set(macs.filter((mac, index) => mac !== null && !results[index].code)),
+  ] as string[];
+  if (unresolvedMacs.length > 0) {
+    const bindings = await resolveVoucherBindings(unresolvedMacs);
+    sessions.forEach((_, index) => {
+      const mac = macs[index];
+      if (results[index].code || !mac) return;
+      const binding = bindings.get(mac);
+      if (!binding?.code) return;
+      results[index].code = binding.code;
+      results[index].holderName = binding.holderName;
+      results[index].holderPhone = binding.holderPhone;
+      results[index].bindingSource = binding.source;
+      results[index].matchedBy = 'mac';
+      results[index].authMethod = 'VOUCHER';
+    });
+  }
+
+  // 3) IP/portal session — last resort for clients whose MAC was never bound.
+  const unresolvedIps = [
+    ...new Set(ips.filter((ip, index) => ip !== null && !results[index].code)),
+  ] as string[];
+  if (unresolvedIps.length > 0) {
+    const accounts = await resolveIpAccounts(unresolvedIps);
+    sessions.forEach((_, index) => {
+      const ip = ips[index];
+      if (results[index].code || !ip) return;
+      const account = accounts.get(ip);
+      if (!account) return;
+      results[index].code = account.code;
+      results[index].holderName = account.name;
+      results[index].holderPhone = account.phone;
+      results[index].accountName = account.name;
+      results[index].accountPhone = account.phone;
+      results[index].accountSessionExpiresAt = account.expiresAt;
+      results[index].bindingSource = 'ip_session';
+      results[index].matchedBy = 'ip';
+      results[index].authMethod = 'VOUCHER';
+    });
+  }
+
+  // 4) AUTH for remaining clients: MAC bypass/whitelist vs unclassified.
+  const unresolvedMacKeys = [
+    ...new Set(macs.filter((mac, index) => mac !== null && !results[index].code)),
+  ] as string[];
+  const whitelisted = await loadWhitelistedMacs(unresolvedMacKeys);
+  sessions.forEach((_, index) => {
+    if (results[index].code) return;
+    const mac = macs[index];
+    results[index].authMethod = 'MAC_AUTO';
+    results[index].macWhitelisted = !!(mac && whitelisted.has(mac));
+  });
+
+  // 5) Data allowance, live usage and multi-device links for every code.
+  const codes = [...new Set(results.map((result) => result.code).filter((code): code is string => !!code))];
+  if (codes.length > 0) {
+    const [data, devices] = await Promise.all([
+      loadVoucherData(codes),
+      loadVoucherDevices(codes),
+    ]);
+    results.forEach((result) => {
+      if (!result.code) return;
+      const row = data.get(result.code);
+      if (row) {
+        result.holderName = result.holderName ?? row.holderName;
+        result.holderPhone = result.holderPhone ?? row.holderPhone;
+        result.isUncapped = row.isUncapped;
+        result.dataLimitBytes = row.dataLimitBytes;
+        result.dataUsedBytes = row.dataUsedBytes;
+        result.dataLeftBytes =
+          row.isUncapped || row.dataLimitBytes === null || row.dataUsedBytes === null
+            ? null
+            : Math.max(0, row.dataLimitBytes - row.dataUsedBytes);
+      }
+      const device = devices.get(result.code);
+      if (device) {
+        result.activeDeviceCount = device.count;
+        result.deviceMacs = device.macs;
+      }
+    });
+  }
+
+  return results;
 }

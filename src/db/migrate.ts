@@ -311,6 +311,17 @@ CREATE INDEX IF NOT EXISTS idx_payments_user_id ON payments (user_id);
   INSERT INTO settings (key, value) VALUES ('session_timeout_min', '1440') ON CONFLICT (key) DO NOTHING;
   INSERT INTO settings (key, value) VALUES ('welcome_message', 'Welcome to Preyone WiFi') ON CONFLICT (key) DO NOTHING;
 
+  -- Configurable voucher alert levels. The alert tables persist tier slots
+  -- 80/95 (so history stays readable), but these settings decide which
+  -- percentage fires each slot. Read by voucherMonitorService.loadAlertThresholds().
+  INSERT INTO settings (key, value) VALUES ('voucher_alert_warn_pct', '80') ON CONFLICT (key) DO NOTHING;
+  INSERT INTO settings (key, value) VALUES ('voucher_alert_crit_pct', '95') ON CONFLICT (key) DO NOTHING;
+
+  -- Month-End / Staff report scheduler (src/services/scheduler.ts).
+  INSERT INTO settings (key, value) VALUES ('month_end_report_enabled', '1') ON CONFLICT (key) DO NOTHING;
+  INSERT INTO settings (key, value) VALUES ('month_end_report_recipients', 'admin@preyone.com') ON CONFLICT (key) DO NOTHING;
+  INSERT INTO settings (key, value) VALUES ('month_end_report_last_sent', '') ON CONFLICT (key) DO NOTHING;
+
   CREATE TABLE IF NOT EXISTS admin_audit_log (
     id          BIGSERIAL PRIMARY KEY,
     admin_id    UUID REFERENCES admin_users(id) ON DELETE SET NULL,
@@ -2067,6 +2078,27 @@ CREATE INDEX IF NOT EXISTS idx_payments_user_id ON payments (user_id);
         ON voucher_alert_events (voucher_code, created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_voucher_alert_events_open
         ON voucher_alert_events (voucher_code) WHERE acknowledged_at IS NULL;
+
+      -- Last good Ruijie voucher roster, shared by every PM2 worker. Ruijie's
+      -- open API has a very small request quota ("code 44: Too many requests"),
+      -- so the consumption tab and the alert sweep read this snapshot instead
+      -- of each process pulling the tenant roster on its own timer. On a failed
+      -- refresh callers serve the snapshot stale rather than showing an error.
+      CREATE TABLE IF NOT EXISTS ruijie_roster_cache (
+        id          SMALLINT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+        payload     JSONB NOT NULL,
+        fetched_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      -- Last good live-session feed (GET /api/ruijie/sessions). Same rendezvous
+      -- pattern as ruijie_roster_cache: one row shared by every PM2 worker, so
+      -- the 5-minute TTL is honoured across processes and a throttled upstream
+      -- can be answered from the last successful read instead of a 502.
+      CREATE TABLE IF NOT EXISTS ruijie_session_cache (
+        id          SMALLINT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+        payload     JSONB NOT NULL,
+        fetched_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
     `);
 
     // ── 3-tier SaaS subscription engine (v2 master upgrade) ─────────────────

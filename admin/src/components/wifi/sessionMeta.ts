@@ -82,7 +82,8 @@ function isWireless(s: WifiSession): boolean {
  * bound to a voucher or it was allowed by MAC.
  */
 export function authMethodOf(s: WifiSession): AuthMethod {
-  return s.code ? 'Voucher' : 'MAC Auto';
+  if (s.authMethod) return s.authMethod;
+  return s.code ? 'VOUCHER' : 'MAC_AUTO';
 }
 
 /** Name column: alias → model → manufacturer → MAC. */

@@ -52,8 +52,8 @@ export const PRIMARY_FILTERS: readonly PrimaryFilter[] = [
 
 export type BandGroup = '5 GHz' | '2.4 GHz' | 'Wired/Other';
 
-/** `Voucher` and `MAC Auto` are the two modes this deployment can produce. */
-export type AuthMethod = 'Voucher' | 'PPSK' | 'MAC Auto';
+/** `VOUCHER` and `MAC_AUTO` are the two modes this deployment can produce. */
+export type AuthMethod = 'VOUCHER' | 'PPSK' | 'MAC_AUTO';
 
 /** Source list behind a historical client row (see GET /api/ruijie/history). */
 export type HistorySource = 'access_log' | 'users' | 'voucher_redemptions' | 'voucher_devices';
@@ -94,6 +94,8 @@ export interface WifiSession {
    * NEVER rendered in the Accounts column; see `code`.
    */
   username: string | null;
+  /** Raw Ruijie `account` field when it differs from `username`. */
+  account?: string | null;
   /** Verified voucher code only (strict contract). Null when unauthenticated. */
   code: string | null;
   holderName: string | null;
@@ -104,6 +106,20 @@ export interface WifiSession {
   accountSessionExpiresAt?: string | null;
   /** Which local source produced `code`. */
   bindingSource?: string | null;
+  /** Which fallback stage matched: direct code, MAC binding, or IP/portal. */
+  matchedBy?: 'code' | 'mac' | 'ip' | null;
+  /** Backend AUTH classification (falls back to code presence). */
+  authMethod?: AuthMethod | null;
+  /** True when a no-code client is explicitly on the MAC whitelist. */
+  macWhitelisted?: boolean;
+  /** Voucher data allowance / usage in bytes. Null when unknown or uncapped. */
+  dataLimitBytes?: number | null;
+  dataUsedBytes?: number | null;
+  dataLeftBytes?: number | null;
+  isUncapped?: boolean | null;
+  /** Active devices linked to the same voucher code. */
+  activeDeviceCount?: number;
+  deviceMacs?: string[];
 
   usedMb: number | null;
   upMb: number | null;
@@ -171,7 +187,8 @@ export type ConsumptionStatus =
   | 'exhausted'  // >= 100% used
   | 'unlimited'  // uncapped bundle (quotaMb <= 0)
   | 'idle'       // 0 bytes used, capped bundle
-  | 'disabled';  // disableStatus != 0 (used up / cancelled)
+  | 'disabled'   // disableStatus != 0 (used up / cancelled)
+  | 'expired';   // Ruijie expiryTime has passed
 
 export interface VoucherConsumptionRow {
   code: string;
@@ -183,12 +200,19 @@ export interface VoucherConsumptionRow {
   usedMB: number | null;
   totalMB: number | null;
   pct: number | null;
+  /** Ruijie expiry timestamp in epoch-ms; null when the roster has no expiry. */
+  expiryTime?: number | null;
   status: ConsumptionStatus;
   onlineNow: boolean;
   activeDevices?: number;
   maxDevices?: number | null;
   alertsSent: { t80: number; t95: number };
   lastAlertAt: string | Date | null;
+  /**
+   * false when the row came from the local vouchers table because the Ruijie
+   * roster was temporarily unavailable — usage fields are unknown, not zero.
+   */
+  usageKnown?: boolean;
 }
 
 export interface VoucherConsumptionSummary {
@@ -200,12 +224,26 @@ export interface VoucherConsumptionSummary {
   unlimited: number;
   idle: number;
   disabled: number;
+  expired: number;
 }
 
 export interface VoucherConsumptionResponse {
   generatedAt: string | Date;
   /** false when Ruijie keys are missing — rows empty, tab shows roster-offline state. */
   live: boolean;
+  /** true when the roster is a cached snapshot served because the refresh failed. */
+  stale?: boolean;
+  /** When the roster snapshot was last pulled from Ruijie. */
+  rosterFetchedAt?: string | Date | null;
+  /** true when the tab is showing local vouchers without live usage. */
+  degraded?: boolean;
+  /** Human-readable reason for `degraded`; safe to display. */
+  warning?: string | null;
+  /**
+   * Admin-configured low/critical percentages (Settings → Alert Thresholds).
+   * Absent on older responses — the tab then assumes 80/95.
+   */
+  thresholds?: { warn: number; critical: number } | null;
   summary: VoucherConsumptionSummary;
   rows: VoucherConsumptionRow[];
 }

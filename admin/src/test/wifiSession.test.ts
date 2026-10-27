@@ -98,9 +98,14 @@ describe('matchesPrimary', () => {
 });
 
 describe('authMethodOf', () => {
-  it('reports Voucher only when a verified code exists, else MAC Auto', () => {
-    expect(authMethodOf(s({ code: 'PIN-4821' }))).toBe('Voucher');
-    expect(authMethodOf(s({ code: null, username: 'vivo Y22 Leslie' }))).toBe('MAC Auto');
+  it('reports VOUCHER only when a verified code exists, else MAC_AUTO', () => {
+    expect(authMethodOf(s({ code: 'PIN-4821' }))).toBe('VOUCHER');
+    expect(authMethodOf(s({ code: null, username: 'vivo Y22 Leslie' }))).toBe('MAC_AUTO');
+  });
+
+  it('prefers the backend classification when it is present', () => {
+    expect(authMethodOf(s({ code: null, authMethod: 'MAC_AUTO', macWhitelisted: true }))).toBe('MAC_AUTO');
+    expect(authMethodOf(s({ code: 'PIN-4821', authMethod: 'VOUCHER' }))).toBe('VOUCHER');
   });
 });
 

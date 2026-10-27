@@ -142,10 +142,23 @@ export default function Sessions() {
                 columns={[
                   { key: 'full_name', label: 'User' },
                   { key: 'voucher_code', label: 'Voucher', width: '120px', render: (r: any) => <span className="code-cell">{r.voucher_code}</span> },
+                  { key: 'auth_method', label: 'Auth', width: '100px', render: (r: any) => (
+                    <Badge variant={r.auth_method === 'VOUCHER' ? 'active' : 'inactive'}>
+                      {r.auth_method ?? (r.voucher_code ? 'VOUCHER' : 'MAC_AUTO')}
+                    </Badge>
+                  )},
                   { key: 'mac_address', label: 'MAC', width: '150px', render: (r: any) => <code style={{ fontSize: 11 }}>{r.mac_address || '—'}</code> },
                   { key: 'ip_address', label: 'IP', width: '130px' },
                   { key: 'data_used_bytes', label: 'Data Used', width: '120px', render: (r: any) => {
                     const b = r.data_used_bytes || 0;
+                    if (b >= 1073741824) return `${(b / 1073741824).toFixed(1)} GB`;
+                    if (b >= 1048576) return `${(b / 1048576).toFixed(1)} MB`;
+                    return '0 MB';
+                  }},
+                  { key: 'data_left_bytes', label: 'Data Left', width: '120px', render: (r: any) => {
+                    if (r.is_uncapped) return 'Unlimited';
+                    const b = r.data_left_bytes;
+                    if (b == null) return '—';
                     if (b >= 1073741824) return `${(b / 1073741824).toFixed(1)} GB`;
                     if (b >= 1048576) return `${(b / 1048576).toFixed(1)} MB`;
                     return '0 MB';

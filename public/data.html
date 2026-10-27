@@ -682,17 +682,25 @@
 
       function refreshAlertsBtn() {
         var b = $('alertsBtn');
-        if (typeof Notification === 'undefined') { b.hidden = true; return; }
+        b.hidden = false;
+        if (typeof Notification === 'undefined') {
+          b.disabled = true;
+          b.textContent = 'ALERTS UNSUPPORTED';
+          b.title = 'This browser does not support notifications.';
+          return;
+        }
         if (Notification.permission === 'granted') {
-          b.hidden = false;
           b.disabled = true;
           b.textContent = 'DATA ALERTS: ON';
+          b.title = 'Data alerts are enabled.';
         } else if (Notification.permission === 'denied') {
-          b.hidden = true;
+          b.disabled = false;
+          b.textContent = 'ALERTS BLOCKED';
+          b.title = 'Allow notifications for this site in your browser settings.';
         } else {
-          b.hidden = false;
           b.disabled = false;
           b.textContent = 'ENABLE DATA ALERTS';
+          b.title = 'Allow alerts';
         }
       }
 
@@ -976,7 +984,16 @@
       });
 
       $('alertsBtn').addEventListener('click', function () {
-        if (typeof Notification === 'undefined') return;
+        if (typeof Notification === 'undefined') {
+          pushToast('', 'ALERTS UNSUPPORTED',
+            'This browser does not support notifications. You will still see data warnings here.');
+          return;
+        }
+        if (Notification.permission === 'denied') {
+          pushToast('', 'ALERTS BLOCKED',
+            'Open this site in your browser settings and allow notifications, then tap ENABLE DATA ALERTS again.');
+          return;
+        }
         var asked = Notification.requestPermission
           ? Notification.requestPermission()
           : Promise.resolve(Notification.permission);
@@ -988,6 +1005,9 @@
             // iOS/Android: the subscription must be created inside this same
             // click (permission + subscribe ride one user gesture).
             ensurePushSubscription();
+          } else if (p === 'denied') {
+            pushToast('', 'ALERTS BLOCKED',
+              'Allow notifications for this site in your browser settings to receive data alerts.');
           }
         });
       });

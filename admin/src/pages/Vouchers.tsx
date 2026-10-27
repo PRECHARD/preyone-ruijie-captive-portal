@@ -859,27 +859,35 @@ const codes = a.voucher_data?.codes;
     setTimeout(() => setVStatus(null), 2000);
   };
 
-  const shareWhatsApp = async (target?: Voucher) => {
+  const buildVoucherWaText = (v: Voucher) => [
+    '*Preyone Voucher*',
+    '',
+    `Code: ${lc(v.code)}`,
+    `Package: ${v.package_tier || 'Standard'}`,
+    `Price: ${v.price_amount ? '$' + parseFloat(v.price_amount).toFixed(2) : '—'}`,
+    `Duration: ${fmtDur(v.duration_min)}`,
+    `Speed: ${v.bandwidth_mbps_up}/${v.bandwidth_mbps_down} Mbps`,
+    `Data: ${v.is_uncapped ? 'Unlimited' : (v.data_limit_gb ?? 'Unlimited') + ' GB'}`,
+    `Valid until: ${fmtDate(v.expires_at)}`,
+    'Connect: https://wifi.preyone.com',
+    '',
+    '_Thank you for choosing Preyone_',
+  ].join('\n');
+
+  const shareWhatsApp = (target?: Voucher) => {
     const data = target || voucherCardData;
     if (!data) return;
-    const c = document.createElement('canvas');
-    c.width = 800; c.height = 450;
-    await drawVoucherCanvas(c, data, user?.fullName || 'Preyone UltraNet');
-    const blob = await new Promise<Blob | null>(resolve => c.toBlob(resolve, 'image/jpeg', 0.95));
-    if (!blob) return;
-    const file = new File([blob], 'voucher-' + (data.code || 'PREYONE-XXXX').toLowerCase() + '.jpeg', { type: 'image/jpeg' });
-    if (navigator.canShare?.({ files: [file] })) {
-      try { await navigator.share({ files: [file], title: 'Preyone Voucher' }); return; } catch {}
-    }
-    const url = URL.createObjectURL(blob);
-    window.open(url, '_blank');
-    setTimeout(() => URL.revokeObjectURL(url), 10000);
+    window.open(
+      'https://api.whatsapp.com/send?text=' + encodeURIComponent(buildVoucherWaText(data)),
+      '_blank',
+      'noopener,noreferrer'
+    );
   };
 
   const copyAllVoucher = () => {
     if (!voucherCardData) return;
-    navigator.clipboard.writeText(voucherCardData.code);
-    setVStatus({ type: 'success', msg: 'Voucher PIN copied to clipboard' });
+    navigator.clipboard.writeText(buildVoucherWaText(voucherCardData));
+    setVStatus({ type: 'success', msg: 'Voucher details copied to clipboard' });
     setTimeout(() => setVStatus(null), 2000);
   };
 
@@ -1570,24 +1578,10 @@ const codes = a.voucher_data?.codes;
           ? v.devices
           : macs.map(m => ({ mac_address: m, label: null, is_active: true, bound_at: null, last_seen_at: null, unbound_at: null }));
 
-        // Real triggers only: code + terms the customer needs. There is no
-        // message-template schema in this build, so nothing here is invented.
-        const waText = [
-          '*Preyone Voucher*',
-          '',
-          `Code: ${lc(v.code)}`,
-          `Package: ${v.package_tier || 'Standard'}`,
-          `Price: ${v.price_amount ? '$' + parseFloat(v.price_amount).toFixed(2) : '—'}`,
-          `Duration: ${fmtDur(v.duration_min)}`,
-          `Speed: ${v.bandwidth_mbps_up}/${v.bandwidth_mbps_down} Mbps`,
-          `Data: ${v.is_uncapped ? 'Unlimited' : (v.data_limit_gb ?? 'Unlimited') + ' GB'}`,
-          `Valid until: ${fmtDate(v.expires_at)}`,
-          '',
-          '_Thank you for choosing Preyone_',
-        ].join('\n');
+        const waText = buildVoucherWaText(v);
 
         return (
-          <Modal open onClose={() => setDetailVoucher(null)} title={`Voucher ${lc(v.code)}`}>
+          <Modal open onClose={() => setDetailVoucher(null)} title={`Voucher ${lc(v.code)}`} wide>
             <div className="voucher-detail">
               <div className="vd-head">
                 <div className="vd-code" onClick={() => copyCode(lc(v.code))} title="Click to copy">{lc(v.code)}</div>
@@ -1686,9 +1680,9 @@ const codes = a.voucher_data?.codes;
                     <svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 4h12v12H4z" /><path d="M7 10h6M10 7v6" /></svg>
                     Print
                   </button>
-                  <button className="btn-action btn-action--wa" onClick={() => shareWhatsApp(v)}>
+                  <button className="btn-action btn-action--wa" onClick={() => shareWhatsApp(v)} aria-label="Share voucher on WhatsApp" title="Share on WhatsApp">
                     <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
-                    Send via WhatsApp
+                    <span className="vd-action-label">Send via WhatsApp</span>
                   </button>
                 </div>
               </section>

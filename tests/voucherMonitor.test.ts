@@ -33,8 +33,15 @@ import {
   runVoucherAlertSweep,
   stopVoucherMonitor,
   ALERT_TIERS,
+  normalizeAlertThresholds,
+  DEFAULT_ALERT_THRESHOLDS,
 } from '../src/services/voucherMonitorService';
-import { consumptionStatus, sortConsumptionRows } from '../src/routes/voucherAnalytics';
+import {
+  consumptionStatus,
+  consumptionTier,
+  isDrainedAndExpired,
+  sortConsumptionRows,
+} from '../src/routes/voucherAnalytics';
 import { alertsRouter } from '../src/routes/alerts';
 
 const MB = 1;
@@ -236,13 +243,116 @@ describe('consumptionStatus (analytics taxonomy)', () => {
     expect(consumptionStatus({ quotaMb: 0, usedQuotaMb: 0 }, null)).toBe('unlimited');
     expect(consumptionStatus({ quotaMb: 1000, usedQuotaMb: 10, disableStatus: 108 }, 1)).toBe('disabled');
   });
+
+  it('marks a past expiryTime as expired even when disableStatus is 0', () => {
+    const now = Date.UTC(2026, 9, 25, 12, 0, 0);
+    expect(consumptionStatus({ quotaMb: 1000, usedQuotaMb: 100, expiryTime: now - 1 }, 10, now)).toBe('expired');
+    expect(consumptionStatus({ quotaMb: 1000, usedQuotaMb: 100, expiryTime: now + 60_000 }, 10, now)).toBe('ok');
+    expect(consumptionStatus({ quotaMb: 1000, usedQuotaMb: 100, expiryTime: now - 1, disableStatus: 108 }, 10, now)).toBe('expired');
+  });
+
+  it('honours configured warn/critical thresholds', () => {
+    const thresholds = normalizeAlertThresholds({ warn: 70, critical: 90 });
+    expect(consumptionStatus({}, 65, Date.now(), thresholds)).toBe('ok');
+    expect(consumptionStatus({}, 75, Date.now(), thresholds)).toBe('low');
+    expect(consumptionStatus({}, 92, Date.now(), thresholds)).toBe('critical');
+    // ...while the default pair still behaves as before.
+    expect(consumptionStatus({}, 75, Date.now(), DEFAULT_ALERT_THRESHOLDS)).toBe('ok');
+  });
 });
 
-describe('sortConsumptionRows (urgency-first ordering)', () => {
-  const r = (code: string, status: string, pct: number | null) => ({ code, status: status as never, pct });
+describe('normalizeAlertThresholds', () => {
+  it('falls back to 80/95 for missing or out-of-range values', () => {
+    expect(normalizeAlertThresholds(null)).toEqual({ warn: 80, critical: 95 });
+    expect(normalizeAlertThresholds({ warn: 'abc', critical: -1 })).toEqual({ warn: 80, critical: 95 });
+    expect(normalizeAlertThresholds({ warn: 0, critical: 101 })).toEqual({ warn: 80, critical: 95 });
+  });
 
-  it('orders critical → low → exhausted → ok → idle → unlimited → disabled (expired last)', () => {
+  it('keeps critical at least 5 points above warn', () => {
+    expect(normalizeAlertThresholds({ warn: 80, critical: 80 })).toEqual({ warn: 80, critical: 85 });
+    expect(normalizeAlertThresholds({ warn: 98, critical: 50 })).toEqual({ warn: 98, critical: 100 });
+  });
+
+  it('maps configured percentages onto the persisted 80/95 tier slots', () => {
+    const t = { warn: 70, critical: 90 };
+    expect(chooseAlertTier(69, t)).toBeNull();
+    expect(chooseAlertTier(70, t)).toBe(80);
+    expect(chooseAlertTier(89.9, t)).toBe(80);
+    expect(chooseAlertTier(90, t)).toBe(95);
+  });
+});
+
+describe('isDrainedAndExpired', () => {
+  const now = Date.UTC(2026, 9, 25, 12, 0, 0);
+  it('only true for fully consumed AND past-expiry rows', () => {
+    expect(isDrainedAndExpired({ pct: 100, expiryTime: now - 1 }, now)).toBe(true);
+    expect(isDrainedAndExpired({ pct: 100, expiryTime: now + 60_000 }, now)).toBe(false);
+    expect(isDrainedAndExpired({ pct: 60, expiryTime: now - 1 }, now)).toBe(false);
+    expect(isDrainedAndExpired({ pct: null, expiryTime: now - 1 }, now)).toBe(false);
+    expect(isDrainedAndExpired({ pct: 100, expiryTime: null }, now)).toBe(false);
+  });
+});
+
+describe('sortConsumptionRows (four-tier hierarchy)', () => {
+  const r = (code: string, status: string, pct: number | null, onlineNow = false) => ({
+    code,
+    status: status as never,
+    pct,
+    onlineNow,
+  });
+
+  it('ranks critical/low above drained, ok and unlimited', () => {
+    expect(consumptionTier('critical')).toBe(0);
+    expect(consumptionTier('low')).toBe(0);
+    expect(consumptionTier('exhausted')).toBe(1);
+    expect(consumptionTier('ok')).toBe(2);
+    expect(consumptionTier('idle')).toBe(2);
+    expect(consumptionTier('unlimited')).toBe(3);
+    expect(consumptionTier('disabled')).toBe(4);
+    expect(consumptionTier('expired')).toBe(5);
+  });
+
+  it('puts quota-critical vouchers on top even when they are offline', () => {
     const sorted = sortConsumptionRows([
+      r('offCrit', 'critical', 99),
+      r('offLow', 'low', 85),
+      r('onIdle', 'idle', 0, true),
+      r('onUnl', 'unlimited', null, true),
+      r('offOk', 'ok', 40),
+    ]);
+    expect(sorted.map((x) => x.code)).toEqual([
+      'offCrit', 'offLow', 'onIdle', 'offOk', 'onUnl',
+    ]);
+  });
+
+  it('orders critical/low → drained → ok/idle → unlimited, online first inside a tier', () => {
+    const sorted = sortConsumptionRows([
+      r('offCrit', 'critical', 99),
+      r('onOk', 'ok', 30, true),
+      r('onUnl', 'unlimited', null, true),
+      r('onLow', 'low', 85, true),
+      r('onCrit', 'critical', 97, true),
+      r('onIdle', 'idle', 0, true),
+      r('onExh', 'exhausted', 100, true),
+    ]);
+    expect(sorted.map((x) => x.code)).toEqual([
+      'onCrit', 'onLow', 'offCrit', 'onExh', 'onOk', 'onIdle', 'onUnl',
+    ]);
+  });
+
+  it('keeps disabled/expired codes out of the live tiers', () => {
+    const sorted = sortConsumptionRows([
+      r('onDead', 'disabled', 50, true),
+      r('onExp', 'expired', 100, true),
+      r('onOk', 'ok', 30, true),
+      r('offOk', 'ok', 20),
+    ]);
+    expect(sorted.map((x) => x.code)).toEqual(['onOk', 'offOk', 'onDead', 'onExp']);
+  });
+
+  it('orders critical → low → drained → ok → idle → unlimited → disabled → expired (expired last)', () => {
+    const sorted = sortConsumptionRows([
+      r('exp1', 'expired', 100),
       r('dis1', 'disabled', 12),
       r('unl1', 'unlimited', null),
       r('idle1', 'idle', 0),
@@ -252,7 +362,7 @@ describe('sortConsumptionRows (urgency-first ordering)', () => {
       r('crit1', 'critical', 97),
     ]);
     expect(sorted.map((x) => x.status)).toEqual([
-      'critical', 'low', 'exhausted', 'ok', 'idle', 'unlimited', 'disabled',
+      'critical', 'low', 'exhausted', 'ok', 'idle', 'unlimited', 'disabled', 'expired',
     ]);
   });
 

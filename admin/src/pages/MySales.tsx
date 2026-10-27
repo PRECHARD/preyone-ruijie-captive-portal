@@ -177,26 +177,41 @@ export default function MySales() {
           <p className="page-desc">{sales?.totalSales || 0} sale(s) · {sales?.totalAmount ? <span className="money">${money(sales.totalAmount).toFixed(2)} {sales.currency || 'USD'}</span> : '—'}</p>
         </div>
         {tab === 'sales' && filteredSales.length > 0 && (
-            <button className="btn-secondary" onClick={exportExcel}>
-
+            <button className="btn-glass btn-glass--gold" onClick={exportExcel}>
             Export Excel
           </button>
         )}
       </div>
 
-      <div className="stats-grid stats-grid--compact stats-grid--hero" style={{ marginBottom: 20 }}>
-        <div className="stat-card stat-violet"><span className="stat-label">Total Sales</span><span className="stat-number">{sales?.totalSales || 0}</span></div>
-        <div className="stat-card stat-gold"><span className="stat-label">Total Revenue</span><span className="stat-number"><span className="money">${money(sales?.totalAmount).toFixed(2)} USD</span></span></div>
-        <div className="stat-card stat-cyan"><span className="stat-label">Pending Handover</span><span className="stat-number"><span className="money">${money(pendingHandoverTotal).toFixed(2)} USD</span></span></div>
-        <div className="stat-card stat-green"><span className="stat-label">Approved Handover</span><span className="stat-number"><span className="money">${money(approvedHandoverTotal).toFixed(2)} USD</span></span></div>
+      <div className="glass-stats">
+        <div className="glass-stat glass-stat--violet">
+          <span className="glass-stat__label">Total Sales</span>
+          <span className="glass-stat__value glass-stat__value--violet">{sales?.totalSales || 0}</span>
+          <span className="glass-stat__meta">Vouchers sold by you</span>
+        </div>
+        <div className="glass-stat glass-stat--gold">
+          <span className="glass-stat__label">Total Revenue</span>
+          <span className="glass-stat__value glass-stat__value--gold">${money(sales?.totalAmount).toFixed(2)}</span>
+          <span className="glass-stat__meta">{sales?.currency || 'USD'} · lifetime</span>
+        </div>
+        <div className="glass-stat">
+          <span className="glass-stat__label">Pending Handover</span>
+          <span className="glass-stat__value glass-stat__value--cyan">${money(pendingHandoverTotal).toFixed(2)}</span>
+          <span className="glass-stat__meta">Awaiting manager approval</span>
+        </div>
+        <div className="glass-stat glass-stat--green">
+          <span className="glass-stat__label">Approved Handover</span>
+          <span className="glass-stat__value glass-stat__value--green">${money(approvedHandoverTotal).toFixed(2)}</span>
+          <span className="glass-stat__meta">Reconciled with finance</span>
+        </div>
       </div>
 
-      <div className="auth-tabs" style={{ marginBottom: '1rem' }}>
-        <button className={'auth-tab' + (tab === 'sales' ? ' active' : '')} onClick={() => setTab('sales')}>Voucher Sales</button>
-        <button className={'auth-tab' + (tab === 'handover' ? ' active' : '')} onClick={() => setTab('handover')}>
+      <div className="glass-tabs" style={{ marginBottom: '1rem' }} role="tablist" aria-label="My sales sections">
+        <button type="button" role="tab" aria-selected={tab === 'sales'} className={'glass-tab' + (tab === 'sales' ? ' active' : '')} onClick={() => setTab('sales')}>Voucher Sales</button>
+        <button type="button" role="tab" aria-selected={tab === 'handover'} className={'glass-tab' + (tab === 'handover' ? ' active' : '')} onClick={() => setTab('handover')}>
           Available for Handover {availSales.length > 0 ? <span className="sidebar-badge" style={{ marginLeft: 6, display: 'inline-flex' }}>{availSales.length}</span> : ''}
         </button>
-        <button className={'auth-tab' + (tab === 'history' ? ' active' : '')} onClick={() => setTab('history')}>Handover History</button>
+        <button type="button" role="tab" aria-selected={tab === 'history'} className={'glass-tab' + (tab === 'history' ? ' active' : '')} onClick={() => setTab('history')}>Handover History</button>
       </div>
 
       {tab === 'sales' && (
@@ -253,36 +268,66 @@ export default function MySales() {
                 </ResponsiveContainer>
               </div>
 
-              <div className="card" style={{ padding: 8 }}>
+              <div className="pm3d">
                 <div className="section-header" style={{ border: 'none', padding: '4px 8px 0' }}>
                   Payment Mix
                 </div>
-                <ResponsiveContainer width="100%" height={210}>
-                  <PieChart>
-                    <Pie
-                      data={paymentMix}
-                      dataKey="amount"
-                      nameKey="name"
-                      innerRadius={52}
-                      outerRadius={76}
-                      paddingAngle={3}
-                      stroke="transparent"
-                    >
-                      {paymentMix.map((entry, index) => (
-                        <Cell key={entry.name} fill={PAYMENT_COLORS[index % PAYMENT_COLORS.length]} />
-                      ))}
-                    </Pie>
-                    <Tooltip
-                      contentStyle={tooltipStyle}
-                      formatter={(value: any, name: any) => [`$${Number(value).toFixed(2)}`, name]}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
-                <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 10, padding: '0 8px 8px' }}>
+                <div style={{ position: 'relative' }}>
+                  <ResponsiveContainer width="100%" height={210}>
+                    <PieChart>
+                      <defs>
+                        {PAYMENT_COLORS.map((color, index) => (
+                          <linearGradient key={color} id={`pm3dGrad${index}`} x1="0" y1="0" x2="1" y2="1">
+                            <stop offset="0%" stopColor={color} stopOpacity={0.98} />
+                            <stop offset="55%" stopColor={color} stopOpacity={0.78} />
+                            <stop offset="100%" stopColor={color} stopOpacity={0.38} />
+                          </linearGradient>
+                        ))}
+                      </defs>
+                      <Pie
+                        className="pm3d__chart"
+                        data={paymentMix}
+                        dataKey="amount"
+                        nameKey="name"
+                        innerRadius={54}
+                        outerRadius={80}
+                        paddingAngle={3}
+                        stroke="rgba(10,15,29,0.85)"
+                        strokeWidth={2}
+                        isAnimationActive
+                        animationDuration={650}
+                      >
+                        {paymentMix.map((entry, index) => (
+                          <Cell
+                            key={entry.name}
+                            fill={`url(#pm3dGrad${index % PAYMENT_COLORS.length})`}
+                            stroke={PAYMENT_COLORS[index % PAYMENT_COLORS.length]}
+                            strokeWidth={1}
+                          />
+                        ))}
+                      </Pie>
+                      <Tooltip
+                        contentStyle={tooltipStyle}
+                        formatter={(value: any, name: any) => [`$${Number(value).toFixed(2)}`, name]}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                  <div className="pm3d__center" aria-hidden="true">
+                    <span className="pm3d__center-value">
+                      ${paymentMix.reduce((sum, entry) => sum + entry.amount, 0).toFixed(2)}
+                    </span>
+                    <span className="pm3d__center-label">Total Mix</span>
+                  </div>
+                </div>
+                <div className="pm3d__legend">
                   {paymentMix.map((entry, index) => (
-                    <span key={entry.name} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10.5, color: 'var(--text-muted)' }}>
-                      <i style={{ width: 7, height: 7, borderRadius: 999, background: PAYMENT_COLORS[index % PAYMENT_COLORS.length] }} />
-                      {entry.name} ({entry.value})
+                    <span
+                      key={entry.name}
+                      className="pm3d__legend-item"
+                      style={{ color: PAYMENT_COLORS[index % PAYMENT_COLORS.length] }}
+                    >
+                      <i className="pm3d__swatch" style={{ background: PAYMENT_COLORS[index % PAYMENT_COLORS.length] }} />
+                      {entry.name} · <span className="pm3d__legend-amount">${entry.amount.toFixed(2)}</span>
                     </span>
                   ))}
                 </div>

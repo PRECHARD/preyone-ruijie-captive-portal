@@ -25,6 +25,8 @@ import { claimPooledVoucher, refillVoucherPool } from '../services/voucherPool';
 import { requireStarlinkAuth } from '../middleware/starlinkAuth';
 import { createStarlinkInvoice, applyStarlinkPayment, getStarlinkKit } from '../db/starlink';
 import { PLAN_TIERS } from './subscription';
+import { sendOnlinePaymentReceiptEmail } from '../services/notificationService';
+import type { OnlinePaymentEmailData } from '../services/notificationService';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'preyone-jwt-secret-change-in-production';
 let _jwtSecretWarned = false;
@@ -201,6 +203,49 @@ function normalizeSaleMethod(raw?: string | null): string {
   return value;
 }
 
+const NOTIFICATION_EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+
+/**
+ * Recipients for the online-payment advice. ONLINE_PAYMENT_RECIPIENTS wins
+ * when set; otherwise every approved CEO/Manager gets a copy. Falls back to
+ * admin@preyone.com so a production with no management account still alerts
+ * someone instead of silently dropping the payment advice.
+ */
+async function onlinePaymentRecipients(): Promise<string[]> {
+  const out = new Set<string>();
+  const configured = (process.env.ONLINE_PAYMENT_RECIPIENTS || '')
+    .split(/[,;]/)
+    .map((email) => email.trim().toLowerCase())
+    .filter((email) => NOTIFICATION_EMAIL_RE.test(email));
+
+  for (const email of configured) out.add(email);
+
+  if (configured.length === 0) {
+    try {
+      const result = await pool.query(
+        `SELECT email FROM admin_users
+          WHERE role IN ('CEO', 'Manager') AND approved = TRUE
+            AND deleted_at IS NULL AND email IS NOT NULL`
+      );
+      const rows = Array.isArray(result?.rows) ? result.rows : [];
+      for (const row of rows) {
+        const email = String(row.email || '').trim().toLowerCase();
+        if (NOTIFICATION_EMAIL_RE.test(email)) out.add(email);
+      }
+    } catch (err) {
+      console.error('Online payment recipient lookup failed:', err);
+    }
+  }
+
+  if (out.size === 0) out.add('admin@preyone.com');
+  return [...out];
+}
+
+async function notifyOnlinePayment(data: OnlinePaymentEmailData): Promise<void> {
+  const recipients = await onlinePaymentRecipients();
+  await sendOnlinePaymentReceiptEmail(recipients, data);
+}
+
 async function recordVoucherPoolFallback(
   paymentId: string,
   pay: any,
@@ -247,27 +292,31 @@ async function completePayment(paymentId: string): Promise<string> {
   // Circuit breaker variables
   let code: string = '';
   let voucherAlreadyMinted = false;
+  let voucherExpiry: string | number | null = null;
   let ruijieSource: { ruijie_expiry: number | null; user_group_id: string; profile_uuid: string; comment: string } | null = null;
   let poolFallbackError: unknown = null;
 
   // Circuit breaker: check if a Ruijie voucher was already minted for this payment
   // (prevents duplicate mints if a previous attempt failed at the DB recording step)
   const mintedCheck = await pool.query(
-    `SELECT code_no FROM ruijie_vouchers WHERE payment_id = $1 LIMIT 1`,
+    `SELECT code_no, ruijie_expiry FROM ruijie_vouchers WHERE payment_id = $1 LIMIT 1`,
     [paymentId]
   );
   if (mintedCheck.rows.length > 0) {
     code = mintedCheck.rows[0].code_no;
+    voucherExpiry = mintedCheck.rows[0].ruijie_expiry ?? null;
     voucherAlreadyMinted = true;
     console.warn(`[completePayment] Voucher ${code} already minted for payment ${paymentId}. Reusing.`);
   }
 
   // Fetch payment details (outside transaction)
   const paymentResult = await pool.query(
-    `SELECT p.*, pk.tier_name, pk.price_amount, pk.duration_min, pk.data_limit_gb,
-            pk.is_uncapped, pk.bandwidth_mbps_up, pk.bandwidth_mbps_down, pk.max_devices
+    `SELECT p.*, pk.tier_name, pk.display_name, pk.price_amount, pk.duration_min, pk.data_limit_gb,
+            pk.is_uncapped, pk.bandwidth_mbps_up, pk.bandwidth_mbps_down, pk.max_devices,
+            u.full_name AS customer_name, u.email AS customer_email
      FROM payments p
      JOIN packages pk ON pk.id = p.package_id
+     LEFT JOIN users u ON u.id = p.user_id
      WHERE p.id = $1`,
     [paymentId]
   );
@@ -318,6 +367,7 @@ async function completePayment(paymentId: string): Promise<string> {
       const claimed = await claimPooledVoucher(client, pay.tier_name, paymentId);
       if (claimed) {
         code = claimed.code_no;
+        voucherExpiry = claimed.ruijie_expiry ?? null;
         console.log(`[completePayment] Claimed pooled voucher ${code} for payment ${paymentId}`);
       } else {
         try {
@@ -325,6 +375,7 @@ async function completePayment(paymentId: string): Promise<string> {
             timeoutMs: 3000,
           });
           code = minted.codeNo;
+          voucherExpiry = minted.expiryTime ?? null;
           ruijieSource = {
             ruijie_expiry: minted.expiryTime ?? null,
             user_group_id: minted.userGroupId,
@@ -413,14 +464,15 @@ async function completePayment(paymentId: string): Promise<string> {
       );
     }
 
-    await client.query(
+    const saleInsert = await client.query(
       `INSERT INTO sales
          (voucher_id, voucher_code, sold_by, sold_by_name, amount, currency,
           payment_method, payment_reference, sold_at)
        SELECT v.id, v.code, $2::uuid, $3, $4, $5, $6, $7, $8
        FROM vouchers v
        WHERE v.code = $1
-         AND NOT EXISTS (SELECT 1 FROM sales WHERE voucher_code = $1)`,
+         AND NOT EXISTS (SELECT 1 FROM sales WHERE voucher_code = $1)
+       RETURNING id, sold_at`,
       [
         code,
         owner?.id ?? null,
@@ -432,8 +484,42 @@ async function completePayment(paymentId: string): Promise<string> {
         completedAt,
       ]
     );
+    const saleRow = saleInsert?.rows?.[0] ?? null;
 
     await client.query('COMMIT');
+
+    void notifyOnlinePayment({
+      paymentId,
+      merchantReference: pay.merchant_reference || null,
+      gatewayReference: pay.pesepay_reference || null,
+      gateway: 'Pesepay',
+      channel: 'Preyone WiFi Portal (wifi.preyone.com)',
+      paymentMethod: pay.payment_method || 'Online payment',
+      status: 'completed',
+      amount: pay.amount,
+      currency: pay.currency || 'USD',
+      initiatedAt: pay.created_at || null,
+      completedAt,
+      customerName: pay.customer_name || null,
+      customerPhone: pay.phone_number || null,
+      customerEmail: pay.customer_email || null,
+      clientMac: pay.client_mac || null,
+      packageTier: pay.tier_name,
+      packageName: pay.display_name || null,
+      durationMin: pay.duration_min,
+      dataLimitGb: pay.data_limit_gb,
+      isUncapped: pay.is_uncapped,
+      bandwidthUpMbps: pay.bandwidth_mbps_up,
+      bandwidthDownMbps: pay.bandwidth_mbps_down,
+      maxDevices: pay.max_devices,
+      voucherCode: code,
+      voucherExpiry,
+      saleId: saleRow?.id ?? null,
+      soldByName: owner?.fullName ?? DEFAULT_ONLINE_SALE_OWNER_NAME,
+      saleType: 'new',
+      taxAmount: null,
+      gatewayFee: null,
+    }).catch((err) => console.error(`[payment-email] Payment ${paymentId} advice failed`, err));
 
     if (poolFallbackError) {
       void recordVoucherPoolFallback(paymentId, pay, code, poolFallbackError);

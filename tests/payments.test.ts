@@ -10,6 +10,7 @@ vi.hoisted(() => {
   process.env.JWT_SECRET = 'test-jwt-secret';
   process.env.PESEPAY_INTEGRATION_KEY = 'test-integration-key';
   process.env.PESEPAY_ENCRYPTION_KEY = '0123456789abcdef0123456789abcdef';
+  process.env.ONLINE_PAYMENT_RECIPIENTS = 'ops@preyone.com';
 });
 
 vi.mock('../src/db/pool', () => {
@@ -26,6 +27,10 @@ vi.mock('../src/db/pool', () => {
     },
   };
 });
+
+vi.mock('../src/services/notificationService', () => ({
+  sendOnlinePaymentReceiptEmail: vi.fn().mockResolvedValue(true),
+}));
 
 vi.mock('../src/services/pesepayService', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/services/pesepayService')>();
@@ -93,6 +98,7 @@ import {
   verifyPaymentStatus,
 } from '../src/services/pesepayService';
 import { isRuijieCloudConfigured, mintRuijieVoucherForTier } from '../src/services/ruijieMint';
+import { sendOnlinePaymentReceiptEmail } from '../src/services/notificationService';
 
 function createApp() {
   const app = express();
@@ -606,6 +612,19 @@ describe('Payments routes', () => {
       expect(res.status).toBe(200);
       expect(res.body.state).toBe('completed');
       expect(res.body.voucherCode).toBe('CT-TESTCODE1');
+      await vi.waitFor(() => {
+        expect(sendOnlinePaymentReceiptEmail).toHaveBeenCalledTimes(1);
+      });
+      expect(sendOnlinePaymentReceiptEmail).toHaveBeenCalledWith(
+        ['ops@preyone.com'],
+        expect.objectContaining({
+          paymentId: 'pay-1',
+          voucherCode: 'CT-TESTCODE1',
+          amount: 10,
+          currency: 'USD',
+          status: 'completed',
+        })
+      );
     });
 
     it('records a Ruijie-minted voucher exactly once', async () => {

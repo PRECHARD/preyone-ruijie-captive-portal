@@ -94,6 +94,28 @@ Phone → Ruijie AP (WiFi) → EG105G-P Gateway → VPS (158.220.118.91)
    postgres. Do not unmask `postgresql` / `postgresql@16-main` on the VPS; if
    you ever reinstall it, keep `DB_HOST=127.0.0.1`. Backups of the old value:
    `/opt/preyone-portal/.env.bak-20261011-124947`.
+8. **Ruijie Cloud throttles hard: `{ code: 44, msg: "Too many requests" }`.**
+   The tenant quota is small enough that per-worker/per-tab polling exhausts it.
+   Rules added 2026-10-27:
+   - `src/services/ruijieRoster.ts` is the only sanctioned way to read the
+     roster. It stores one snapshot in the `ruijie_roster_cache` table
+     (created by `npm run migrate`) shared by all PM2 workers, TTL
+     `RUIJIE_ROSTER_TTL_MS` (default 120s), and **serves the last good
+     snapshot stale** when the pull fails. Never call `getAllRuijieVouchers()`
+     from a polling endpoint — use `getRuijieRoster()`.
+   - Reads enter a 60s cooldown after a 44 (`RUIJIE_READ_COOLDOWN_MS`), so
+     background sweeps stop hammering and let the quota recover.
+   - Voucher minting retries 44s briefly (1.2s, 3.5s) and then falls back to the
+     **pre-minted pool** (`claimPooledVoucherForStaff`); only when that tier's
+     stock is empty does the sale return **429** with `retryable: true`. Never
+     let a `RuijieApiError` reach the global handler, which masks every 5xx as
+     "Internal server error" in production. Claims are committed immediately, so
+     any request that aborts before creating the voucher row must give them back
+     (`releasePooledVouchers`) — otherwise stock is stranded as `assigned`
+     forever.
+   - `GET /api/admin/voucher-analytics` never 502s on a throttle: it returns
+     local vouchers with `degraded: true` / `usageKnown: false` so the
+     consumption tab still renders.
 
 ## VPS Access (production)
 

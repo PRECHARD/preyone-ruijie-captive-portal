@@ -16,6 +16,7 @@ const STATUS_LABEL: Record<ConsumptionStatus, string> = {
   exhausted: 'DRAINED',
   unlimited: 'UNLIMITED',
   disabled: 'DISABLED',
+  expired: 'EXPIRED',
 };
 
 /** Same badge vocabulary as the Vouchers list, plus crit/unlimited tones. */
@@ -27,9 +28,10 @@ const STATUS_BADGE: Record<ConsumptionStatus, string> = {
   exhausted: 'badge badge--no',
   unlimited: 'badge badge--unl',
   disabled: 'badge badge--muted',
+  expired: 'badge badge--expired',
 };
 
-type FilterKey = 'all' | 'low' | 'critical' | 'exhausted' | 'unlimited' | 'ok';
+type FilterKey = 'all' | 'low' | 'critical' | 'exhausted' | 'unlimited' | 'expired' | 'ok';
 
 const FILTERS: { key: FilterKey; label: string }[] = [
   { key: 'all', label: 'All' },
@@ -38,6 +40,7 @@ const FILTERS: { key: FilterKey; label: string }[] = [
   { key: 'critical', label: 'Critical 95%+' },
   { key: 'exhausted', label: 'Drained' },
   { key: 'unlimited', label: 'Unlimited' },
+  { key: 'expired', label: 'Expired' },
 ];
 
 function fmtMB(mb: number | null): string {
@@ -59,11 +62,17 @@ function fmtWhen(at: string | Date | null): string {
 }
 
 function isUnlimited(row: VoucherConsumptionRow): boolean {
+  // Only call a bundle unlimited when Ruijie actually reported the quota.
+  // Degraded rows have totalMB=null because usage is unknown, not uncapped.
+  if (row.usageKnown === false) return false;
   return row.totalMB == null || row.totalMB <= 0;
 }
 
 /** Used / Bundle cell — unlimited bundles always read "used / Unlimited". */
 function usedCell(row: VoucherConsumptionRow) {
+  if (row.usageKnown === false) {
+    return <span className="un-consume__muted" title="Live usage unavailable">—</span>;
+  }
   if (isUnlimited(row)) {
     return (
       <span className="un-consume__used">
@@ -160,12 +169,16 @@ export default function VoucherConsumptionTab() {
           {data && data.live ? (
             <span
               className="live-pill"
-              title="Re-reads every 30 seconds, so consumption, online devices and alerts stay current."
+              title={data.stale
+                ? 'Ruijie is temporarily rate-limiting us, so this is the last good reading. Retrying automatically.'
+                : 'Re-reads every 30 seconds, so consumption, online devices and alerts stay current.'}
             >
               <span className="live-dot" />
-              <span className="live-pill__label">Live</span>
+              <span className="live-pill__label">{data.stale ? 'Cached' : 'Live'}</span>
               <span className="live-pill__time">
-                {data ? `synced ${new Date(data.generatedAt).toLocaleTimeString()}` : 'syncing…'}
+                {data.stale && data.rosterFetchedAt
+                  ? `as of ${new Date(data.rosterFetchedAt).toLocaleTimeString()}`
+                  : `synced ${new Date(data.generatedAt).toLocaleTimeString()}`}
               </span>
             </span>
           ) : (
@@ -181,12 +194,24 @@ export default function VoucherConsumptionTab() {
         </div>
       </div>
       <p className="un-consume__sub">
-        Dual-threshold live view — 80% reminder / 95% critical · sweep every 5 min
+        Dual-threshold live view — {data?.thresholds?.warn ?? 80}% reminder /{' '}
+        {data?.thresholds?.critical ?? 95}% critical · sweep every 5 min
       </p>
 
       {data && !data.live && (
         <p className="un-consume__banner">
           Ruijie Cloud keys are missing on this portal — consumption rows and alert history are unavailable.
+        </p>
+      )}
+      {data?.degraded && (
+        <p className="un-consume__banner">
+          {data.warning
+            || 'Ruijie Cloud is temporarily unavailable, so live usage is paused. Showing local vouchers.'}
+        </p>
+      )}
+      {data?.stale && !data.degraded && (
+        <p className="un-consume__banner">
+          Ruijie Cloud is rate-limiting us, so this is the last successful reading — usage may be a few minutes old.
         </p>
       )}
       {error && <p className="un-consume__banner">{error}</p>}
@@ -216,6 +241,10 @@ export default function VoucherConsumptionTab() {
           <div className="un-consume__stat un-consume__stat--unlimited">
             <div className="un-consume__stat-num">{summary.unlimited}</div>
             <div className="un-consume__stat-label">Unlimited</div>
+          </div>
+          <div className="un-consume__stat un-consume__stat--expired">
+            <div className="un-consume__stat-num">{summary.expired}</div>
+            <div className="un-consume__stat-label">Expired</div>
           </div>
           <div className="un-consume__stat un-consume__stat--risk">
             <div className="un-consume__stat-num" style={{ fontSize: '1.35rem' }}>
@@ -310,19 +339,21 @@ export default function VoucherConsumptionTab() {
                     <div className="un-consume__bar" aria-hidden="true">
                       <div
                         className={fillClass(row)}
-                        style={{ width: `${row.pct == null ? 100 : Math.min(row.pct, 100)}%` }}
+                        style={{ width: row.usageKnown === false ? '0%' : `${row.pct == null ? 100 : Math.min(row.pct, 100)}%` }}
                       />
-                      {row.pct != null && (
+                      {row.pct != null && row.usageKnown !== false && (
                         <>
                           <span className="un-consume__tick" style={{ left: '80%' }} data-label="80" />
                           <span className="un-consume__tick" style={{ left: '95%' }} data-label="95" />
                         </>
                       )}
                     </div>
-                    <div className="un-consume__pct">{fmtPct(row.pct)}</div>
+                    <div className="un-consume__pct">{row.usageKnown === false ? '—' : fmtPct(row.pct)}</div>
                   </td>
                   <td>
-                    <span className={STATUS_BADGE[row.status]}>{STATUS_LABEL[row.status]}</span>
+                    {row.usageKnown === false
+                      ? <span className="badge badge--muted" title="Live Ruijie usage is unavailable">NO LIVE DATA</span>
+                      : <span className={STATUS_BADGE[row.status]}>{STATUS_LABEL[row.status]}</span>}
                   </td>
                   <td>
                     {row.onlineNow

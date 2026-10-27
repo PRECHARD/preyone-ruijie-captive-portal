@@ -31,16 +31,103 @@ import type { RuijieVoucher } from './ruijieCloud';
 export const ALERT_TIERS = [80, 95] as const;
 export type AlertTier = 80 | 95;
 
+/**
+ * Admin-configurable thresholds (Settings → Alert Thresholds).
+ *
+ * The *storage slots* stay 80/95 — `voucher_alert_state.tier` and
+ * `voucher_alert_events.tier` are keyed on those two integers, and the
+ * Consumption tab's badge vocabulary reads them. What is configurable is the
+ * percentage that fires each slot, so an operator can warn at 70 and go
+ * critical at 90 without a schema change (and without orphaning alert history).
+ */
+export interface AlertThresholds {
+  /** Percentage that fires the "low" reminder (stored as tier 80). */
+  warn: number;
+  /** Percentage that fires the "critical" push (stored as tier 95). */
+  critical: number;
+}
+
+export const DEFAULT_ALERT_THRESHOLDS: AlertThresholds = { warn: 80, critical: 95 };
+
+/** Settings keys backing the two thresholds (plain `settings` rows). */
+export const ALERT_THRESHOLD_KEYS = {
+  warn: 'voucher_alert_warn_pct',
+  critical: 'voucher_alert_crit_pct',
+} as const;
+
+/** Pure: coerce anything (form input, env, DB text) into sane thresholds. */
+export function normalizeAlertThresholds(
+  input: { warn?: unknown; critical?: unknown } | null | undefined
+): AlertThresholds {
+  const parse = (value: unknown, fallback: number): number => {
+    const n = Number(value);
+    if (!Number.isFinite(n) || n <= 0 || n > 100) return fallback;
+    return Math.round(n * 10) / 10;
+  };
+  const warn = parse(input?.warn, DEFAULT_ALERT_THRESHOLDS.warn);
+  const critical = parse(input?.critical, DEFAULT_ALERT_THRESHOLDS.critical);
+  // A critical threshold at or below the warning level would fire both slots on
+  // the same crossing. Keep the pair ordered and at least 5 points apart.
+  if (critical <= warn) return { warn, critical: Math.min(100, warn + 5) };
+  return { warn, critical };
+}
+
+const THRESHOLD_CACHE_MS = 60_000;
+let thresholdCache: { at: number; value: AlertThresholds } | null = null;
+
+/**
+ * Read the configured thresholds. Cached for 60s per worker so the 5-minute
+ * sweep and the analytics tab do not query `settings` on every request. Any
+ * failure silently falls back to 80/95 — alerting must never break on a
+ * settings read.
+ */
+export async function loadAlertThresholds(): Promise<AlertThresholds> {
+  if (thresholdCache && Date.now() - thresholdCache.at < THRESHOLD_CACHE_MS) {
+    return thresholdCache.value;
+  }
+  let value = DEFAULT_ALERT_THRESHOLDS;
+  try {
+    const { rows } = await pool.query(
+      'SELECT key, value FROM settings WHERE key = ANY($1::text[])',
+      [[ALERT_THRESHOLD_KEYS.warn, ALERT_THRESHOLD_KEYS.critical]]
+    );
+    const byKey = new Map<string, string>(rows.map((r: any) => [String(r.key), String(r.value)]));
+    value = normalizeAlertThresholds({
+      warn: byKey.get(ALERT_THRESHOLD_KEYS.warn),
+      critical: byKey.get(ALERT_THRESHOLD_KEYS.critical),
+    });
+  } catch {
+    value = DEFAULT_ALERT_THRESHOLDS;
+  }
+  thresholdCache = { at: Date.now(), value };
+  return value;
+}
+
+/** Test-only: forget the cached thresholds. */
+export function __resetAlertThresholdsForTests(): void {
+  thresholdCache = null;
+}
+
 export const MONITOR_POLL_MS = 5 * 60 * 1000;
 /** Re-alert only after this much NEW usage beyond the last alert (MB). */
 const RE_ALERT_EPSILON_MB = 1;
 /** Pending alerts older than this stop appearing on the portal banner. */
 const PENDING_FRESHNESS_H = 24;
 
-/** Pure: the tier to fire for a percentage, or null when below all tiers. */
-export function chooseAlertTier(pct: number): AlertTier | null {
-  if (!Number.isFinite(pct) || pct < ALERT_TIERS[0]) return null;
-  return pct >= 95 ? 95 : 80;
+/**
+ * Pure: the tier slot to fire for a percentage, or null when below all tiers.
+ * `thresholds` defaults to 80/95; the returned value is always the storage slot
+ * (80 or 95), never the configured percentage.
+ */
+export function chooseAlertTier(
+  pct: number,
+  thresholds: AlertThresholds = DEFAULT_ALERT_THRESHOLDS
+): AlertTier | null {
+  if (!Number.isFinite(pct)) return null;
+  const { warn, critical } = normalizeAlertThresholds(thresholds);
+  if (pct >= critical) return 95;
+  if (pct >= warn) return 80;
+  return null;
 }
 
 /** Pure: usage percentage for a capped Ruijie voucher, or null (unlimited/invalid). */
@@ -187,6 +274,10 @@ export async function runVoucherAlertSweep(): Promise<SweepSummary> {
   };
   if (!isRuijieCloudConfigured()) return summary;
 
+  // Loaded lazily: a sweep with no alert candidates (all unlimited/disabled)
+  // must not touch the database at all — same contract the tests assert.
+  let thresholds: AlertThresholds | null = null;
+
   let vouchers: RuijieVoucher[];
   try {
     vouchers = await getAllRuijieVouchers();
@@ -199,7 +290,8 @@ export async function runVoucherAlertSweep(): Promise<SweepSummary> {
     summary.scanned += 1;
     if (!isAlertCandidate(v)) continue;
     const pct = voucherPct(v)!;
-    const tier = chooseAlertTier(pct);
+    thresholds ??= await loadAlertThresholds();
+    const tier = chooseAlertTier(pct, thresholds);
     if (tier == null) continue;
     summary.candidates += 1;
 

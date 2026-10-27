@@ -27,6 +27,7 @@ import { currencyRouter } from './routes/currency';
 import { usageRouter } from './routes/usage';
 import { alertsRouter } from './routes/alerts';
 import { voucherAnalyticsRouter } from './routes/voucherAnalytics';
+import { reportsRouter } from './routes/reports';
 import { ensureStarlinkSchema } from './db/starlink';
 import { errorHandler } from './middleware/errorHandler';
 import { maintenanceCheck } from './middleware/maintenanceMode';
@@ -37,6 +38,7 @@ import { scheduleHandoverReminders } from './services/handoverReminder';
 import { startVoucherMonitor } from './services/voucherMonitorService';
 import { startVoucherPoolWorker } from './services/voucherPool';
 import { startRuijieVoucherStatusWorker } from './services/ruijieVoucherStatusSync';
+import { startReportScheduler } from './services/scheduler';
 import { scheduleSubscriptionCron } from './jobs/subscriptionCron';
 
 const app = express();
@@ -400,6 +402,9 @@ app.use('/api/check-usage', usageRouter);
 app.use('/api/alerts', alertsRouter);
 // Voucher Consumption & Status tab (admin): roster + alert history aggregate.
 app.use('/api/admin/voucher-analytics', voucherAnalyticsRouter);
+// Month-End / Staff reports + the 3rd-of-month email scheduler (additive;
+// mounted after the main admin router so no existing route is shadowed).
+app.use('/api/admin/reports', reportsRouter);
 // Multi-currency exchange rates (company-scoped)
 app.use('/api/currency', currencyRouter);
 
@@ -520,6 +525,10 @@ app.listen(PORT, () => {
   // Keep a small pre-minted Ruijie stock per active tier. The advisory lock
   // makes the sweep safe across all PM2 cluster workers.
   startVoucherPoolWorker();
+
+  // Month-End / Staff report email: 3rd of every month at 08:00 (previous
+  // month), with an hourly catch-up so a restart cannot skip a month.
+  startReportScheduler();
 
   // 3-tier subscription dunning: 3-day warning, 1-day urgent notice and
   // suspension on expiry, every day at midnight.

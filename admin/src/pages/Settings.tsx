@@ -11,6 +11,12 @@ interface ReportSchedule {
   created_at: string;
 }
 
+/** Settings keys read by src/services/voucherMonitorService.ts. */
+const ALERT_WARN_KEY = 'voucher_alert_warn_pct';
+const ALERT_CRIT_KEY = 'voucher_alert_crit_pct';
+const ALERT_WARN_DEFAULT = '80';
+const ALERT_CRIT_DEFAULT = '95';
+
 export default function Settings() {
   const [tab, setTab] = useState('general');
   const [loading, setLoading] = useState(true);
@@ -144,6 +150,7 @@ export default function Settings() {
         <button className={`auth-tab ${tab === 'branding' ? 'active' : ''}`} onClick={() => setTab('branding')}>Branding</button>
         <button className={`auth-tab ${tab === 'maintenance' ? 'active' : ''}`} onClick={() => setTab('maintenance')}>Maintenance</button>
         <button className={`auth-tab ${tab === 'retention' ? 'active' : ''}`} onClick={() => setTab('retention')}>Retention</button>
+        <button className={`auth-tab ${tab === 'alerts' ? 'active' : ''}`} onClick={() => setTab('alerts')}>Alert Thresholds</button>
         <button className={`auth-tab ${tab === 'commissions' ? 'active' : ''}`} onClick={() => setTab('commissions')}>Commissions</button>
         <button className={`auth-tab ${tab === 'schedules' ? 'active' : ''}`} onClick={() => setTab('schedules')}>Reports</button>
       </div>
@@ -212,6 +219,42 @@ export default function Settings() {
             <div className="auth-field"><label>Audit Log Retention (days)</label><input type="number" value={retention.audit_log_days ?? ''} onChange={e => setRetention({ ...retention, audit_log_days: e.target.value })} /></div>
             <button className="auth-btn" onClick={updateRetention}>Save Retention Policy</button>
             {retMsg && <div className={`form-status ${retMsg.includes('updated') ? 'form-status--success' : 'form-status--error'}`}>{retMsg}</div>}
+          </div>
+        </div>
+      )}
+
+      {tab === 'alerts' && (
+        <div className="card" style={{ padding: 20 }}>
+          <div className="auth-form">
+            <p style={{ color: 'var(--text-muted)', fontSize: 12, marginBottom: 12, lineHeight: 1.6 }}>
+              These percentages drive both the Consumption tab badges and the automated
+              push reminder sweep. The critical level must stay at least 5 points above the
+              warning level. Defaults are 80 / 95.
+            </p>
+            <div className="auth-field">
+              <label>Warning Threshold (%)</label>
+              <input
+                type="number"
+                min="1"
+                max="99"
+                step="1"
+                value={settings[ALERT_WARN_KEY] ?? ALERT_WARN_DEFAULT}
+                onChange={e => setSettings({ ...settings, [ALERT_WARN_KEY]: e.target.value })}
+              />
+            </div>
+            <div className="auth-field">
+              <label>Critical Threshold (%)</label>
+              <input
+                type="number"
+                min="2"
+                max="100"
+                step="1"
+                value={settings[ALERT_CRIT_KEY] ?? ALERT_CRIT_DEFAULT}
+                onChange={e => setSettings({ ...settings, [ALERT_CRIT_KEY]: e.target.value })}
+              />
+            </div>
+            <button className="auth-btn" onClick={updateSettings}>Save Thresholds</button>
+            {msg && <div className={`form-status ${msg.includes('updated') ? 'form-status--success' : 'form-status--error'}`}>{msg}</div>}
           </div>
         </div>
       )}

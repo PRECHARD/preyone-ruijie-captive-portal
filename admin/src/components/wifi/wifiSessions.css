@@ -700,6 +700,17 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.wf-data-left {
+  font-size: 10.5px;
+  color: var(--wf-green);
+  font-variant-numeric: tabular-nums;
+}
+.wf-devices {
+  font-size: 10.5px;
+  color: rgba(255, 255, 255, 0.45);
+  font-variant-numeric: tabular-nums;
+  cursor: help;
+}
 
 .wf-auth {
   display: inline-block;

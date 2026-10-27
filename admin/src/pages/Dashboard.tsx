@@ -221,7 +221,7 @@ export default function Dashboard({ onNavigate }: { onNavigate?: (s: string) => 
                   </span>
                 ) : (
                   <>
-                    <span className="stat-number"><span className="money">${(s as any).amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD</span></span>
+                    <span className="stat-number stat-number--money"><span className="money">${(s as any).amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD</span></span>
                     <span className="stat-sub">{s.count} sale{s.count !== 1 ? 's' : ''}</span>
                   </>
                 )}

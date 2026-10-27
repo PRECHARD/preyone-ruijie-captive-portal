@@ -25,7 +25,8 @@ import {
   getHourlySalesVelocity,
   getRecentActivity,
 } from '../db/sales';
-import { RuijieApiError } from '../services/ruijieCloud';
+import { RuijieApiError, RATE_LIMIT_CODE, isRateLimitError } from '../services/ruijieCloud';
+import { claimPooledVoucherForStaff, releasePooledVouchers } from '../services/voucherPool';
 import { syncRuijieVoucherStatuses } from '../services/ruijieVoucherStatusSync';
 import ExcelJS from 'exceljs';
 import path from 'path';
@@ -54,16 +55,119 @@ interface StaffRuijieMint {
   profile: string;
   userGroupId: string;
   expiryTime: number | null;
+  /** True when the code came from pre-minted stock because Ruijie was throttling. */
+  fromPool?: boolean;
 }
+
+// Ruijie's quota ("code 44") can stay exhausted for minutes. Once a mint is
+// refused, stop probing the API for a short window and sell from the pool
+// instead: a bulk run of 10 must not spend ~5s per code re-learning that the
+// quota is still empty.
+const MINT_COOLDOWN_MS = 30_000;
+let mintCooldownUntil = 0;
+
+function mintCooldownMsRemaining(): number {
+  return Math.max(0, mintCooldownUntil - Date.now());
+}
+
+/** Test-only: forget the throttle so each case starts with a clean quota. */
+export function __resetStaffMintThrottleForTests(): void {
+  mintCooldownUntil = 0;
+}
+
+function pooledExpiry(raw: string | number | null): number | null {
+  if (raw == null) return null;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/**
+ * Mint the code a staff sale will hand to the customer.
+ *
+ * When Ruijie refuses the mint because the tenant quota is exhausted, the sale
+ * must still go through: the pool already holds genuine, tier-matched codes
+ * minted ahead of time (`refillVoucherPool`), so the oldest usable one is
+ * assigned instead. Only when that stock is empty too does the caller see the
+ * rate-limit error and tell the operator to retry shortly.
+ */
 async function staffRuijieMint(packageTier: string, comment: string): Promise<StaffRuijieMint | null> {
   if (!isRuijieCloudConfigured()) return null;
-  const minted = await mintRuijieVoucherForTier(packageTier, comment);
+
+  if (mintCooldownMsRemaining() === 0) {
+    try {
+      const minted = await mintRuijieVoucherForTier(packageTier, comment);
+      mintCooldownUntil = 0;
+      return {
+        code: minted.codeNo,
+        profile: minted.profile,
+        userGroupId: minted.userGroupId,
+        expiryTime: minted.expiryTime ?? null,
+      };
+    } catch (err) {
+      if (!isRateLimitError(err)) throw err;
+      mintCooldownUntil = Date.now() + MINT_COOLDOWN_MS;
+    }
+  }
+
+  const pooled = await claimPooledVoucherForStaff(packageTier, comment);
+  if (!pooled) {
+    // Nothing pre-minted left for this tier — surface the (retryable) throttle.
+    throw new RuijieApiError(
+      RATE_LIMIT_CODE,
+      `voucher/create: Ruijie is rate-limiting us and no pooled ${packageTier} voucher is left`
+    );
+  }
+  console.warn(
+    `[voucher-mint] Ruijie rate-limited; assigned pooled ${packageTier} voucher ${pooled.code_no} to ${comment}`
+  );
   return {
-    code: minted.codeNo,
-    profile: minted.profile,
-    userGroupId: minted.userGroupId,
-    expiryTime: minted.expiryTime ?? null,
+    // The claimed row is already in ruijie_vouchers, so the audit INSERT below
+    // conflicts and keeps its real profile/expiry; these are only fallbacks.
+    code: pooled.code_no,
+    profile: pooled.profile_uuid ?? '',
+    userGroupId: pooled.user_group_id ?? '',
+    expiryTime: pooledExpiry(pooled.ruijie_expiry),
+    fromPool: true,
   };
+}
+
+/** Return any claimed-but-unsold pool codes so they stay sellable. */
+async function releaseUnusedPoolClaims(mints: StaffRuijieMint[], usedCodes?: Set<string>): Promise<void> {
+  const codes = mints
+    .filter((m) => m.fromPool)
+    .map((m) => m.code)
+    .filter((code) => !usedCodes || !usedCodes.has(String(code).toLowerCase()));
+  if (codes.length === 0) return;
+  try {
+    const released = await releasePooledVouchers(codes);
+    if (released > 0) console.warn(`[voucher-mint] released ${released} unused pooled voucher(s) back to stock`);
+  } catch (err) {
+    console.error('[voucher-mint] failed to release unused pooled vouchers', err);
+  }
+}
+
+/**
+ * Turn a failed mint into an actionable response instead of letting the global
+ * handler mask it as "Internal server error". Rate limiting is the common case
+ * (Ruijie `code 44`) and is retryable by the operator after a short wait.
+ * Returns true when the response has been sent.
+ */
+function replyIfRuijieMintError(res: Response, err: unknown): boolean {
+  if (!(err instanceof RuijieApiError)) return false;
+  if (isRateLimitError(err)) {
+    res.status(429).json({
+      error: 'Ruijie Cloud is rate-limiting new vouchers and the pre-minted stock for this tier is empty. Wait about a minute and try again — nothing was sold.',
+      code: err.code,
+      retryable: true,
+    });
+    return true;
+  }
+  res.status(502).json({
+    error: `Ruijie Cloud could not create this voucher: ${err.message}`,
+    code: err.code,
+    retryable: false,
+  });
+  return true;
 }
 
 const RUIJIE_VOUCHER_AUDIT_SQL = `INSERT INTO ruijie_vouchers
@@ -285,9 +389,15 @@ adminRouter.post('/vouchers', async (req: Request, res: Response) => {
   let ruijieMint: StaffRuijieMint | null = null;
   if (isRuijieCloudConfigured()) {
     if (!resolvedPackageTier) {
-      throw new RuijieApiError('missing_tier', 'Ruijie Cloud requires a package tier to mint a voucher');
+      res.status(422).json({ error: 'Choose a package tier — Ruijie Cloud mints every voucher from one.' });
+      return;
     }
-    ruijieMint = await staffRuijieMint(resolvedPackageTier, `Staff sale by ${req.adminUser!.fullName}`);
+    try {
+      ruijieMint = await staffRuijieMint(resolvedPackageTier, `Staff sale by ${req.adminUser!.fullName}`);
+    } catch (err) {
+      if (replyIfRuijieMintError(res, err)) return;
+      throw err;
+    }
   }
   // Canonical stored PIN is lowercase. Authentication is case-insensitive
   // (gateway + portal compare UPPER(code)), and every output path renders the
@@ -304,6 +414,9 @@ adminRouter.post('/vouchers', async (req: Request, res: Response) => {
      holderNameValue, holderPhoneValue, ruijieMint ? 'synced' : null, ruijieMint ? ruijieMint.code : null]
   );
   if (rows.length === 0) {
+    // A pooled code can only collide if it was already sold; give the claim
+    // back rather than stranding it, then report the conflict as before.
+    if (ruijieMint?.fromPool) await releaseUnusedPoolClaims([ruijieMint]);
     res.status(409).json({ error: 'A voucher with that code already exists.' });
     return;
   }
@@ -1752,13 +1865,14 @@ adminRouter.get('/active-sessions', async (req: Request, res: Response) => {
   const enriched = activeUsers.map((u: any) => {
     const dataLimit = u.data_limit_gb ? u.data_limit_gb * 1024 * 1024 * 1024 : null;
     const dataUsed = u.data_used_bytes ? parseInt(u.data_used_bytes) : 0;
-    const dataLeft = dataLimit ? Math.max(0, dataLimit - dataUsed) : (u.is_uncapped ? -1 : 0);
+    const dataLeft = dataLimit ? Math.max(0, dataLimit - dataUsed) : (u.is_uncapped ? -1 : null);
     const usagePercent = dataLimit && dataLimit > 0 ? ((dataUsed / dataLimit) * 100).toFixed(1) : null;
     const expiresAt = u.session_expires_at ? new Date(u.session_expires_at).getTime() : null;
     const timeLeft = expiresAt ? Math.max(0, expiresAt - Date.now()) : 0;
     const timeLeftMin = Math.round(timeLeft / 60000);
     return {
       ...u,
+      auth_method: u.voucher_code ? 'VOUCHER' : 'MAC_AUTO',
       data_used_bytes: dataUsed,
       data_limit_bytes: dataLimit,
       data_left_bytes: dataLeft,
@@ -2268,9 +2382,16 @@ adminRouter.post('/vouchers/bulk', async (req: Request, res: Response) => {
   let ruijieMints: StaffRuijieMint[] = [];
   if (isRuijieCloudConfigured()) {
     for (let i = 0; i < count; i++) {
-      const m = await staffRuijieMint(packageTier, `Bulk by ${req.adminUser!.fullName}`);
-      if (!m) break;
-      ruijieMints.push(m);
+      try {
+        const m = await staffRuijieMint(packageTier, `Bulk by ${req.adminUser!.fullName}`);
+        if (!m) break;
+        ruijieMints.push(m);
+      } catch (err) {
+        // Nothing was written yet, so hand back every pooled code claimed so far.
+        await releaseUnusedPoolClaims(ruijieMints);
+        if (replyIfRuijieMintError(res, err)) return;
+        throw err;
+      }
     }
   }
   const created: any[] = [];
@@ -2312,10 +2433,17 @@ adminRouter.post('/vouchers/bulk', async (req: Request, res: Response) => {
       created.push(rows[0]);
     }
     await client.query('COMMIT');
+    // Codes that lost the race to an existing voucher row are still unsold.
+    await releaseUnusedPoolClaims(
+      ruijieMints,
+      new Set(created.map((v: any) => String(v.code).toLowerCase()))
+    );
     await recordAuditLog(req.adminUser!.id, req.adminUser!.fullName, 'bulk_voucher_create', 'voucher', undefined, `Created ${count} vouchers for ${packageTier}`);
     res.status(201).json({ message: `${count} voucher(s) created`, count, vouchers: created });
   } catch (err) {
     await client.query('ROLLBACK');
+    // The inserts are gone, so every pool claim must go back to stock.
+    await releaseUnusedPoolClaims(ruijieMints);
     throw err;
   } finally {
     client.release();
@@ -2444,9 +2572,15 @@ adminRouter.post('/vouchers/approvals/:id/approve', requirePermission(PERMISSION
   let ruijieMints: StaffRuijieMint[] = [];
   if (isRuijieCloudConfigured()) {
     for (let i = 0; i < count; i++) {
-      const m = await staffRuijieMint(approval.package_tier, `Approval by ${req.adminUser!.fullName}`);
-      if (!m) break;
-      ruijieMints.push(m);
+      try {
+        const m = await staffRuijieMint(approval.package_tier, `Approval by ${req.adminUser!.fullName}`);
+        if (!m) break;
+        ruijieMints.push(m);
+      } catch (err) {
+        await releaseUnusedPoolClaims(ruijieMints);
+        if (replyIfRuijieMintError(res, err)) return;
+        throw err;
+      }
     }
   }
 
@@ -2500,6 +2634,11 @@ adminRouter.post('/vouchers/approvals/:id/approve', requirePermission(PERMISSION
 
     await client.query('COMMIT');
 
+    await releaseUnusedPoolClaims(
+      ruijieMints,
+      new Set(created.map((v: any) => String(v.code).toLowerCase()))
+    );
+
     await recordAuditLog(req.adminUser!.id, req.adminUser!.fullName, 'voucher_approval_approve', 'voucher_approval', id,
       `Approved ${count} ${approval.request_type} voucher(s) for ${approval.package_tier} (requested by ${approval.requested_by_name})`);
 
@@ -2513,6 +2652,7 @@ adminRouter.post('/vouchers/approvals/:id/approve', requirePermission(PERMISSION
     res.json({ message: `${count} voucher(s) approved and created`, count, vouchers: created });
   } catch (err) {
     await client.query('ROLLBACK');
+    await releaseUnusedPoolClaims(ruijieMints);
     throw err;
   } finally {
     client.release();

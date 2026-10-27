@@ -1,0 +1,341 @@
+/* ─────────────────────────────────────────────────────────────────────────────
+   Preyone Admin — unified dark-glassmorphism theme layer.
+
+   Additive only: every rule is namespaced under `glass-*` / `pm3d-*`, so
+   importing this file cannot change an existing page that has not opted in.
+   Palette: base #0a0f1d · neon cyan #00ccff · violet #a855f7 · gold #ffcc00.
+   ───────────────────────────────────────────────────────────────────────────── */
+
+:root {
+  --glass-bg: rgba(255, 255, 255, 0.045);
+  --glass-bg-strong: rgba(255, 255, 255, 0.07);
+  --glass-border: rgba(255, 255, 255, 0.10);
+  --glass-border-strong: rgba(255, 255, 255, 0.18);
+  --glass-blur: blur(14px) saturate(140%);
+  --neon-cyan: #00ccff;
+  --neon-violet: #a855f7;
+  --neon-gold: #ffcc00;
+  --neon-green: #22e6a8;
+  --neon-pink: #ff2d95;
+}
+
+/* ── Glassmorphic stat cards ───────────────────────────────────────────────── */
+
+.glass-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 14px;
+  margin-bottom: 20px;
+}
+
+.glass-stat {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 18px 18px 16px;
+  border-radius: 16px;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow:
+    0 12px 34px rgba(0, 0, 0, 0.42),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+  transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 220ms ease, border-color 220ms ease;
+}
+
+.glass-stat::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: radial-gradient(120% 90% at 100% 0%, rgba(0, 204, 255, 0.14), transparent 62%);
+  pointer-events: none;
+}
+
+.glass-stat:hover {
+  transform: translateY(-3px);
+  border-color: var(--glass-border-strong);
+  box-shadow:
+    0 18px 44px rgba(0, 0, 0, 0.5),
+    0 0 0 1px rgba(0, 204, 255, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.glass-stat--gold::after {
+  background: radial-gradient(120% 90% at 100% 0%, rgba(255, 204, 0, 0.16), transparent 62%);
+}
+
+.glass-stat--violet::after {
+  background: radial-gradient(120% 90% at 100% 0%, rgba(168, 85, 247, 0.18), transparent 62%);
+}
+
+.glass-stat--green::after {
+  background: radial-gradient(120% 90% at 100% 0%, rgba(34, 230, 168, 0.14), transparent 62%);
+}
+
+.glass-stat__label {
+  position: relative;
+  z-index: 1;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 1.7px;
+  text-transform: uppercase;
+  color: #9fb0c9;
+}
+
+.glass-stat__value {
+  position: relative;
+  z-index: 1;
+  font-family: var(--font-display, 'Plus Jakarta Sans', 'Montserrat', system-ui, sans-serif);
+  font-size: clamp(1.5rem, 1.1rem + 1.4vw, 2.35rem);
+  font-weight: 800;
+  line-height: 1.12;
+  letter-spacing: -0.02em;
+  color: #f1f5f9;
+}
+
+.glass-stat__value--gold {
+  color: var(--neon-gold);
+  text-shadow: 0 0 18px rgba(255, 204, 0, 0.45), 0 0 46px rgba(255, 204, 0, 0.16);
+}
+
+.glass-stat__value--cyan {
+  color: var(--neon-cyan);
+  text-shadow: 0 0 18px rgba(0, 204, 255, 0.45), 0 0 46px rgba(0, 204, 255, 0.16);
+}
+
+.glass-stat__value--violet {
+  color: #c084fc;
+  text-shadow: 0 0 18px rgba(168, 85, 247, 0.45), 0 0 46px rgba(168, 85, 247, 0.16);
+}
+
+.glass-stat__value--green {
+  color: var(--neon-green);
+  text-shadow: 0 0 18px rgba(34, 230, 168, 0.4), 0 0 46px rgba(34, 230, 168, 0.14);
+}
+
+.glass-stat__meta {
+  position: relative;
+  z-index: 1;
+  font-size: 11.5px;
+  color: #7f8fa8;
+}
+
+/* ── Purple tab pills (voucher sale sub-tabs, range switches) ──────────────── */
+
+.glass-tabs {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--glass-border);
+}
+
+.glass-tab {
+  appearance: none;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #a8b6cc;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 7px 14px;
+  border-radius: 9px;
+  cursor: pointer;
+  transition: background 180ms ease, color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+}
+
+.glass-tab:hover {
+  background: rgba(168, 85, 247, 0.8);
+  color: #ffffff;
+  box-shadow: 0 6px 18px rgba(168, 85, 247, 0.28);
+}
+
+.glass-tab.active {
+  background: linear-gradient(135deg, #a855f7, #7c3aed);
+  border-color: rgba(255, 255, 255, 0.16);
+  color: #ffffff;
+  box-shadow: 0 8px 24px rgba(168, 85, 247, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
+
+.glass-tab:focus-visible {
+  outline: 2px solid var(--neon-cyan);
+  outline-offset: 2px;
+}
+
+/* ── 3D payment-mix donut ──────────────────────────────────────────────────── */
+
+.pm3d {
+  position: relative;
+  border-radius: 16px;
+  padding: 10px 10px 4px;
+  background:
+    radial-gradient(120% 120% at 50% 0%, rgba(168, 85, 247, 0.10), transparent 60%),
+    var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow:
+    0 16px 40px rgba(0, 0, 0, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  overflow: hidden;
+}
+
+.pm3d__chart {
+  filter: drop-shadow(0 14px 22px rgba(0, 204, 255, 0.22)) drop-shadow(0 4px 8px rgba(0, 0, 0, 0.55));
+  transition: transform 260ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.pm3d:hover .pm3d__chart {
+  transform: translateY(-2px) scale(1.015);
+}
+
+.pm3d__center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  transform: translateY(-16px);
+}
+
+.pm3d__center-value {
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--neon-gold);
+  text-shadow: 0 0 16px rgba(255, 204, 0, 0.45);
+  letter-spacing: -0.02em;
+}
+
+.pm3d__center-label {
+  font-size: 9px;
+  letter-spacing: 1.6px;
+  text-transform: uppercase;
+  color: #7f8fa8;
+  font-weight: 700;
+}
+
+.pm3d__legend {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px 14px;
+  padding: 4px 8px 10px;
+}
+
+.pm3d__legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10.5px;
+  color: #9fb0c9;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.pm3d__swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  box-shadow: 0 0 8px currentColor;
+}
+
+.pm3d__legend-amount {
+  color: #e2e8f0;
+  font-weight: 700;
+}
+
+/* ── Chart tooltip skin (recharts passes contentStyle) ────────────────────── */
+
+.glass-tooltip {
+  background: rgba(10, 15, 29, 0.92) !important;
+  border: 1px solid rgba(0, 204, 255, 0.28) !important;
+  border-radius: 10px !important;
+  color: #e2e8f0 !important;
+  font-size: 12px !important;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.04) inset !important;
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+}
+
+/* ── Section chrome used by the revamped report pages ─────────────────────── */
+
+.glass-panel {
+  border-radius: 16px;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.4);
+}
+
+.glass-panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  color: #cfd9e8;
+}
+
+.glass-panel__body {
+  padding: 14px 16px;
+}
+
+/* ── Ghost/gold action button used next to the new stats ──────────────────── */
+
+.btn-glass {
+  appearance: none;
+  cursor: pointer;
+  border-radius: 10px;
+  padding: 8px 16px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #dbe6f5;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--glass-border);
+  transition: background 180ms ease, color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+}
+
+.btn-glass:hover {
+  background: rgba(168, 85, 247, 0.8);
+  color: #ffffff;
+  box-shadow: 0 8px 22px rgba(168, 85, 247, 0.32);
+  transform: translateY(-1px);
+}
+
+.btn-glass--gold {
+  color: var(--neon-gold);
+  border-color: rgba(255, 204, 0, 0.35);
+}
+
+.btn-glass--gold:hover {
+  background: rgba(255, 204, 0, 0.18);
+  color: var(--neon-gold);
+  box-shadow: 0 8px 22px rgba(255, 204, 0, 0.22);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .glass-stat,
+  .glass-tab,
+  .btn-glass,
+  .pm3d__chart {
+    transition: none !important;
+  }
+  .glass-stat:hover,
+  .pm3d:hover .pm3d__chart {
+    transform: none;
+  }
+}

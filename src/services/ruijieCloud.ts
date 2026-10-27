@@ -36,6 +36,50 @@ function isAuthError(err: unknown): err is RuijieApiError {
   return AUTH_ERROR_CODES.includes(Number(err.code)) || AUTH_ERROR_MESSAGE.test(err.message);
 }
 
+/**
+ * Ruijie answers HTTP 200 with `{ code: 44, msg: "Too many requests" }` once the
+ * tenant's API quota is exhausted. It is transient — the same call succeeds
+ * again after the window resets — so it must never surface as an opaque 500,
+ * and reads must stop asking for a while instead of deepening the throttle.
+ */
+export const RATE_LIMIT_CODE = 44;
+
+export function isRateLimitError(err: unknown): boolean {
+  if (!(err instanceof RuijieApiError)) return false;
+  return Number(err.code) === RATE_LIMIT_CODE || /too many requests/i.test(err.message);
+}
+
+// Writes (voucher minting) are user-initiated, so they are retried briefly
+// before giving up: the quota window often frees within a couple of seconds.
+const CREATE_RATE_LIMIT_RETRY_MS = [1200, 3500];
+
+async function withRateLimitRetry<T>(fn: () => Promise<T>): Promise<T> {
+  let attempt = 0;
+  for (;;) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (!isRateLimitError(err) || attempt >= CREATE_RATE_LIMIT_RETRY_MS.length) throw err;
+      const delay = CREATE_RATE_LIMIT_RETRY_MS[attempt] + Math.floor(Math.random() * 300);
+      attempt += 1;
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
+}
+
+// Reads (roster pulls) are cached upstream (see ruijieRoster.ts). Once Ruijie
+// says "Too many requests" the whole worker stops reading for a cooldown, so
+// background sweeps cannot keep the quota pinned at zero.
+const READ_COOLDOWN_MS = (() => {
+  const parsed = Number(process.env.RUIJIE_READ_COOLDOWN_MS ?? 60_000);
+  return Number.isFinite(parsed) && parsed >= 5_000 ? parsed : 60_000;
+})();
+let readCooldownUntil = 0;
+
+export function ruijieReadCooldownMsRemaining(): number {
+  return Math.max(0, readCooldownUntil - Date.now());
+}
+
 export interface RuijieUserGroup {
   id: string;
   name: string;
@@ -88,6 +132,7 @@ let cachedToken: { accessToken: string; expiresAt: number } | null = null;
 
 export function resetRuijieCloudCache(): void {
   cachedToken = null;
+  readCooldownUntil = 0;
 }
 
 export function isRuijieCloudConfigured(): boolean {
@@ -217,7 +262,7 @@ export async function createRuijieVoucher(input: CreateRuijieVoucherInput): Prom
   if (!input.profile || !input.userGroupId) {
     throw new RuijieApiError('config', `No Ruijie profile mapping for package`);
   }
-  return withTokenRefresh(async (accessToken) => {
+  return withRateLimitRetry(() => withTokenRefresh(async (accessToken) => {
     const cfg = getConfig();
     const comment = (input.comment || '').slice(0, 50);
     const res = await client().post(
@@ -245,7 +290,7 @@ export async function createRuijieVoucher(input: CreateRuijieVoucherInput): Prom
       userGroupId: entry?.userGroupId != null ? String(entry.userGroupId) : input.userGroupId,
       comment,
     };
-  });
+  }));
 }
 
 export interface GetRuijieVouchersInput {
@@ -257,37 +302,49 @@ export interface GetRuijieVouchersInput {
 export async function getRuijieVouchers(input: GetRuijieVouchersInput = {}): Promise<RuijieVoucher[]> {
   const start = input.start ?? 0;
   const pageSize = input.pageSize ?? 20;
-  return withTokenRefresh(async (accessToken) => {
-    const cfg = getConfig();
-    const res = await client().get(
-      `${VOUCHER_GET_LIST_URL}/${cfg.groupId}?access_token=${encodeURIComponent(accessToken)}&start=${start}&pageSize=${pageSize}`
+  if (readCooldownUntil > Date.now()) {
+    const left = Math.ceil((readCooldownUntil - Date.now()) / 1000);
+    throw new RuijieApiError(
+      RATE_LIMIT_CODE,
+      `voucher/getList skipped: cooling down after "Too many requests" (${left}s left)`
     );
-    failIfNotZero(res.data, `voucher/getList (groupId=${cfg.groupId}) -> HTTP ${res.status}`);
-    const vd = resolveVoucherData(res.data);
-    const list = vd?.list ?? vd?.voucherList ?? [];
-    if (!Array.isArray(list)) throw new RuijieApiError('bad_shape', 'Ruijie voucher getList returned no array');
-    return list.map((v: any) => ({
-      codeNo: String(v.codeNo ?? v.voucherCode ?? ''),
-      voucherCode: v.voucherCode != null ? String(v.voucherCode) : v.codeNo != null ? String(v.codeNo) : undefined,
-      expiryTime: parseExpiry(v.expiryTime ?? v.expireTime ?? v.expire_time),
-      profile: v.profile != null ? String(v.profile) : undefined,
-      userGroupId: v.userGroupId != null ? String(v.userGroupId) : undefined,
-      status: v.status != null ? String(v.status) : undefined,
-      comment: v.comment != null ? String(v.comment) : undefined,
-      quotaMb: toNum(v.quota ?? v.quotaMb),
-      usedQuotaMb: toNum(v.usedQuota ?? v.usedQuotaMb),
-      usedTimeMin: toNum(v.usedTime ?? v.usedTimeMin),
-      usedCount: toNum(v.usedCount ?? v.used_count),
-      timePeriodMin: toNum(v.timePeriod ?? v.timePeriodMin),
-      loginTime: toNum(v.loginTime ?? v.login_time),
-      firstUseTime: parseExpiry(v.firstUseTime ?? v.first_use_time ?? v.firstLoginTime),
-      currentClients: toNum(v.currentClients ?? v.current_clients),
-      maxClients: toNum(v.maxClients),
-      onlineStatus: v.onlineStatus ?? v.online_status,
-      packageName: v.packageName != null ? String(v.packageName) : undefined,
-      disableStatus: toNum(v.disableStatus ?? v.disable_status),
-    }));
-  });
+  }
+  try {
+    return await withTokenRefresh(async (accessToken) => {
+      const cfg = getConfig();
+      const res = await client().get(
+        `${VOUCHER_GET_LIST_URL}/${cfg.groupId}?access_token=${encodeURIComponent(accessToken)}&start=${start}&pageSize=${pageSize}`
+      );
+      failIfNotZero(res.data, `voucher/getList (groupId=${cfg.groupId}) -> HTTP ${res.status}`);
+      const vd = resolveVoucherData(res.data);
+      const list = vd?.list ?? vd?.voucherList ?? [];
+      if (!Array.isArray(list)) throw new RuijieApiError('bad_shape', 'Ruijie voucher getList returned no array');
+      return list.map((v: any) => ({
+        codeNo: String(v.codeNo ?? v.voucherCode ?? ''),
+        voucherCode: v.voucherCode != null ? String(v.voucherCode) : v.codeNo != null ? String(v.codeNo) : undefined,
+        expiryTime: parseExpiry(v.expiryTime ?? v.expireTime ?? v.expire_time),
+        profile: v.profile != null ? String(v.profile) : undefined,
+        userGroupId: v.userGroupId != null ? String(v.userGroupId) : undefined,
+        status: v.status != null ? String(v.status) : undefined,
+        comment: v.comment != null ? String(v.comment) : undefined,
+        quotaMb: toNum(v.quota ?? v.quotaMb),
+        usedQuotaMb: toNum(v.usedQuota ?? v.usedQuotaMb),
+        usedTimeMin: toNum(v.usedTime ?? v.usedTimeMin),
+        usedCount: toNum(v.usedCount ?? v.used_count),
+        timePeriodMin: toNum(v.timePeriod ?? v.timePeriodMin),
+        loginTime: toNum(v.loginTime ?? v.login_time),
+        firstUseTime: parseExpiry(v.firstUseTime ?? v.first_use_time ?? v.firstLoginTime),
+        currentClients: toNum(v.currentClients ?? v.current_clients),
+        maxClients: toNum(v.maxClients),
+        onlineStatus: v.onlineStatus ?? v.online_status,
+        packageName: v.packageName != null ? String(v.packageName) : undefined,
+        disableStatus: toNum(v.disableStatus ?? v.disable_status),
+      }));
+    });
+  } catch (err) {
+    if (isRateLimitError(err)) readCooldownUntil = Date.now() + READ_COOLDOWN_MS;
+    throw err;
+  }
 }
 
 /**

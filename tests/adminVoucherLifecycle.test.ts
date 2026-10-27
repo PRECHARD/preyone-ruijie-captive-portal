@@ -13,6 +13,16 @@ const { mockPoolQuery, mockClientQuery, mockClientRelease, mockPoolConnect } = v
   return { mockPoolQuery, mockClientQuery, mockClientRelease, mockPoolConnect };
 });
 
+// Ruijie Cloud is stubbed for the whole file: every staff sale mints or falls
+// back to the pre-minted pool, and neither may touch the network in a unit test.
+const ruijieMint = vi.hoisted(() => ({ configured: vi.fn(() => true), mint: vi.fn() }));
+
+vi.mock('../src/services/ruijieMint', () => ({
+  isRuijieCloudConfigured: ruijieMint.configured,
+  findRuijieProfile: vi.fn(),
+  mintRuijieVoucherForTier: ruijieMint.mint,
+}));
+
 vi.mock('../src/db/pool', () => ({
   pool: { query: mockPoolQuery, connect: mockPoolConnect },
 }));
@@ -45,7 +55,8 @@ vi.mock('../src/routes/adminAuth', async () => {
 });
 
 import { requireAdminAuth } from '../src/middleware/adminAuth';
-import { adminRouter } from '../src/routes/admin';
+import { adminRouter, __resetStaffMintThrottleForTests } from '../src/routes/admin';
+import { RuijieApiError } from '../src/services/ruijieCloud';
 
 function createApp() {
   const app = express();
@@ -74,6 +85,9 @@ beforeEach(() => {
   mockClientRelease.mockReset();
   mockPoolConnect.mockReset();
   mockPoolConnect.mockResolvedValue({ query: mockClientQuery, release: mockClientRelease });
+  ruijieMint.configured.mockReturnValue(true);
+  ruijieMint.mint.mockReset();
+  __resetStaffMintThrottleForTests();
 });
 
 const VOUCHER_ROW = {
@@ -648,6 +662,89 @@ describe('POST /api/admin/vouchers/:id/renew', () => {
     expect(set).not.toContain('price_amount');
     // Only the voucher load ran — no package lookup at all.
     expect(mockPoolQuery).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * Regression guard: the prompts these routes came from asked for a stored
+ * `status` column and a `/wispr/login` callback. Both would be regressions —
+ * see AGENTS.md — so pin the decisions here.
+ */
+describe('POST /api/admin/vouchers while Ruijie is throttling', () => {
+  const PKG_ROW = {
+    tier_name: 'PreLite',
+    display_name: 'PreLite',
+    duration_min: 1440,
+    data_limit_gb: 1,
+    is_uncapped: false,
+    bandwidth_mbps_up: 2,
+    bandwidth_mbps_down: 5,
+    max_devices: 1,
+  };
+
+  const throttle = () =>
+    new RuijieApiError(44, 'voucher/create (groupId=9624342) -> HTTP 200: Too many requests.');
+
+  it('sells a pre-minted pool voucher instead of failing the sale', async () => {
+    mockAuth({ id: 'ceo-1', role: 'CEO', fullName: 'Boss' });
+    ruijieMint.mint.mockRejectedValueOnce(throttle());
+    mockPoolQuery
+      .mockResolvedValueOnce({ rows: [PKG_ROW] }) // package lookup
+      .mockResolvedValueOnce({                              // pool claim
+        rows: [{
+          code_no: 'pooled123',
+          tier_name: 'PreLite',
+          user_group_id: 'grp-1',
+          profile_uuid: 'prof-1',
+          ruijie_expiry: '1798761600000',
+        }],
+        rowCount: 1,
+      })
+      .mockResolvedValueOnce({ rows: [{ id: 'v-9', code: 'pooled123', package_tier: 'PreLite' }] }) // vouchers insert
+      .mockResolvedValueOnce({ rows: [] }); // ruijie_vouchers audit insert (conflicts, no-op)
+
+    const res = await request(createApp())
+      .post('/api/admin/vouchers')
+      .send({ code: 'typed-by-staff', packageTier: 'PreLite' });
+
+    expect(res.status).toBe(201);
+    // The customer gets the real Ruijie PIN from stock, never the typed value.
+    expect(res.body.code).toBe('pooled123');
+    const claim = mockPoolQuery.mock.calls.find(([sql]) => String(sql).includes("source = 'staff'"));
+    expect(claim).toBeTruthy();
+    expect((claim as any[])[1]).toEqual(['PreLite', 'Staff sale by Boss']);
+  });
+
+  it('answers 429 with retryable:true when the pool is empty too', async () => {
+    mockAuth({ id: 'ceo-1', role: 'CEO', fullName: 'Boss' });
+    ruijieMint.mint.mockRejectedValueOnce(throttle());
+    mockPoolQuery
+      .mockResolvedValueOnce({ rows: [PKG_ROW] }) // package lookup
+      .mockResolvedValueOnce({ rows: [] });       // nothing pre-minted left
+
+    const res = await request(createApp())
+      .post('/api/admin/vouchers')
+      .send({ code: 'typed', packageTier: 'PreLite' });
+
+    expect(res.status).toBe(429);
+    expect(res.body.retryable).toBe(true);
+    expect(res.body.error).toMatch(/nothing was sold/i);
+  });
+
+  it('reports a real Ruijie failure with its message, not "Internal server error"', async () => {
+    mockAuth({ id: 'ceo-1', role: 'CEO', fullName: 'Boss' });
+    ruijieMint.mint.mockRejectedValueOnce(
+      new RuijieApiError('unmapped_tier', "Package tier 'PreLite' has no active Ruijie Cloud profile mapping")
+    );
+    mockPoolQuery.mockResolvedValueOnce({ rows: [PKG_ROW] });
+
+    const res = await request(createApp())
+      .post('/api/admin/vouchers')
+      .send({ code: 'typed', packageTier: 'PreLite' });
+
+    expect(res.status).toBe(502);
+    expect(res.body.retryable).toBe(false);
+    expect(res.body.error).toMatch(/no active Ruijie Cloud profile mapping/);
   });
 });
 

@@ -165,4 +165,31 @@ describe('VoucherConsumptionTab', () => {
     await waitFor(() => expect(screen.queryByText('Voucher crit95x')).toBeNull());
     expect(screen.getByText('crit95x')).toBeTruthy();
   });
+
+  it('keeps local vouchers visible when Ruijie is rate-limiting the roster', async () => {
+    apiState.get.mockResolvedValue(payload({
+      degraded: true,
+      warning: 'Ruijie Cloud is temporarily unavailable or rate-limiting us, so live usage is paused.',
+      summary: { total: 1, ok: 0, low: 0, critical: 0, exhausted: 0, unlimited: 0, idle: 1, disabled: 0, expired: 0 },
+      rows: [row({ code: 'localonly', usedMB: null, totalMB: null, pct: null, status: 'idle', usageKnown: false })],
+    }));
+    render(<VoucherConsumptionTab />);
+
+    await waitFor(() => expect(screen.getByText('localonly')).toBeTruthy());
+    // The degraded banner explains why usage is missing instead of hiding the table.
+    expect(screen.getByText(/rate-limiting us/)).toBeTruthy();
+    expect(screen.getByText('NO LIVE DATA')).toBeTruthy();
+  });
+
+  it('labels a cached snapshot instead of claiming it is live', async () => {
+    apiState.get.mockResolvedValue(payload({
+      stale: true,
+      rosterFetchedAt: new Date(Date.now() - 5 * 60_000).toISOString(),
+    }));
+    render(<VoucherConsumptionTab />);
+
+    await waitFor(() => expect(screen.getByText('Cached')).toBeTruthy());
+    expect(screen.queryByText('Live')).toBeNull();
+    expect(screen.getByText(/last successful reading/)).toBeTruthy();
+  });
 });

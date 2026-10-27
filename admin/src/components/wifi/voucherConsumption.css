@@ -209,6 +209,7 @@
 .un-consume__stat--critical { --uc-accent: var(--pink); }
 .un-consume__stat--exhausted { --uc-accent: var(--red); }
 .un-consume__stat--unlimited { --uc-accent: var(--purple, #a855f7); }
+.un-consume__stat--expired { --uc-accent: #ff8a65; }
 .un-consume__stat--risk { --uc-accent: var(--red); }
 
 .un-consume__stat-num {
@@ -259,6 +260,7 @@
   animation: uc-flow 2.4s linear infinite;
 }
 .un-consume__fill--disabled { background: rgba(255, 255, 255, 0.18); }
+.un-consume__fill--expired { background: linear-gradient(90deg, #ff8a65, var(--red)); opacity: 0.8; }
 
 @keyframes uc-flow {
   0% { filter: brightness(1); }
@@ -329,6 +331,12 @@
   background: rgba(255, 0, 127, 0.14);
   color: var(--pink);
   box-shadow: 0 0 8px rgba(255, 0, 127, 0.2);
+}
+
+.badge--expired {
+  background: rgba(255, 138, 101, 0.15);
+  color: #ffab91;
+  box-shadow: 0 0 8px rgba(255, 138, 101, 0.2);
 }
 
 .badge--unl {

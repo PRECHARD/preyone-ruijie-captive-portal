@@ -6,16 +6,18 @@ import { isRuijieCloudConfigured, RuijieApiError } from '../services/ruijieCloud
 import {
   kickRuijieUser,
   listRuijieDevices,
-  listRuijieOnlineUsers,
   syncAccountingData,
   syncVoucherToRuijie,
   type RuijieOnlineUser,
 } from '../services/ruijieService';
+import { getRuijieSessionSnapshot } from '../services/ruijieSessionCache';
 import {
   bindingMacKey,
   loadHolders,
+  resolveSessionAccounts,
   resolveVoucherBindings,
   verifyVoucherCodes,
+  type AccountMatchSource,
   type BindingSource,
 } from '../services/voucherBindingService';
 
@@ -107,8 +109,18 @@ export interface EnrichedSession extends RuijieOnlineUser {
   accountName: string | null;
   accountPhone: string | null;
   accountSessionExpiresAt: string | null;
-  /** Which local source produced `code` â€” null when nothing resolved. */
   bindingSource: BindingSource | null;
+  /** Which fallback stage matched: direct code, MAC binding, or IP/portal. */
+  matchedBy: AccountMatchSource | null;
+  /** AUTH column classification: voucher or MAC bypass/whitelist. */
+  authMethod: 'VOUCHER' | 'MAC_AUTO';
+  macWhitelisted: boolean;
+  dataLimitBytes: number | null;
+  dataUsedBytes: number | null;
+  dataLeftBytes: number | null;
+  isUncapped: boolean | null;
+  activeDeviceCount: number;
+  deviceMacs: string[];
 }
 
 interface PortalAccount {
@@ -178,83 +190,91 @@ async function enrichSessions(sessions: RuijieOnlineUser[]): Promise<EnrichedSes
     accountPhone: null,
     accountSessionExpiresAt: null,
     bindingSource: null,
+    matchedBy: null,
+    authMethod: 'MAC_AUTO',
+    macWhitelisted: false,
+    dataLimitBytes: null,
+    dataUsedBytes: null,
+    dataLeftBytes: null,
+    isUncapped: null,
+    activeDeviceCount: 0,
+    deviceMacs: [],
   }));
   if (out.length === 0) return out;
 
   try {
-    // 1) MAC â†’ voucher (shared resolver: case-correct across all four sources).
-    const byMac = await resolveVoucherBindings(out.map((s) => s.mac));
-    for (const s of out) {
-      const key = bindingMacKey(s.mac);
-      const binding = key ? byMac.get(key) : undefined;
-      if (!binding?.code) continue;
-      s.code = binding.code;
-      s.holderName = binding.holderName;
-      s.holderPhone = binding.holderPhone;
-      s.bindingSource = binding.source;
-    }
+    // 1) Direct code -> MAC binding -> IP/portal, plus data/device/auth metadata.
+    const resolved = await resolveSessionAccounts(
+      out.map((s) => ({ mac: s.mac, ip: s.ip, codeCandidates: [s.username, s.account] }))
+    );
+    out.forEach((s, index) => {
+      const account = resolved[index];
+      s.code = account.code;
+      s.holderName = account.holderName;
+      s.holderPhone = account.holderPhone;
+      s.accountName = account.accountName;
+      s.accountPhone = account.accountPhone;
+      s.accountSessionExpiresAt = account.accountSessionExpiresAt;
+      s.bindingSource = account.bindingSource;
+      s.matchedBy = account.matchedBy;
+      s.authMethod = account.authMethod;
+      s.macWhitelisted = account.macWhitelisted;
+      s.dataLimitBytes = account.dataLimitBytes;
+      s.dataUsedBytes = account.dataUsedBytes;
+      s.dataLeftBytes = account.dataLeftBytes;
+      s.isUncapped = account.isUncapped;
+      s.activeDeviceCount = account.activeDeviceCount;
+      s.deviceMacs = account.deviceMacs;
+    });
 
-    // 2) MAC -> portal account (name / phone / expiry). Also fills a gap when
-    //    the voucher resolver had no holder name, and recovers the PIN from
-    //    users.voucher_code if none of the four binding sources matched.
+    // 2) Portal account name/phone/expiry by MAC. The resolver already filled
+    //    these for IP matches; this adds them for MAC-resolved vouchers and
+    //    fills a holder-name gap without overriding a real voucher holder.
     const accounts = await loadPortalAccounts(out.map((s) => s.mac));
     for (const s of out) {
       const key = bindingMacKey(s.mac);
       const account = key ? accounts.get(key) : undefined;
       if (!account) continue;
-      s.accountName = account.fullName;
-      s.accountPhone = account.phone;
-      s.accountSessionExpiresAt = account.sessionExpiresAt;
+      s.accountName = s.accountName ?? account.fullName;
+      s.accountPhone = s.accountPhone ?? account.phone;
+      s.accountSessionExpiresAt = s.accountSessionExpiresAt ?? account.sessionExpiresAt;
       if (!s.holderName && account.fullName) s.holderName = account.fullName;
       if (!s.holderPhone && account.phone) s.holderPhone = account.phone;
-      if (!s.code && account.voucherCode) {
-        s.code = account.voucherCode.toLowerCase();
-        s.bindingSource = 'users';
-      }
-    }
-
-    // 3) Strict contract fallback: Ruijie reports the voucher code as
-    //    `userName` on some deployments. Accept it ONLY after confirming it
-    //    exists on vouchers â€” otherwise the label stays hidden and the UI
-    //    renders an em-dash rather than a fake PIN.
-    const candidates = out.filter((s) => !s.code && s.username);
-    if (candidates.length > 0) {
-      const verified = await verifyVoucherCodes(candidates.map((s) => s.username));
-      for (const s of candidates) {
-        const code = verified.get(String(s.username).trim().toLowerCase());
-        if (code) {
-          s.code = code;
-          s.bindingSource = 'ruijie_user_name';
-        }
-      }
-      if (verified.size > 0) {
-        const holders = await loadHolders(verified.values());
-        for (const s of out) {
-          if (!s.code || s.holderName) continue;
-          const holder = holders.get(s.code);
-          if (holder) {
-            s.holderName = holder.name;
-            s.holderPhone = holder.phone;
-          }
-        }
-      }
     }
   } catch (err) {
-    // Holder enrichment must never sink live telemetry â€” sessions still ship.
+    // Holder enrichment must never sink live telemetry - sessions still ship.
     console.error('[RUIJIE API] session holder enrichment failed:', err);
   }
   return out;
 }
 
-ruijieRouter.get('/sessions', async (_req, res) => {
+ruijieRouter.get('/sessions', async (req, res) => {
   try {
-    if (!isRuijieCloudConfigured()) {
+    // Cached, circuit-broken feed. Upstream failures degrade to the last good
+    // snapshot (with stale/degraded flags) instead of a 502 — the Sessions view
+    // must keep rendering while Ruijie's quota recovers.
+    const force = req.query.refresh === '1' || req.query.refresh === 'true';
+    const snapshot = await getRuijieSessionSnapshot({ force });
+    if (snapshot.reason === 'ruijie_cloud_not_configured') {
       res.json({ skipped: true, reason: 'ruijie_cloud_not_configured', count: 0, users: [] });
       return;
     }
-    const users = await listRuijieOnlineUsers();
-    const enriched = await enrichSessions(users);
-    res.json({ skipped: false, count: enriched.length, users: enriched });
+    const enriched = await enrichSessions(snapshot.users);
+    res.json({
+      skipped: false,
+      count: enriched.length,
+      users: enriched,
+      stale: snapshot.stale,
+      degraded: snapshot.degraded,
+      breakerOpen: snapshot.breakerOpen,
+      rosterFetchedAt: snapshot.fetchedAt,
+      ttlMs: snapshot.ttlMs,
+      warning: snapshot.stale
+        ? 'Ruijie Cloud is temporarily unavailable or rate-limiting us, so this is the last successful reading. Retrying automatically.'
+        : snapshot.degraded
+          ? 'Ruijie Cloud is unreachable and no reading has been cached yet. Retrying automatically.'
+          : null,
+    });
   } catch (err) {
     sendRuijieError(res, err, 'Failed to fetch Ruijie online users');
   }
