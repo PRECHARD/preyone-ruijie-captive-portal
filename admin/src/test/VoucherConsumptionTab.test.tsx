@@ -192,4 +192,33 @@ describe('VoucherConsumptionTab', () => {
     expect(screen.queryByText('Live')).toBeNull();
     expect(screen.getByText(/last successful reading/)).toBeTruthy();
   });
+
+  it('renders the All list in the five-tier urgency order', async () => {
+    apiState.get.mockResolvedValue(payload({
+      rows: [
+        row({ code: 'idleBottom', pct: 0, status: 'idle' }),
+        row({ code: 'unlOff', totalMB: null, pct: null, status: 'unlimited' }),
+        row({ code: 'okMid', pct: 10, status: 'ok' }),
+        row({ code: 'unlOn', totalMB: null, pct: null, status: 'unlimited', onlineNow: true }),
+        row({ code: 'drainTop', pct: 100, status: 'exhausted' }),
+        row({ code: 'critTop', pct: 96, status: 'critical' }),
+        row({ code: 'lowMid', pct: 84, status: 'low' }),
+        row({ code: 'expBottom', pct: 100, status: 'expired' }),
+      ],
+    }));
+    render(<VoucherConsumptionTab />);
+
+    await waitFor(() => expect(screen.getByText('critTop')).toBeTruthy());
+    const codes = Array.from(document.querySelectorAll('.code-cell')).map((el) => el.textContent);
+    expect(codes).toEqual([
+      'critTop',   // 1. critical 95%+
+      'lowMid',    // 1. low 80%+
+      'drainTop',  // 2. drained 100%
+      'okMid',     // 3. OK
+      'unlOn',     // 4. unlimited, online first…
+      'unlOff',    //    …then offline, still above idle
+      'idleBottom',// 5. idle / expired at the bottom
+      'expBottom',
+    ]);
+  });
 });

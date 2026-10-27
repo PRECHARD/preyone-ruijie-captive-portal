@@ -95,14 +95,27 @@ export default function Dashboard({ onNavigate }: { onNavigate?: (s: string) => 
   const loadAll = useCallback(() => {
     if (isMgmt) {
       api.get<DashboardData>('/dashboard').then(setData).catch(() => {});
-      // Monthly revenue target (settings-backed, see /api/admin/reports).
-      api.get('/reports/revenue-target').then(setRevenueTarget).catch(() => {});
+      // Monthly revenue target (settings-backed; canonical /api/admin/revenue-target).
+      api.get('/revenue-target').then(setRevenueTarget).catch(() => {});
     } else {
       api.get<StaffStats>('/staff/stats').then(setStaffStats).catch(() => {});
     }
   }, [isMgmt]);
 
-  useEffect(() => { loadAll(); const i = setInterval(loadAll, 30000); return () => clearInterval(i); }, [loadAll]);
+  useEffect(() => {
+    loadAll();
+    const i = setInterval(loadAll, 30000);
+    // A target saved in My Sales / Settings must show up immediately when the
+    // operator comes back to the Dashboard instead of waiting for the poll.
+    const onFocus = () => { if (!document.hidden) loadAll(); };
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onFocus);
+    return () => {
+      clearInterval(i);
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onFocus);
+    };
+  }, [loadAll]);
 
   const m = data?.metrics;
 

@@ -100,6 +100,76 @@ function matchesFilter(row: VoucherConsumptionRow, filter: FilterKey): boolean {
   return row.status === filter;
 }
 
+/**
+ * Five-tier hierarchy the Consumption tab renders, in order:
+ *
+ *   1. `critical` / `low` — 80%+ and 95%+ quota usage. Needs an upsell today.
+ *   2. `exhausted`       — quota-bound bundle fully consumed (100%).
+ *   3. `ok`              — healthy capped vouchers.
+ *   4. `unlimited`       — uncapped bundles; online sessions first.
+ *   5. `idle` / `disabled` / `expired` — inactive dead stock, always last.
+ *
+ * Mirrors `consumptionTier` in `src/routes/voucherAnalytics.ts` so the client
+ * can never re-order what the API already sorted.
+ */
+export function consumptionTier(status: ConsumptionStatus): number {
+  switch (status) {
+    case 'critical':
+    case 'low':
+      return 0;
+    case 'exhausted':
+      return 1;
+    case 'ok':
+      return 2;
+    case 'unlimited':
+      return 3;
+    case 'idle':
+    case 'disabled':
+    case 'expired':
+    default:
+      return 4;
+  }
+}
+
+/** Dead-stock sub-rank inside tier 4: idle → disabled → expired. */
+function deadRank(status: ConsumptionStatus): number {
+  if (status === 'idle') return 0;
+  if (status === 'disabled') return 1;
+  if (status === 'expired') return 2;
+  return 0;
+}
+
+function pctOf(row: VoucherConsumptionRow): number {
+  const pct = Number(row.pct);
+  return Number.isFinite(pct) ? pct : -1;
+}
+
+/**
+ * Five-tier, urgency-first ordering (pure, unit-tested).
+ *
+ * Tier order is fixed: critical/low → drained → OK → unlimited (online first,
+ * i.e. directly below OK) → idle/expired. Inside a tier, vouchers with a live
+ * client come first, then higher pct, then PIN ascending for a stable order.
+ */
+export function compareConsumptionRows(a: VoucherConsumptionRow, b: VoucherConsumptionRow): number {
+  const byTier = consumptionTier(a.status) - consumptionTier(b.status);
+  if (byTier !== 0) return byTier;
+
+  // Only matters inside the dead tier, where it keeps disabled/expired codes
+  // below untouched idle ones even when their stored pct is high.
+  const byDead = deadRank(a.status) - deadRank(b.status);
+  if (byDead !== 0) return byDead;
+
+  const aOnline = a.onlineNow === true ? 1 : 0;
+  const bOnline = b.onlineNow === true ? 1 : 0;
+  if (aOnline !== bOnline) return bOnline - aOnline;
+
+  const pctDiff = pctOf(b) - pctOf(a);
+  if (pctDiff !== 0) return pctDiff;
+
+  return String(a.code || '').localeCompare(String(b.code || ''));
+}
+
 export default function VoucherConsumptionTab() {
   const [data, setData] = useState<VoucherConsumptionResponse | null>(null);
   const [error, setError] = useState('');
@@ -148,7 +218,11 @@ export default function VoucherConsumptionTab() {
     );
   }, [rows, query]);
 
-  const visible = useMemo(() => searched.filter((r) => matchesFilter(r, filter)), [searched, filter]);
+  // Five-tier hierarchy: critical → drained → OK → unlimited (online first) → idle/expired.
+  const visible = useMemo(
+    () => searched.filter((r) => matchesFilter(r, filter)).sort(compareConsumptionRows),
+    [searched, filter]
+  );
   const atRiskValue = useMemo(
     () => rows
       .filter((r) => r.status === 'low' || r.status === 'critical')

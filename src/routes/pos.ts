@@ -1495,8 +1495,9 @@ router.get('/repairs', async (req, res) => {
   const cid = tenantId(req);
   const status = str(req.query.status);
   const params: unknown[] = [cid];
-  let where = 'WHERE company_id = $1';
-  if (status) { params.push(status); where += ` AND status = $${params.length}`; }
+  // `company_id` is ambiguous here: the LEFT JOIN to pos_customers also has one.
+  let where = 'WHERE r.company_id = $1';
+  if (status) { params.push(status); where += ` AND r.status = $${params.length}`; }
   const { rows } = await pool.query(
     `SELECT r.*, c.name AS customer_name, c.phone AS customer_phone
        FROM pos_repair_tickets r

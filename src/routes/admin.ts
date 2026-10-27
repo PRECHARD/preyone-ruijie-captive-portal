@@ -28,6 +28,7 @@ import {
 import { RuijieApiError, RATE_LIMIT_CODE, isRateLimitError } from '../services/ruijieCloud';
 import { claimPooledVoucherForStaff, releasePooledVouchers } from '../services/voucherPool';
 import { syncRuijieVoucherStatuses } from '../services/ruijieVoucherStatusSync';
+import { loadRevenueTarget, parseRevenueTarget, saveRevenueTarget } from '../services/revenueTarget';
 import ExcelJS from 'exceljs';
 import path from 'path';
 import fs from 'fs';
@@ -996,6 +997,41 @@ adminRouter.get('/my-sales', async (req: Request, res: Response) => {
   const totalSales = rows.length;
   res.json({ sales: rows, totalAmount, totalSales });
 });
+
+// ── Monthly revenue target (canonical) ──
+//
+// GET  /api/admin/revenue-target  → any authenticated admin (progress widgets)
+// POST /api/admin/revenue-target  → COMPANY_ADMIN (CEO / Manager) only
+// PUT  /api/admin/revenue-target  → alias of POST, so both verbs work
+//
+// Stored additively in `settings`; `/api/admin/reports/revenue-target` keeps
+// working as an alias and shares the same service helpers.
+
+adminRouter.get('/revenue-target', async (_req: Request, res: Response) => {
+  res.json(await loadRevenueTarget());
+});
+
+const saveRevenueTargetHandler = async (req: Request, res: Response) => {
+  const parsed = parseRevenueTarget((req.body ?? {}).target);
+  if (!parsed.ok) {
+    res.status(400).json({ error: parsed.error });
+    return;
+  }
+  const actor = req.adminUser;
+  const actorName = String(actor?.fullName || actor?.email || 'admin');
+  res.json({ ok: true, ...(await saveRevenueTarget(parsed.value, actorName)) });
+};
+
+adminRouter.post(
+  '/revenue-target',
+  requirePermission(PERMISSIONS.COMPANY_ADMIN),
+  saveRevenueTargetHandler
+);
+adminRouter.put(
+  '/revenue-target',
+  requirePermission(PERMISSIONS.COMPANY_ADMIN),
+  saveRevenueTargetHandler
+);
 
 // ── Shared Sales Excel Builder (neon purple theme) ──
 

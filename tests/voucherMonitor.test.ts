@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   query: vi.fn(),
   isRuijieCloudConfigured: vi.fn(() => true),
   getAllRuijieVouchers: vi.fn(async (): Promise<any[]> => []),
+  getRuijieRoster: vi.fn(async (): Promise<any> => ({ vouchers: [], fetchedAt: new Date(), stale: false })),
   setVapidDetails: vi.fn(),
   sendNotification: vi.fn(async () => ({})),
 }));
@@ -14,6 +15,10 @@ vi.mock('../src/db/pool', () => ({ pool: { query: mocks.query } }));
 vi.mock('../src/services/ruijieCloud', () => ({
   isRuijieCloudConfigured: mocks.isRuijieCloudConfigured,
   getAllRuijieVouchers: mocks.getAllRuijieVouchers,
+}));
+// The sweep must read the shared snapshot, never Ruijie directly (tenant quota).
+vi.mock('../src/services/ruijieRoster', () => ({
+  getRuijieRoster: mocks.getRuijieRoster,
 }));
 vi.mock('web-push', () => ({
   __esModule: true,
@@ -46,6 +51,10 @@ import { alertsRouter } from '../src/routes/alerts';
 
 const MB = 1;
 
+function rosterOf(vouchers: unknown[]) {
+  return { vouchers, fetchedAt: new Date(), stale: false };
+}
+
 function voucher(overrides: Record<string, unknown> = {}) {
   return {
     codeNo: 'N1',
@@ -63,6 +72,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.isRuijieCloudConfigured.mockReturnValue(true);
   mocks.getAllRuijieVouchers.mockResolvedValue([]);
+  mocks.getRuijieRoster.mockResolvedValue(rosterOf([]));
   mocks.query.mockResolvedValue({ rows: [] });
   mocks.sendNotification.mockResolvedValue({});
   process.env.VAPID_PUBLIC_KEY = 'test-public-key';
@@ -166,17 +176,25 @@ describe('runVoucherAlertSweep', () => {
   }
 
   it('skips unlimited and disabled vouchers entirely', async () => {
-    mocks.getAllRuijieVouchers.mockResolvedValue([
+    mocks.getRuijieRoster.mockResolvedValue(rosterOf([
       voucher({ quotaMb: 0, usedQuotaMb: 500 }),
       voucher({ disableStatus: 108 }),
-    ]);
+    ]));
     const s = await runVoucherAlertSweep();
     expect(s).toMatchObject({ scanned: 2, candidates: 0, claimed: 0 });
     expect(mocks.query).not.toHaveBeenCalled();
   });
 
+  it('reads the shared roster snapshot instead of calling Ruijie directly', async () => {
+    mocks.getRuijieRoster.mockResolvedValue(rosterOf([voucher({ usedQuotaMb: 960 })]));
+    mockClaim(false);
+    await runVoucherAlertSweep();
+    expect(mocks.getRuijieRoster).toHaveBeenCalledTimes(1);
+    expect(mocks.getAllRuijieVouchers).not.toHaveBeenCalled();
+  });
+
   it('claims and records an event at the 80 tier when no VAPID subs exist', async () => {
-    mocks.getAllRuijieVouchers.mockResolvedValue([voucher({ usedQuotaMb: 800 * MB, quotaMb: 1000 * MB })]);
+    mocks.getRuijieRoster.mockResolvedValue(rosterOf([voucher({ usedQuotaMb: 800 * MB, quotaMb: 1000 * MB })]));
     mockClaim(true);
     const s = await runVoucherAlertSweep();
     expect(s).toMatchObject({ scanned: 1, candidates: 1, claimed: 1, noSubscribers: 1 });
@@ -189,7 +207,7 @@ describe('runVoucherAlertSweep', () => {
   });
 
   it('fires only the 95 tier once usage is past 95', async () => {
-    mocks.getAllRuijieVouchers.mockResolvedValue([voucher({ usedQuotaMb: 960 })]);
+    mocks.getRuijieRoster.mockResolvedValue(rosterOf([voucher({ usedQuotaMb: 960 })]));
     mockClaim(true);
     const s = await runVoucherAlertSweep();
     expect(s.claimed).toBe(1);
@@ -198,7 +216,7 @@ describe('runVoucherAlertSweep', () => {
   });
 
   it('loses the race cleanly when another cluster already claimed', async () => {
-    mocks.getAllRuijieVouchers.mockResolvedValue([voucher({ usedQuotaMb: 900 })]);
+    mocks.getRuijieRoster.mockResolvedValue(rosterOf([voucher({ usedQuotaMb: 900 })]));
     mockClaim(false);
     const s = await runVoucherAlertSweep();
     expect(s).toMatchObject({ scanned: 1, candidates: 1, claimed: 0 });
@@ -207,7 +225,7 @@ describe('runVoucherAlertSweep', () => {
   });
 
   it('dispatches a real push and records sent status', async () => {
-    mocks.getAllRuijieVouchers.mockResolvedValue([voucher({ usedQuotaMb: 900 })]);
+    mocks.getRuijieRoster.mockResolvedValue(rosterOf([voucher({ usedQuotaMb: 900 })]));
     mocks.query.mockImplementation(async (sql: string) => {
       if (sql.includes('INSERT INTO voucher_alert_state')) return { rows: [{ id: 'claim-1' }] };
       if (sql.includes('SELECT endpoint, p256dh, auth')) {
@@ -229,7 +247,7 @@ describe('runVoucherAlertSweep', () => {
     mocks.isRuijieCloudConfigured.mockReturnValue(false);
     const s = await runVoucherAlertSweep();
     expect(s.scanned).toBe(0);
-    expect(mocks.getAllRuijieVouchers).not.toHaveBeenCalled();
+    expect(mocks.getRuijieRoster).not.toHaveBeenCalled();
   });
 });
 
@@ -293,7 +311,7 @@ describe('isDrainedAndExpired', () => {
   });
 });
 
-describe('sortConsumptionRows (four-tier hierarchy)', () => {
+describe('sortConsumptionRows (five-tier hierarchy)', () => {
   const r = (code: string, status: string, pct: number | null, onlineNow = false) => ({
     code,
     status: status as never,
@@ -301,15 +319,15 @@ describe('sortConsumptionRows (four-tier hierarchy)', () => {
     onlineNow,
   });
 
-  it('ranks critical/low above drained, ok and unlimited', () => {
+  it('ranks critical/low above drained, ok, unlimited and dead stock', () => {
     expect(consumptionTier('critical')).toBe(0);
     expect(consumptionTier('low')).toBe(0);
     expect(consumptionTier('exhausted')).toBe(1);
     expect(consumptionTier('ok')).toBe(2);
-    expect(consumptionTier('idle')).toBe(2);
     expect(consumptionTier('unlimited')).toBe(3);
+    expect(consumptionTier('idle')).toBe(4);
     expect(consumptionTier('disabled')).toBe(4);
-    expect(consumptionTier('expired')).toBe(5);
+    expect(consumptionTier('expired')).toBe(4);
   });
 
   it('puts quota-critical vouchers on top even when they are offline', () => {
@@ -321,23 +339,33 @@ describe('sortConsumptionRows (four-tier hierarchy)', () => {
       r('offOk', 'ok', 40),
     ]);
     expect(sorted.map((x) => x.code)).toEqual([
-      'offCrit', 'offLow', 'onIdle', 'offOk', 'onUnl',
+      'offCrit', 'offLow', 'offOk', 'onUnl', 'onIdle',
     ]);
   });
 
-  it('orders critical/low → drained → ok/idle → unlimited, online first inside a tier', () => {
+  it('places online unlimited directly below OK and above idle', () => {
     const sorted = sortConsumptionRows([
-      r('offCrit', 'critical', 99),
-      r('onOk', 'ok', 30, true),
       r('onUnl', 'unlimited', null, true),
+      r('onOk', 'ok', 30, true),
+      r('onIdle', 'idle', 0, true),
+      r('offCrit', 'critical', 99),
       r('onLow', 'low', 85, true),
       r('onCrit', 'critical', 97, true),
-      r('onIdle', 'idle', 0, true),
       r('onExh', 'exhausted', 100, true),
     ]);
     expect(sorted.map((x) => x.code)).toEqual([
-      'onCrit', 'onLow', 'offCrit', 'onExh', 'onOk', 'onIdle', 'onUnl',
+      'onCrit', 'onLow', 'offCrit', 'onExh', 'onOk', 'onUnl', 'onIdle',
     ]);
+  });
+
+  it('puts offline unlimited under online unlimited but still above idle', () => {
+    const sorted = sortConsumptionRows([
+      r('offUnl', 'unlimited', null),
+      r('onUnl', 'unlimited', null, true),
+      r('onIdle', 'idle', 0, true),
+      r('onOk', 'ok', 10, true),
+    ]);
+    expect(sorted.map((x) => x.code)).toEqual(['onOk', 'onUnl', 'offUnl', 'onIdle']);
   });
 
   it('keeps disabled/expired codes out of the live tiers', () => {
@@ -350,7 +378,7 @@ describe('sortConsumptionRows (four-tier hierarchy)', () => {
     expect(sorted.map((x) => x.code)).toEqual(['onOk', 'offOk', 'onDead', 'onExp']);
   });
 
-  it('orders critical → low → drained → ok → idle → unlimited → disabled → expired (expired last)', () => {
+  it('orders critical → low → drained → ok → unlimited → idle → disabled → expired', () => {
     const sorted = sortConsumptionRows([
       r('exp1', 'expired', 100),
       r('dis1', 'disabled', 12),
@@ -362,7 +390,7 @@ describe('sortConsumptionRows (four-tier hierarchy)', () => {
       r('crit1', 'critical', 97),
     ]);
     expect(sorted.map((x) => x.status)).toEqual([
-      'critical', 'low', 'exhausted', 'ok', 'idle', 'unlimited', 'disabled', 'expired',
+      'critical', 'low', 'exhausted', 'ok', 'unlimited', 'idle', 'disabled', 'expired',
     ]);
   });
 

@@ -23,7 +23,7 @@ import './MySales.css';
 type Tab = 'sales' | 'handover' | 'history' | 'target';
 type Range = 'today' | 'week' | 'month' | 'all';
 
-/** GET/PUT /api/admin/reports/revenue-target */
+/** GET/POST /api/admin/revenue-target (writes also accept PUT) */
 interface RevenueTarget {
   target: number;
   achieved: number;
@@ -78,7 +78,7 @@ export default function MySales() {
     try { setHandovers(await api.get('/cash-handovers/my')); } catch { /* ignore */ }
     try { setAvailable(await api.get('/cash-handovers/available-sales')); } catch { /* ignore */ }
     try {
-      const t = await api.get<RevenueTarget>('/reports/revenue-target');
+      const t = await api.get<RevenueTarget>('/revenue-target');
       setRevenueTarget(t);
       setTargetDraft(t?.target ? String(t.target) : '');
     } catch { /* target widget is optional */ }
@@ -95,7 +95,7 @@ export default function MySales() {
     }
     setSavingTarget(true);
     try {
-      const data = await api.put<RevenueTarget>('/reports/revenue-target', { target: value });
+      const data = await api.post<RevenueTarget>('/revenue-target', { target: value });
       setRevenueTarget(data);
       setTargetDraft(data?.target ? String(data.target) : '');
       showToast({

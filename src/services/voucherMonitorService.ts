@@ -1,8 +1,9 @@
 import webpush from 'web-push';
 import type { PushSubscription, RequestOptions as WebPushRequestOptions } from 'web-push';
 import { pool } from '../db/pool';
-import { getAllRuijieVouchers, isRuijieCloudConfigured } from './ruijieCloud';
+import { isRuijieCloudConfigured } from './ruijieCloud';
 import type { RuijieVoucher } from './ruijieCloud';
+import { getRuijieRoster } from './ruijieRoster';
 
 /**
  * Hybrid multi-tier voucher alerting (80% reminder / 95% critical).
@@ -280,7 +281,12 @@ export async function runVoucherAlertSweep(): Promise<SweepSummary> {
 
   let vouchers: RuijieVoucher[];
   try {
-    vouchers = await getAllRuijieVouchers();
+    // Shared snapshot instead of a raw pull: the sweep runs on every worker and
+    // used to spend a Ruijie call each time, which is what exhausted the tenant
+    // quota (code 44). `getRuijieRoster()` reuses one cross-worker snapshot and
+    // serves the last good copy when upstream is throttled.
+    const roster = await getRuijieRoster();
+    vouchers = roster.vouchers;
   } catch (err) {
     console.error('[voucher-monitor] roster fetch failed', err);
     return summary;

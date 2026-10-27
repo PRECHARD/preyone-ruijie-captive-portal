@@ -15,6 +15,7 @@ import {
 } from '../services/exportService';
 import { buildMonthEndEmailHtml, sendMonthEndReportEmail } from '../services/email';
 import { getSchedulerStatus } from '../services/scheduler';
+import { loadRevenueTarget, parseRevenueTarget, saveRevenueTarget } from '../services/revenueTarget';
 
 /**
  * Admin reporting endpoints (additive, read-only except the explicit "send now"
@@ -235,80 +236,24 @@ reportsRouter.post(
 // change) and rendered by the Dashboard + My Sales progress widgets. GET is
 // open to every authenticated admin so Staff can see how the month is tracking;
 // PUT is COMPANY_ADMIN only.
-
-async function readSetting(key: string): Promise<string | null> {
-  try {
-    const { rows } = await pool.query('SELECT value FROM settings WHERE key = $1', [key]);
-    return rows.length > 0 ? String(rows[0].value ?? '') : null;
-  } catch {
-    return null;
-  }
-}
-
-async function loadRevenueTarget() {
-  const [targetRaw, updatedAtRaw, updatedByRaw] = await Promise.all([
-    readSetting('monthly_revenue_target'),
-    readSetting('monthly_revenue_target_updated_at'),
-    readSetting('monthly_revenue_target_updated_by'),
-  ]);
-
-  const { rows } = await pool.query(
-    `SELECT COALESCE(SUM(amount), 0)::float AS achieved,
-            COUNT(*)::int                    AS sales_count,
-            MIN(currency)                    AS currency,
-            date_trunc('month', NOW())::date AS month_start,
-            (date_trunc('month', NOW()) + INTERVAL '1 month')::date AS next_month
-       FROM sales
-      WHERE sold_at >= date_trunc('month', NOW())
-        AND sold_at <  date_trunc('month', NOW()) + INTERVAL '1 month'`
-  );
-  const row = rows[0] ?? {};
-  const target = Math.max(0, Number(targetRaw) || 0);
-  const achieved = Math.round((Number(row.achieved) || 0) * 100) / 100;
-  const monthStart = row.month_start ? new Date(row.month_start) : new Date();
-  const nextMonth = row.next_month ? new Date(row.next_month) : new Date();
-
-  return {
-    target,
-    achieved,
-    remaining: Math.max(0, Math.round((target - achieved) * 100) / 100),
-    /** Uncapped: 140 means the month is already 1.4× over target. */
-    pct: target > 0 ? Math.round((achieved / target) * 1000) / 10 : null,
-    currency: String(row.currency || 'USD'),
-    salesCount: Number(row.sales_count) || 0,
-    monthStart: monthStart.toISOString(),
-    monthEnd: nextMonth.toISOString(),
-    label: monthStart.toLocaleString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' }),
-    configured: target > 0,
-    updatedAt: updatedAtRaw || null,
-    updatedBy: updatedByRaw || null,
-  };
-}
+//
+// The canonical path is `/api/admin/revenue-target` (admin router). These two
+// routes stay as an alias for the first release of the widget; both delegate to
+// `src/services/revenueTarget.ts` so there is exactly one implementation.
 
 reportsRouter.get('/revenue-target', async (_req: Request, res: Response) => {
   res.json(await loadRevenueTarget());
 });
 
 reportsRouter.put('/revenue-target', requireReports, async (req: Request, res: Response) => {
-  const raw = (req.body ?? {}).target;
-  const target = Number(raw);
-  if (!Number.isFinite(target) || target < 0 || target > 1_000_000_000) {
-    res.status(400).json({ error: 'target must be a positive number (or 0 to clear it)' });
+  const parsed = parseRevenueTarget((req.body ?? {}).target);
+  if (!parsed.ok) {
+    res.status(400).json({ error: parsed.error });
     return;
   }
-  const rounded = Math.round(target * 100) / 100;
   const actor = req.adminUser;
   const actorName = String(actor?.fullName || actor?.email || 'admin');
-  const stamp = new Date().toISOString();
-  await pool.query(
-    `INSERT INTO settings (key, value) VALUES
-       ('monthly_revenue_target', $1),
-       ('monthly_revenue_target_updated_at', $2),
-       ('monthly_revenue_target_updated_by', $3)
-     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
-    [String(rounded), stamp, actorName]
-  );
-  res.json({ ok: true, ...(await loadRevenueTarget()) });
+  res.json({ ok: true, ...(await saveRevenueTarget(parsed.value, actorName)) });
 });
 
 // ── Scheduler status ────────────────────────────────────────────────────────

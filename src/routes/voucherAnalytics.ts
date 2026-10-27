@@ -164,17 +164,18 @@ export function consumptionStatus(
 }
 
 /**
- * The four-tier hierarchy the Consumption tab renders, in order:
+ * The five-tier hierarchy the Consumption tab renders, in order:
  *
- *   1. `critical` — low/critical quota usage (default 80%+, critical 95%+).
- *      Needs an upsell now, so it always sits on top.
- *   2. `drained`  — quota-bound bundle fully consumed (100%).
- *   3. `ok`       — healthy capped vouchers (plus idle codes never used).
- *   4. `unlimited`— uncapped bundles, which have no depletion risk and are
- *      therefore least urgent of the live codes.
+ *   1. `critical`/`low` — quota usage at 80%+ (critical at 95%+). Needs an
+ *      upsell now, so it always sits on top.
+ *   2. `exhausted` — quota-bound bundle fully consumed (100%).
+ *   3. `ok` — healthy capped vouchers.
+ *   4. `unlimited` — uncapped bundles. No depletion risk, but they are live
+ *      sessions, so they sit directly below OK and above inactive stock.
+ *   5. `idle`/`disabled`/`expired` — dead stock, always at the bottom.
  *
- * `disabled` (cancelled) and `expired` are dead stock and keep the previous
- * behaviour of sinking below every live tier, expired always last.
+ * Kept byte-for-byte in step with `consumptionTier` in
+ * `admin/src/components/wifi/VoucherConsumptionTab.tsx`.
  */
 export function consumptionTier(status: ConsumptionStatus): number {
   switch (status) {
@@ -184,27 +185,34 @@ export function consumptionTier(status: ConsumptionStatus): number {
     case 'exhausted':
       return 1;
     case 'ok':
-    case 'idle':
       return 2;
     case 'unlimited':
       return 3;
+    case 'idle':
     case 'disabled':
-      return 4;
     case 'expired':
-      return 5;
     default:
-      return 2;
+      return 4;
   }
 }
 
+/** Dead-stock sub-rank inside the last tier: idle -> disabled -> expired. */
+function deadRank(status: ConsumptionStatus): number {
+  if (status === 'idle') return 0;
+  if (status === 'disabled') return 1;
+  if (status === 'expired') return 2;
+  return 0;
+}
+
 /**
- * Four-tier, urgency-first ordering for the consumption table (pure,
+ * Five-tier, urgency-first ordering for the consumption table (pure,
  * unit-tested).
  *
- * Tier order is fixed (critical/low → drained → ok → unlimited → disabled →
- * expired). Inside a tier, vouchers with a live client come first — an online
- * code is the one an operator is being asked about right now — then higher
- * pct, then PIN ascending for a stable order.
+ * Tier order is fixed (critical/low -> drained -> ok -> unlimited -> dead).
+ * Inside a tier, vouchers with a live client come first — an online code is the
+ * one an operator is being asked about right now — then higher pct, then PIN
+ * ascending for a stable order. Dead stock keeps its idle -> disabled ->
+ * expired order so a cancelled high-usage code never climbs into the live rows.
  */
 export function sortConsumptionRows<T extends {
   status: ConsumptionStatus;
@@ -215,6 +223,8 @@ export function sortConsumptionRows<T extends {
   return [...rows].sort((a, b) => {
     const byTier = consumptionTier(a.status) - consumptionTier(b.status);
     if (byTier !== 0) return byTier;
+    const byDead = deadRank(a.status) - deadRank(b.status);
+    if (byDead !== 0) return byDead;
     const aOnline = a.onlineNow === true ? 1 : 0;
     const bOnline = b.onlineNow === true ? 1 : 0;
     if (aOnline !== bOnline) return bOnline - aOnline;

@@ -405,4 +405,151 @@ describe('Admin routes', () => {
       expect(res.body.activeUsers[0].usage_percent).toBe('20.0');
     });
   });
+
+  // -- Monthly revenue target (canonical /api/admin/revenue-target) ---------
+  //
+  // Backed by `settings` keys, no schema change. GET is open to every
+  // authenticated admin so the Dashboard + My Sales widgets always agree; the
+  // writes reuse the COMPANY_ADMIN gate that already guards money movement.
+
+  describe('Monthly revenue target', () => {
+    beforeEach(() => {
+      // An earlier describe swaps requireAdminAuth for a Staff actor; restore the
+      // CEO used by this suite (clearAllMocks does not reset implementations).
+      (requireAdminAuth as any).mockImplementation((_req: any, _res: any, next: any) => {
+        _req.adminUser = { id: 'test', email: 'test@test', role: 'CEO', fullName: 'Test' };
+        next();
+      });
+    });
+
+    function mockTargetStore(saved: string | null = '10000') {
+      (pool.query as any).mockImplementation(async (sql: string, params?: any[]) => {
+        if (/FROM settings WHERE key = \$1/.test(sql)) {
+          const key = params?.[0];
+          if (key === 'monthly_revenue_target') {
+            return { rows: saved == null ? [] : [{ value: saved }] };
+          }
+          if (key === 'monthly_revenue_target_updated_at') {
+            return { rows: [{ value: '2026-10-02T10:00:00.000Z' }] };
+          }
+          if (key === 'monthly_revenue_target_updated_by') {
+            return { rows: [{ value: 'Prechard Muvirimi' }] };
+          }
+          return { rows: [] };
+        }
+        if (/FROM sales/.test(sql)) {
+          return {
+            rows: [{
+              achieved: 2500,
+              sales_count: 7,
+              currency: 'USD',
+              month_start: '2026-10-01',
+              next_month: '2026-11-01',
+            }],
+          };
+        }
+        return { rows: [], rowCount: 0 };
+      });
+    }
+
+    it('GET /api/admin/revenue-target returns the live saved target and progress', async () => {
+      mockTargetStore('10000');
+
+      const res = await request(createApp()).get('/api/admin/revenue-target');
+
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({
+        target: 10000,
+        achieved: 2500,
+        remaining: 7500,
+        pct: 25,
+        currency: 'USD',
+        salesCount: 7,
+        label: 'October 2026',
+        configured: true,
+        updatedBy: 'Prechard Muvirimi',
+      });
+    });
+
+    it('never reports 0% when a target is saved (the bug this widget fixed)', async () => {
+      mockTargetStore('400');
+
+      const res = await request(createApp()).get('/api/admin/revenue-target');
+
+      expect(res.status).toBe(200);
+      // 2500 achieved against a 400 target => uncapped 625%.
+      expect(res.body.pct).toBe(625);
+      expect(res.body.remaining).toBe(0);
+    });
+
+    it('POST /api/admin/revenue-target persists the target and echoes the new state', async () => {
+      mockTargetStore('12000');
+
+      const res = await request(createApp()).post('/api/admin/revenue-target').send({ target: 12000 });
+
+      expect(res.status).toBe(200);
+      expect(res.body.ok).toBe(true);
+      expect(res.body.target).toBe(12000);
+
+      const write = (pool.query as any).mock.calls.find((c: any[]) =>
+        typeof c[0] === 'string' && c[0].includes('INSERT INTO settings')
+      );
+      expect(write).toBeTruthy();
+      expect(write![1]).toEqual([
+        'monthly_revenue_target', '12000',
+        'monthly_revenue_target_updated_at', expect.any(String),
+        'monthly_revenue_target_updated_by', 'Test',
+      ]);
+    });
+
+    it('PUT /api/admin/revenue-target is an alias of POST', async () => {
+      mockTargetStore('900');
+
+      const res = await request(createApp()).put('/api/admin/revenue-target').send({ target: 900 });
+
+      expect(res.status).toBe(200);
+      expect(res.body.target).toBe(900);
+    });
+
+    it('rounds to cents and rejects invalid amounts without writing', async () => {
+      mockTargetStore('1234.57');
+      const ok = await request(createApp()).post('/api/admin/revenue-target').send({ target: 1234.567 });
+      expect(ok.status).toBe(200);
+      const write = (pool.query as any).mock.calls.find((c: any[]) =>
+        typeof c[0] === 'string' && c[0].includes('INSERT INTO settings')
+      );
+      expect(write![1][1]).toBe('1234.57');
+
+      (pool.query as any).mockClear();
+      for (const bad of [-1, 'abc', 1_000_000_001, undefined]) {
+        const res = await request(createApp()).post('/api/admin/revenue-target').send({ target: bad });
+        expect(res.status).toBe(400);
+        expect(res.body.error).toContain('target must be');
+      }
+      expect(pool.query).not.toHaveBeenCalled();
+    });
+
+    it('treats a null target as an explicit clear', async () => {
+      mockTargetStore('0');
+
+      const res = await request(createApp()).post('/api/admin/revenue-target').send({ target: null });
+
+      expect(res.status).toBe(200);
+      const write = (pool.query as any).mock.calls.find((c: any[]) =>
+        typeof c[0] === 'string' && c[0].includes('INSERT INTO settings')
+      );
+      expect(write![1][1]).toBe('0');
+    });
+
+    it('treats a cleared target as unconfigured but still reports achievement', async () => {
+      mockTargetStore('0');
+
+      const res = await request(createApp()).get('/api/admin/revenue-target');
+
+      expect(res.status).toBe(200);
+      expect(res.body.configured).toBe(false);
+      expect(res.body.pct).toBeNull();
+      expect(res.body.achieved).toBe(2500);
+    });
+  });
 });

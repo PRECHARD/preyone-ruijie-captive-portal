@@ -268,3 +268,48 @@ describe('POS document numbering prefixes', () => {
     expect(DOC_PREFIX.quotation).toBe('QUO');
   });
 });
+
+// -- Repair tickets: unambiguous tenant predicate ---------------------------
+//
+// `GET /api/pos/repairs` joins pos_customers, which also has a `company_id`.
+// An unqualified `WHERE company_id = $1` therefore failed in production with
+// `error: column reference "company_id" is ambiguous` (SQLSTATE 42702).
+
+describe('POS repair tickets tenant predicate', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    session.companyId = COMPANY_A;
+    session.userId = 'user-a';
+    session.role = 'CEO';
+  });
+
+  it('qualifies tenant and status so the customer join cannot shadow them', async () => {
+    (pool.query as any).mockImplementation(async () => ({ rows: [], rowCount: 0 }));
+
+    const res = await request(createApp()).get('/api/pos/repairs?status=received');
+    expect(res.status).toBe(200);
+
+    const call = (pool.query as any).mock.calls.find((c: any[]) =>
+      typeof c[0] === 'string' && c[0].includes('FROM pos_repair_tickets r')
+    );
+    expect(call).toBeTruthy();
+    const [sql, params] = call as [string, any[]];
+    expect(sql).toMatch(/WHERE r\.company_id = \$1/);
+    expect(sql).toMatch(/AND r\.status = \$2/);
+    expect(sql).not.toMatch(/\bWHERE company_id\b/);
+    expect(params).toEqual([COMPANY_A, 'received']);
+  });
+
+  it('keeps the tenant filter when no status is supplied', async () => {
+    (pool.query as any).mockImplementation(async () => ({ rows: [], rowCount: 0 }));
+
+    await request(createApp()).get('/api/pos/repairs');
+
+    const call = (pool.query as any).mock.calls.find((c: any[]) =>
+      typeof c[0] === 'string' && c[0].includes('FROM pos_repair_tickets r')
+    );
+    const [sql, params] = call as [string, any[]];
+    expect(sql).toMatch(/WHERE r\.company_id = \$1/);
+    expect(params).toEqual([COMPANY_A]);
+  });
+});
