@@ -87,10 +87,16 @@ export default function Dashboard({ onNavigate }: { onNavigate?: (s: string) => 
 
   const [data, setData] = useState<DashboardData | null>(null);
   const [staffStats, setStaffStats] = useState<StaffStats | null>(null);
+  const [revenueTarget, setRevenueTarget] = useState<{
+    target: number; achieved: number; remaining: number; pct: number | null;
+    currency: string; label: string; configured: boolean;
+  } | null>(null);
 
   const loadAll = useCallback(() => {
     if (isMgmt) {
       api.get<DashboardData>('/dashboard').then(setData).catch(() => {});
+      // Monthly revenue target (settings-backed, see /api/admin/reports).
+      api.get('/reports/revenue-target').then(setRevenueTarget).catch(() => {});
     } else {
       api.get<StaffStats>('/staff/stats').then(setStaffStats).catch(() => {});
     }
@@ -158,6 +164,33 @@ export default function Dashboard({ onNavigate }: { onNavigate?: (s: string) => 
           </div>
         </div>
       ))}</div>
+
+      {isMgmt && (
+        <div className="glass-stats" style={{ marginTop: '1rem' }}>
+          <div className="glass-stat glass-stat--gold" style={{ gridColumn: '1 / -1' }}>
+            <span className="glass-stat__label">
+              Monthly Revenue Target · {revenueTarget?.label || 'This month'}
+            </span>
+            <span className="glass-stat__value glass-stat__value--gold">
+              {revenueTarget && revenueTarget.pct != null
+                ? `${revenueTarget.pct.toFixed(1)}%`
+                : 'Not set'}
+            </span>
+            <span className="glass-stat__meta">
+              {revenueTarget
+                ? `$${Number(revenueTarget.achieved || 0).toFixed(2)} achieved of $${Number(revenueTarget.target || 0).toFixed(2)} ${revenueTarget.currency}` +
+                  (revenueTarget.configured ? ` · $${Number(revenueTarget.remaining || 0).toFixed(2)} to go` : '')
+                : 'Set a target from My Sales → Revenue Target'}
+            </span>
+            <div className="glass-progress" aria-hidden="true">
+              <div
+                className="glass-progress__fill"
+                style={{ width: `${revenueTarget?.pct == null ? 0 : Math.max(0, Math.min(revenueTarget.pct, 100))}%` }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
 
       {isMgmt && data && (
         <>

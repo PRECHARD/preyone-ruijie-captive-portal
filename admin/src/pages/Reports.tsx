@@ -277,18 +277,35 @@ export default function Reports({ onNavigate, canPeakHours }: Props = {}) {
               <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', fontWeight: 600, fontSize: 13 }}>Staff Performance</div>
               <div className="card-table">
                 <table className="data-table">
-                  <thead><tr><th>Staff</th><th>Role</th><th>Total Sales</th><th>Total Amount</th><th></th></tr></thead>
+                  <thead><tr><th>Staff</th><th>Role</th><th>Total Sales</th><th>Total Amount</th><th>Comm. %</th><th>Commission Due</th><th></th></tr></thead>
                   <tbody>
                     {staffSales.staffSummary.map((s: any, i: number) => (
-                      <tr key={i}>
-                        <td style={{ fontWeight: 600 }}>{s.full_name}</td>
-                        <td><Badge variant={s.role === 'Manager' ? 'info' : 'default'}>{s.role}</Badge></td>
+                      <tr key={s.id || i} style={(s.role || '').toUpperCase() === 'CEO' ? { background: 'rgba(212,175,55,0.08)' } : undefined}>
+                        <td style={{ fontWeight: 600 }}>
+                          {(s.role || '').toUpperCase() === 'CEO' ? '👑 ' : ''}{s.full_name}
+                        </td>
+                        <td><Badge variant={s.role === 'CEO' ? 'gold' : s.role === 'Manager' ? 'info' : 'default'}>{s.role}</Badge></td>
                         <td>{s.total_sales || 0}</td>
                         <td><span className="money money--sm">${Number(s.total_amount || 0).toFixed(2)} USD</span></td>
+                        <td>{Number(s.commission_pct || 0).toFixed(2)}%</td>
+                        <td><span className="money money--sm money--gold">${Number(s.commission_due || 0).toFixed(2)} USD</span></td>
                         <td><button className="btn-sm" style={{ background: 'linear-gradient(135deg, var(--purple), var(--pink))', border: 'none', color: '#fff' }} onClick={() => exportStaffMember(s.id, s.full_name)} title="Download staff sales">Download Sales Excel</button></td>
                       </tr>
                     ))}
                   </tbody>
+                  {staffSales.totals && (
+                    <tfoot>
+                      <tr>
+                        <td style={{ fontWeight: 700 }}>TOTAL</td>
+                        <td />
+                        <td style={{ fontWeight: 700 }}>{staffSales.totals.sales ?? 0}</td>
+                        <td><span className="money money--sm">${Number(staffSales.totals.amount || 0).toFixed(2)} USD</span></td>
+                        <td />
+                        <td><span className="money money--sm money--gold">${Number(staffSales.totals.commissionDue || 0).toFixed(2)} USD</span></td>
+                        <td />
+                      </tr>
+                    </tfoot>
+                  )}
                 </table>
               </div>
             </div>

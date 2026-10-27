@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { pool } from '../db/pool';
+import { attachRuijieQuotaGuard } from './ruijieRateLimiter';
 import {
   getRuijieVouchers,
   isRuijieCloudConfigured,
@@ -78,11 +79,13 @@ function maintConfig() {
 }
 
 function maintClient(): ReturnType<typeof axios.create> {
-  return axios.create({
+  // Same cluster-wide quota guard as ruijieCloud.client(): all maintenance
+  // endpoints share one tenant quota with voucher minting.
+  return attachRuijieQuotaGuard(axios.create({
     baseURL: process.env.RUIJIE_CLOUD_BASE_URL || 'https://cloud.ruijienetworks.com',
     timeout: 20000,
     headers: { 'Content-Type': 'application/json' },
-  });
+  }));
 }
 
 function errMsg(err: unknown): string {

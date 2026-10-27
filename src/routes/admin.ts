@@ -1202,13 +1202,24 @@ adminRouter.get('/my-sales/export', async (req: Request, res: Response) => {
 // ── Staff Sales Aggregated (CEO/Manager only) ──
 
 adminRouter.get('/staff-sales', requirePermission(PERMISSIONS.COMPANY_ADMIN), async (_req: Request, res: Response) => {
+  // Every selling account appears, CEO included, even with zero sales in the
+  // window: LEFT JOIN (not INNER) plus an explicit role list. `commission_pct`
+  // is joined in so the console table can show the payable split without a
+  // second round-trip.
   const { rows: staffSummary } = await pool.query(`
-    SELECT a.id, a.full_name, a.role, COUNT(v.id)::int AS total_sales, COALESCE(SUM(v.price_amount), 0)::float AS total_amount
+    SELECT a.id,
+           COALESCE(NULLIF(a.full_name, ''), a.email, 'Unknown staff') AS full_name,
+           a.role,
+           COUNT(v.id)::int AS total_sales,
+           COALESCE(SUM(v.price_amount), 0)::float AS total_amount,
+           COALESCE(sc.commission_pct, 0)::float AS commission_pct,
+           (COALESCE(SUM(v.price_amount), 0) * COALESCE(sc.commission_pct, 0) / 100)::float AS commission_due
     FROM admin_users a
-    INNER JOIN vouchers v ON v.sold_by = a.id
-    WHERE a.role IN ('Staff', 'Manager') AND a.deleted_at IS NULL
-    GROUP BY a.id, a.full_name, a.role
-    ORDER BY total_amount DESC
+    LEFT JOIN vouchers v ON v.sold_by = a.id
+    LEFT JOIN staff_commissions sc ON sc.staff_id = a.id
+    WHERE a.role IN ('CEO', 'Manager', 'Staff', 'Cashier') AND a.deleted_at IS NULL
+    GROUP BY a.id, a.full_name, a.email, a.role, sc.commission_pct
+    ORDER BY total_amount DESC, full_name ASC
   `);
   const { rows: allSales } = await pool.query(`
     SELECT v.*, a.full_name AS sold_by_name
@@ -1218,14 +1229,45 @@ adminRouter.get('/staff-sales', requirePermission(PERMISSIONS.COMPANY_ADMIN), as
     ORDER BY v.created_at DESC
   `);
   const { rows: dailyBreakdown } = await pool.query(`
-    SELECT DATE(v.created_at) AS sale_date, a.full_name, a.role, COUNT(v.id)::int AS sales_count, COALESCE(SUM(v.price_amount), 0)::float AS total_amount
+    SELECT DATE(v.created_at) AS sale_date,
+           COALESCE(NULLIF(a.full_name, ''), a.email, 'Unknown staff') AS full_name,
+           a.role,
+           COUNT(v.id)::int AS sales_count,
+           COALESCE(SUM(v.price_amount), 0)::float AS total_amount
     FROM vouchers v
     INNER JOIN admin_users a ON a.id = v.sold_by AND a.deleted_at IS NULL
-    WHERE a.role IN ('Staff', 'Manager')
-    GROUP BY DATE(v.created_at), a.full_name, a.role
-    ORDER BY sale_date DESC, a.full_name ASC
+    WHERE a.role IN ('CEO', 'Manager', 'Staff', 'Cashier')
+    GROUP BY DATE(v.created_at), a.full_name, a.email, a.role
+    ORDER BY sale_date DESC, full_name ASC
   `);
-  res.json({ staffSummary, allSales, dailyBreakdown });
+  const { rows: commissions } = await pool.query(`
+    SELECT sc.staff_id,
+           COALESCE(NULLIF(a.full_name, ''), a.email, 'Unknown staff') AS full_name,
+           a.role,
+           sc.commission_pct::float AS commission_pct
+    FROM staff_commissions sc
+    JOIN admin_users a ON a.id = sc.staff_id AND a.deleted_at IS NULL
+  `);
+  const totals = staffSummary.reduce(
+    (acc: { sales: number; amount: number; commissionDue: number }, row: any) => {
+      acc.sales += Number(row.total_sales) || 0;
+      acc.amount += Number(row.total_amount) || 0;
+      acc.commissionDue += Number(row.commission_due) || 0;
+      return acc;
+    },
+    { sales: 0, amount: 0, commissionDue: 0 }
+  );
+  res.json({
+    staffSummary,
+    allSales,
+    dailyBreakdown,
+    commissions,
+    totals: {
+      sales: totals.sales,
+      amount: Math.round(totals.amount * 100) / 100,
+      commissionDue: Math.round(totals.commissionDue * 100) / 100,
+    },
+  });
 });
 
 // ── All Staff Sales Export (Excel, CEO/Manager only) ──

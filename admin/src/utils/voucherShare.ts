@@ -63,10 +63,10 @@ export async function renderVoucherJpeg(
   return blob;
 }
 
-/** `voucher-abc123.jpeg` — lowercase code, filesystem-safe. */
+/** `voucher-abc123.jpg` — lowercase code, filesystem-safe, WhatsApp-friendly. */
 export function voucherJpegName(code: string): string {
   const safe = String(code || 'preyone').trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-');
-  return `voucher-${safe || 'preyone'}.jpeg`;
+  return `voucher-${safe || 'preyone'}.jpg`;
 }
 
 function defaultShareText(code: string): string {

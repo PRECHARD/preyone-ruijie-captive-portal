@@ -20,8 +20,24 @@ import Table from '../components/Table';
 import Badge from '../components/Badge';
 import './MySales.css';
 
-type Tab = 'sales' | 'handover' | 'history';
+type Tab = 'sales' | 'handover' | 'history' | 'target';
 type Range = 'today' | 'week' | 'month' | 'all';
+
+/** GET/PUT /api/admin/reports/revenue-target */
+interface RevenueTarget {
+  target: number;
+  achieved: number;
+  remaining: number;
+  pct: number | null;
+  currency: string;
+  salesCount: number;
+  monthStart: string;
+  monthEnd: string;
+  label: string;
+  configured: boolean;
+  updatedAt: string | null;
+  updatedBy: string | null;
+}
 
 const tooltipStyle = {
   background: '#0b1222',
@@ -48,15 +64,53 @@ export default function MySales() {
   const [submitting, setSubmitting] = useState(false);
   const [range, setRange] = useState<Range>('all');
   const [search, setSearch] = useState('');
+  const [revenueTarget, setRevenueTarget] = useState<RevenueTarget | null>(null);
+  const [targetDraft, setTargetDraft] = useState('');
+  const [savingTarget, setSavingTarget] = useState(false);
+
+  const canEditTarget =
+    (user?.permissions || []).includes('company.admin') ||
+    user?.role === 'CEO' ||
+    user?.role === 'Manager';
 
   const loadData = useCallback(async () => {
     try { setSales(await api.get('/my-sales')); } catch { /* ignore */ }
     try { setHandovers(await api.get('/cash-handovers/my')); } catch { /* ignore */ }
     try { setAvailable(await api.get('/cash-handovers/available-sales')); } catch { /* ignore */ }
+    try {
+      const t = await api.get<RevenueTarget>('/reports/revenue-target');
+      setRevenueTarget(t);
+      setTargetDraft(t?.target ? String(t.target) : '');
+    } catch { /* target widget is optional */ }
     setLoading(false);
   }, []);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  const saveTarget = async () => {
+    const value = Number(targetDraft === '' ? 0 : targetDraft);
+    if (!Number.isFinite(value) || value < 0) {
+      showToast({ title: 'Invalid target', message: 'Enter 0 or a positive amount.', type: 'error' });
+      return;
+    }
+    setSavingTarget(true);
+    try {
+      const data = await api.put<RevenueTarget>('/reports/revenue-target', { target: value });
+      setRevenueTarget(data);
+      setTargetDraft(data?.target ? String(data.target) : '');
+      showToast({
+        title: 'Revenue target updated',
+        message: value > 0
+          ? `Monthly target set to ${data.currency} ${value.toFixed(2)} — progress bars now track it.`
+          : 'Monthly target cleared.',
+        type: 'success',
+      });
+    } catch (e: any) {
+      showToast({ title: 'Could not save target', message: e?.message || 'Please try again.', type: 'error' });
+    } finally {
+      setSavingTarget(false);
+    }
+  };
 
   const submitHandover = async () => {
     const ids = availSales.map((s: any) => s.id);
@@ -167,6 +221,10 @@ export default function MySales() {
   const pendingHandoverTotal = handovers.filter((h: any) => h.status === 'pending').reduce((sum, h) => sum + money(h.total_amount), 0);
   const approvedHandoverTotal = handovers.filter((h: any) => h.status === 'approved').reduce((sum, h) => sum + money(h.total_amount), 0);
 
+  const targetPct = revenueTarget?.pct ?? null;
+  const targetBarPct = targetPct == null ? 0 : Math.max(0, Math.min(targetPct, 100));
+  const targetCurrency = revenueTarget?.currency || 'USD';
+
   if (loading) return <Spinner />;
 
   return (
@@ -204,6 +262,20 @@ export default function MySales() {
           <span className="glass-stat__value glass-stat__value--green">${money(approvedHandoverTotal).toFixed(2)}</span>
           <span className="glass-stat__meta">Reconciled with finance</span>
         </div>
+        <div className="glass-stat glass-stat--gold">
+          <span className="glass-stat__label">Month Target · {revenueTarget?.label || 'This month'}</span>
+          <span className="glass-stat__value glass-stat__value--gold">
+            {targetPct == null ? 'Not set' : `${targetPct.toFixed(1)}%`}
+          </span>
+          <span className="glass-stat__meta">
+            {revenueTarget
+              ? `$${money(revenueTarget.achieved).toFixed(2)} of $${money(revenueTarget.target).toFixed(2)} ${targetCurrency}`
+              : 'Set a target in the Revenue Target tab'}
+          </span>
+          <div className="glass-progress" aria-hidden="true">
+            <div className="glass-progress__fill" style={{ width: `${targetBarPct}%` }} />
+          </div>
+        </div>
       </div>
 
       <div className="glass-tabs" style={{ marginBottom: '1rem' }} role="tablist" aria-label="My sales sections">
@@ -212,6 +284,7 @@ export default function MySales() {
           Available for Handover {availSales.length > 0 ? <span className="sidebar-badge" style={{ marginLeft: 6, display: 'inline-flex' }}>{availSales.length}</span> : ''}
         </button>
         <button type="button" role="tab" aria-selected={tab === 'history'} className={'glass-tab' + (tab === 'history' ? ' active' : '')} onClick={() => setTab('history')}>Handover History</button>
+        <button type="button" role="tab" aria-selected={tab === 'target'} className={'glass-tab' + (tab === 'target' ? ' active' : '')} onClick={() => setTab('target')}>Revenue Target</button>
       </div>
 
       {tab === 'sales' && (
@@ -436,6 +509,78 @@ export default function MySales() {
               ]}
               data={handovers}
             />
+          )}
+        </div>
+      )}
+
+      {tab === 'target' && (
+        <div className="card" style={{ padding: 20 }}>
+          <div className="section-header" style={{ border: 'none', padding: 0, marginBottom: 4 }}>
+            Monthly Revenue Target
+            <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-dim)', fontWeight: 500 }}>
+              {revenueTarget?.label || 'This month'}
+            </span>
+          </div>
+          <p style={{ color: 'var(--text-dim)', fontSize: 13, margin: '0 0 18px' }}>
+            The target drives the gold progress bar on this page and on the Dashboard.
+            {revenueTarget?.updatedBy ? ` Last updated by ${revenueTarget.updatedBy}.` : ''}
+          </p>
+
+          <div className="glass-progress glass-progress--lg" role="progressbar"
+            aria-valuemin={0} aria-valuemax={100} aria-valuenow={targetPct == null ? 0 : Math.round(Math.min(targetPct, 100))}
+            aria-label="Monthly revenue target progress">
+            <div className="glass-progress__fill" style={{ width: `${targetBarPct}%` }} />
+            <span className="glass-progress__label">{targetPct == null ? 'No target set' : `${targetPct.toFixed(1)}%`}</span>
+          </div>
+
+          <div className="glass-stats" style={{ marginTop: 16 }}>
+            <div className="glass-stat">
+              <span className="glass-stat__label">Achieved</span>
+              <span className="glass-stat__value glass-stat__value--cyan">${money(revenueTarget?.achieved).toFixed(2)}</span>
+              <span className="glass-stat__meta">{targetCurrency} · {revenueTarget?.salesCount ?? 0} sale(s) this month</span>
+            </div>
+            <div className="glass-stat glass-stat--gold">
+              <span className="glass-stat__label">Target</span>
+              <span className="glass-stat__value glass-stat__value--gold">${money(revenueTarget?.target).toFixed(2)}</span>
+              <span className="glass-stat__meta">{revenueTarget?.configured ? 'Locked in' : 'Not configured yet'}</span>
+            </div>
+            <div className="glass-stat glass-stat--violet">
+              <span className="glass-stat__label">Remaining</span>
+              <span className="glass-stat__value glass-stat__value--violet">${money(revenueTarget?.remaining).toFixed(2)}</span>
+              <span className="glass-stat__meta">To hit the monthly goal</span>
+            </div>
+          </div>
+
+          {canEditTarget ? (
+            <form
+              onSubmit={(e) => { e.preventDefault(); void saveTarget(); }}
+              style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap', marginTop: 8 }}
+            >
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12, color: 'var(--text-dim)' }}>
+                Monthly target ({targetCurrency})
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  inputMode="decimal"
+                  aria-label="Monthly revenue target"
+                  value={targetDraft}
+                  onChange={(e) => setTargetDraft(e.target.value)}
+                  placeholder="e.g. 5000"
+                  style={{ width: 200, padding: '9px 12px', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text)', fontSize: 14 }}
+                />
+              </label>
+              <button type="submit" className="btn-glass btn-glass--gold" disabled={savingTarget}>
+                {savingTarget ? 'Saving…' : 'Save Target'}
+              </button>
+              <button type="button" className="btn-sm" onClick={() => { setTargetDraft('0'); }} disabled={savingTarget}>
+                Clear
+              </button>
+            </form>
+          ) : (
+            <p style={{ color: 'var(--text-dim)', fontSize: 13 }}>
+              Only a CEO, Manager or company admin can change the target.
+            </p>
           )}
         </div>
       )}

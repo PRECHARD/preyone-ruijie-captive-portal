@@ -166,9 +166,16 @@ export default function ConsumptionDetailModal({ code, row, onClose }: Props) {
     ].join('\n');
   };
 
+  /**
+   * "Copy All" copies the voucher PIN and nothing else (staff paste it into
+   * WhatsApp / captive-portal username fields). The full blurb moved to the
+   * WhatsApp share action, which sends the card image plus the details.
+   */
   const copyDetails = () => {
-    try { navigator.clipboard?.writeText(waText()); } catch { /* clipboard denied */ }
-    setActionMsg('Details copied.');
+    if (!code) return;
+    const pin = lc(code);
+    try { navigator.clipboard?.writeText(pin); } catch { /* clipboard denied */ }
+    setActionMsg(`PIN ${pin} copied.`);
   };
 
   const downloadJpeg = async () => {
@@ -401,7 +408,7 @@ export default function ConsumptionDetailModal({ code, row, onClose }: Props) {
 
         <section className="vd-section">
           <h4 className="vd-section-title">Share &amp; Notify</h4>
-          <p className="vd-count">Copy the full voucher details, download the card, print it, or send it on WhatsApp.</p>
+          <p className="vd-count">Copy the voucher PIN, download the card, print it, or send the card image on WhatsApp.</p>
           <div className="vd-actions">
             <button type="button" className="btn-action btn-action--copy" onClick={copyDetails}>
               <svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2"><rect x="5" y="2" width="13" height="15" rx="2" /><polyline points="2 5 2 18 15 18" /></svg>

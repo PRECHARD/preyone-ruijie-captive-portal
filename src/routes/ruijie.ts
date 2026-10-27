@@ -5,12 +5,13 @@ import { requireAdminAuth } from '../middleware/adminAuth';
 import { isRuijieCloudConfigured, RuijieApiError } from '../services/ruijieCloud';
 import {
   kickRuijieUser,
-  listRuijieDevices,
   syncAccountingData,
   syncVoucherToRuijie,
   type RuijieOnlineUser,
 } from '../services/ruijieService';
 import { getRuijieSessionSnapshot } from '../services/ruijieSessionCache';
+import { getRuijieDeviceSnapshot } from '../services/ruijieDeviceCache';
+import { ruijieQuotaStatus } from '../services/ruijieRateLimiter';
 import {
   bindingMacKey,
   loadHolders,
@@ -447,10 +448,31 @@ ruijieRouter.get('/devices', async (_req, res) => {
       res.json({ skipped: true, reason: 'ruijie_cloud_not_configured', count: 0, devices: [] });
       return;
     }
-    const devices = await listRuijieDevices();
-    res.json({ skipped: false, count: devices.length, devices });
+    // Cached (10 min TTL, stale-serve on throttle) — one page load used to cost
+    // three quota slots upstream.
+    const snapshot = await getRuijieDeviceSnapshot();
+    res.json({
+      skipped: false,
+      count: snapshot.devices.length,
+      devices: snapshot.devices,
+      stale: snapshot.stale,
+      fetchedAt: snapshot.fetchedAt,
+      reason: snapshot.reason,
+    });
   } catch (err) {
     sendRuijieError(res, err, 'Failed to fetch Ruijie devices');
+  }
+});
+
+// GET /api/ruijie/quota â€” outbound Ruijie API budget (read-only). Surfaced so
+// operators can see how much of the tenant quota the cluster has spent without
+// digging through logs. Never triggers an upstream call.
+ruijieRouter.get('/quota', async (_req, res) => {
+  try {
+    const status = await ruijieQuotaStatus();
+    res.json({ ok: true, ...status });
+  } catch (err) {
+    sendRuijieError(res, err, 'Failed to read Ruijie quota');
   }
 });
 

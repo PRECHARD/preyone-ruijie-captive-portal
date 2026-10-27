@@ -322,6 +322,12 @@ CREATE INDEX IF NOT EXISTS idx_payments_user_id ON payments (user_id);
   INSERT INTO settings (key, value) VALUES ('month_end_report_recipients', 'admin@preyone.com') ON CONFLICT (key) DO NOTHING;
   INSERT INTO settings (key, value) VALUES ('month_end_report_last_sent', '') ON CONFLICT (key) DO NOTHING;
 
+  -- Monthly revenue target shown on the Dashboard / My Sales progress widgets.
+  -- Stored as a plain decimal string (currency-agnostic); '0' means "not set".
+  INSERT INTO settings (key, value) VALUES ('monthly_revenue_target', '0') ON CONFLICT (key) DO NOTHING;
+  INSERT INTO settings (key, value) VALUES ('monthly_revenue_target_updated_at', '') ON CONFLICT (key) DO NOTHING;
+  INSERT INTO settings (key, value) VALUES ('monthly_revenue_target_updated_by', '') ON CONFLICT (key) DO NOTHING;
+
   CREATE TABLE IF NOT EXISTS admin_audit_log (
     id          BIGSERIAL PRIMARY KEY,
     admin_id    UUID REFERENCES admin_users(id) ON DELETE SET NULL,
@@ -2095,6 +2101,28 @@ CREATE INDEX IF NOT EXISTS idx_payments_user_id ON payments (user_id);
       -- the 5-minute TTL is honoured across processes and a throttled upstream
       -- can be answered from the last successful read instead of a 502.
       CREATE TABLE IF NOT EXISTS ruijie_session_cache (
+        id          SMALLINT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+        payload     JSONB NOT NULL,
+        fetched_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      -- Cluster-wide outbound Ruijie API quota counter (single row, atomic
+      -- UPSERT from every PM2 worker). Ruijie caps the tenant at ~20 calls/min
+      -- and 5,000/day; src/services/ruijieRateLimiter.ts enforces 15/min here
+      -- so sales and voucher lookups keep working while background sweeps run.
+      CREATE TABLE IF NOT EXISTS ruijie_api_quota (
+        id           SMALLINT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+        minute_start TIMESTAMPTZ NOT NULL DEFAULT date_trunc('minute', NOW()),
+        minute_count INTEGER NOT NULL DEFAULT 0,
+        day_key      DATE NOT NULL DEFAULT CURRENT_DATE,
+        day_count    INTEGER NOT NULL DEFAULT 0,
+        updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      -- Last good device inventory (GET /api/ruijie/devices). Same rendezvous
+      -- pattern: device-to-session mapping is expensive and slow-changing, so a
+      -- throttled or unreachable upstream still answers from the last read.
+      CREATE TABLE IF NOT EXISTS ruijie_device_cache (
         id          SMALLINT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
         payload     JSONB NOT NULL,
         fetched_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()

@@ -3,6 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import { api } from '../api/client';
 import { showToast } from '../utils/toast';
 import { drawVoucherCanvas, voucherSerial } from '../utils/voucherCard';
+import { shareVoucherJpeg } from '../utils/voucherShare';
 import jsPDF from 'jspdf';
 import { playVoucherSound, playAlertSound } from '../utils/sound';
 import EmptyState from '../components/EmptyState';
@@ -153,6 +154,7 @@ export default function Vouchers() {
   const [vPayRef, setVPayRef] = useState('');
   const [vouchers, setVouchers] = useState<Voucher[]>([]);
   const [vStatus, setVStatus] = useState<{ type: string; msg: string } | null>(null);
+  const [sharingWa, setSharingWa] = useState(false);
   const [creating, setCreating] = useState(false);
 
   const [bulkTier, setBulkTier] = useState('');
@@ -859,6 +861,23 @@ const codes = a.voucher_data?.codes;
     setTimeout(() => setVStatus(null), 2000);
   };
 
+  /**
+   * "Copy All" copies the voucher PIN and nothing else. Staff paste it straight
+   * into WhatsApp/usernames, and the old behaviour (full multi-line voucher
+   * blurb) put the package, price and URL on the clipboard instead of the code.
+   */
+  const copyVoucherPin = (code?: string | null) => {
+    const pin = lc(code ?? '');
+    if (!pin) {
+      setVStatus({ type: 'error', msg: 'No voucher PIN to copy' });
+      setTimeout(() => setVStatus(null), 2500);
+      return;
+    }
+    navigator.clipboard.writeText(pin);
+    setVStatus({ type: 'success', msg: `PIN ${pin} copied` });
+    setTimeout(() => setVStatus(null), 2000);
+  };
+
   const buildVoucherWaText = (v: Voucher) => [
     '*Preyone Voucher*',
     '',
@@ -874,21 +893,48 @@ const codes = a.voucher_data?.codes;
     '_Thank you for choosing Preyone_',
   ].join('\n');
 
-  const shareWhatsApp = (target?: Voucher) => {
-    const data = target || voucherCardData;
-    if (!data) return;
-    window.open(
-      'https://api.whatsapp.com/send?text=' + encodeURIComponent(buildVoucherWaText(data)),
-      '_blank',
-      'noopener,noreferrer'
-    );
+  const shareWhatsApp = async (target?: Voucher) => {
+    const data: any = target || voucherCardData;
+    if (!data || sharingWa) return;
+    const code = lc(data.code);
+    if (!code) return;
+    setSharingWa(true);
+    setVStatus({ type: 'success', msg: 'Preparing the voucher image…' });
+    try {
+      // Renders the same canvas card as Download/Print and hands WhatsApp a real
+      // JPEG File via the native share sheet; desktop falls back to download +
+      // clipboard + WhatsApp Web (see utils/voucherShare.ts).
+      const result = await shareVoucherJpeg({
+        data: {
+          code: data.code,
+          package_tier: data.package_tier,
+          price_amount: data.price_amount,
+          duration_min: data.duration_min,
+          is_uncapped: data.is_uncapped,
+          data_limit_gb: data.data_limit_gb,
+          bandwidth_mbps_up: data.bandwidth_mbps_up,
+          bandwidth_mbps_down: data.bandwidth_mbps_down,
+          holder_name: [data.first_name, data.last_name].filter(Boolean).join(' ') || data.alias || data.redemption_name || null,
+          expires_at: data.expires_at,
+          activated_at: data.activated_at,
+          created_at: data.created_at,
+        },
+        code,
+        issuedByName: user?.fullName || 'Preyone UltraNet',
+        text: buildVoucherWaText(data),
+      });
+      setVStatus({ type: result.method === 'failed' ? 'error' : 'success', msg: result.message });
+    } catch {
+      setVStatus({ type: 'error', msg: 'Could not prepare the voucher image.' });
+    } finally {
+      setSharingWa(false);
+      setTimeout(() => setVStatus(null), 6000);
+    }
   };
 
   const copyAllVoucher = () => {
     if (!voucherCardData) return;
-    navigator.clipboard.writeText(buildVoucherWaText(voucherCardData));
-    setVStatus({ type: 'success', msg: 'Voucher details copied to clipboard' });
-    setTimeout(() => setVStatus(null), 2000);
+    copyVoucherPin(voucherCardData.code);
   };
 
   function buildBarcodeHtml() {
@@ -1074,9 +1120,9 @@ const codes = a.voucher_data?.codes;
       </div>
 
       <div className="voucher-card-actions-bar">
-            <button className="btn-action btn-action--wa" onClick={() => shareWhatsApp()}>
+            <button className="btn-action btn-action--wa" onClick={() => { void shareWhatsApp(); }} disabled={sharingWa}>
               <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
-              WhatsApp
+              {sharingWa ? 'Preparing…' : 'WhatsApp'}
             </button>
             <button className="btn-action btn-action--copy" onClick={copyAllVoucher}>
               <svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2"><rect x="5" y="2" width="13" height="15" rx="2"/><polyline points="2 5 2 18 15 18"/></svg>
@@ -1578,8 +1624,6 @@ const codes = a.voucher_data?.codes;
           ? v.devices
           : macs.map(m => ({ mac_address: m, label: null, is_active: true, bound_at: null, last_seen_at: null, unbound_at: null }));
 
-        const waText = buildVoucherWaText(v);
-
         return (
           <Modal open onClose={() => setDetailVoucher(null)} title={`Voucher ${lc(v.code)}`} wide>
             <div className="voucher-detail">
@@ -1669,7 +1713,7 @@ const codes = a.voucher_data?.codes;
                 <h4 className="vd-section-title">Share &amp; Notify</h4>
                 <p className="vd-count">Download, print, or send this voucher as an image.</p>
                 <div className="vd-actions">
-                  <button className="btn-sm" onClick={() => copyCode(waText)}>
+                  <button className="btn-sm" onClick={() => copyVoucherPin(v.code)} title="Copy the voucher PIN only">
                     Copy All
                   </button>
                   <button className="btn-action btn-action--download" onClick={() => handleDownloadJpeg(v)}>
@@ -1680,9 +1724,9 @@ const codes = a.voucher_data?.codes;
                     <svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 4h12v12H4z" /><path d="M7 10h6M10 7v6" /></svg>
                     Print
                   </button>
-                  <button className="btn-action btn-action--wa" onClick={() => shareWhatsApp(v)} aria-label="Share voucher on WhatsApp" title="Share on WhatsApp">
+                  <button className="btn-action btn-action--wa" onClick={() => { void shareWhatsApp(v); }} aria-label="Share voucher on WhatsApp" title="Share on WhatsApp" disabled={sharingWa}>
                     <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
-                    <span className="vd-action-label">Send via WhatsApp</span>
+                    <span className="vd-action-label">{sharingWa ? 'Preparing…' : 'Send via WhatsApp'}</span>
                   </button>
                 </div>
               </section>

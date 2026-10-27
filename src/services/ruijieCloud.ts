@@ -1,4 +1,14 @@
 import axios from 'axios';
+import { attachRuijieQuotaGuard } from './ruijieRateLimiter';
+import {
+  RuijieApiError,
+  RATE_LIMIT_CODE,
+  isRateLimitError,
+} from './ruijieErrors';
+
+// Re-exported so every existing `from '../services/ruijieCloud'` import of the
+// error vocabulary keeps working unchanged.
+export { RuijieApiError, RATE_LIMIT_CODE, isRateLimitError };
 
 // Derived from axios.create() rather than importing the named `AxiosInstance`
 // type: under this project's commonjs/node10 resolution the named export
@@ -21,32 +31,9 @@ const AUTH_ERROR_CODES = [4010, 4011, 4013];
 // code=3 alone is too generic to force-refresh on, so also require the message.
 const AUTH_ERROR_MESSAGE = /login timeout/i;
 
-export class RuijieApiError extends Error {
-  readonly code: string | number;
-  readonly status: number = 502;
-  constructor(code: string | number, message: string) {
-    super(message);
-    this.name = 'RuijieApiError';
-    this.code = code;
-  }
-}
-
 function isAuthError(err: unknown): err is RuijieApiError {
   if (!(err instanceof RuijieApiError)) return false;
   return AUTH_ERROR_CODES.includes(Number(err.code)) || AUTH_ERROR_MESSAGE.test(err.message);
-}
-
-/**
- * Ruijie answers HTTP 200 with `{ code: 44, msg: "Too many requests" }` once the
- * tenant's API quota is exhausted. It is transient — the same call succeeds
- * again after the window resets — so it must never surface as an opaque 500,
- * and reads must stop asking for a while instead of deepening the throttle.
- */
-export const RATE_LIMIT_CODE = 44;
-
-export function isRateLimitError(err: unknown): boolean {
-  if (!(err instanceof RuijieApiError)) return false;
-  return Number(err.code) === RATE_LIMIT_CODE || /too many requests/i.test(err.message);
 }
 
 // Writes (voucher minting) are user-initiated, so they are retried briefly
@@ -154,11 +141,13 @@ function getConfig() {
 }
 
 function client(): AxiosInstance {
-  return axios.create({
+  // Every outbound call (token exchange included) is metered by the cluster-wide
+  // quota guard before it leaves the process — see ruijieRateLimiter.ts.
+  return attachRuijieQuotaGuard(axios.create({
     baseURL: getConfig().baseUrl,
     timeout: 15000,
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-  });
+  }));
 }
 
 function failIfNotZero(payload: unknown, context: string): asserts payload is { [k: string]: any } {

@@ -139,15 +139,16 @@ describe('ConsumptionDetailModal', () => {
     expect(screen.queryByText('$1.00')).toBeNull();
   });
 
-  it('copies the full voucher details and confirms inline', async () => {
+  it('Copy All copies only the clean voucher PIN and confirms inline', async () => {
     render(<ConsumptionDetailModal code="ebywa6" row={consumptionRow as any} onClose={() => {}} />);
     await waitFor(() => expect(screen.getByText('Copy All')).toBeTruthy());
 
     fireEvent.click(screen.getByText('Copy All'));
     const copied = (navigator.clipboard.writeText as any).mock.calls.at(-1)[0];
-    expect(copied).toContain('Code: ebywa6');
-    expect(copied).toContain('Connect: https://wifi.preyone.com');
-    expect(screen.getByRole('status').textContent).toMatch(/Details copied/);
+    // PIN only: no package/price/URL payload on the clipboard.
+    expect(copied).toBe('ebywa6');
+    expect(copied).not.toContain('Connect:');
+    expect(screen.getByRole('status').textContent).toMatch(/PIN ebywa6 copied/);
   });
 
   it('downloads the voucher card JPEG through the shared canvas painter', async () => {

@@ -3,7 +3,6 @@ import path from 'path';
 dotenv.config({ path: path.resolve(__dirname, '../.env') });
 import 'express-async-errors';
 import express from 'express';
-import helmet from 'helmet';
 import cors from 'cors';
 import compression from 'compression';
 import cookieParser from 'cookie-parser';
@@ -40,6 +39,13 @@ import { startVoucherPoolWorker } from './services/voucherPool';
 import { startRuijieVoucherStatusWorker } from './services/ruijieVoucherStatusSync';
 import { startReportScheduler } from './services/scheduler';
 import { scheduleSubscriptionCron } from './jobs/subscriptionCron';
+import {
+  adminApiRateLimit,
+  apiRateLimit,
+  helmetMiddleware,
+  sanitizeRequest,
+  securityHeaders,
+} from './middleware/security';
 
 const app = express();
 const PORT = process.env.PORT ?? 3000;
@@ -52,23 +58,11 @@ if (process.env.NODE_ENV === 'production' && !process.env.ONLINE_SALE_OWNER_ID) 
 
 app.set('trust proxy', 1);
 
-app.use(
-  helmet({
-    crossOriginResourcePolicy: { policy: 'cross-origin' },
-    contentSecurityPolicy: {
-      directives: {
-        defaultSrc: ["'self'"],
-        styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
-        fontSrc: ["'self'", 'https://fonts.gstatic.com'],
-        scriptSrc: ["'self'", "'unsafe-inline'"],
-        imgSrc: ["'self'", 'data:'],
-        formAction: ["*"],
-        connectSrc: ["'self'", 'http://192.168.1.216:2060', 'http://192.168.100.1:2060'],
-        upgradeInsecureRequests: null,
-      },
-    },
-  })
-);
+// Security headers (CSP + HSTS/nosniff/frameguard) live in one audited module:
+// src/middleware/security.ts. `formAction: ['*']` MUST stay — the captive
+// portal posts to the Ruijie gateway on a private LAN address.
+app.use(helmetMiddleware);
+app.use(securityHeaders);
 // Cross-subdomain CORS: reflect only Preyone origins so the SSO cookie can be
 // sent (credentials) without opening the API up to third-party sites.
 const PREYONE_ORIGIN_RE = /^https:\/\/(?:[a-z0-9-]+\.)*preyone\.com(\/|$)/i;
@@ -99,6 +93,13 @@ app.use(
 );
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
+
+// Recursive input sanitisation (control chars, prototype pollution) and the
+// baseline API rate limit. Captive-portal guest traffic and payment webhooks are
+// exempt — see src/middleware/security.ts.
+app.use(sanitizeRequest);
+app.use('/api', apiRateLimit);
+app.use('/api/admin', adminApiRateLimit);
 
 // ── Gateway routes (work on any host, registered before subdomain routing) ──
 app.use(gatewayRouter);

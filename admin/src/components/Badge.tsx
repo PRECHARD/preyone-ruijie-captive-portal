@@ -6,6 +6,7 @@ const variants: Record<string, { bg: string; color: string }> = {
   rejected: { bg: 'rgba(255,23,68,0.15)', color: 'var(--red)' },
   warning: { bg: 'rgba(255,145,0,0.15)', color: 'var(--orange)' },
   info: { bg: 'rgba(0,229,255,0.15)', color: 'var(--cyan)' },
+  gold: { bg: 'rgba(255,204,0,0.18)', color: 'var(--neon-gold, #ffcc00)' },
   default: { bg: 'rgba(255,255,255,0.05)', color: 'var(--text-muted)' },
 };
 
