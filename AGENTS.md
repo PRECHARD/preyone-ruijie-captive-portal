@@ -116,6 +116,21 @@ Phone → Ruijie AP (WiFi) → EG105G-P Gateway → VPS (158.220.118.91)
    - `GET /api/admin/voucher-analytics` never 502s on a throttle: it returns
      local vouchers with `degraded: true` / `usageKnown: false` so the
      consumption tab still renders.
+9. **The Consumption tab order lives in two places and they must match.**
+   `consumptionTier` / `sortConsumptionRows` in `src/routes/voucherAnalytics.ts`
+   (server) and `consumptionTier` / `compareConsumptionRows` in
+   `admin/src/components/wifi/VoucherConsumptionTab.tsx` (client, defensive).
+   Five tiers, in order: critical/low 80%+ → exhausted 100% → ok → unlimited
+   (online first, directly below OK) → idle/disabled/expired. Change both, and
+   `tests/voucherMonitor.test.ts` + `admin/src/test/VoucherConsumptionTab.test.tsx`.
+10. **The monthly revenue target has one canonical endpoint:
+   `/api/admin/revenue-target`** (admin router; GET for any authed admin, POST +
+   PUT gated by `company.admin`). It is implemented once in
+   `src/services/revenueTarget.ts`; `/api/admin/reports/revenue-target` remains
+   as an alias and delegates to the same helpers. The value is a `settings` key
+   (`monthly_revenue_target`), never a column — do not add a schema field. The
+   Dashboard, My Sales and Settings cards all read this path, so a saving bug
+   there shows up as "0% / no target set" on the Dashboard.
 
 ## VPS Access (production)
 
