@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import bcrypt from 'bcryptjs';
 import { pool } from './pool';
+import { PACKAGE_CATALOG } from '../config/packages';
 import { formatZimPhone } from '../utils/phone';
 
 const SQL = `
@@ -1539,6 +1540,29 @@ CREATE INDEX IF NOT EXISTS idx_payments_user_id ON payments (user_id);
   CREATE UNIQUE INDEX IF NOT EXISTS idx_voucher_profiles_tier ON voucher_profiles (tier_name);
   CREATE INDEX IF NOT EXISTS idx_voucher_profiles_active ON voucher_profiles (active);
 
+  -- Desired-vs-applied state for Ruijie Cloud User Groups. Package create/edit
+  -- records the policy locally first, then pushes it to Ruijie on a throttled
+  -- background call (see src/services/ruijieUserGroups.ts). Keeping the desired
+  -- policy in Postgres means a throttled tenant degrades to "pending" instead
+  -- of failing the admin save, and a later retry is idempotent.
+  CREATE TABLE IF NOT EXISTS ruijie_user_group_sync (
+    tier_name            TEXT PRIMARY KEY,
+    desired_name         TEXT NOT NULL,
+    time_period_min      INTEGER,
+    quota_mb             INTEGER,
+    no_of_device         INTEGER,
+    rate_limit_kbps_up   INTEGER,
+    rate_limit_kbps_down INTEGER,
+    ruijie_user_group_id TEXT,
+    sync_status          TEXT NOT NULL DEFAULT 'pending',
+    attempts             INTEGER NOT NULL DEFAULT 0,
+    last_error           TEXT,
+    last_attempt_at      TIMESTAMPTZ,
+    synced_at            TIMESTAMPTZ,
+    updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+  CREATE INDEX IF NOT EXISTS idx_ruijie_user_group_sync_status ON ruijie_user_group_sync (sync_status);
+
   -- Audit trail of every Ruijie Cloud code minted through this portal.
   CREATE TABLE IF NOT EXISTS ruijie_vouchers (
     id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1776,24 +1800,13 @@ CREATE INDEX IF NOT EXISTS idx_payments_user_id ON payments (user_id);
     `);
 
     // Seed packages table (idempotent upsert — updates existing tiers, inserts new ones)
-    const packages = [
-      // Orange band
-      ['PreLite', 'Daily Basic', 1.00, 'USD', 'daily', 1440, 5, false, 5, 5, 1],
-      ['PreLite Plus', 'Starter', 1.99, 'USD', '2days', 2880, 10, false, 5, 5, 1],
-      ['PreLink', 'Weekly Standard', 4.99, 'USD', 'weekly', 10080, 20, false, 5, 5, 1],
-      // Cyan band
-      ['PreGo', 'PreGo', 7.99, 'USD', 'monthly', 43200, 30, false, 5, 5, 1],
-      ['PreFlow', 'PreFlow', 9.99, 'USD', 'monthly', 43200, 40, false, 5, 5, 1],
-      ['PreCore', 'PreCore', 14.99, 'USD', 'monthly', 43200, null, true, 5, 5, 1],
-      // Blue band
-      ['PreBizPlus', 'Business', 19.99, 'USD', 'monthly', 43200, null, true, 10, 10, 1],
-      ['PreFam', 'Family Pack', 24.99, 'USD', 'monthly', 43200, null, true, 10, 10, 2],
-      ['PreBizPro', 'Business Pro', 29.99, 'USD', 'monthly', 43200, null, true, 10, 10, 3],
-      // Purple band
-      ['PreMax', 'Monthly Pro', 34.99, 'USD', 'monthly', 43200, null, true, 15, 15, 1],
-      ['PreUltra', 'Monthly Unlimited', 44.99, 'USD', 'monthly', 43200, null, true, 15, 15, 1],
-      ['PreExecutive', 'VIP Tier', 59.99, 'USD', 'monthly', 43200, null, true, 30, 30, 1],
-    ];
+    // Source of truth: src/config/packages.ts. Appending a tier there is enough
+    // to get it seeded here, together with its CEO-exclusive flag.
+    const packages = PACKAGE_CATALOG.map((p) => [
+      p.tierName, p.displayName, p.priceAmount, p.priceCurrency, p.billingPeriod,
+      p.durationMin, p.dataLimitGb, p.isUncapped, p.bandwidthMbpsUp,
+      p.bandwidthMbpsDown, p.maxDevices,
+    ]);
 
     for (const pkg of packages) {
       await client.query(

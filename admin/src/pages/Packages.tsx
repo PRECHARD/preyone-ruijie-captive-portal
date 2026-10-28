@@ -60,8 +60,12 @@ export default function Packages() {
         await api.put(`/packages/${editing.id}`, body);
         setMsg('Package updated');
       } else {
-        await api.post('/packages', body);
-        setMsg('Package created');
+        const saved: any = await api.post('/packages', body);
+        // The Ruijie User Group is provisioned on a throttled background call;
+        // the save never waits for (or fails on) Ruijie being reachable.
+        setMsg(saved?.ruijie_user_group_queued
+          ? 'Package created — Ruijie user group provisioning queued'
+          : 'Package created');
       }
       setShowForm(false);
       fetch();
@@ -99,6 +103,11 @@ export default function Packages() {
             columns={[
               { key: 'tier_name', label: 'Tier' },
               { key: 'display_name', label: 'Display Name' },
+              { key: 'policy', label: 'Policy', width: '110px', render: (r: any) => (
+                r.ceo_exclusive
+                  ? <span className="badge badge--warn" title="Only the CEO can mint vouchers on this tier">CEO only</span>
+                  : <span className="muted" style={{ fontSize: 11 }}>Standard</span>
+              ) },
               { key: 'price_amount', label: 'Price', width: '120px', render: (r: any) => <span className="money money--sm">${Number(r.price_amount).toFixed(2)} {r.price_currency || 'USD'}</span> },
               { key: 'duration_min', label: 'Duration', width: '90px', render: (r: any) => r.duration_min ? `${r.duration_min}m` : '—' },
               { key: 'billing_period', label: 'Period', width: '80px', render: (r: any) => String(r.billing_period || '—') },
@@ -148,6 +157,10 @@ export default function Packages() {
             <input type="checkbox" checked={form.isUncapped} onChange={e => setForm({ ...form, isUncapped: e.target.checked })} />
             Uncapped (no data limit)
           </label>
+          <p className="muted" style={{ fontSize: 11, margin: 0 }}>
+            Saving also provisions or updates the matching Ruijie Cloud user group
+            (throttled in the background — a busy Ruijie tenant never blocks the save).
+          </p>
           <button className="auth-btn" onClick={save}>{editing ? 'Update Package' : 'Create Package'}</button>
         </div>
       </Modal>

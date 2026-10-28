@@ -29,6 +29,8 @@ import { RuijieApiError, RATE_LIMIT_CODE, isRateLimitError } from '../services/r
 import { claimPooledVoucherForStaff, releasePooledVouchers } from '../services/voucherPool';
 import { syncRuijieVoucherStatuses } from '../services/ruijieVoucherStatusSync';
 import { loadRevenueTarget, parseRevenueTarget, saveRevenueTarget } from '../services/revenueTarget';
+import { isCeoExclusiveTier } from '../config/packages';
+import { queueRuijieUserGroupProvisioning } from '../services/ruijieUserGroups';
 import ExcelJS from 'exceljs';
 import path from 'path';
 import fs from 'fs';
@@ -324,7 +326,10 @@ adminRouter.get('/packages', async (_req: Request, res: Response) => {
   const { rows } = await pool.query(
     'SELECT * FROM packages WHERE deleted_at IS NULL ORDER BY price_amount ASC'
   );
-  res.json(rows);
+  // `ceo_exclusive` is derived from the catalogue (src/config/packages.ts), not
+  // a column. The mint UI hides these tiers from everyone but the CEO, and the
+  // create endpoints below enforce the same rule server-side.
+  res.json(rows.map((row: any) => ({ ...row, ceo_exclusive: isCeoExclusiveTier(row.tier_name) })));
 });
 
 adminRouter.post('/vouchers', async (req: Request, res: Response) => {
@@ -347,6 +352,16 @@ adminRouter.post('/vouchers', async (req: Request, res: Response) => {
   let resolvedPackageTier: string | null = null;
 
   if (!code) { res.status(422).json({ error: 'code is required' }); return; }
+
+  // CEO-exclusive promo tiers (prePromo_Monthly): a 403 before any clock-in or
+  // mint work, so the attempt can never claim pool stock or reach Ruijie.
+  if (packageTier && isCeoExclusiveTier(packageTier) && req.adminUser!.role !== 'CEO') {
+    res.status(403).json({
+      error: 'This promo package is reserved for the CEO account.',
+      ceoOnly: true,
+    });
+    return;
+  }
 
   // Staff and Manager must be clocked in to sell vouchers
   if (req.adminUser!.role !== 'CEO') {
@@ -2426,6 +2441,15 @@ adminRouter.post('/vouchers/bulk', async (req: Request, res: Response) => {
   if (!packageTier) { res.status(422).json({ error: 'packageTier required' }); return; }
   if (count < 1 || count > 100) { res.status(422).json({ error: 'count must be between 1 and 100' }); return; }
 
+  // CEO-exclusive promo tiers are not bulk-sellable by anyone else.
+  if (isCeoExclusiveTier(packageTier) && req.adminUser!.role !== 'CEO') {
+    res.status(403).json({
+      error: 'This promo package is reserved for the CEO account.',
+      ceoOnly: true,
+    });
+    return;
+  }
+
   // Staff cannot create bulk vouchers at all — must request approval
   if (req.adminUser!.role === 'Staff') {
     res.status(403).json({
@@ -2582,6 +2606,15 @@ adminRouter.post('/vouchers/request-approval', async (req: Request, res: Respons
   }
   if (requestType !== 'single' && requestType !== 'bulk') {
     res.status(422).json({ error: 'requestType must be single or bulk' }); return;
+  }
+
+  // Staff cannot even request the CEO promo tier — no approval path exists.
+  if (isCeoExclusiveTier(packageTier) && req.adminUser!.role !== 'CEO') {
+    res.status(403).json({
+      error: 'This promo package is reserved for the CEO account.',
+      ceoOnly: true,
+    });
+    return;
   }
 
   const { rows: pkgs } = await pool.query(
@@ -3276,7 +3309,7 @@ adminRouter.post('/bandwidth/snapshot', async (req: Request, res: Response) => {
 
 adminRouter.get('/packages/manage', requirePermission(PERMISSIONS.SYSTEM_DEVELOPER), async (_req: Request, res: Response) => {
   const { rows } = await pool.query('SELECT * FROM packages WHERE deleted_at IS NULL ORDER BY price_amount ASC');
-  res.json(rows);
+  res.json(rows.map((row: any) => ({ ...row, ceo_exclusive: isCeoExclusiveTier(row.tier_name) })));
 });
 
 adminRouter.post('/packages', requirePermission(PERMISSIONS.SYSTEM_DEVELOPER), async (req: Request, res: Response) => {
@@ -3290,7 +3323,14 @@ adminRouter.post('/packages', requirePermission(PERMISSIONS.SYSTEM_DEVELOPER), a
     [tierName, displayName, priceAmount, priceCurrency || 'USD', billingPeriod || 'daily', durationMin || 1440, dataLimitGb ?? null, !!isUncapped, bandwidthUp || 2, bandwidthDown || 2, maxDevices ?? null]
   );
   await recordAuditLog(req.adminUser!.id, req.adminUser!.fullName, 'package_create', 'package', rows[0].id, `Created package ${tierName}`);
-  res.status(201).json(rows[0]);
+  // Ruijie User Group: fire-and-forget behind the shared pacing queue, so a
+  // throttled tenant degrades to the local cache instead of failing the save.
+  const ruijieUserGroupQueued = queueRuijieUserGroupProvisioning(rows[0].tier_name);
+  res.status(201).json({
+    ...rows[0],
+    ceo_exclusive: isCeoExclusiveTier(rows[0].tier_name),
+    ruijie_user_group_queued: ruijieUserGroupQueued,
+  });
 });
 
 adminRouter.put('/packages/:id', requirePermission(PERMISSIONS.SYSTEM_DEVELOPER), async (req: Request, res: Response) => {
@@ -3306,7 +3346,12 @@ adminRouter.put('/packages/:id', requirePermission(PERMISSIONS.SYSTEM_DEVELOPER)
   const { rows } = await pool.query(`UPDATE packages SET ${sets.join(', ')}, updated_at = NOW() WHERE id = $${idx} RETURNING *`, vals);
   if (rows.length === 0) { res.status(404).json({ error: 'Package not found' }); return; }
   await recordAuditLog(req.adminUser!.id, req.adminUser!.fullName, 'package_update', 'package', id, `Updated package ${rows[0].tier_name}`);
-  res.json(rows[0]);
+  const ruijieUserGroupQueued = queueRuijieUserGroupProvisioning(rows[0].tier_name);
+  res.json({
+    ...rows[0],
+    ceo_exclusive: isCeoExclusiveTier(rows[0].tier_name),
+    ruijie_user_group_queued: ruijieUserGroupQueued,
+  });
 });
 
 adminRouter.delete('/packages/:id', requirePermission(PERMISSIONS.SYSTEM_DEVELOPER), async (req: Request, res: Response) => {

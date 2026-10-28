@@ -51,6 +51,7 @@ const groups: LinkGroup[] = [
     links: [
       { label: 'Vouchers', section: 'vouchers', roles: ['Staff', 'Manager', 'CEO'], icon: <FiCreditCard />, badgeKey: 'pendingApprovals' },
       { label: 'Consumption', section: 'consumption', roles: ['Staff', 'Manager', 'CEO'], icon: <FiActivity /> },
+      { label: 'Packages', section: 'packages', roles: ['CEO'], icon: <FiPackage /> },
     ],
   },
   {
@@ -76,14 +77,6 @@ const groups: LinkGroup[] = [
     links: [
       { label: 'My Sales', section: 'my-sales', roles: ['Staff', 'Manager', 'CEO'], icon: <FiDollarSign /> },
       { label: 'Reports', section: 'reports', roles: ['Manager', 'CEO'], icon: <FiPieChart />, badgeKey: 'pendingHandovers' },
-    ],
-  },
-  {
-    label: 'WiFi Users & Packages',
-    workspace: 'ultranet',
-    links: [
-      { label: 'Users', section: 'users', roles: ['Staff', 'Manager', 'CEO'], icon: <FiUsers /> },
-      { label: 'Packages', section: 'packages', roles: ['CEO'], icon: <FiPackage /> },
     ],
   },
   // ── Preyone Transit Operations workspace ──────────────────────────

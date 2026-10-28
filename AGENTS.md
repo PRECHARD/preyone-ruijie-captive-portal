@@ -152,6 +152,20 @@ Phone → Ruijie AP (WiFi) → EG105G-P Gateway → VPS (158.220.118.91)
    it. `voucherPool.refillVoucherPool()` never throws on a throttle: it returns
    `degraded: true` and stops, and `syncVoucherPoolStock()` is the monitor tick
    that only refills a tier at/below `VOUCHER_POOL_LOW_WATERMARK`.
+13. **The package catalogue is `src/config/packages.ts`, and it is the seed for
+   `packages`.** `npm run migrate` inserts every entry with
+   `ON CONFLICT (tier_name) DO NOTHING`. Adding a tier = append it there (never
+   rename an existing `tierName` — live vouchers, `voucher_profiles` and
+   historical payments key on it). `prePromo_Monthly` is flagged
+   `ceoExclusive`: `POST /api/admin/vouchers`, `/vouchers/bulk` and
+   `/vouchers/request-approval` answer **403 `ceoOnly: true`** for any non-CEO,
+   `POST /api/payments/initiate` refuses it, and every mint picker filters it
+   through `admin/src/utils/packages.ts`. Package create/edit also provisions
+   the matching Ruijie Cloud User Group (`src/services/ruijieUserGroups.ts`):
+   the desired policy is cached in `ruijie_user_group_sync` and pushed through
+   `throttledRuijieCall()` on a fire-and-forget call, so a throttled tenant
+   degrades to `pending` and never fails the save. Run `npm run migrate` before
+   the first package save after deploying — the cache table is new.
 
 ## VPS Access (production)
 

@@ -19,6 +19,13 @@ type AxiosInstance = ReturnType<typeof axios.create>;
 const RUIJIE_BASE_URL = 'https://cloud.ruijienetworks.com';
 const ACCESS_TOKEN_URL = '/service/api/oauth20/client/access_token';
 const USERGROUP_LIST_URL = '/service/api/intl/usergroup/list';
+// Package → Ruijie User Group auto-provisioning. The path mirrors the Ruijie
+// Cloud console's own user-group config screen and is overridable so a tenant
+// whose API surface differs can be pointed at the right endpoint without a
+// code change. The caller (ruijieUserGroups.ts) always degrades to the local
+// cache when this route rejects or throttles.
+const USERGROUP_CONFIG_URL =
+  process.env.RUIJIE_USERGROUP_CONFIG_PATH || '/service/api/intl/usergroup/config_group_userManagement_menu';
 const VOUCHER_CREATE_URL = '/service/api/open/auth/voucher/create';
 const VOUCHER_GET_LIST_URL = '/service/api/open/auth/voucher/getList';
 
@@ -236,6 +243,62 @@ export async function getRuijieUserGroups(): Promise<RuijieUserGroup[]> {
       comment: g.comment != null ? String(g.comment) : undefined,
       groupId: g.groupId != null ? String(g.groupId) : undefined,
     }));
+  });
+}
+
+export interface RuijieUserGroupPolicy {
+  /** User group name shown in the Ruijie Cloud console. */
+  name: string;
+  comment?: string;
+  timePeriodMin?: number | null;
+  /** Megabytes; 0/null means unlimited. */
+  quotaMb?: number | null;
+  noOfDevice?: number | null;
+  rateLimitKbpsUp?: number | null;
+  rateLimitKbpsDown?: number | null;
+}
+
+export interface UpsertedRuijieUserGroup {
+  id?: string;
+  policy: RuijieUserGroupPolicy;
+}
+
+/**
+ * Create or update the Ruijie Cloud User Group that backs a package.
+ *
+ * Ruijie keys user groups by the group name inside the tenant, so the call is
+ * an upsert: sending the same `name` with a new policy updates the existing
+ * group instead of creating a duplicate. The returned id is cached by the
+ * caller; when Ruijie omits it the local row keeps its previous value.
+ */
+export async function upsertRuijieUserGroup(
+  policy: RuijieUserGroupPolicy
+): Promise<UpsertedRuijieUserGroup> {
+  if (!policy.name) throw new RuijieApiError('config', 'Ruijie user group needs a name');
+  return withTokenRefresh(async (accessToken) => {
+    const cfg = getConfig();
+    const res = await client().post(
+      `${USERGROUP_CONFIG_URL}/${cfg.groupId}?access_token=${encodeURIComponent(accessToken)}`,
+      {
+        groupId: cfg.groupId,
+        name: policy.name,
+        comment: (policy.comment || policy.name).slice(0, 50),
+        timePeriod: policy.timePeriodMin ?? null,
+        quota: policy.quotaMb ?? 0,
+        noOfDevice: policy.noOfDevice ?? 1,
+        upRateLimit: policy.rateLimitKbpsUp ?? 0,
+        downloadRateLimit: policy.rateLimitKbpsDown ?? 0,
+        bindMac: 0,
+      },
+      { headers: { 'Content-Type': 'application/json' } }
+    );
+    failIfNotZero(
+      res.data,
+      `usergroup/config_group_userManagement_menu (groupId=${cfg.groupId}) -> HTTP ${res.status}`
+    );
+    const data = (res.data as { [k: string]: any })?.data ?? {};
+    const id = data.id ?? data.userGroupId ?? data.groupId;
+    return { id: id != null ? String(id) : undefined, policy };
   });
 }
 

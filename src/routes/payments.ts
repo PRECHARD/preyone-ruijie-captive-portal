@@ -25,6 +25,7 @@ import { claimPooledVoucher, refillVoucherPool } from '../services/voucherPool';
 import { requireStarlinkAuth } from '../middleware/starlinkAuth';
 import { createStarlinkInvoice, applyStarlinkPayment, getStarlinkKit } from '../db/starlink';
 import { PLAN_TIERS } from './subscription';
+import { isCeoExclusiveTier } from '../config/packages';
 import { sendOnlinePaymentReceiptEmail } from '../services/notificationService';
 import type { OnlinePaymentEmailData } from '../services/notificationService';
 
@@ -720,6 +721,12 @@ paymentsRouter.post('/initiate', async (req: Request, res: Response) => {
     return;
   }
   const pkg = pkgResult.rows[0];
+
+  // CEO-exclusive promo tiers are never sold through the public checkout.
+  if (isCeoExclusiveTier(pkg.tier_name)) {
+    res.status(403).json({ error: 'This package is not available for online purchase.' });
+    return;
+  }
 
   // Ruijie Cloud is the single source of internet access: a package with no
   // active profile mapping must NOT be chargeable, or the customer pays and

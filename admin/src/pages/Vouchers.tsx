@@ -6,7 +6,8 @@ import { drawVoucherCanvas, voucherSerial } from '../utils/voucherCard';
 import { shareVoucherJpeg } from '../utils/voucherShare';
 import jsPDF from 'jspdf';
 import { playVoucherSound, playAlertSound } from '../utils/sound';
-import EmptyState from '../components/EmptyState';
+import { packagesForMinting } from '../utils/packages';
+import PendingApprovals from '../components/PendingApprovals';
 import Modal from '../components/Modal';
 import './Vouchers.css';
 
@@ -20,6 +21,8 @@ interface Package {
   bandwidth_mbps_down: number;
   data_limit_gb: number | null;
   is_uncapped: boolean;
+  /** Derived server-side from src/config/packages.ts. */
+  ceo_exclusive?: boolean;
 }
 
   interface Voucher {
@@ -146,6 +149,9 @@ export default function Vouchers() {
 
   const [clockStatus, setClockStatus] = useState<ClockStatus | null>(null);
   const [packages, setPackages] = useState<Package[]>([]);
+  // Promo tiers (prePromo_Monthly) are CEO-only: hide them from every mint
+  // picker for Staff/Manager. POST /vouchers still answers 403 if bypassed.
+  const mintPackages = packagesForMinting(packages, user);
   const [selectedPkg, setSelectedPkg] = useState<Package | null>(null);
   const [vCode, setVCode] = useState('');
   const [vPrice, setVPrice] = useState('');
@@ -989,7 +995,7 @@ const codes = a.voucher_data?.codes;
           </div>
 
           <div className="package-grid">
-            {packages.map(pkg => (
+            {mintPackages.map(pkg => (
               <div
                 key={pkg.tier_name}
                 className={'package-card' + (selectedPkg?.tier_name === pkg.tier_name ? ' package-card--selected' : '')}
@@ -1152,7 +1158,7 @@ const codes = a.voucher_data?.codes;
               <label>Package Tier</label>
               <select value={bulkTier} onChange={e => { const t = e.target.value; setBulkTier(t); const pkg = packages.find(p => p.tier_name === t); if (pkg) setBulkPrice(pkg.price_amount); }} className="form-select">
                 <option value="">Select package...</option>
-                {packages.map(p => (
+                {mintPackages.map(p => (
                   <option key={p.tier_name} value={p.tier_name}>{p.display_name} ({p.tier_name}) - ${parseFloat(p.price_amount).toFixed(2)}</option>
                 ))}
               </select>
@@ -1258,7 +1264,15 @@ const codes = a.voucher_data?.codes;
             <p className="section-head-desc">Staff requests awaiting your authorization</p>
           </div>
           {pendingApprovals.length > 0 ? (
-            <div className="card card-table approvals-scroll">
+            <>
+              <div style={{ marginBottom: 10 }}>
+                <PendingApprovals
+                  pending={pendingApprovals.length}
+                  title="Pending Approvals"
+                  message="Awaiting your authorization"
+                />
+              </div>
+              <div className="card card-table approvals-scroll">
               <table className="data-table">
                 <thead><tr><th>Staff</th><th>Type</th><th>Package</th><th>Amount</th><th>Count</th><th>Requested</th><th>Actions</th></tr></thead>
                 <tbody>
@@ -1287,8 +1301,9 @@ const codes = a.voucher_data?.codes;
                 </tbody>
               </table>
             </div>
+            </>
           ) : (
-            <EmptyState icon="🕐" title="No Pending Approvals" message="No approval requests at the moment." />
+            <PendingApprovals pending={0} />
           )}
         </div>
       )}
@@ -1786,7 +1801,7 @@ const codes = a.voucher_data?.codes;
               <option value="">
                 Keep {renewTarget.package_tier ? `${renewTarget.package_tier} (current)` : 'the current package'}
               </option>
-              {packages.map(p => (
+              {mintPackages.map(p => (
                 <option key={p.tier_name} value={p.tier_name}>
                   {p.display_name || p.tier_name} — ${parseFloat(String(p.price_amount || 0)).toFixed(2)} · {fmtDur(p.duration_min)} · {p.is_uncapped ? 'Unlimited' : `${p.data_limit_gb ?? 'Unlimited'} GB`} · {p.bandwidth_mbps_up}/{p.bandwidth_mbps_down} Mbps
                 </option>
