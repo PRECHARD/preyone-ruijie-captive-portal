@@ -14,6 +14,7 @@ import {
 } from 'react-icons/fi';
 import './Dashboard.css';
 import './SectorDashboards.css';
+import { DEFAULT_REVENUE_TARGET, resolveMonthlyTarget, monthlyTargetPct } from '../utils/revenueTarget';
 
 interface SalesItemized { package_name: string; quantity: number; price: number; total_revenue: number }
 interface WeeklyPoint { day: string; revenue: number }
@@ -200,6 +201,9 @@ export default function WifiDashboard({ onNavigate }: { onNavigate?: (s: string)
   const [sales, setSales] = useState<SalesSummary | null>(null);
   const [error, setError] = useState('');
   const [tab, setTab] = useState<TabId>('overview');
+  // Canonical monthly revenue target (settings-backed). Fetched on mount so the
+  // gauge is right even when sales-summary is cached or still loading.
+  const [revenueTarget, setRevenueTarget] = useState<{ target: number; achieved: number; configured: boolean } | null>(null);
 
   // Ruijie Cloud telemetry — separate state so the local dashboard still
   // renders when the cloud is unconfigured or the remote API is down.
@@ -233,6 +237,10 @@ export default function WifiDashboard({ onNavigate }: { onNavigate?: (s: string)
         target: Number(s.target) || 0,
       });
     }).catch(() => {});
+    // Same endpoint the Dashboard, My Sales and Settings cards read.
+    api.get<{ target: number; achieved: number; configured: boolean }>('/revenue-target')
+      .then((t) => setRevenueTarget(t && typeof t === 'object' ? t : null))
+      .catch(() => {});
   }, []);
 
   // Cloud calls hit the remote Ruijie API — polled on the same 30s cadence as
@@ -290,7 +298,15 @@ export default function WifiDashboard({ onNavigate }: { onNavigate?: (s: string)
   const d = sales ? drift(sales.platformDaily, sales.platformYesterday) : null;
   const apHealth = data && data.aps.total > 0 ? Math.round((data.aps.online / data.aps.total) * 100) : 0;
   const gwHealth = data && data.aps.gateways.total > 0 ? Math.round((data.aps.gateways.online / data.aps.gateways.total) * 100) : 0;
-  const monthPct = sales && sales.target > 0 ? Math.min(100, (sales.monthly / sales.target) * 100) : 0;
+
+  // Monthly target: the saved setting when there is one ($500 baseline
+  // otherwise), so the gauge is never blank. `sales.monthly` stays the money
+  // figure shown beside it; `/revenue-target` only supplies the denominator.
+  const savedTargetAmount = Math.max(Number(sales?.target) || 0, Number(revenueTarget?.target) || 0);
+  const monthlyTargetIsCustom = savedTargetAmount > 0;
+  const monthlyTargetAmount = resolveMonthlyTarget(savedTargetAmount, DEFAULT_REVENUE_TARGET);
+  const monthlyAchieved = sales ? Number(sales.monthly) || 0 : Number(revenueTarget?.achieved) || 0;
+  const monthPct = monthlyTargetPct(monthlyAchieved, monthlyTargetAmount);
 
   // Live truth from Ruijie Cloud when it is linked and answering; the local
   // portal figures stay as the fallback so the cards never go blank.
@@ -457,7 +473,7 @@ export default function WifiDashboard({ onNavigate }: { onNavigate?: (s: string)
                   <div className="hud-label">Monthly Revenue</div>
                   <div className="hud-value">{sales ? fmtMoney(sales.monthly) : '—'}</div>
                   <div className="hud-meta hud-meta--row">
-                    <RadialGauge pct={monthPct} label={sales && sales.target > 0 ? 'of ' + fmtMoney(sales.target) : 'no target set'} />
+                    <RadialGauge pct={monthPct} label={'of ' + fmtMoney(monthlyTargetAmount) + (monthlyTargetIsCustom ? '' : ' · default')} />
                   </div>
                 </div>
               </div>
@@ -680,7 +696,7 @@ export default function WifiDashboard({ onNavigate }: { onNavigate?: (s: string)
                 <div className="hud-card">
                   <div className="hud-label">This Month</div>
                   <div className="hud-value">{sales ? fmtMoney(sales.monthly) : '—'}</div>
-                  <div className="hud-meta"><RadialGauge pct={monthPct} label={sales && sales.target > 0 ? 'of target' : 'no target'} /></div>
+                  <div className="hud-meta"><RadialGauge pct={monthPct} label={monthlyTargetIsCustom ? 'of target' : 'of default target'} /></div>
                 </div>
               </div>
 

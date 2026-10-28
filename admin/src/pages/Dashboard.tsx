@@ -5,6 +5,7 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, AreaChart, Area,
 } from 'recharts';
 import { FiUsers, FiCreditCard, FiDollarSign, FiClock, FiActivity, FiTrendingUp, FiShoppingBag, FiWifi, FiHardDrive, FiAlertTriangle, FiRadio } from 'react-icons/fi';
+import { DEFAULT_REVENUE_TARGET, resolveMonthlyTarget, monthlyTargetPctRaw } from '../utils/revenueTarget';
 import './Dashboard.css';
 
 interface DashboardData {
@@ -86,12 +87,9 @@ const tooltipStyle = { background: '#111', border: '1px solid #2a2a3e', borderRa
  * `/api/admin/revenue-target` is the canonical source for this number, but a
  * tenant that has never saved one answers `configured: false` and `pct: null`.
  * The Dashboard still has to show a meaningful gauge instead of "Not set", so it
- * falls back to this value. Saving a target always wins over it — nothing is
- * written back to the database from here.
+ * falls back to `DEFAULT_REVENUE_TARGET` (see `utils/revenueTarget`). Saving a
+ * target always wins over it — nothing is written back to the database here.
  */
-const DEFAULT_REVENUE_TARGET = 500;
-
-/** Geometry of the radial gauge (percent-of-target ring). */
 const GAUGE_RADIUS = 42;
 const GAUGE_CIRCUMFERENCE = 2 * Math.PI * GAUGE_RADIUS;
 
@@ -140,10 +138,10 @@ export default function Dashboard({ onNavigate }: { onNavigate?: (s: string) => 
   // on window focus and on tab visibility — the same cadence as the metrics.
   const storedTarget = Number(revenueTarget?.target);
   const targetIsCustom = Boolean(revenueTarget?.configured) && Number.isFinite(storedTarget) && storedTarget > 0;
-  const targetAmount = targetIsCustom ? storedTarget : DEFAULT_REVENUE_TARGET;
+  const targetAmount = resolveMonthlyTarget(storedTarget, DEFAULT_REVENUE_TARGET);
   const targetAchieved = Number(revenueTarget?.achieved) || 0;
   const targetCurrency = revenueTarget?.currency || 'USD';
-  const rawTargetPct = targetAmount > 0 ? (targetAchieved / targetAmount) * 100 : 0;
+  const rawTargetPct = monthlyTargetPctRaw(targetAchieved, targetAmount);
   const targetPct = Number.isFinite(rawTargetPct) ? Math.max(0, rawTargetPct) : 0;
   // The ring caps at a full circle; the number beside it may exceed 100%.
   const gaugePct = Math.min(100, targetPct);
