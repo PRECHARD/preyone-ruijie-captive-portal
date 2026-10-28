@@ -3,6 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import { api } from '../api/client';
 import { showToast } from '../utils/toast';
 import { drawVoucherCanvas, voucherSerial } from '../utils/voucherCard';
+import { formatVoucherExpiry, parseVoucherDate } from '../utils/voucherExpiry';
 import { shareVoucherJpeg } from '../utils/voucherShare';
 import jsPDF from 'jspdf';
 import { playVoucherSound, playAlertSound } from '../utils/sound';
@@ -118,8 +119,18 @@ function fmtDur(m: number): string {
   return m + 'min';
 }
 
-function fmtDate(d: string): string {
-  try { return new Date(d).toLocaleString(); } catch { return d || '—'; }
+/**
+ * Ledger timestamps (created / activated / last seen / first redeemed).
+ *
+ * `vouchers.expires_at` is NULL for "never expires", and `expires_at` columns
+ * used to be handed to `new Date(null)`, which is epoch 0 — that is where the
+ * "1/1/1970" rows in the detail sheet came from. Null/garbage now renders `—`
+ * so an absent stored date is never invented here (the customer-facing share
+ * text is the one place a date is derived; see utils/voucherExpiry.ts).
+ */
+function fmtDate(d?: string | number | null): string {
+  const parsed = parseVoucherDate(d);
+  return parsed ? parsed.toLocaleString() : '—';
 }
 
 const PAYMENT_METHODS = ['Cash', 'EcoCash', 'OneMoney', 'Omari', 'InnBucks'];
@@ -893,7 +904,7 @@ const codes = a.voucher_data?.codes;
     `Duration: ${fmtDur(v.duration_min)}`,
     `Speed: ${v.bandwidth_mbps_up}/${v.bandwidth_mbps_down} Mbps`,
     `Data: ${v.is_uncapped ? 'Unlimited' : (v.data_limit_gb ?? 'Unlimited') + ' GB'}`,
-    `Valid until: ${fmtDate(v.expires_at)}`,
+    `Valid until: ${formatVoucherExpiry(v)}`,
     'Connect: https://wifi.preyone.com',
     '',
     '_Thank you for choosing Preyone_',

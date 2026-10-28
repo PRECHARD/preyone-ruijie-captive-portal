@@ -161,6 +161,31 @@ describe('ConsumptionDetailModal', () => {
     expect(URL.createObjectURL).toHaveBeenCalled();
   });
 
+  it('sends a real "Valid until" on WhatsApp when expires_at is NULL', async () => {
+    const share = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { share, canShare: vi.fn().mockReturnValue(true) });
+    apiState.get.mockResolvedValue({
+      vouchers: [{ ...saleRow, expires_at: null, created_at: '2026-10-01T10:00:00.000Z', duration_min: 1440 }],
+    });
+
+    render(<ConsumptionDetailModal code="ebywa6" row={consumptionRow as any} onClose={() => {}} />);
+    // Wait for the local sale so the text is built from it, not the roster row.
+    await waitFor(() => expect(screen.getByText('$1.00')).toBeTruthy());
+
+    fireEvent.click(screen.getByLabelText('Share voucher on WhatsApp'));
+    await waitFor(() => expect(share).toHaveBeenCalled());
+
+    const text = String((share.mock.calls[0][0] as { text: string }).text);
+    const expected = new Date(Date.parse('2026-10-01T10:00:00.000Z') + 1440 * 60_000).toLocaleDateString();
+    expect(text).toContain('Valid until:');
+    expect(text).toContain(expected);
+    expect(text).not.toContain('1970');
+    expect(text).not.toContain('Invalid Date');
+
+    delete (navigator as any).share;
+    delete (navigator as any).canShare;
+  });
+
   it('closes via the onClose callback', async () => {
     const onClose = vi.fn();
     render(<ConsumptionDetailModal code="ebywa6" row={consumptionRow as any} onClose={onClose} />);

@@ -2,6 +2,8 @@
 // and the Consumption tab's detail modal. Extracted verbatim from Vouchers.tsx
 // so both surfaces render byte-identical JPEG cards.
 
+import { voucherExpiryIsoDate, type VoucherDateInput } from './voucherExpiry';
+
 /** The subset of a voucher row the canvas reads. All optional so partial
  *  objects (create-flow previews, consumption-only rows) stay compatible. */
 export interface VoucherCardData {
@@ -14,9 +16,10 @@ export interface VoucherCardData {
   bandwidth_mbps_up?: number | null;
   bandwidth_mbps_down?: number | null;
   holder_name?: string | null;
-  expires_at?: string | null;
-  activated_at?: string | null;
-  created_at?: string | null;
+  /** Widened beyond `string`: Ruijie's roster reports epoch ms (sometimes s). */
+  expires_at?: VoucherDateInput;
+  activated_at?: VoucherDateInput;
+  created_at?: VoucherDateInput;
 }
 
 export function voucherSerial(code: string) {
@@ -32,11 +35,24 @@ export function fmtDurShort(m: number): string {
   return m + ' Min';
 }
 
+/**
+ * The date printed in the card's "Valid Until" slot.
+ *
+ * Delegates to the shared resolver (utils/voucherExpiry.ts) so a NULL
+ * `expires_at` becomes `created_at + duration_min` instead of `new Date(null)`
+ * === 01/01/1970, and an unparseable value can no longer throw
+ * `RangeError: Invalid time value` out of `toISOString()` (which used to abort
+ * Download / Print / WhatsApp for that voucher).
+ *
+ * Date only: the slot is 140px at 13px type, so the share TEXT carries the
+ * localised date + time while the card stays legible.
+ */
 export function calcValidUntil(data: VoucherCardData): string {
-  if (data.expires_at) return new Date(data.expires_at).toISOString().split('T')[0];
-  const d = new Date();
-  d.setMinutes(d.getMinutes() + (data.duration_min || 60));
-  return d.toISOString().split('T')[0];
+  return voucherExpiryIsoDate({
+    expires_at: data.expires_at,
+    created_at: data.created_at,
+    duration_min: data.duration_min,
+  });
 }
 
 export const drawVoucherCanvas = async (c: HTMLCanvasElement, data: VoucherCardData, issuedByName: string) => {

@@ -4,6 +4,7 @@ import { useAuth } from '../../context/AuthContext';
 import { api } from '../../api/client';
 import Modal from '../Modal';
 import { drawVoucherCanvas } from '../../utils/voucherCard';
+import { formatVoucherExpiry, parseVoucherDate } from '../../utils/voucherExpiry';
 import { shareVoucherJpeg } from '../../utils/voucherShare';
 import type { ConsumptionStatus, VoucherConsumptionRow } from '../../types/wifi';
 import './voucherConsumption.css';
@@ -83,9 +84,16 @@ function fmtDur(m: number): string {
   return m + 'min';
 }
 
+/**
+ * Roster/ledger timestamp. `expiryTime` arrives as epoch ms from Ruijie (and
+ * epoch seconds from some surfaces), and `expires_at` is NULL for "never
+ * expires" — both used to render as 01/01/1970 through `new Date(null)`.
+ * `parseVoucherDate` rejects epoch-0 sentinels and normalises seconds, so an
+ * absent or bogus value now renders `—` instead of 1970.
+ */
 function fmtDate(d?: string | number | null): string {
-  if (d == null || d === '') return '—';
-  try { return new Date(d).toLocaleString(); } catch { return String(d); }
+  const parsed = parseVoucherDate(d);
+  return parsed ? parsed.toLocaleString() : '—';
 }
 
 function fmtMB(mb: number | null): string {
@@ -159,7 +167,14 @@ export default function ConsumptionDetailModal({ code, row, onClose }: Props) {
       `Duration: ${v ? fmtDur(v.duration_min) : '—'}`,
       `Speed: ${v ? `${v.bandwidth_mbps_up}/${v.bandwidth_mbps_down} Mbps` : '—'}`,
       `Data: ${v ? (v.is_uncapped ? 'Unlimited' : (v.data_limit_gb ?? 'Unlimited') + ' GB') : '—'}`,
-      `Valid until: ${fmtDate(v?.expires_at ?? row?.expiryTime)}`,
+      // Local sale first, then the live roster's epoch-ms expiry. Either may be
+      // absent; the resolver then applies the package duration instead of
+      // printing epoch 0.
+      `Valid until: ${formatVoucherExpiry({
+        expires_at: v?.expires_at ?? row?.expiryTime,
+        created_at: v?.created_at,
+        duration_min: v?.duration_min,
+      })}`,
       'Connect: https://wifi.preyone.com',
       '',
       '_Thank you for choosing Preyone_',

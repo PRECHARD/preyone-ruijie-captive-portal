@@ -186,6 +186,36 @@ describe('shareVoucherJpeg - desktop fallback', () => {
   });
 });
 
+describe('shareVoucherJpeg - default text', () => {
+  it('includes a real "Valid until" when the voucher knows its validity', async () => {
+    const share = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { share, canShare: vi.fn().mockReturnValue(true) });
+
+    await shareVoucherJpeg({
+      // expires_at NULL is the common case ("never expires"); the text must
+      // derive created_at + duration rather than say 01/01/1970.
+      data: { ...data, expires_at: null, created_at: '2026-10-01T10:00:00.000Z' },
+      code: 'ebywa6',
+      issuedByName: 'Preyone',
+    });
+
+    const text = String(share.mock.calls[0][0].text);
+    expect(text).toContain('Voucher PIN: ebywa6');
+    expect(text).toContain('Valid until:');
+    expect(text).not.toContain('1970');
+    expect(text).not.toContain('Invalid Date');
+  });
+
+  it('stays PIN-only when the voucher carries no validity information', async () => {
+    const share = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { share, canShare: vi.fn().mockReturnValue(true) });
+
+    await shareVoucherJpeg({ data: { code: 'ebywa6' }, code: 'ebywa6', issuedByName: 'Preyone' });
+
+    expect(String(share.mock.calls[0][0].text)).toBe('Voucher PIN: ebywa6');
+  });
+});
+
 describe('shareVoucherJpeg - hardening', () => {
   it('refuses an empty PIN without touching the canvas', async () => {
     const result = await shareVoucherJpeg({ data, code: '   ', issuedByName: 'Preyone' });

@@ -22,6 +22,7 @@
 
 import { drawVoucherCanvas } from './voucherCard';
 import type { VoucherCardData } from './voucherCard';
+import { formatVoucherExpiry } from './voucherExpiry';
 
 export interface VoucherShareResult {
   /** How the share resolved. */
@@ -69,8 +70,23 @@ export function voucherJpegName(code: string): string {
   return `voucher-${safe || 'preyone'}.jpg`;
 }
 
-function defaultShareText(code: string): string {
-  return `Voucher PIN: ${String(code).trim().toLowerCase()}`;
+/**
+ * Fallback message body when a caller passes no `text` override.
+ *
+ * Kept to the PIN alone when the voucher carries no validity information at
+ * all, so existing callers see byte-identical output; when it does, the
+ * customer also gets the expiry (formatted through the shared resolver, so it
+ * can never read "01/01/1970").
+ */
+function defaultShareText(code: string, data?: VoucherCardData): string {
+  const pin = `Voucher PIN: ${String(code).trim().toLowerCase()}`;
+  if (!data) return pin;
+  const knowsExpiry =
+    (data.expires_at != null && data.expires_at !== '') ||
+    (data.created_at != null && data.created_at !== '') ||
+    Number(data.duration_min) > 0;
+  if (!knowsExpiry) return pin;
+  return `${pin}\nValid until: ${formatVoucherExpiry(data)}`;
 }
 
 /** Save a Blob to the device via a temporary object URL. */
@@ -128,7 +144,7 @@ export async function shareVoucherJpeg(input: ShareVoucherInput): Promise<Vouche
   const code = String(input.code || '').trim().toLowerCase();
   if (!code) return { method: 'failed', message: 'This voucher has no PIN to share.' };
 
-  const text = input.text ?? defaultShareText(code);
+  const text = input.text ?? defaultShareText(code, input.data);
   let blob: Blob;
   try {
     blob = await renderVoucherJpeg(input.data, input.issuedByName || 'Preyone UltraNet');
