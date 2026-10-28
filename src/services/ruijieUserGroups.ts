@@ -1,11 +1,14 @@
 import { pool } from '../db/pool';
 import {
+  getRuijieUserGroups,
   isRuijieCloudConfigured,
   upsertRuijieUserGroup,
+  type RuijieUserGroup,
   type RuijieUserGroupPolicy,
   type UpsertedRuijieUserGroup,
 } from './ruijieCloud';
 import { isThrottleError, throttledRuijieCall } from './ruijieSync';
+import { RuijieApiError } from './ruijieErrors';
 
 /**
  * Package → Ruijie Cloud User Group auto-provisioning.
@@ -123,11 +126,95 @@ async function recordOutcome(
 export interface ProvisionOptions {
   /** Test seam: replace the Ruijie push. */
   push?: (policy: RuijieUserGroupPolicy) => Promise<UpsertedRuijieUserGroup>;
+  /** Test seam: replace the tenant user-group list read. */
+  list?: () => Promise<RuijieUserGroup[]>;
   /** Skip the pacing wait (explicit admin "send now" actions). */
   immediate?: boolean;
   /** Injected clock/sleep, forwarded to the shared pacing queue (tests). */
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
+}
+
+interface ActiveMapping {
+  ruijie_user_group_id: string;
+  ruijie_profile_uuid: string;
+}
+
+async function getActiveMapping(tierName: string): Promise<ActiveMapping | null> {
+  const { rows } = await pool.query(
+    `SELECT ruijie_user_group_id, ruijie_profile_uuid
+       FROM voucher_profiles WHERE tier_name = $1 AND active = TRUE LIMIT 1`,
+    [tierName]
+  );
+  if (rows.length === 0) return null;
+  return {
+    ruijie_user_group_id: String(rows[0].ruijie_user_group_id),
+    ruijie_profile_uuid: String(rows[0].ruijie_profile_uuid),
+  };
+}
+
+/**
+ * Write the `voucher_profiles` mapping that the mint path requires.
+ *
+ * `findRuijieProfile()` refuses to mint a tier that has no active mapping, so a
+ * package is only truly sellable once this row exists. The group's own
+ * `authProfileId` is the profile UUID; copying it (rather than inventing one)
+ * is what makes the minted code enforce the group's policy.
+ */
+async function upsertVoucherProfile(tierName: string, group: RuijieUserGroup): Promise<void> {
+  await pool.query(
+    `INSERT INTO voucher_profiles
+       (tier_name, ruijie_user_group_id, ruijie_profile_uuid, ruijie_group_name,
+        time_period_min, quota_mb, no_of_device, rate_limit_kbps, active)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, TRUE)
+     ON CONFLICT (tier_name) DO UPDATE SET
+       ruijie_user_group_id = EXCLUDED.ruijie_user_group_id,
+       ruijie_profile_uuid  = EXCLUDED.ruijie_profile_uuid,
+       ruijie_group_name    = EXCLUDED.ruijie_group_name,
+       time_period_min      = EXCLUDED.time_period_min,
+       quota_mb             = EXCLUDED.quota_mb,
+       no_of_device         = EXCLUDED.no_of_device,
+       rate_limit_kbps      = EXCLUDED.rate_limit_kbps,
+       active               = TRUE,
+       updated_at           = NOW()`,
+    [
+      tierName,
+      group.id,
+      group.authProfileId,
+      group.name,
+      group.timePeriodMin ?? null,
+      group.quotaMb ?? null,
+      group.noOfDevice ?? null,
+      group.rateLimitKbps ?? null,
+    ]
+  );
+}
+
+function groupMatchesPolicy(group: RuijieUserGroup, policy: RuijieUserGroupPolicy): boolean {
+  if ((group.timePeriodMin ?? null) !== (policy.timePeriodMin ?? null)) return false;
+  if ((group.quotaMb ?? 0) !== (policy.quotaMb ?? 0)) return false;
+  if ((group.noOfDevice ?? 1) !== (policy.noOfDevice ?? 1)) return false;
+  const down = policy.rateLimitKbpsDown ?? 0;
+  if (down > 0 && group.rateLimitKbps != null && group.rateLimitKbps !== down) return false;
+  return true;
+}
+
+function pacing(options: ProvisionOptions, label: string) {
+  return {
+    label,
+    immediate: options.immediate,
+    now: options.now,
+    sleep: options.sleep,
+  };
+}
+
+async function findGroupByName(
+  tierName: string,
+  options: ProvisionOptions
+): Promise<RuijieUserGroup | null> {
+  const list = options.list ?? getRuijieUserGroups;
+  const groups = await throttledRuijieCall(() => list(), pacing(options, `usergroup:list:${tierName}`));
+  return groups.find((g) => g.name === tierName) ?? null;
 }
 
 /**
@@ -173,16 +260,62 @@ export async function provisionRuijieUserGroupForPackage(
     return { tierName, status: 'skipped', degraded: true, error: 'Ruijie Cloud not configured' };
   }
 
+  const push = options.push ?? upsertRuijieUserGroup;
   try {
-    const push = options.push ?? upsertRuijieUserGroup;
-    const applied = await throttledRuijieCall(() => push(policy), {
-      label: `usergroup:${tierName}`,
-      immediate: options.immediate,
-      now: options.now,
-      sleep: options.sleep,
-    });
-    await recordOutcome(tierName, 'synced', applied?.id ?? null);
-    return { tierName, status: 'synced', degraded: false, userGroupId: applied?.id };
+    const existing = await getActiveMapping(tierName);
+
+    if (existing) {
+      // Already sellable: keep the original contract and just push the policy.
+      const applied = await throttledRuijieCall(
+        () => push(policy),
+        pacing(options, `usergroup:${tierName}`)
+      );
+      const groupId = applied?.id ?? existing.ruijie_user_group_id;
+      await recordOutcome(tierName, 'synced', groupId);
+      return { tierName, status: 'synced', degraded: false, userGroupId: groupId };
+    }
+
+    // No mapping yet means `findRuijieProfile()` will reject every mint for
+    // this tier ("no active Ruijie Cloud profile mapping"). A package can be
+    // seeded by migrate (no API save), so reconcile the mapping here: find the
+    // group by name, create it only when it is genuinely absent, then copy its
+    // id + authProfileId into voucher_profiles.
+    let group = await findGroupByName(tierName, options);
+    if (!group) {
+      await throttledRuijieCall(
+        () => push(policy),
+        pacing(options, `usergroup:create:${tierName}`)
+      );
+      group = await findGroupByName(tierName, options);
+    }
+    if (!group || !group.authProfileId) {
+      throw new RuijieApiError(
+        'unmapped_tier',
+        `Ruijie group "${tierName}" is missing or has no auth profile`
+      );
+    }
+
+    // The mapping is what makes the tier sellable, so write it before the
+    // best-effort policy alignment. A stale policy is a warning, not a blocker.
+    await upsertVoucherProfile(tierName, group);
+    if (!groupMatchesPolicy(group, policy)) {
+      try {
+        await throttledRuijieCall(
+          () => push(policy),
+          pacing(options, `usergroup:align:${tierName}`)
+        );
+        group = (await findGroupByName(tierName, options)) ?? group;
+        await upsertVoucherProfile(tierName, group);
+      } catch (alignErr) {
+        console.warn(
+          `[ruijie-usergroup] ${tierName} mapped but policy not aligned: ` +
+            `${alignErr instanceof Error ? alignErr.message : String(alignErr)}`
+        );
+      }
+    }
+
+    await recordOutcome(tierName, 'synced', group.id);
+    return { tierName, status: 'synced', degraded: false, userGroupId: group.id };
   } catch (err) {
     // Throttles and an open breaker are retryable; everything else is a hard
     // rejection (bad payload, missing permission). Both stay cached locally.

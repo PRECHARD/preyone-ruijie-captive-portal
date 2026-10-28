@@ -16,6 +16,7 @@
     "purge:retry-vouchers": "node -r ts-node/register/transpile-only scripts/purge-retry-vouchers.ts",
     "seed:vouchers": "node -r ts-node/register/transpile-only scripts/seed-voucher-pool.ts",
     "sync:vouchers": "node -r ts-node/register/transpile-only scripts/sync-voucher-statuses.ts",
+    "sync:ruijie-mappings": "node -r ts-node/register/transpile-only scripts/sync-ruijie-mappings.ts",
     "test": "vitest run",
     "test:e2e": "vitest run --config vitest.e2e.config.ts",
     "verify:route-templates": "ts-node -T scripts/verify-route-templates.ts"

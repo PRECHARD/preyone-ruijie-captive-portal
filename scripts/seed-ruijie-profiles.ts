@@ -34,6 +34,12 @@ const TIER_TO_GROUP: Record<string, string> = {
   'PreMax': 'preMax_Monthly',
   'PreUltra': 'preUltra_Monthly',
   'PreExecutive': 'preExecutive_Monthly',
+  // Daily passes + CEO promo (groups verified live 2026-10-28). These are
+  // seeded by migrate, so no package save ever triggered their mapping; the
+  // mint path rejected them with "no active Ruijie Cloud profile mapping".
+  'preMicro_Daily': 'preMicro_Daily',
+  'preStream_Daily': 'preStream_Daily',
+  'prePromo_Monthly': 'prePromo_Monthly',
 };
 
 // ── Owner-confirmed deltas (business policy, NOT bugs) ──────────────────────

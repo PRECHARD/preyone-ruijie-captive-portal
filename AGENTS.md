@@ -166,6 +166,13 @@ Phone → Ruijie AP (WiFi) → EG105G-P Gateway → VPS (158.220.118.91)
    `throttledRuijieCall()` on a fire-and-forget call, so a throttled tenant
    degrades to `pending` and never fails the save. Run `npm run migrate` before
    the first package save after deploying — the cache table is new.
+   A package is only *sellable* once `voucher_profiles` has an active row
+   (`ruijie_user_group_id` + the group's `authProfileId`), otherwise every mint
+   fails with `no active Ruijie Cloud profile mapping`. Tiers inserted by
+   `npm run migrate` never pass through the package API, so after seeding run
+   `npm run sync:ruijie-mappings` (idempotent, maps by exact group name, paced by
+   the same queue). The provisioning service reconciles the mapping for
+   groups that already exist in Ruijie instead of creating duplicates.
 
 ## VPS Access (production)
 
