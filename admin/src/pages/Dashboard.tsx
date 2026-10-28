@@ -80,6 +80,21 @@ function fmtTimeAgo(d: string): string {
 
 const tooltipStyle = { background: '#111', border: '1px solid #2a2a3e', borderRadius: 6, color: '#e2e8f0', fontSize: 12 };
 
+/**
+ * Baseline monthly revenue target.
+ *
+ * `/api/admin/revenue-target` is the canonical source for this number, but a
+ * tenant that has never saved one answers `configured: false` and `pct: null`.
+ * The Dashboard still has to show a meaningful gauge instead of "Not set", so it
+ * falls back to this value. Saving a target always wins over it — nothing is
+ * written back to the database from here.
+ */
+const DEFAULT_REVENUE_TARGET = 500;
+
+/** Geometry of the radial gauge (percent-of-target ring). */
+const GAUGE_RADIUS = 42;
+const GAUGE_CIRCUMFERENCE = 2 * Math.PI * GAUGE_RADIUS;
+
 export default function Dashboard({ onNavigate }: { onNavigate?: (s: string) => void }) {
   const { user } = useAuth();
   const role = user?.role || 'Staff';
@@ -118,6 +133,22 @@ export default function Dashboard({ onNavigate }: { onNavigate?: (s: string) => 
   }, [loadAll]);
 
   const m = data?.metrics;
+
+  // ── Monthly revenue target (radial gauge) ──
+  // Prefer the stored target, fall back to the $500 baseline so the gauge is
+  // never blank. Fetched on mount through loadAll() and refreshed every 30s,
+  // on window focus and on tab visibility — the same cadence as the metrics.
+  const storedTarget = Number(revenueTarget?.target);
+  const targetIsCustom = Boolean(revenueTarget?.configured) && Number.isFinite(storedTarget) && storedTarget > 0;
+  const targetAmount = targetIsCustom ? storedTarget : DEFAULT_REVENUE_TARGET;
+  const targetAchieved = Number(revenueTarget?.achieved) || 0;
+  const targetCurrency = revenueTarget?.currency || 'USD';
+  const rawTargetPct = targetAmount > 0 ? (targetAchieved / targetAmount) * 100 : 0;
+  const targetPct = Number.isFinite(rawTargetPct) ? Math.max(0, rawTargetPct) : 0;
+  // The ring caps at a full circle; the number beside it may exceed 100%.
+  const gaugePct = Math.min(100, targetPct);
+  const gaugeOffset = GAUGE_CIRCUMFERENCE - (gaugePct / 100) * GAUGE_CIRCUMFERENCE;
+  const targetRemaining = Math.max(0, targetAmount - targetAchieved);
 
   if (isMgmt && !data) {
     return (
@@ -180,26 +211,60 @@ export default function Dashboard({ onNavigate }: { onNavigate?: (s: string) => 
 
       {isMgmt && (
         <div className="glass-stats" style={{ marginTop: '1rem' }}>
-          <div className="glass-stat glass-stat--gold" style={{ gridColumn: '1 / -1' }}>
-            <span className="glass-stat__label">
-              Monthly Revenue Target · {revenueTarget?.label || 'This month'}
-            </span>
-            <span className="glass-stat__value glass-stat__value--gold">
-              {revenueTarget && revenueTarget.pct != null
-                ? `${revenueTarget.pct.toFixed(1)}%`
-                : 'Not set'}
-            </span>
-            <span className="glass-stat__meta">
-              {revenueTarget
-                ? `$${Number(revenueTarget.achieved || 0).toFixed(2)} achieved of $${Number(revenueTarget.target || 0).toFixed(2)} ${revenueTarget.currency}` +
-                  (revenueTarget.configured ? ` · $${Number(revenueTarget.remaining || 0).toFixed(2)} to go` : '')
-                : 'Set a target from My Sales → Revenue Target'}
-            </span>
-            <div className="glass-progress" aria-hidden="true">
+          <div className="glass-stat glass-stat--gold revenue-target" style={{ gridColumn: '1 / -1' }}>
+            <div className="revenue-target__head">
+              <span className="glass-stat__label">
+                Monthly Revenue Target · {revenueTarget?.label || 'This month'}
+              </span>
+              <span className="glass-stat__value glass-stat__value--gold revenue-target__pct">
+                {targetPct.toFixed(1)}%
+              </span>
+            </div>
+
+            <div className="revenue-target__body">
               <div
-                className="glass-progress__fill"
-                style={{ width: `${revenueTarget?.pct == null ? 0 : Math.max(0, Math.min(revenueTarget.pct, 100))}%` }}
-              />
+                className="revenue-gauge"
+                role="img"
+                aria-label={`${targetPct.toFixed(1)} percent of the $${targetAmount.toFixed(2)} monthly revenue target`}
+              >
+                <svg className="revenue-gauge__svg" viewBox="0 0 100 100" aria-hidden="true">
+                  <defs>
+                    <linearGradient id="revenueGaugeGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                      <stop offset="0%" stopColor="#00ccff" />
+                      <stop offset="60%" stopColor="#33e1c0" />
+                      <stop offset="100%" stopColor="#f5c451" />
+                    </linearGradient>
+                  </defs>
+                  <circle className="revenue-gauge__track" cx="50" cy="50" r={GAUGE_RADIUS} />
+                  <circle
+                    className="revenue-gauge__arc"
+                    cx="50"
+                    cy="50"
+                    r={GAUGE_RADIUS}
+                    strokeDasharray={GAUGE_CIRCUMFERENCE}
+                    strokeDashoffset={gaugeOffset}
+                  />
+                </svg>
+                <span className="revenue-gauge__center">
+                  {targetPct.toFixed(0)}
+                  <small>%</small>
+                </span>
+              </div>
+
+              <div className="revenue-target__copy">
+                <p className="revenue-target__achieved">
+                  ${targetAchieved.toFixed(2)}
+                  <span> of ${targetAmount.toFixed(2)} {targetCurrency}</span>
+                </p>
+                <p className="revenue-target__meta">
+                  {targetIsCustom
+                    ? `$${targetRemaining.toFixed(2)} to go this month`
+                    : `Default target of $${DEFAULT_REVENUE_TARGET.toFixed(2)} — set your own in My Sales → Revenue Target`}
+                </p>
+                <div className="glass-progress" aria-hidden="true">
+                  <div className="glass-progress__fill" style={{ width: `${gaugePct}%` }} />
+                </div>
+              </div>
             </div>
           </div>
         </div>

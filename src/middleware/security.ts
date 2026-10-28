@@ -163,6 +163,9 @@ function intFromEnv(raw: string | undefined, fallback: number, min = 1): number 
  */
 const RATE_LIMIT_EXEMPT = [
   /^\/api\/auth\//,
+  // Local captive-portal redemption: the same NAT-IP crowd as /api/auth, and
+  // the route carries its own failure-only limiter.
+  /^\/api\/portal\//,
   /^\/api\/radius\//,
   /^\/api\/payments\/webhook/,
   /^\/api\/payments\/pesepay\/(callback|webhook)/,

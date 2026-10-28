@@ -17,6 +17,7 @@ import { paymentsRouter } from './routes/payments';
 import { subscriptionRouter } from './routes/subscription';
 import { siteInvoicesRouter } from './routes/siteInvoices';
 import { gatewayRouter, connectAuthRouter } from './routes/gateway';
+import { portalRouter } from './routes/portal';
 import { transitRouter } from './routes/transit';
 import { transitWebRouter } from './routes/transitWeb';
 import { systemAdminRouter } from './routes/systemAdmin';
@@ -373,6 +374,9 @@ app.use((req, res, next) => {
 app.use(maintenanceCheck);
 
 app.use('/api/auth', authRouter);
+// Local-only captive-portal redemption (no Ruijie round-trip). Mounted before
+// the signup alias so /api/portal/* can never be shadowed by it.
+app.use('/api/portal', portalRouter);
 // Alias: /api/auth/login -> /api/auth/portal-login
 app.post('/api/auth/login', (req, res) => {
   req.url = '/portal-login';

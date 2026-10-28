@@ -130,7 +130,28 @@ Phone → Ruijie AP (WiFi) → EG105G-P Gateway → VPS (158.220.118.91)
    as an alias and delegates to the same helpers. The value is a `settings` key
    (`monthly_revenue_target`), never a column — do not add a schema field. The
    Dashboard, My Sales and Settings cards all read this path, so a saving bug
-   there shows up as "0% / no target set" on the Dashboard.
+   there shows up as "0% / no target set" on the Dashboard. When nothing is
+   configured the Dashboard gauge falls back to `DEFAULT_REVENUE_TARGET = 500`
+   in `admin/src/pages/Dashboard.tsx` — a display default only, never written.
+11. **Customers redeem at `POST /api/portal/redeem`, not `/api/auth/signup`.**
+   Signup carries `signupLimiter` = 10 requests / 15 min **per IP**, and every
+   guest on a hotspot shares one NAT IP, so the 11th customer of the day got
+   "Too many requests, please try again later" — read as "voucher rejected".
+   The portal route resolves the PIN against the local `vouchers` table inside
+   one transaction (`src/models/voucher.ts`), makes **zero outbound calls**, and
+   is limited on failed attempts only (`skipSuccessfulRequests`, 60/min per IP,
+   `PORTAL_REDEEM_FAIL_LIMIT_PER_MIN`). Do not add a Ruijie read/mint to it, and
+   do not re-point `public/js/portal.js` at signup — it only falls back there
+   when the route is missing (404/405) or a proxy is down (501/502/503/504).
+   `/api/portal/` is in `RATE_LIMIT_EXEMPT` for the same NAT reason as `/api/auth/`.
+12. **All background Ruijie calls go through `src/services/ruijieSync.ts`.**
+   `throttledRuijieCall()` paces them (>= 6s apart, <= 11/min) and a circuit
+   breaker opens for 120s after 3 consecutive throttles (`code 44`, HTTP 429/503
+   or a "too many requests" message). `RuijieCircuitOpenError` extends
+   `RuijieApiError` with code 44 so existing `isRateLimitError()` branches catch
+   it. `voucherPool.refillVoucherPool()` never throws on a throttle: it returns
+   `degraded: true` and stops, and `syncVoucherPoolStock()` is the monitor tick
+   that only refills a tier at/below `VOUCHER_POOL_LOW_WATERMARK`.
 
 ## VPS Access (production)
 

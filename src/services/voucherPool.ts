@@ -1,6 +1,7 @@
 import type { PoolClient } from 'pg';
 import { pool } from '../db/pool';
 import { isRuijieCloudConfigured, mintRuijieVoucherForTier } from './ruijieMint';
+import { isRuijieSyncCircuitOpen, isThrottleError, throttledRuijieCall } from './ruijieSync';
 
 function positiveInt(raw: string | undefined, fallback: number, min: number): number {
   const value = Number(raw);
@@ -31,6 +32,8 @@ export interface VoucherPoolTierResult {
   after: number;
   minted: number;
   errors: string[];
+  /** True when the refill stopped early because Ruijie throttled us. */
+  degraded: boolean;
 }
 
 export interface VoucherPoolRefillResult {
@@ -38,6 +41,12 @@ export interface VoucherPoolRefillResult {
   reason?: string;
   locked: boolean;
   tiers: VoucherPoolTierResult[];
+  /**
+   * True when stock could not be topped up because Ruijie is throttling or the
+   * sync circuit is open. Callers serve pre-minted stock and must not treat this
+   * as an error — a customer is never blocked by it.
+   */
+  degraded: boolean;
 }
 
 export interface ClaimedPoolVoucher {
@@ -195,7 +204,19 @@ export async function refillVoucherPool(
   options: { force?: boolean } = {}
 ): Promise<VoucherPoolRefillResult> {
   if (!isRuijieCloudConfigured()) {
-    return { skipped: true, reason: 'Ruijie Cloud is not configured', locked: false, tiers: [] };
+    return { skipped: true, reason: 'Ruijie Cloud is not configured', locked: false, tiers: [], degraded: false };
+  }
+
+  // Nothing to do while the breaker is open: asking again only deepens the
+  // throttle. The pool still holds whatever was minted before this point.
+  if (isRuijieSyncCircuitOpen()) {
+    return {
+      skipped: true,
+      reason: 'Ruijie sync circuit is open',
+      locked: false,
+      tiers: [],
+      degraded: true,
+    };
   }
 
   const client = await pool.connect();
@@ -207,26 +228,32 @@ export async function refillVoucherPool(
     );
     locked = Boolean(lock.rows[0]?.locked);
     if (!locked) {
-      return { skipped: true, reason: 'Another worker is refilling the pool', locked: false, tiers: [] };
+      return { skipped: true, reason: 'Another worker is refilling the pool', locked: false, tiers: [], degraded: false };
     }
 
     const { rows: tierRows } = await client.query(ACTIVE_TIERS_SQL);
     const results: VoucherPoolTierResult[] = [];
+    let degraded = false;
 
     for (const row of tierRows) {
       const tierName = String(row.tier_name);
       const before = await availableCount(client, tierName);
       if (!options.force && before > VOUCHER_POOL_LOW_WATERMARK) {
-        results.push({ tierName, before, after: before, minted: 0, errors: [] });
+        results.push({ tierName, before, after: before, minted: 0, errors: [], degraded: false });
         continue;
       }
 
       const errors: string[] = [];
       let minted = 0;
+      let tierDegraded = false;
       const deficit = Math.max(0, VOUCHER_POOL_TARGET - before);
       for (let i = 0; i < deficit; i++) {
         try {
-          const voucher = await mintRuijieVoucherForTier(tierName, `Pool ${tierName}`);
+          // Paced to at most one call every 6-10s and <12/min. A throttle trips
+          // the shared breaker, which ends this loop on the next iteration.
+          const voucher = await throttledRuijieCall(() => mintRuijieVoucherForTier(tierName, `Pool ${tierName}`), {
+            label: `pool:mint:${tierName}`,
+          });
           const inserted = await client.query(
             `INSERT INTO ruijie_vouchers
                (code_no, tier_name, user_group_id, profile_uuid, ruijie_expiry, payment_id,
@@ -246,6 +273,10 @@ export async function refillVoucherPool(
           if (inserted.rowCount) minted += 1;
         } catch (err) {
           errors.push(err instanceof Error ? err.message : String(err));
+          if (isThrottleError(err) || isRuijieSyncCircuitOpen()) {
+            tierDegraded = true;
+            degraded = true;
+          }
           break;
         }
       }
@@ -256,10 +287,11 @@ export async function refillVoucherPool(
         after: await availableCount(client, tierName),
         minted,
         errors,
+        degraded: tierDegraded,
       });
     }
 
-    return { skipped: false, locked: true, tiers: results };
+    return { skipped: false, locked: true, tiers: results, degraded };
   } finally {
     if (locked) {
       try {
@@ -269,6 +301,32 @@ export async function refillVoucherPool(
     }
     client.release();
   }
+}
+
+export interface VoucherPoolSyncResult {
+  status: VoucherPoolStatus;
+  refillTriggered: boolean;
+  refill?: VoucherPoolRefillResult;
+}
+
+/**
+ * Monitor tick: look at local stock and only reach for Ruijie when a tier has
+ * fallen to its low watermark.
+ *
+ * This is the entry point background jobs should use. It reads stock from the
+ * database (cheap, no upstream call) and starts a refill only when one is
+ * actually needed, so an idle pool costs nothing against the tiny tenant quota.
+ */
+export async function syncVoucherPoolStock(options: { force?: boolean } = {}): Promise<VoucherPoolSyncResult> {
+  const status = await getVoucherPoolStatus();
+  if (!status.configured) return { status, refillTriggered: false };
+
+  const needsStock =
+    options.force === true || status.tiers.some((tier) => tier.available <= VOUCHER_POOL_LOW_WATERMARK);
+  if (!needsStock) return { status, refillTriggered: false };
+
+  const refill = await refillVoucherPool({ force: options.force });
+  return { status, refillTriggered: true, refill };
 }
 
 let workerTimer: ReturnType<typeof setInterval> | null = null;
@@ -283,15 +341,21 @@ export function startVoucherPoolWorker(): void {
   const tick = () => {
     if (workerTicking) return;
     workerTicking = true;
-    refillVoucherPool()
+    syncVoucherPoolStock()
       .then((result) => {
-        if (!result.skipped) {
-          const minted = result.tiers.reduce((sum, tier) => sum + tier.minted, 0);
-          if (minted > 0) console.log(`[voucher-pool] refilled ${minted} voucher(s)`);
-          for (const tier of result.tiers) {
-            if (tier.errors.length > 0) {
-              console.error(`[voucher-pool] ${tier.tierName}: ${tier.errors[0]}`);
-            }
+        const refill = result.refill;
+        if (!refill) return;
+        if (refill.skipped) {
+          if (refill.degraded) {
+            console.warn(`[voucher-pool] stock low but ${refill.reason ?? 'throttled'} — serving pooled stock`);
+          }
+          return;
+        }
+        const minted = refill.tiers.reduce((sum, tier) => sum + tier.minted, 0);
+        if (minted > 0) console.log(`[voucher-pool] refilled ${minted} voucher(s)`);
+        for (const tier of refill.tiers) {
+          if (tier.errors.length > 0) {
+            console.error(`[voucher-pool] ${tier.tierName}: ${tier.errors[0]}`);
           }
         }
       })

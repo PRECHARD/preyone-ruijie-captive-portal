@@ -1083,6 +1083,7 @@
   var quickBtn = document.getElementById('quick-submit-btn');
   var quickBtnText = document.getElementById('quick-btn-text');
   var quickBtnSpinner = document.getElementById('quick-btn-spinner');
+  var quickError = document.getElementById('form-error');
 
   function setQuickLoading(loading) {
     if (quickBtn) quickBtn.disabled = loading;
@@ -1090,18 +1091,95 @@
     if (quickBtnSpinner) quickBtnSpinner.classList.toggle('hidden', !loading);
   }
 
+  function showQuickError(message) {
+    if (quickError) {
+      quickError.textContent = message;
+      quickError.classList.remove('hidden');
+    }
+  }
+
+  // The account-registration endpoint is the last resort. It is rate limited to
+  // 10 requests / 15 min PER IP, and every guest on a hotspot shares one NAT IP,
+  // so it is only used when the local route genuinely is not deployed.
+  async function legacyRedeem(code) {
+    var res = await fetch('/api/auth/signup?' + voucherParams.toString(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ voucherCode: code, fullName: 'Voucher Guest', acceptedTos: true }),
+    });
+    var json = await res.json().catch(function () { return {}; });
+    if (!res.ok) throw new Error(json.error || 'Could not activate that voucher.');
+    return json;
+  }
+
+  /**
+   * Redeem against the LOCAL `vouchers` table: POST /api/portal/redeem.
+   *
+   * One round-trip, no account, no password and no Ruijie Cloud call, so paying
+   * customers queued behind one NAT IP can never throttle each other out.
+   * The legacy signup POST is used only when this deployment does not have the
+   * route (404/405) or a proxy in front of it is down (501/502/503/504) — a
+   * plain 500 is reported to the customer instead of silently retried, because
+   * retrying a possibly-committed redemption could burn a second allocation.
+   */
+  async function redeemVoucher(code) {
+    var res;
+    try {
+      res = await fetch('/api/portal/redeem?' + voucherParams.toString(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ voucherCode: code, fullName: 'Voucher Guest', acceptedTos: true }),
+      });
+    } catch (_networkErr) {
+      return legacyRedeem(code);
+    }
+
+    if (res.status === 404 || res.status === 405 || [501, 502, 503, 504].indexOf(res.status) !== -1) {
+      return legacyRedeem(code);
+    }
+
+    var json = await res.json().catch(function () { return {}; });
+    if (!res.ok) {
+      throw new Error(json.error || 'Could not activate that voucher. Please check the code and try again.');
+    }
+    return json;
+  }
+
   if (quickForm) {
-    quickForm.addEventListener('submit', function (e) {
-      var code = document.getElementById('accessCode').value.trim();
+    quickForm.addEventListener('submit', async function (e) {
+      e.preventDefault();
+      clearErrors();
+
+      var input = document.getElementById('accessCode');
+      var code = (input && input.value ? input.value : '').replace(/\s+/g, '').trim();
       if (!code) {
-        e.preventDefault();
-        setFieldError('accessCode', 'Access code is required.');
+        setFieldError('accessCode', 'Voucher code is required.');
+        if (input) input.focus();
         return;
       }
-      // Set form action to include original gateway params (client_mac, nas_ip, etc.)
-      quickForm.action = '/api/auth/signup?' + voucherParams.toString();
-      // Submit naturally — browser POSTs to server, server returns 302 redirect to ext_login,
-      // browser follows as top-level navigation, no JS dependency for the redirect.
+
+      setQuickLoading(true);
+      try {
+        var json = await redeemVoucher(code);
+        // The server returns the ext_login URL with the ORIGINAL destination
+        // already encoded — hand it straight to the browser, never rebuild it.
+        redirectToSuccess(json);
+      } catch (err) {
+        var msg = (err && err.message) || 'Could not activate that voucher. Please try again.';
+        setFieldError('accessCode', msg);
+        showQuickError(msg);
+        setQuickLoading(false);
+        if (input) input.focus();
+      }
+    });
+  }
+
+  var quickBuyBtn = document.getElementById('quick-buy-btn');
+  if (quickBuyBtn) {
+    quickBuyBtn.addEventListener('click', function () {
+      var target = document.getElementById('packages-heading');
+      if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
   }
 
