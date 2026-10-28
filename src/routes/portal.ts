@@ -28,10 +28,13 @@ import {
  * local `vouchers` table inside one transaction, activates the session and
  * answers 200 with everything the client needs to hand off to the gateway.
  *
- * It performs **no outbound HTTP at all** — no Ruijie Cloud call, no OCS, no
- * RADIUS request. `tests/portalRedeem.test.ts` fails the build if this module
- * ever imports a Ruijie client. The gateway authorises the MAC afterwards via
- * ext_login/RADIUS, which is the existing, working flow.
+ * The redemption itself performs **no outbound HTTP at all** — no Ruijie Cloud
+ * call, no OCS, no RADIUS request. `tests/portalRedeem.test.ts` fails the build
+ * if this module eagerly imports a Ruijie client, and asserts the only Ruijie
+ * touch point runs AFTER the response is written. The gateway authorises the MAC
+ * afterwards via ext_login/RADIUS, which is the existing, working flow; a
+ * best-effort "authorise this MAC in the cloud now" hook fires post-commit and
+ * can never delay or fail a redemption (`src/services/ruijieAuthorize.ts`).
  *
  * Strictly additive: `/api/auth/signup` and its handler are untouched, and the
  * portal JS falls back to it if this route is unavailable.
@@ -84,8 +87,13 @@ export function readGatewayContext(req: Request): GatewayContext {
   const body = (req.body ?? {}) as Record<string, unknown>;
   return {
     macAddress:
-      s(q.client_mac) || s(q.mac) || s(q.clientMac) || s(req.headers['x-client-mac']) || s(body.mac) || s(body.client_mac),
-    ipAddress: s(q.ip) || s(body.ip) || req.ip || null,
+      s(q.client_mac) || s(q.mac) || s(q.clientMac) || s(q.client_mac_address) ||
+      s(req.headers['x-client-mac']) || s(body.clientMac) || s(body.client_mac) || s(body.mac),
+    // `nas_ip` is the gateway, never the client, so it is deliberately absent
+    // here. `wlanuserip` is the WISPr name for the station address.
+    ipAddress:
+      s(q.client_ip) || s(q.clientIp) || s(q.ip) || s(q.wlanuserip) || s(q.userip) ||
+      s(body.clientIp) || s(body.client_ip) || s(body.ip) || req.ip || null,
     nasip: s(q.nas_ip) || s(q.nasip) || s(q.wlanacname),
     loginUrl: s(q.login_url),
     nasMac: s(q.nas_mac),
@@ -162,12 +170,20 @@ portalRouter.post('/redeem', redeemLimiter, async (req: Request, res: Response) 
     // gateway receives it.
     const canonicalCode = voucher.code;
 
-    const usedCount = await markVoucherRedeemed(client, voucher.id);
+    const usedCount = await markVoucherRedeemed(client, voucher.id, {
+      clientMac: ctx.macAddress,
+      clientIp: ctx.ipAddress,
+    });
     if (usedCount == null) {
       await client.query('ROLLBACK');
       res.status(400).json({ error: 'Invalid Voucher code.', reason: 'invalid' });
       return;
     }
+
+    // "Used" is derived from used_count/max_uses (never a stored status column),
+    // so a single-use code is already `used` at this point.
+    const voucherStatus: 'used' | 'available' =
+      Number(voucher.max_uses) > 0 && usedCount >= Number(voucher.max_uses) ? 'used' : 'available';
 
     const sessionToken = crypto.randomUUID();
     const sessionExpires = new Date(Date.now() + activation.durationMin * 60 * 1000);
@@ -225,6 +241,30 @@ portalRouter.post('/redeem', redeemLimiter, async (req: Request, res: Response) 
       );
     }
 
+    // Per-device session ledger. `users.session_expires_at` remains the account
+    // view (unchanged); this row is the gateway-facing one: which MAC, which
+    // voucher, which bandwidth, and when access ends. Upsert on the token so a
+    // retried redemption for the same token refreshes instead of duplicating.
+    await client.query(
+      `INSERT INTO active_sessions
+         (session_token, user_id, voucher_id, voucher_code, client_mac, client_ip,
+          package_tier, duration_min, bandwidth_mbps_up, bandwidth_mbps_down,
+          data_limit_gb, is_uncapped, started_at, expires_at, last_seen_at, status)
+       VALUES ($1, $2, $3, $4, $5, $6::inet, $7, $8, $9, $10, $11, $12, NOW(), $13, NOW(), 'active')
+       ON CONFLICT (session_token) DO UPDATE SET
+         client_mac   = COALESCE(EXCLUDED.client_mac, active_sessions.client_mac),
+         client_ip    = COALESCE(EXCLUDED.client_ip, active_sessions.client_ip),
+         expires_at   = EXCLUDED.expires_at,
+         last_seen_at = NOW(),
+         status       = 'active',
+         updated_at   = NOW()`,
+      [
+        sessionToken, userId, voucher.id, canonicalCode, ctx.macAddress, ctx.ipAddress,
+        activation.packageTier, activation.durationMin, activation.bandwidthMbpsUp,
+        activation.bandwidthMbpsDown, activation.dataLimitGb, activation.isUncapped, sessionExpires,
+      ]
+    );
+
     await client.query(
       `INSERT INTO access_log (user_id, event, mac_address, ip_address, detail, request_method, http_status)
        VALUES ($1, 'login', $2, $3::inet, $4, 'POST', 200)`,
@@ -260,6 +300,10 @@ portalRouter.post('/redeem', redeemLimiter, async (req: Request, res: Response) 
       sessionToken,
       sessionExpiresAt: sessionExpires.toISOString(),
       redirectUrl,
+      // Fallback destination only. `redirectUrl` deliberately stays the gateway
+      // ext_login URL (src/utils/redirect.ts) — sending the client to
+      // success.html instead is what breaks internet access.
+      successUrl: '/success.html',
       bandwidthMbpsUp: activation.bandwidthMbpsUp,
       bandwidthMbpsDown: activation.bandwidthMbpsDown,
       dataLimitGb: activation.dataLimitGb,
@@ -268,11 +312,31 @@ portalRouter.post('/redeem', redeemLimiter, async (req: Request, res: Response) 
       macAddress: ctx.macAddress,
       ipAddress: ctx.ipAddress,
       voucherCode: canonicalCode,
+      voucherStatus,
       packageTier: activation.packageTier,
       loginUrl: ctx.loginUrl,
       // Never expose the session token hash; this is only for support tickets.
       sessionRef: sha256(sessionToken).slice(0, 12),
     });
+
+    // ── Post-commit, fire-and-forget MAC authorisation ──────────────────────
+    // The response above is already written, so a slow or throttled Ruijie
+    // tenant can never delay or fail a redemption. The module is imported
+    // lazily (not at boot) to keep this route free of an eager Ruijie client
+    // dependency; `authorizeClientAfterRedeem` swallows every error.
+    void (async () => {
+      try {
+        const { authorizeClientAfterRedeem } = await import('../services/ruijieAuthorize');
+        await authorizeClientAfterRedeem({
+          macAddress: ctx.macAddress,
+          ipAddress: ctx.ipAddress,
+          voucherCode: canonicalCode,
+        });
+      } catch (err) {
+        // Only reachable if the module itself fails to load.
+        console.warn('[portal/redeem] cloud authorize hook unavailable:', err);
+      }
+    })();
   } catch (err) {
     await client.query('ROLLBACK').catch(() => undefined);
     console.error('[portal/redeem] failed', err);

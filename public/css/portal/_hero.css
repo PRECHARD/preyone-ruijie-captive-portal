@@ -46,6 +46,45 @@
   max-width: none;
 }
 
+/* ── Voucher quick-connect card ──────────────────────────────────────────
+   The primary path for a walk-up customer: the PIN box is visible on load,
+   sitting in the right-hand hero column. It yields to the registration card
+   when "Sign Up Now" is pressed, and comes back when that is closed.
+   NOTE: this block previously lived ONLY in the built public/css/portal.css,
+   so `npm run build:portal-css` silently dropped it. It belongs here. */
+.hero-section > .hero-card--quick {
+  grid-column: 2;
+  grid-row: 1;
+  max-width: none;
+}
+
+.hero-section.signup-open > .hero-card--quick {
+  display: none;
+}
+
+#quick-form .hero-connect-btn {
+  max-width: none;
+  margin-top: 0.25rem;
+  font-size: clamp(1rem, 1.8vw, 1.35rem);
+}
+
+.quick-help {
+  margin: 0.9rem 0 0;
+  font-size: 0.82rem;
+  line-height: 1.6;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.quick-help a {
+  color: var(--cyan);
+  text-decoration: none;
+}
+
+.quick-help a:hover {
+  text-decoration: underline;
+}
+
 .hero-text {
   color: var(--text-muted);
   font-size: 1.1rem;

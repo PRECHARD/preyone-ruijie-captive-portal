@@ -50,4 +50,40 @@ describe('public asset references', () => {
       expect(html, `${page} still references faviconloading.svg`).not.toContain('faviconloading.svg');
     }
   });
+
+  it('portal.css is exactly the concatenation of its partials', () => {
+    // `npm run build:portal-css` regenerates public/css/portal.css from
+    // public/css/portal/*.css on every deploy, so a rule hand-edited into the
+    // built file is silently discarded there. That is how the voucher
+    // quick-connect grid rules (`.hero-card--quick`) once disappeared. Keep the
+    // order in sync with scripts/build-portal-css.mjs.
+    const order = [
+      '_base.css',
+      '_header.css',
+      '_hero.css',
+      '_forms.css',
+      '_features.css',
+      '_packages.css',
+      '_buttons.css',
+      '_success.css',
+      '_terms.css',
+      '_footer.css',
+      '_responsive.css',
+      '_modal.css',
+    ];
+    for (const file of order) {
+      expect(existsSync(path.join(publicDir, 'css', 'portal', file)), `missing partial ${file}`).toBe(true);
+    }
+
+    const expected = order
+      .map((file) => {
+        const css = readFileSync(path.join(publicDir, 'css', 'portal', file), 'utf8').replace(/\s*$/, '');
+        return `/* portal/${file} */\n${css}\n\n`;
+      })
+      .join('')
+      .trimEnd();
+
+    const built = readFileSync(path.join(publicDir, 'css', 'portal.css'), 'utf8').trimEnd();
+    expect(built).toBe(expected);
+  });
 });

@@ -206,6 +206,69 @@ describe('POST /api/portal/redeem — persistence contract', () => {
     expect(releaseMock).toHaveBeenCalled();
   });
 
+  it('marks the voucher used and records the claiming device', async () => {
+    await request(app())
+      .post('/api/portal/redeem?client_mac=AA:BB:CC:DD:EE:FF&client_ip=10.1.2.3')
+      .send({ voucherCode: 'e7wj7w' });
+
+    const update = executed.find((q) => q.includes('UPDATE vouchers'));
+    expect(update).toBeDefined();
+    // Consumption + first-use clock + the device that claimed the code.
+    expect(update).toMatch(/used_count\s+= used_count \+ 1/);
+    expect(update).toMatch(/activated_at = COALESCE\(activated_at, NOW\(\)\)/);
+    expect(update).toMatch(/client_mac\s+= COALESCE\(client_mac, \$2\)/);
+    expect(update).toMatch(/client_ip\s+= COALESCE\(client_ip, \$3::inet\)/);
+    // A stored status column would be a second copy of used_count/max_uses.
+    expect(update).not.toContain('status =');
+  });
+
+  it('upserts the per-device session ledger inside the transaction', async () => {
+    await request(app())
+      .post('/api/portal/redeem?client_mac=AA:BB:CC:DD:EE:FF&client_ip=10.1.2.3')
+      .send({ voucherCode: 'e7wj7w' });
+
+    const session = executed.find((q) => q.includes('INSERT INTO active_sessions'));
+    expect(session).toBeDefined();
+    expect(session).toContain('ON CONFLICT (session_token) DO UPDATE');
+    expect(session).toContain('client_mac');
+    expect(session).toContain('expires_at');
+    // The ledger row must land before the COMMIT that publishes the redemption.
+    expect(executed.indexOf(session!)).toBeLessThan(executed.indexOf('COMMIT'));
+  });
+
+  it('accepts the device identity from the body when the gateway sent none in the URL', async () => {
+    const res = await request(app())
+      .post('/api/portal/redeem')
+      .send({ voucherCode: 'e7wj7w', clientMac: 'aa-bb-cc-dd-ee-ff', clientIp: '10.9.8.7' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.macAddress).toBe('aa-bb-cc-dd-ee-ff');
+    expect(res.body.ipAddress).toBe('10.9.8.7');
+  });
+
+  it('reports "used" and a success.html fallback without changing the gateway redirect', async () => {
+    const res = await request(app())
+      .post('/api/portal/redeem?client_mac=AA:BB:CC:DD:EE:FF&login_url=http://10.0.0.1:2060/ext_login')
+      .send({ voucherCode: 'e7wj7w' });
+
+    expect(res.status).toBe(200);
+    // Single-use code, so one redemption exhausts it.
+    expect(res.body.voucherStatus).toBe('used');
+    expect(res.body.successUrl).toBe('/success.html');
+    // Hard invariant: the client is still sent to ext_login, not success.html.
+    expect(res.body.redirectUrl).toContain('10.0.0.1:2060/ext_login');
+  });
+
+  it('never treats nas_ip as the client address', async () => {
+    const res = await request(app())
+      .post('/api/portal/redeem?nas_ip=192.168.1.1')
+      .send({ voucherCode: 'e7wj7w' });
+
+    expect(res.status).toBe(200);
+    // req.ip is the only remaining source (supertest loopback).
+    expect(res.body.ipAddress).not.toBe('192.168.1.1');
+  });
+
   it('does not create a WISPr profile when the gateway supplied no MAC', async () => {
     await request(app()).post('/api/portal/redeem').send({ voucherCode: 'e7wj7w' });
 
@@ -281,6 +344,20 @@ describe('local-only guarantee', () => {
   it('does not touch the signup handler', () => {
     const auth = read('src/routes/auth.ts');
     expect(auth).toContain("authRouter.post('/signup', signupLimiter");
+  });
+
+  it('only reaches Ruijie after COMMIT, fire-and-forget, so it can never delay a redemption', () => {
+    const source = read('src/routes/portal.ts');
+    const commitAt = source.indexOf("await client.query('COMMIT')");
+    const hookAt = source.indexOf('authorizeClientAfterRedeem');
+    const responseAt = source.indexOf('res.status(200).json');
+
+    expect(commitAt).toBeGreaterThan(-1);
+    expect(responseAt).toBeGreaterThan(commitAt);
+    // The hook is imported lazily and never awaited on the response path.
+    expect(hookAt).toBeGreaterThan(responseAt);
+    expect(source).toMatch(/void \(async \(\) => \{/);
+    expect(source).toContain("await import('../services/ruijieAuthorize')");
   });
 });
 

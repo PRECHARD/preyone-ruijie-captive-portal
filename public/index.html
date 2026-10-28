@@ -31,9 +31,9 @@
   <link rel="preconnect" href="http://192.168.1.216:2060" />
   <link rel="dns-prefetch" href="http://192.168.1.216:2060" />
   <link
-    href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Montserrat:wght@500;600;700;800&family=Satisfy&display=swap"
+    href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Montserrat:wght@500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Satisfy&display=swap"
     rel="stylesheet">
-  <link rel="stylesheet" href="/css/portal.css?v=47" />
+  <link rel="stylesheet" href="/css/portal.css?v=48" />
   <!-- Header logo is the largest paint on the portal. Preload the variant a
        phone will actually pick so discovery does not wait on the parser. -->
   <link
@@ -114,7 +114,50 @@
       </div>
 
       <div class="hero-btn-group">
+        <button type="button" class="hero-connect-btn hero-connect-btn--connect" id="connectNowBtn"
+          aria-expanded="false" aria-controls="connect-form-modal">Connect Now</button>
         <button type="button" class="hero-connect-btn" id="signUpBtn">Sign Up Now</button>
+      </div>
+
+      <!-- Connect Now popup: hidden by default (`display: none` in
+           public/css/portal/_modal.css) and toggled by portal.js. It is an
+           overlay card anchored to the hero button group, not a new page step,
+           so a walk-up customer can redeem without leaving the page. -->
+      <div class="connect-modal" id="connect-form-modal" role="dialog" aria-modal="true"
+        aria-labelledby="connect-form-title" aria-hidden="true">
+        <div class="connect-modal-card">
+          <button type="button" class="connect-modal-close" id="connect-form-close" aria-label="Close connect form">&times;</button>
+          <div class="connect-modal-head">
+            <span class="connect-modal-badge" aria-hidden="true"></span>
+            <h2 id="connect-form-title">Connect to Preyone</h2>
+            <p class="connect-modal-sub">Enter the voucher PIN you were sold and you're online in seconds.</p>
+          </div>
+          <form id="connect-form" method="POST" novalidate>
+            <div class="connect-field">
+              <label for="connectVoucherCode">Voucher code</label>
+              <input id="connectVoucherCode" name="voucherCode" type="text" inputmode="text"
+                placeholder="e.g. 1234 5678" autocomplete="one-time-code" autocapitalize="characters"
+                spellcheck="false" required />
+              <span class="field-error" id="err-connectVoucherCode"></span>
+            </div>
+            <div class="connect-device" id="connect-device" hidden>
+              <span class="connect-device-label">Device</span>
+              <span class="connect-device-value" id="connect-device-mac"></span>
+            </div>
+            <div id="connect-form-error" class="field-error hidden"></div>
+            <div class="connect-actions">
+              <button type="submit" class="connect-submit" id="connect-submit-btn">
+                <span id="connect-btn-text">Connect</span>
+                <span id="connect-btn-spinner" class="spinner hidden" aria-hidden="true"></span>
+              </button>
+              <button type="button" class="connect-cancel" id="connect-cancel-btn">Cancel</button>
+            </div>
+            <p class="connect-help">
+              No voucher yet? <button type="button" class="link-button" id="connect-buy-btn">Buy one below</button>
+              &middot; By connecting you accept our <a href="/terms.html" target="_blank" rel="noopener">Terms</a>
+            </p>
+          </form>
+        </div>
       </div>
 
       <!-- Voucher quick-connect: the PRIMARY path for a captive-portal guest.
@@ -647,7 +690,7 @@
     }
   })();
   </script>
-  <script src="/js/portal.js?v=30"></script>
+  <script src="/js/portal.js?v=31"></script>
   <script>
   // ── Captive-portal alert injection ──────────────────────────────────────
   // The gateway bounces a blocked customer straight back to this page, so it

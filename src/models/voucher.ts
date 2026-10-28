@@ -110,16 +110,38 @@ export async function findVoucherForRedemption(
   return rows[0] ?? null;
 }
 
-/** Consume one allocation. Returns the new used_count (or null if the row vanished). */
+/** Extra device facts recorded on the voucher the first time it is redeemed. */
+export interface RedemptionMark {
+  clientMac?: string | null;
+  clientIp?: string | null;
+}
+
+/**
+ * Consume one allocation. Returns the new used_count (or null if the row vanished).
+ *
+ * `activated_at` is `COALESCE`d so the FIRST redemption wins: a multi-device
+ * package must not move the clock forward every time another phone joins.
+ * `client_mac` / `client_ip` follow the same rule — they describe the device that
+ * claimed the code, not whichever device redeemed it most recently.
+ *
+ * There is deliberately no `status` column: "used" is derived from
+ * used_count/max_uses (see src/db/migrate.ts), so writing it here would be a
+ * second copy of the same fact that could only drift.
+ */
 export async function markVoucherRedeemed(
   client: Pick<PoolClient, 'query'>,
-  voucherId: string
+  voucherId: string,
+  mark: RedemptionMark = {}
 ): Promise<number | null> {
   const { rows } = await client.query<{ used_count: number }>(
-    `UPDATE vouchers SET used_count = used_count + 1, activated_at = COALESCE(activated_at, NOW())
+    `UPDATE vouchers
+        SET used_count   = used_count + 1,
+            activated_at = COALESCE(activated_at, NOW()),
+            client_mac   = COALESCE(client_mac, $2),
+            client_ip    = COALESCE(client_ip, $3::inet)
       WHERE id = $1
       RETURNING used_count`,
-    [voucherId]
+    [voucherId, mark.clientMac ?? null, mark.clientIp ?? null]
   );
   return rows.length > 0 ? Number(rows[0].used_count) : null;
 }

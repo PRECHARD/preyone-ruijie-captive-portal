@@ -28,6 +28,12 @@ const USERGROUP_CONFIG_URL =
   process.env.RUIJIE_USERGROUP_CONFIG_PATH || '/service/api/intl/usergroup/config_group_userManagement_menu';
 const VOUCHER_CREATE_URL = '/service/api/open/auth/voucher/create';
 const VOUCHER_GET_LIST_URL = '/service/api/open/auth/voucher/getList';
+// Post-redemption MAC authorisation ("unblock this device now"). Best-effort
+// only: the gateway still authorises through ext_login/RADIUS, so a tenant that
+// does not expose this route (or is out of quota) must never fail a redemption.
+// Overridable so a different API surface needs no code change.
+const CLIENT_AUTHORIZE_URL =
+  process.env.RUIJIE_AUTHORIZE_PATH || '/service/api/open/auth/authorize';
 
 const TOKEN_TTL_MS = 50 * 60 * 1000;
 
@@ -343,6 +349,54 @@ export async function createRuijieVoucher(input: CreateRuijieVoucherInput): Prom
       comment,
     };
   }));
+}
+
+export interface AuthorizeRuijieClientInput {
+  /** Client (station) MAC the gateway is holding in its captive state. */
+  macAddress: string;
+  /** The PIN that paid for this session, when known. */
+  voucherCode?: string;
+  /** Defaults to the configured tenant group id. */
+  userGroupId?: string;
+  /** Per-request timeout. Defaults to 5s; this call is never on a blocking path. */
+  timeoutMs?: number;
+}
+
+export interface AuthorizedRuijieClient {
+  macAddress: string;
+  code: number;
+}
+
+/**
+ * Ask Ruijie Cloud to authorise a client MAC straight after a local redemption.
+ *
+ * Deliberately NOT retried: the caller (`ruijieAuthorize.ts`) is a fire-and-forget
+ * hook after the response, and the gateway's own ext_login/RADIUS path is what
+ * actually grants access. Retrying here would burn the tenant's small quota for
+ * no customer-visible benefit.
+ */
+export async function authorizeRuijieClient(
+  input: AuthorizeRuijieClientInput
+): Promise<AuthorizedRuijieClient> {
+  const macAddress = String(input.macAddress || '').trim();
+  if (!macAddress) throw new RuijieApiError('config', 'No client MAC to authorize');
+  return withTokenRefresh(async (accessToken) => {
+    const cfg = getConfig();
+    const res = await client().post(
+      `${CLIENT_AUTHORIZE_URL}/${cfg.groupId}?access_token=${encodeURIComponent(accessToken)}`,
+      {
+        mac: macAddress,
+        userGroupId: input.userGroupId || cfg.groupId,
+        ...(input.voucherCode ? { voucherCode: input.voucherCode } : {}),
+      },
+      {
+        headers: { 'Content-Type': 'application/json' },
+        timeout: input.timeoutMs ?? 5_000,
+      }
+    );
+    failIfNotZero(res.data, `auth/authorize (groupId=${cfg.groupId}) -> HTTP ${res.status}`);
+    return { macAddress, code: 0 };
+  });
 }
 
 export interface GetRuijieVouchersInput {

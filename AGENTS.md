@@ -144,6 +144,15 @@ Phone → Ruijie AP (WiFi) → EG105G-P Gateway → VPS (158.220.118.91)
    do not re-point `public/js/portal.js` at signup — it only falls back there
    when the route is missing (404/405) or a proxy is down (501/502/503/504).
    `/api/portal/` is in `RATE_LIMIT_EXEMPT` for the same NAT reason as `/api/auth/`.
+   The one upstream touch point is a **post-response, fire-and-forget** MAC
+   authorisation (`src/services/ruijieAuthorize.ts`, lazily imported *after*
+   `res.json`): 5s timeout, never throws, skipped while the sync breaker is open
+   or the pacing window is full, and parked for 15 minutes after a hard rejection.
+   `RUIJIE_AUTHORIZE_ON_REDEEM=false` turns it off. The redemption itself still
+   answers from local Postgres only — keep it that way.
+   The same transaction also writes `active_sessions` (per-device ledger) and
+   stamps `vouchers.client_mac` / `client_ip`; `vouchers.status` is still
+   **derived** from `used_count`/`max_uses`, never stored.
 12. **All background Ruijie calls go through `src/services/ruijieSync.ts`.**
    `throttledRuijieCall()` paces them (>= 6s apart, <= 11/min) and a circuit
    breaker opens for 120s after 3 consecutive throttles (`code 44`, HTTP 429/503
@@ -194,6 +203,9 @@ Phone → Ruijie AP (WiFi) → EG105G-P Gateway → VPS (158.220.118.91)
 1. Build locally: `npm run build` (tsc)
 2. Build admin SPA: `cd admin && npm install && npm run build` (vite)
 3. Build site SPA: `cd site && npm install && npm run build && npm run optimize` (vite; sharp generates WebP/AVIF images)
+   - Portal CSS is generated: `npm run build:portal-css` concatenates `public/css/portal/*.css`
+     into `public/css/portal.css`. **Never hand-edit the generated file** — the deploy rebuild
+     drops it (`tests/portalAssets.test.ts` fails if the two diverge).
 4. Upload tarball of repo (exclude `.git`, `node_modules`, `android`, `bus-ticket-app`) → `/opt/preyone-portal`, extract (preserve `.env` + `node_modules`)
    - **Never build the file list from `git ls-files`.** `.gitignore` contains `dist/`, so every Vite
      build artifact (`admin/dist/assets/*`, `site/dist/*`, `pos/dist/*`) is invisible to git and gets

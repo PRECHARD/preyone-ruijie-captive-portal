@@ -1688,6 +1688,52 @@ CREATE INDEX IF NOT EXISTS idx_payments_user_id ON payments (user_id);
   -- tombstone instead.
   ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
 
+  -- The device that first claimed the code, and the address it came from.
+  -- voucher_redemptions keeps the full per-event audit; these two are the
+  -- "claiming device" summary the portal/admin reads without a join, and the
+  -- redemption path COALESCEs them so a later device can never rewrite the first.
+  ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS client_mac TEXT;
+  ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS client_ip  INET;
+
+  -- ═════════════════════════════════════════════════════════════════════════
+  -- active_sessions: the per-redemption session ledger.
+  --
+  -- POST /api/portal/redeem writes this row inside the same transaction as the
+  -- redemption, and the local success page can then show "you are online until
+  -- X" without asking Ruijie. Deliberately separate from users.session_expires_at
+  -- (the account view) and from vouchers.expires_at (the code's shelf life):
+  -- this is the DEVICE view — which MAC, which voucher, which bandwidth.
+  --
+  -- Additive and safe on an existing deployment: the table is new, every column
+  -- is nullable or defaulted, and the upsert key is the freshly minted
+  -- session_token (a retried redemption refreshes rather than duplicates).
+  -- ═════════════════════════════════════════════════════════════════════════
+  CREATE TABLE IF NOT EXISTS active_sessions (
+    id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    session_token      TEXT UNIQUE NOT NULL,
+    user_id            UUID REFERENCES users(id) ON DELETE SET NULL,
+    voucher_id         UUID REFERENCES vouchers(id) ON DELETE SET NULL,
+    voucher_code       TEXT,
+    client_mac         TEXT,
+    client_ip          INET,
+    package_tier       TEXT,
+    duration_min       INTEGER NOT NULL DEFAULT 60,
+    bandwidth_mbps_up  INTEGER NOT NULL DEFAULT 2,
+    bandwidth_mbps_down INTEGER NOT NULL DEFAULT 5,
+    data_limit_gb      NUMERIC(10,2),
+    is_uncapped        BOOLEAN NOT NULL DEFAULT TRUE,
+    started_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at         TIMESTAMPTZ,
+    last_seen_at       TIMESTAMPTZ,
+    status             TEXT NOT NULL DEFAULT 'active',
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_active_sessions_mac     ON active_sessions (client_mac);
+  CREATE INDEX IF NOT EXISTS idx_active_sessions_expires ON active_sessions (expires_at);
+  CREATE INDEX IF NOT EXISTS idx_active_sessions_status  ON active_sessions (status);
+
   -- Subscriber name parts. users.full_name is the single field the signup flow
   -- already writes and must keep writing; these are an optional split of it for
   -- display, and full_name remains the source of truth.

@@ -910,3 +910,305 @@ body.modal-open {
   border-color: rgba(0, 212, 255, 0.85);
   box-shadow: 0 0 20px rgba(0, 212, 255, 0.5);
 }
+/* ═══════════════════════════════════════════════════════════════════════════
+   CONNECT NOW POPUP (#connect-form-modal)
+   Hidden by default; `is-open` is set by portal.js. Dark glassmorphism on the
+   Preyone palette: #0a0f1d base, neon cyan #00ccff accents, Plus Jakarta Sans.
+   Appended last in the cascade (see scripts/build-portal-css.mjs) so these
+   rules win over the generic responsive overrides.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+#connect-form-modal {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 9500;
+  align-items: center;
+  justify-content: center;
+  padding: clamp(0.75rem, 3vw, 2rem);
+  background: rgba(4, 7, 15, 0.62);
+  backdrop-filter: blur(10px) saturate(1.15);
+  -webkit-backdrop-filter: blur(10px) saturate(1.15);
+  animation: connectOverlayIn 0.22s ease;
+}
+
+#connect-form-modal.is-open {
+  display: flex;
+}
+
+.connect-modal-card {
+  position: relative;
+  width: 100%;
+  max-width: 400px;
+  max-height: 90vh;
+  overflow-y: auto;
+  padding: clamp(1.25rem, 3vw, 1.75rem);
+  border-radius: 22px;
+  background: rgba(10, 15, 29, 0.95);
+  border: 1px solid rgba(0, 204, 255, 0.3);
+  box-shadow:
+    0 24px 60px rgba(0, 0, 0, 0.62),
+    0 0 0 1px rgba(255, 255, 255, 0.05),
+    0 0 38px rgba(0, 204, 255, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(22px) saturate(1.4);
+  -webkit-backdrop-filter: blur(22px) saturate(1.4);
+  color: #e8f7ff;
+  font-family: 'Plus Jakarta Sans', var(--font);
+  animation: connectCardIn 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.connect-modal-close {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 1px solid rgba(0, 204, 255, 0.22);
+  background: rgba(0, 204, 255, 0.08);
+  color: #9fe6ff;
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.connect-modal-close:hover,
+.connect-modal-close:focus-visible {
+  border-color: rgba(0, 204, 255, 0.65);
+  color: #ffffff;
+  box-shadow: 0 0 16px rgba(0, 204, 255, 0.45);
+  outline: none;
+}
+
+.connect-modal-head {
+  margin: 0 0 1rem;
+  padding-right: 2rem;
+}
+
+.connect-modal-badge {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-bottom: 0.55rem;
+  border-radius: 50%;
+  background: #00ccff;
+  box-shadow: 0 0 12px rgba(0, 204, 255, 0.9);
+  animation: connectPulse 2s ease-in-out infinite;
+}
+
+.connect-modal-head h2 {
+  font-family: 'Plus Jakarta Sans', var(--font);
+  font-size: clamp(1.15rem, 2.4vw, 1.4rem);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: #ffffff;
+  margin: 0 0 0.35rem;
+}
+
+.connect-modal-sub {
+  font-size: 0.86rem;
+  line-height: 1.55;
+  color: #9db4cc;
+  margin: 0;
+}
+
+.connect-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 0.85rem;
+}
+
+.connect-field label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(0, 204, 255, 0.85);
+}
+
+.connect-field input {
+  width: 100%;
+  padding: 0.8rem 0.95rem;
+  border-radius: 12px;
+  border: 1px solid rgba(0, 204, 255, 0.28);
+  background: rgba(5, 10, 22, 0.85);
+  color: #ffffff;
+  font-family: 'Plus Jakarta Sans', var(--font);
+  font-size: 1.05rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.connect-field input::placeholder {
+  color: rgba(157, 180, 204, 0.55);
+  letter-spacing: 0.06em;
+  text-transform: none;
+}
+
+.connect-field input:focus {
+  outline: none;
+  border-color: rgba(0, 204, 255, 0.85);
+  box-shadow: 0 0 0 3px rgba(0, 204, 255, 0.14), 0 0 22px rgba(0, 204, 255, 0.28);
+}
+
+.connect-field input.invalid {
+  border-color: rgba(255, 84, 112, 0.75);
+  box-shadow: 0 0 0 3px rgba(255, 84, 112, 0.12);
+}
+
+.connect-device {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin: 0 0 0.85rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: 10px;
+  border: 1px dashed rgba(0, 204, 255, 0.22);
+  background: rgba(0, 204, 255, 0.05);
+  font-size: 0.74rem;
+}
+
+.connect-device[hidden] { display: none; }
+
+.connect-device-label {
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(0, 204, 255, 0.75);
+}
+
+.connect-device-value {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: #d8f4ff;
+  overflow-wrap: anywhere;
+}
+
+.connect-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  margin-top: 0.35rem;
+}
+
+.connect-submit,
+.connect-cancel {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.85rem 1rem;
+  border-radius: 50px;
+  font-family: 'Plus Jakarta Sans', var(--font);
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease;
+}
+
+.connect-submit {
+  border: 1px solid rgba(0, 204, 255, 0.55);
+  background: linear-gradient(135deg, rgba(0, 204, 255, 0.9) 0%, rgba(0, 128, 200, 0.85) 100%);
+  color: #03121e;
+  box-shadow: 0 0 26px rgba(0, 204, 255, 0.35);
+}
+
+.connect-submit:hover:not(:disabled) {
+  transform: translateY(-2px);
+  filter: brightness(1.08);
+  box-shadow: 0 0 34px rgba(0, 204, 255, 0.55);
+}
+
+.connect-submit:disabled {
+  opacity: 0.7;
+  cursor: progress;
+}
+
+.connect-cancel {
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: transparent;
+  color: #b9cadb;
+}
+
+.connect-cancel:hover {
+  border-color: rgba(0, 204, 255, 0.45);
+  color: #ffffff;
+}
+
+.connect-help {
+  margin: 0.85rem 0 0;
+  font-size: 0.76rem;
+  line-height: 1.6;
+  text-align: center;
+  color: #8ba3ba;
+}
+
+.connect-help a,
+.connect-help .link-button {
+  color: #00ccff;
+  text-decoration: none;
+}
+
+.connect-help a:hover,
+.connect-help .link-button:hover {
+  text-decoration: underline;
+}
+
+/* The page behind the popup must not scroll while it is open. */
+body.connect-modal-open {
+  overflow: hidden;
+}
+
+/* Hero CTA pair: "Connect Now" (neon cyan glass) beside "Sign Up Now". */
+.hero-btn-group .hero-connect-btn--connect {
+  background: linear-gradient(135deg, rgba(0, 204, 255, 0.24) 0%, rgba(10, 15, 29, 0.92) 62%);
+  border: 1px solid rgba(0, 204, 255, 0.55);
+  color: #d7f6ff;
+  text-shadow: 0 0 14px rgba(0, 204, 255, 0.45);
+  box-shadow: 0 0 26px rgba(0, 204, 255, 0.28), inset 0 0 18px rgba(0, 204, 255, 0.08);
+}
+
+.hero-btn-group .hero-connect-btn--connect:hover {
+  background: linear-gradient(135deg, rgba(0, 204, 255, 0.38) 0%, rgba(10, 15, 29, 0.9) 65%);
+  border-color: rgba(0, 204, 255, 0.9);
+  color: #ffffff;
+  box-shadow: 0 0 40px rgba(0, 204, 255, 0.55), inset 0 0 22px rgba(0, 204, 255, 0.14);
+}
+
+@keyframes connectOverlayIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes connectCardIn {
+  from { opacity: 0; transform: translateY(18px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes connectPulse {
+  0%, 100% { opacity: 0.55; box-shadow: 0 0 8px rgba(0, 204, 255, 0.55); }
+  50% { opacity: 1; box-shadow: 0 0 18px rgba(0, 204, 255, 0.95); }
+}
+
+@media (max-width: 420px) {
+  .connect-modal-card {
+    max-width: none;
+    border-radius: 18px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #connect-form-modal,
+  .connect-modal-card,
+  .connect-modal-badge {
+    animation: none;
+  }
+}

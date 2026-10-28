@@ -1122,14 +1122,20 @@
    * plain 500 is reported to the customer instead of silently retried, because
    * retrying a possibly-committed redemption could burn a second allocation.
    */
-  async function redeemVoucher(code) {
+  async function redeemVoucher(code, queryOverride, payloadOverride) {
+    var query = queryOverride != null ? queryOverride : voucherParams.toString();
+    var payload = payloadOverride || {
+      voucherCode: code,
+      fullName: 'Voucher Guest',
+      acceptedTos: true,
+    };
     var res;
     try {
-      res = await fetch('/api/portal/redeem?' + voucherParams.toString(), {
+      res = await fetch('/api/portal/redeem?' + query, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
-        body: JSON.stringify({ voucherCode: code, fullName: 'Voucher Guest', acceptedTos: true }),
+        body: JSON.stringify(payload),
       });
     } catch (_networkErr) {
       return legacyRedeem(code);
@@ -1180,6 +1186,190 @@
     quickBuyBtn.addEventListener('click', function () {
       var target = document.getElementById('packages-heading');
       if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  }
+
+  // --- GATEWAY CONTEXT (client MAC / IP from the redirected URL) ------------
+  // The EG105G-P (and the Ruijie AP models in front of it) name the station
+  // differently: client_mac, mac, clientMac, sta_mac ... and for the address
+  // ip, client_ip, wlanuserip. Normalising the key means one lookup serves every
+  // model instead of a per-model branch. `nas_ip` is the GATEWAY address, so it
+  // is deliberately never treated as the client IP.
+  var GATEWAY_MAC_KEYS = ['clientmac', 'mac', 'macaddress', 'stamac', 'usermac', 'devicemac', 'clienthwaddr'];
+  var GATEWAY_IP_KEYS = ['clientip', 'ip', 'ipaddress', 'wlanuserip', 'userip', 'staip', 'deviceip'];
+
+  function normalizeGatewayKey(key) {
+    return String(key == null ? '' : key).toLowerCase().replace(/[^a-z0-9]/g, '');
+  }
+
+  function extractGatewayContext(search) {
+    var context = { mac: '', ip: '' };
+    var params;
+    try {
+      params = new URLSearchParams(search || '');
+    } catch (_err) {
+      return context;
+    }
+    params.forEach(function (value, key) {
+      var name = normalizeGatewayKey(key);
+      var raw = String(value == null ? '' : value).trim();
+      if (!raw) return;
+      if (!context.mac && GATEWAY_MAC_KEYS.indexOf(name) !== -1) context.mac = raw;
+      if (!context.ip && GATEWAY_IP_KEYS.indexOf(name) !== -1) context.ip = raw;
+    });
+    return context;
+  }
+
+  var gatewayContext = extractGatewayContext(location.search);
+
+  // The gateway params must travel in the QUERY STRING (AGENTS.md: a POST body
+  // loses them). location.search is already forwarded verbatim; this only adds
+  // the aliases we resolved, and never overrides what the gateway sent.
+  function connectQueryString() {
+    var qs;
+    try {
+      qs = new URLSearchParams(location.search);
+    } catch (_err) {
+      return voucherParams.toString();
+    }
+    if (gatewayContext.mac && !qs.get('client_mac')) qs.set('client_mac', gatewayContext.mac);
+    if (gatewayContext.ip && !qs.get('client_ip') && !qs.get('ip')) qs.set('client_ip', gatewayContext.ip);
+    return qs.toString();
+  }
+
+  // --- CONNECT NOW POPUP ---------------------------------------------------
+  // Hidden by default (`display: none` in _modal.css); toggled here. Cancel,
+  // the ✕ button, Escape and a click on the backdrop all close it, and focus
+  // returns to the button that opened it.
+  var connectModal = document.getElementById('connect-form-modal');
+  var connectOpenBtn = document.getElementById('connectNowBtn');
+  var connectForm = document.getElementById('connect-form');
+  var connectInput = document.getElementById('connectVoucherCode');
+  var connectError = document.getElementById('connect-form-error');
+  var connectSubmitBtn = document.getElementById('connect-submit-btn');
+  var connectSubmitText = document.getElementById('connect-btn-text');
+  var connectSubmitSpinner = document.getElementById('connect-btn-spinner');
+  var connectReturnFocus = null;
+
+  function isConnectOpen() {
+    return !!connectModal && connectModal.classList.contains('is-open');
+  }
+
+  function setConnectOpen(open) {
+    if (!connectModal) return;
+    connectModal.classList.toggle('is-open', !!open);
+    connectModal.setAttribute('aria-hidden', open ? 'false' : 'true');
+    if (connectOpenBtn) connectOpenBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    document.body.classList.toggle('connect-modal-open', !!open);
+    if (!open) {
+      if (connectReturnFocus && typeof connectReturnFocus.focus === 'function') connectReturnFocus.focus();
+      return;
+    }
+    var deviceRow = document.getElementById('connect-device');
+    var deviceMac = document.getElementById('connect-device-mac');
+    if (deviceRow && deviceMac) {
+      if (gatewayContext.mac) {
+        deviceMac.textContent = gatewayContext.mac;
+        deviceRow.hidden = false;
+      } else {
+        deviceRow.hidden = true;
+      }
+    }
+    if (connectError) {
+      connectError.textContent = '';
+      connectError.classList.add('hidden');
+    }
+    var input = connectInput || document.getElementById('connectVoucherCode');
+    if (input) setTimeout(function () { input.focus(); }, 60);
+  }
+
+  function setConnectLoading(loading) {
+    if (connectSubmitBtn) connectSubmitBtn.disabled = loading;
+    if (connectSubmitText) connectSubmitText.textContent = loading ? 'Connecting\u2026' : 'Connect';
+    if (connectSubmitSpinner) connectSubmitSpinner.classList.toggle('hidden', !loading);
+  }
+
+  function showConnectError(message) {
+    if (!connectError) return;
+    connectError.textContent = message;
+    connectError.classList.remove('hidden');
+  }
+
+  if (connectOpenBtn) {
+    connectOpenBtn.addEventListener('click', function () {
+      connectReturnFocus = connectOpenBtn;
+      setConnectOpen(true);
+    });
+  }
+
+  ['connect-form-close', 'connect-cancel-btn'].forEach(function (id) {
+    var btn = document.getElementById(id);
+    if (btn) {
+      btn.addEventListener('click', function () { setConnectOpen(false); });
+    }
+  });
+
+  if (connectModal) {
+    // Click-outside-to-close: only a click on the overlay itself counts, so
+    // selecting text inside the card never dismisses the form.
+    connectModal.addEventListener('click', function (event) {
+      if (event.target === connectModal) setConnectOpen(false);
+    });
+  }
+
+  document.addEventListener('keydown', function (event) {
+    if ((event.key === 'Escape' || event.key === 'Esc') && isConnectOpen()) {
+      event.preventDefault();
+      setConnectOpen(false);
+    }
+  });
+
+  var connectBuyBtn = document.getElementById('connect-buy-btn');
+  if (connectBuyBtn) {
+    connectBuyBtn.addEventListener('click', function () {
+      setConnectOpen(false);
+      var target = document.getElementById('packages-heading');
+      if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  }
+
+  if (connectForm) {
+    connectForm.addEventListener('submit', async function (event) {
+      event.preventDefault();
+
+      var input = connectInput || document.getElementById('connectVoucherCode');
+      var code = (input && input.value ? input.value : '').replace(/\s+/g, '').trim();
+      if (connectError) {
+        connectError.textContent = '';
+        connectError.classList.add('hidden');
+      }
+      setFieldError('connectVoucherCode', '');
+      if (!code) {
+        setFieldError('connectVoucherCode', 'Voucher code is required.');
+        showConnectError('Voucher code is required.');
+        if (input) input.focus();
+        return;
+      }
+
+      setConnectLoading(true);
+      try {
+        var json = await redeemVoucher(code, connectQueryString(), {
+          voucherCode: code,
+          fullName: 'Voucher Guest',
+          acceptedTos: true,
+          clientMac: gatewayContext.mac || undefined,
+          clientIp: gatewayContext.ip || undefined,
+        });
+        if (connectSubmitText) connectSubmitText.textContent = 'Connected \u2014 redirecting\u2026';
+        // Server-built ext_login URL, with the original destination attached.
+        redirectToSuccess(json);
+      } catch (err) {
+        setConnectLoading(false);
+        var message = (err && err.message) || 'Could not activate that voucher. Please try again.';
+        setFieldError('connectVoucherCode', message);
+        showConnectError(message);
+        if (input) input.focus();
+      }
     });
   }
 
@@ -1309,26 +1499,9 @@ document.addEventListener('DOMContentLoaded', function () {
   if (loadingEl) loadingEl.classList.add('hidden');
 });
 
-// Connect Now button — scroll to quick form and highlight access code
-document.addEventListener('DOMContentLoaded', function () {
-  var btn = document.getElementById('connectNowBtn');
-  if (btn) {
-    btn.addEventListener('click', function () {
-      var card = document.querySelector('.hero-card');
-      if (card) {
-        card.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      }
-      var input = document.getElementById('accessCode');
-      if (input) {
-        setTimeout(function () { input.focus(); }, 500);
-        input.classList.add('voucher-highlight');
-        setTimeout(function () {
-          input.classList.remove('voucher-highlight');
-        }, 2600);
-      }
-    });
-  }
-});
+// NOTE: "Connect Now" is wired inside the main portal IIFE above
+// (open/close/backdrop/Escape + AJAX redemption). The old scroll-to-quick-form
+// handler that lived here is gone: the button now opens the popup card instead.
 
 // --- PORTAL LOGIN + INLINE DASHBOARD (account-login.html) ---
 function showDashboard() {
