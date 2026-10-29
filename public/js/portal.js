@@ -1248,6 +1248,23 @@
     });
   }
 
+  // Preyone voucher PINs are minted lowercase (`vnq4wx`), but phone keyboards
+  // still auto-capitalise despite autocapitalize="none". Normalise as the
+  // customer types so what they see matches what is stored and submitted.
+  var lowercaseVoucherInput = connectInput || document.getElementById('connectVoucherCode');
+  if (lowercaseVoucherInput) {
+    lowercaseVoucherInput.addEventListener('input', function () {
+      var lowered = String(this.value || '').toLowerCase();
+      if (this.value === lowered) return;
+      var caret = this.selectionStart;
+      this.value = lowered;
+      // Keep the caret where the customer left it instead of jumping to the end.
+      if (caret != null) {
+        try { this.setSelectionRange(caret, caret); } catch (_err) { /* unsupported */ }
+      }
+    });
+  }
+
   ['connect-form-close', 'connect-cancel-btn'].forEach(function (id) {
     var btn = document.getElementById(id);
     if (btn) {

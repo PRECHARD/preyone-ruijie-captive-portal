@@ -79,6 +79,24 @@ describe('index.html — hero CTA pair', () => {
     expect(modal).toContain('id="form-error"');
   });
 
+  it('accepts lowercase voucher PINs instead of forcing caps', () => {
+    const modal = connectModalMarkup();
+    // Preyone PINs are lowercase (`vnq4wx`); the field must not auto-capitalise
+    // or visually uppercase what the customer types.
+    expect(modal).toContain('autocapitalize="none"');
+    expect(modal).not.toContain('autocapitalize="characters"');
+
+    const inputBlock = portalCss.match(/\.connect-field input \{([^}]*)\}/);
+    expect(inputBlock, '.connect-field input rule missing').not.toBeNull();
+    expect(inputBlock![1]).not.toContain('text-transform: uppercase');
+    expect(inputBlock![1]).toContain('text-transform: none');
+  });
+
+  it('normalises typed voucher codes to lowercase in portal.js', () => {
+    expect(portalJs).toContain('lowercaseVoucherInput.addEventListener');
+    expect(portalJs).toMatch(/String\(this\.value \|\| ''\)\.toLowerCase\(\)/);
+  });
+
   it('cache-busts the assets that changed', () => {
     expect(html).toMatch(/portal\.css\?v=4[89]|portal\.css\?v=[5-9]\d/);
     expect(html).toMatch(/portal\.js\?v=3[2-9]|portal\.js\?v=[4-9]\d/);

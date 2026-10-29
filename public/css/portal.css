@@ -4352,7 +4352,9 @@ body.modal-open {
   font-family: 'Plus Jakarta Sans', var(--font);
   font-size: 1.05rem;
   letter-spacing: 0.12em;
-  text-transform: uppercase;
+  /* Voucher PINs are minted lowercase (e.g. `vnq4wx`); never force caps or the
+     customer thinks their code is being rejected/mistyped. */
+  text-transform: none;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
