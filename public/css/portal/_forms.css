@@ -98,26 +98,6 @@
   border-radius: 20px;
 }
 
-#quick-submit-btn {
-  width: 100%;
-  padding: 0.8rem;
-  font-family: var(--display);
-  font-size: 1.3rem;
-  background: linear-gradient(90deg, #ff00cc, #3333ff);
-  border: none;
-  border-radius: 50px;
-  color: #fff;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-#quick-submit-btn:hover {
-  transform: scale(1.05);
-  filter: brightness(1.2);
-  box-shadow: 0 0 20px rgba(255, 0, 204, 0.4);
-}
-
-#quick-submit-btn:active,
 #signup-submit-btn:active {
   transform: scale(0.95);
 }

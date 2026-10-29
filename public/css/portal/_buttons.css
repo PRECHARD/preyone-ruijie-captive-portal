@@ -91,11 +91,94 @@
 
 .hero-btn-group {
   display: flex;
+  flex-direction: row;
   flex-wrap: wrap;
-  gap: clamp(0.75rem, 2vw, 1.25rem);
+  gap: 12px;
   justify-content: center;
   align-items: center;
   margin-top: clamp(1rem, 2.5vw, 2rem);
+}
+
+/* The hero CTA pair is a .btn.btn-primary / .btn.btn-secondary pair so the
+   markup stays semantic, but inside the hero it takes the Preyone neon-glass
+   look (#0a0f1d base, #00ccff glow) instead of the global solid-cyan fill. */
+.hero-btn-group .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 1 auto;
+  min-width: 180px;
+  padding: clamp(0.85rem, 1.6vw, 1.05rem) clamp(1.6rem, 3.4vw, 2.4rem);
+  font-family: 'Plus Jakarta Sans', var(--font);
+  font-size: clamp(0.95rem, 1.6vw, 1.1rem);
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: 0.04em;
+  text-align: center;
+  text-decoration: none;
+  white-space: nowrap;
+  border-radius: 50px;
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease,
+    border-color 0.2s ease, color 0.2s ease;
+}
+
+.hero-btn-group .btn-primary {
+  background: linear-gradient(135deg, rgba(0, 204, 255, 0.24) 0%, rgba(10, 15, 29, 0.92) 62%);
+  border: 1px solid rgba(0, 204, 255, 0.55);
+  color: #d7f6ff;
+  text-shadow: 0 0 14px rgba(0, 204, 255, 0.45);
+  box-shadow: 0 0 26px rgba(0, 204, 255, 0.28), inset 0 0 18px rgba(0, 204, 255, 0.08);
+}
+
+.hero-btn-group .btn-primary:hover,
+.hero-btn-group .btn-primary:focus-visible {
+  background: linear-gradient(135deg, rgba(0, 204, 255, 0.38) 0%, rgba(10, 15, 29, 0.9) 65%);
+  border-color: rgba(0, 204, 255, 0.9);
+  color: #ffffff;
+  box-shadow: 0 0 40px rgba(0, 204, 255, 0.55), inset 0 0 22px rgba(0, 204, 255, 0.14);
+  transform: translateY(-2px);
+  outline: none;
+}
+
+.hero-btn-group .btn-secondary {
+  background: rgba(10, 15, 29, 0.62);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: #e8f7ff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.hero-btn-group .btn-secondary:hover,
+.hero-btn-group .btn-secondary:focus-visible {
+  border-color: rgba(0, 204, 255, 0.6);
+  color: #ffffff;
+  box-shadow: 0 0 24px rgba(0, 204, 255, 0.24);
+  transform: translateY(-2px);
+  outline: none;
+}
+
+.hero-btn-group .btn:active {
+  transform: translateY(0) scale(0.98);
+}
+
+/* Small phones: the pair stacks instead of squeezing two labels onto one
+   line. The group itself stays a flex container either way. */
+@media (max-width: 420px) {
+  .hero-btn-group {
+    flex-direction: column;
+    align-items: stretch;
+    width: 100%;
+    max-width: 340px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  .hero-btn-group .btn {
+    width: 100%;
+    min-width: 0;
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
 }
 
 .hero-connect-btn {

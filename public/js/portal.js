@@ -988,11 +988,11 @@
   }
 
   function showDataFinished(status) {
-    var connectCard = document.querySelector('#quick-form');
-    if (connectCard) {
-      var card = connectCard.closest('.hero-card');
-      if (card) card.hidden = true;
-    }
+    // The redemption form now lives in the Connect Now popup, so there is no
+    // inline card to swap out — hide the trigger instead, otherwise the guest
+    // is offered a voucher box they cannot use.
+    var connectBtn = document.getElementById('connect-now-btn');
+    if (connectBtn) connectBtn.hidden = true;
     dataFinishedCard.hidden = false;
 
     if (status.uncapped || !status.quotaBytes) return;
@@ -1078,25 +1078,7 @@
     }
   }
 
-  // --- QUICK CONNECT FORM (voucher only) ---
-  var quickForm = document.getElementById('quick-form');
-  var quickBtn = document.getElementById('quick-submit-btn');
-  var quickBtnText = document.getElementById('quick-btn-text');
-  var quickBtnSpinner = document.getElementById('quick-btn-spinner');
-  var quickError = document.getElementById('form-error');
-
-  function setQuickLoading(loading) {
-    if (quickBtn) quickBtn.disabled = loading;
-    if (quickBtnText) quickBtnText.textContent = loading ? 'Connecting\u2026' : 'Connect';
-    if (quickBtnSpinner) quickBtnSpinner.classList.toggle('hidden', !loading);
-  }
-
-  function showQuickError(message) {
-    if (quickError) {
-      quickError.textContent = message;
-      quickError.classList.remove('hidden');
-    }
-  }
+  // --- VOUCHER REDEMPTION (shared by the Connect Now popup) ---
 
   // The account-registration endpoint is the last resort. It is rate limited to
   // 10 requests / 15 min PER IP, and every guest on a hotspot shares one NAT IP,
@@ -1152,43 +1134,6 @@
     return json;
   }
 
-  if (quickForm) {
-    quickForm.addEventListener('submit', async function (e) {
-      e.preventDefault();
-      clearErrors();
-
-      var input = document.getElementById('accessCode');
-      var code = (input && input.value ? input.value : '').replace(/\s+/g, '').trim();
-      if (!code) {
-        setFieldError('accessCode', 'Voucher code is required.');
-        if (input) input.focus();
-        return;
-      }
-
-      setQuickLoading(true);
-      try {
-        var json = await redeemVoucher(code);
-        // The server returns the ext_login URL with the ORIGINAL destination
-        // already encoded — hand it straight to the browser, never rebuild it.
-        redirectToSuccess(json);
-      } catch (err) {
-        var msg = (err && err.message) || 'Could not activate that voucher. Please try again.';
-        setFieldError('accessCode', msg);
-        showQuickError(msg);
-        setQuickLoading(false);
-        if (input) input.focus();
-      }
-    });
-  }
-
-  var quickBuyBtn = document.getElementById('quick-buy-btn');
-  if (quickBuyBtn) {
-    quickBuyBtn.addEventListener('click', function () {
-      var target = document.getElementById('packages-heading');
-      if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    });
-  }
-
   // --- GATEWAY CONTEXT (client MAC / IP from the redirected URL) ------------
   // The EG105G-P (and the Ruijie AP models in front of it) name the station
   // differently: client_mac, mac, clientMac, sta_mac ... and for the address
@@ -1242,11 +1187,11 @@
   // the ✕ button, Escape and a click on the backdrop all close it, and focus
   // returns to the button that opened it.
   var connectModal = document.getElementById('connect-form-modal');
-  var connectOpenBtn = document.getElementById('connectNowBtn');
+  var connectOpenBtn = document.getElementById('connect-now-btn') || document.getElementById('connectNowBtn');
   var connectForm = document.getElementById('connect-form');
   var connectInput = document.getElementById('connectVoucherCode');
-  var connectError = document.getElementById('connect-form-error');
-  var connectSubmitBtn = document.getElementById('connect-submit-btn');
+  var connectError = document.getElementById('form-error') || document.getElementById('connect-form-error');
+  var connectSubmitBtn = document.getElementById('quick-submit-btn') || document.getElementById('connect-submit-btn');
   var connectSubmitText = document.getElementById('connect-btn-text');
   var connectSubmitSpinner = document.getElementById('connect-btn-spinner');
   var connectReturnFocus = null;
@@ -1279,6 +1224,7 @@
       connectError.textContent = '';
       connectError.classList.add('hidden');
     }
+    setFieldError('connectVoucherCode', '');
     var input = connectInput || document.getElementById('connectVoucherCode');
     if (input) setTimeout(function () { input.focus(); }, 60);
   }
@@ -1468,7 +1414,7 @@ function setFieldError(fieldName, message) {
 }
 
 function clearErrors() {
-  ['fullName', 'phone', 'email', 'voucherCode', 'acceptedTos', 'suVoucherCode', 'accessCode', 'login-email', 'login-phone', 'login-password', 'suPassword', 'suPasswordConfirm'].forEach(function (f) {
+  ['fullName', 'phone', 'email', 'voucherCode', 'acceptedTos', 'suVoucherCode', 'connectVoucherCode', 'login-email', 'login-phone', 'login-password', 'suPassword', 'suPasswordConfirm'].forEach(function (f) {
     setFieldError(f, '');
   });
   var fe = document.getElementById('form-error');

@@ -33,7 +33,7 @@
   <link
     href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Montserrat:wght@500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Satisfy&display=swap"
     rel="stylesheet">
-  <link rel="stylesheet" href="/css/portal.css?v=48" />
+  <link rel="stylesheet" href="/css/portal.css?v=49" />
   <!-- Header logo is the largest paint on the portal. Preload the variant a
        phone will actually pick so discovery does not wait on the parser. -->
   <link
@@ -114,9 +114,9 @@
       </div>
 
       <div class="hero-btn-group">
-        <button type="button" class="hero-connect-btn hero-connect-btn--connect" id="connectNowBtn"
+        <button type="button" class="btn btn-primary" id="connect-now-btn"
           aria-expanded="false" aria-controls="connect-form-modal">Connect Now</button>
-        <button type="button" class="hero-connect-btn" id="signUpBtn">Sign Up Now</button>
+        <button type="button" class="btn btn-secondary" id="signup-now-btn">Sign Up Now</button>
       </div>
 
       <!-- Connect Now popup: hidden by default (`display: none` in
@@ -129,14 +129,13 @@
           <button type="button" class="connect-modal-close" id="connect-form-close" aria-label="Close connect form">&times;</button>
           <div class="connect-modal-head">
             <span class="connect-modal-badge" aria-hidden="true"></span>
-            <h2 id="connect-form-title">Connect to Preyone</h2>
-            <p class="connect-modal-sub">Enter the voucher PIN you were sold and you're online in seconds.</p>
+            <h2 id="connect-form-title">Connect Now To Preyone WiFi</h2>
           </div>
           <form id="connect-form" method="POST" novalidate>
             <div class="connect-field">
-              <label for="connectVoucherCode">Voucher code</label>
+              <label for="connectVoucherCode">Preyone Voucher code</label>
               <input id="connectVoucherCode" name="voucherCode" type="text" inputmode="text"
-                placeholder="e.g. 1234 5678" autocomplete="one-time-code" autocapitalize="characters"
+                placeholder="xxxxxx" autocomplete="one-time-code" autocapitalize="none"
                 spellcheck="false" required />
               <span class="field-error" id="err-connectVoucherCode"></span>
             </div>
@@ -144,9 +143,9 @@
               <span class="connect-device-label">Device</span>
               <span class="connect-device-value" id="connect-device-mac"></span>
             </div>
-            <div id="connect-form-error" class="field-error hidden"></div>
+            <div id="form-error" class="field-error hidden"></div>
             <div class="connect-actions">
-              <button type="submit" class="connect-submit" id="connect-submit-btn">
+              <button type="submit" class="connect-submit" id="quick-submit-btn">
                 <span id="connect-btn-text">Connect</span>
                 <span id="connect-btn-spinner" class="spinner hidden" aria-hidden="true"></span>
               </button>
@@ -160,37 +159,10 @@
         </div>
       </div>
 
-      <!-- Voucher quick-connect: the PRIMARY path for a captive-portal guest.
-           Redeems against the local `vouchers` table only — no account, no
-           password, and no Ruijie Cloud round-trip (POST /api/portal/redeem).
-           portal.js falls back to the legacy /api/auth/signup POST if this
-           endpoint is unavailable. -->
-      <aside class="hero-card hero-card--quick" id="quick-card">
-        <div class="glass-card glass-card--hero">
-          <div class="brand">
-            <h2>Enter your voucher</h2>
-            <p class="subtitle">Type the PIN you were sold and you're online in seconds.</p>
-          </div>
-          <form id="quick-form" method="POST" novalidate>
-            <div class="field">
-              <label for="accessCode">Voucher code</label>
-              <input id="accessCode" name="voucherCode" type="text" inputmode="text"
-                placeholder="e.g. 1234 5678" autocomplete="one-time-code" autocapitalize="characters"
-                spellcheck="false" required />
-              <span class="field-error" id="err-accessCode"></span>
-            </div>
-            <div id="form-error" class="field-error hidden"></div>
-            <button type="submit" class="hero-connect-btn" id="quick-submit-btn">
-              <span id="quick-btn-text">Connect</span>
-              <span id="quick-btn-spinner" class="spinner hidden" aria-hidden="true"></span>
-            </button>
-            <p class="quick-help">
-              No voucher yet? <button type="button" class="link-button" id="quick-buy-btn">Buy one below</button>
-              &middot; By connecting you accept our <a href="/terms.html" target="_blank" rel="noopener">Terms</a>
-            </p>
-          </form>
-        </div>
-      </aside>
+      <!-- The voucher PIN box lives in the Connect Now popup above. The old
+           always-visible quick-connect card was removed: the popup keeps the
+           hero compact and gives the same one-field redemption on every
+           screen size (POST /api/portal/redeem). -->
 
       <aside class="hero-card" id="signup-card" style="display:none;">
         <div class="glass-card glass-card--hero">
@@ -661,7 +633,7 @@
 
     // Detect gateway redirect â€” if params like wlanuserip or nasip exist, user
     // was redirected here by the EG105G-P. Auto-focus access code input    // Sign Up button reveals the registration form
-    var signUpBtn = document.getElementById('signUpBtn');
+    var signUpBtn = document.getElementById('signup-now-btn');
     if (signUpBtn) {
       signUpBtn.addEventListener('click', function() {
         var card = document.getElementById('signup-card');
@@ -690,7 +662,7 @@
     }
   })();
   </script>
-  <script src="/js/portal.js?v=31"></script>
+  <script src="/js/portal.js?v=32"></script>
   <script>
   // ── Captive-portal alert injection ──────────────────────────────────────
   // The gateway bounces a blocked customer straight back to this page, so it
