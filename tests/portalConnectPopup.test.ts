@@ -49,6 +49,9 @@ describe('index.html — hero CTA pair', () => {
     expect(html).toMatch(
       /id="connect-now-btn"[\s\S]{0,200}aria-expanded="false"[\s\S]{0,200}aria-controls="connect-form-modal"/
     );
+    // Rendered label is uppercase: Bebas Neue is caps-only anyway, and the
+    // markup now matches the CTA labels used elsewhere on the portal.
+    expect(html).toContain('aria-controls="connect-form-modal">CONNECT NOW</button>');
   });
 
   it('no longer ships the static voucher card in the hero', () => {
