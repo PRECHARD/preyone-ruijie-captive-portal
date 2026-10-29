@@ -1246,3 +1246,84 @@ a.footer-card:hover {
 
   .footer-links { grid-template-columns: 1fr; }
 }
+/* ═══════════════════════════════════════════════════════════════════════════
+   QUICK LINKS LAYOUT
+   Desktop/tablet: one vertical column inside the Quick Links footer column.
+   Phones: compact 2-up grid so the list stays short and centred.
+   ═══════════════════════════════════════════════════════════════════════════ */
+.footer-col--links .footer-links {
+  grid-template-columns: 1fr;
+  gap: 0.6rem;
+}
+
+.footer-col--links .footer-links li {
+  justify-content: flex-start;
+}
+
+@media (max-width: 600px) {
+  .footer-col--links .footer-links {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.45rem 0.9rem;
+    justify-items: start;
+    max-width: 320px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  .footer-col--links .footer-links li {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 360px) {
+  .footer-col--links .footer-links {
+    gap: 0.4rem 0.6rem;
+  }
+
+  .footer-col--links .footer-links a {
+    font-size: 0.82rem;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   FOOTER "SECURE PAYMENTS" RAIL BADGES
+   Same artwork as the checkout modal, locked to one box size so EcoCash,
+   InnBucks and O'mari line up cleanly side by side.
+   ═══════════════════════════════════════════════════════════════════════════ */
+.pay-logos--footer {
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.pay-logos--footer .pay-logo--img {
+  box-sizing: border-box;
+  height: 36px;
+  min-width: 96px;
+  padding: 0.35rem 0.7rem;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.pay-logos--footer .pay-logo--img img {
+  display: block;
+  width: 72px;
+  height: 18px;
+  object-fit: contain;
+  object-position: center;
+}
+
+@media (max-width: 480px) {
+  .pay-logos--footer .pay-logo--img {
+    height: 32px;
+    min-width: 82px;
+    padding: 0.28rem 0.5rem;
+  }
+
+  .pay-logos--footer .pay-logo--img img {
+    width: 60px;
+    height: 16px;
+  }
+}

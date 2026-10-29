@@ -41,6 +41,10 @@ body.portal-body {
     radial-gradient(circle at 20% 90%, rgba(0, 212, 255, 0.08), transparent 40%);
   padding: 2rem 1.25rem;
   line-height: 1.5;
+  /* Nothing in the portal is meant to scroll sideways; this stops one wide
+     row (footer badges, long voucher codes) from creating a horizontal scroll
+     on phones. */
+  overflow-x: hidden;
 }
 
 @media (min-width: 769px) {

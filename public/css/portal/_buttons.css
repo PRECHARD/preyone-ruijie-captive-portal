@@ -161,6 +161,46 @@
   transform: translateY(0) scale(0.98);
 }
 
+/* "Sign Up Now" mirrors the package-card Buy Now CTA exactly: same Bebas
+   display type, magenta→blue gradient, pill radius and glow hover (with the
+   shared pulse-glow animation defined above). */
+.hero-btn-group #signup-now-btn {
+  background: linear-gradient(90deg, #ff00cc, #3333ff);
+  border: none;
+  border-radius: 50px;
+  color: #fff;
+  font-family: var(--display);
+  font-size: 1.3rem;
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  text-shadow: 0 1px 12px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 0 18px rgba(255, 0, 204, 0.28), 0 4px 18px rgba(0, 0, 0, 0.28);
+}
+
+.hero-btn-group #signup-now-btn:hover,
+.hero-btn-group #signup-now-btn:focus-visible {
+  background: linear-gradient(90deg, #00d4ff, #ff00ff);
+  border: none;
+  color: #fff;
+  transform: scale(1.05);
+  filter: brightness(1.15);
+  box-shadow: 0 0 24px rgba(255, 0, 255, 0.55), 0 0 42px rgba(0, 212, 255, 0.28);
+  animation: pulse-glow 1.5s infinite;
+  outline: none;
+}
+
+.hero-btn-group #signup-now-btn:active {
+  transform: scale(0.95);
+  animation: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-btn-group #signup-now-btn:hover,
+  .hero-btn-group #signup-now-btn:focus-visible {
+    animation: none;
+  }
+}
+
 /* Small phones: the pair stacks instead of squeezing two labels onto one
    line. The group itself stays a flex container either way. */
 @media (max-width: 420px) {

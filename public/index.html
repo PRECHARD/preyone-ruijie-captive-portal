@@ -33,7 +33,7 @@
   <link
     href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Montserrat:wght@500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Satisfy&display=swap"
     rel="stylesheet">
-  <link rel="stylesheet" href="/css/portal.css?v=50" />
+  <link rel="stylesheet" href="/css/portal.css?v=51" />
   <!-- Header logo is the largest paint on the portal. Preload the variant a
        phone will actually pick so discovery does not wait on the parser. -->
   <link
@@ -46,10 +46,16 @@
     imagesrcset="/images/preyonenoneglow-logo-400.webp 400w, /images/preyonenoneglow-logo-800.webp 800w"
     imagesizes="(max-width: 800px) 100vw, 800px" fetchpriority="high" />
   <link rel="preload" as="image" type="image/webp" href="/images/faviconloading-80.webp" />
+  <!-- Payment-rail badges used by the checkout modal (rendered by portal.js).
+       Same URLs and ?v= cache key, so the modal paints them from cache the
+       moment it opens instead of flashing empty slots. -->
+  <link rel="preload" as="image" href="/img/pay/ecocash.png?v=41" />
+  <link rel="preload" as="image" href="/img/pay/innbucks.png?v=41" />
+  <link rel="preload" as="image" href="/img/pay/omari.webp?v=41" fetchpriority="low" />
 </head>
 
 <body class="portal-body">
-  <div class="body-loading" id="bodyLoading" style="display:none;">
+  <div class="body-loading" id="bodyLoading" role="status" aria-live="polite">
     <div class="loading-spinner">
       <div class="loading-spinner-inner">
         <picture>
@@ -520,7 +526,7 @@
             </div>
           </div>
 
-          <div class="footer-col">
+          <div class="footer-col footer-col--links">
             <h3>QUICK LINKS</h3>
             <ul class="footer-links">
               <li>
@@ -605,11 +611,20 @@
             <p>&copy; <span id="current-year"></span> Preyone Enterprises. All Rights Reserved.</p>
             <div class="payment-badges">
               <span class="secure-pay-label">Secure Payments</span>
-              <span class="pay-logos">
+              <span class="pay-logos pay-logos--footer">
 
-                <span class="pay-logo pay-logo--visa">VISA</span>
-                <span class="pay-logo pay-logo--mastercard"><span class="mastercard-mark" aria-hidden="true"><i></i><i></i></span><span>Mastercard</span></span>
-                <span class="pay-logo pay-logo--ecocash"><span class="ecocash-mark"><span class="ecocash-eco">Eco</span><span class="ecocash-cash">Cash</span></span></span>
+                <span class="pay-logo pay-logo--img">
+                  <img src="/img/pay/ecocash.png?v=41" alt="EcoCash" loading="eager"
+                    decoding="async" width="1329" height="244" />
+                </span>
+                <span class="pay-logo pay-logo--img">
+                  <img src="/img/pay/innbucks.png?v=41" alt="InnBucks" loading="eager"
+                    decoding="async" width="631" height="134" />
+                </span>
+                <span class="pay-logo pay-logo--img">
+                  <img src="/img/pay/omari.webp?v=41" alt="O'mari" loading="eager"
+                    decoding="async" />
+                </span>
               </span>
             </div>
           </div>
@@ -618,6 +633,39 @@
     
   </div>
   <script>(function(){var e=document.getElementById('bodyLoading');if(!e)return;var h=function(){e.classList.add('is-hidden')};if(document.readyState==='complete')h();else window.addEventListener('load',h);setTimeout(h,8e3)})();</script>
+  <script>
+  // Show the branded loading spinner whenever this page navigates to another
+  // page on the same origin (link click, or a form that is not handled with
+  // preventDefault). Back/forward cache restores must clear it again.
+  (function () {
+    var overlay = document.getElementById('bodyLoading');
+    if (!overlay) return;
+    var show = function () { overlay.classList.remove('is-hidden'); };
+    var hide = function () { overlay.classList.add('is-hidden'); };
+
+    document.addEventListener('click', function (event) {
+      if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      var link = event.target && event.target.closest ? event.target.closest('a[href]') : null;
+      if (!link) return;
+      var href = link.getAttribute('href') || '';
+      if (!href || href.charAt(0) === '#' || link.hasAttribute('download') || link.getAttribute('target') === '_blank') return;
+      if (link.getAttribute('rel') && link.getAttribute('rel').indexOf('external') !== -1) return;
+      var url;
+      try { url = new URL(link.href, location.href); } catch (_err) { return; }
+      if (url.origin !== location.origin) return;
+      if (url.href === location.href) return;
+      show();
+    }, true);
+
+    document.addEventListener('submit', function (event) {
+      // Runs after the form's own handlers, so a prevented submit (AJAX forms
+      // with their own inline spinner) does not cover the page.
+      setTimeout(function () { if (!event.defaultPrevented) show(); }, 0);
+    }, true);
+
+    window.addEventListener('pageshow', hide);
+  })();
+  </script>
   <script>
   (function() {
     var params = new URLSearchParams(location.search);

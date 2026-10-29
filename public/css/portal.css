@@ -42,6 +42,10 @@ body.portal-body {
     radial-gradient(circle at 20% 90%, rgba(0, 212, 255, 0.08), transparent 40%);
   padding: 2rem 1.25rem;
   line-height: 1.5;
+  /* Nothing in the portal is meant to scroll sideways; this stops one wide
+     row (footer badges, long voucher codes) from creating a horizontal scroll
+     on phones. */
+  overflow-x: hidden;
 }
 
 @media (min-width: 769px) {
@@ -1120,6 +1124,46 @@ body.portal-body {
 
 .hero-btn-group .btn:active {
   transform: translateY(0) scale(0.98);
+}
+
+/* "Sign Up Now" mirrors the package-card Buy Now CTA exactly: same Bebas
+   display type, magenta→blue gradient, pill radius and glow hover (with the
+   shared pulse-glow animation defined above). */
+.hero-btn-group #signup-now-btn {
+  background: linear-gradient(90deg, #ff00cc, #3333ff);
+  border: none;
+  border-radius: 50px;
+  color: #fff;
+  font-family: var(--display);
+  font-size: 1.3rem;
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  text-shadow: 0 1px 12px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 0 18px rgba(255, 0, 204, 0.28), 0 4px 18px rgba(0, 0, 0, 0.28);
+}
+
+.hero-btn-group #signup-now-btn:hover,
+.hero-btn-group #signup-now-btn:focus-visible {
+  background: linear-gradient(90deg, #00d4ff, #ff00ff);
+  border: none;
+  color: #fff;
+  transform: scale(1.05);
+  filter: brightness(1.15);
+  box-shadow: 0 0 24px rgba(255, 0, 255, 0.55), 0 0 42px rgba(0, 212, 255, 0.28);
+  animation: pulse-glow 1.5s infinite;
+  outline: none;
+}
+
+.hero-btn-group #signup-now-btn:active {
+  transform: scale(0.95);
+  animation: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-btn-group #signup-now-btn:hover,
+  .hero-btn-group #signup-now-btn:focus-visible {
+    animation: none;
+  }
 }
 
 /* Small phones: the pair stacks instead of squeezing two labels onto one
@@ -3172,6 +3216,87 @@ a.footer-card:hover {
   .checkout-voucher-code { font-size: 1.35rem; }
 
   .footer-links { grid-template-columns: 1fr; }
+}
+/* ═══════════════════════════════════════════════════════════════════════════
+   QUICK LINKS LAYOUT
+   Desktop/tablet: one vertical column inside the Quick Links footer column.
+   Phones: compact 2-up grid so the list stays short and centred.
+   ═══════════════════════════════════════════════════════════════════════════ */
+.footer-col--links .footer-links {
+  grid-template-columns: 1fr;
+  gap: 0.6rem;
+}
+
+.footer-col--links .footer-links li {
+  justify-content: flex-start;
+}
+
+@media (max-width: 600px) {
+  .footer-col--links .footer-links {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.45rem 0.9rem;
+    justify-items: start;
+    max-width: 320px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  .footer-col--links .footer-links li {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 360px) {
+  .footer-col--links .footer-links {
+    gap: 0.4rem 0.6rem;
+  }
+
+  .footer-col--links .footer-links a {
+    font-size: 0.82rem;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   FOOTER "SECURE PAYMENTS" RAIL BADGES
+   Same artwork as the checkout modal, locked to one box size so EcoCash,
+   InnBucks and O'mari line up cleanly side by side.
+   ═══════════════════════════════════════════════════════════════════════════ */
+.pay-logos--footer {
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.pay-logos--footer .pay-logo--img {
+  box-sizing: border-box;
+  height: 36px;
+  min-width: 96px;
+  padding: 0.35rem 0.7rem;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.pay-logos--footer .pay-logo--img img {
+  display: block;
+  width: 72px;
+  height: 18px;
+  object-fit: contain;
+  object-position: center;
+}
+
+@media (max-width: 480px) {
+  .pay-logos--footer .pay-logo--img {
+    height: 32px;
+    min-width: 82px;
+    padding: 0.28rem 0.5rem;
+  }
+
+  .pay-logos--footer .pay-logo--img img {
+    width: 60px;
+    height: 16px;
+  }
 }
 
 /* portal/_responsive.css */
