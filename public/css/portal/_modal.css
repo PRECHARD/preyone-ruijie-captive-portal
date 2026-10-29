@@ -1164,19 +1164,12 @@ body.modal-open {
   text-decoration: underline;
 }
 
-/* The popup's own error slot (#form-error). portal.js also writes field-level
-   errors into #err-connectVoucherCode; this one is for whole-request failures. */
+/* The popup's request-level error slot (#form-error). It is a single
+   `.form-alert` (icon + one line of text) positioned directly above the
+   action row; the per-field hint under the input is #err-connectVoucherCode
+   and must never repeat the same sentence. */
 .connect-modal-card #form-error {
-  margin: 0 0 0.7rem;
-  padding: 0;
-  text-align: center;
-  font-size: 0.78rem;
-  line-height: 1.45;
-  color: #ff8fa3;
-}
-
-.connect-modal-card #form-error.hidden {
-  display: none;
+  margin: 0 0 0.85rem;
 }
 
 /* The page behind the popup must not scroll while it is open. */

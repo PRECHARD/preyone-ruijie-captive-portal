@@ -33,7 +33,7 @@
   <link
     href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Montserrat:wght@500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Satisfy&display=swap"
     rel="stylesheet">
-  <link rel="stylesheet" href="/css/portal.css?v=51" />
+  <link rel="stylesheet" href="/css/portal.css?v=52" />
   <!-- Header logo is the largest paint on the portal. Preload the variant a
        phone will actually pick so discovery does not wait on the parser. -->
   <link
@@ -149,7 +149,15 @@
               <span class="connect-device-label">Device</span>
               <span class="connect-device-value" id="connect-device-mac"></span>
             </div>
-            <div id="form-error" class="field-error hidden"></div>
+            <div id="form-error" class="form-alert hidden" role="alert" aria-live="assertive">
+              <svg class="form-alert__icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
+                <path d="M12 3.6 21.2 19.4a1.2 1.2 0 0 1-1.04 1.8H3.84a1.2 1.2 0 0 1-1.04-1.8L12 3.6Z"
+                  stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" />
+                <path d="M12 9.2v4.4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+                <circle cx="12" cy="17.1" r="1.05" fill="currentColor" />
+              </svg>
+              <span class="form-alert__text" id="form-error-text"></span>
+            </div>
             <div class="connect-actions">
               <button type="submit" class="connect-submit" id="quick-submit-btn">
                 <span id="connect-btn-text">Connect</span>
@@ -710,7 +718,7 @@
     }
   })();
   </script>
-  <script src="/js/portal.js?v=33"></script>
+  <script src="/js/portal.js?v=34"></script>
   <script>
   // ── Captive-portal alert injection ──────────────────────────────────────
   // The gateway bounces a blocked customer straight back to this page, so it

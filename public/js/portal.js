@@ -1037,7 +1037,10 @@
   function redirectToSuccess(json) {
     // Navigate directly to the ext_login URL (or success.html fallback) returned by the server.
     // Do NOT re-encode or add extra params — the server already built the correct URL.
-    location.href = json.redirectUrl || '/success.html';
+    // `authUrl` covers deployments that return the Ruijie authorization endpoint
+    // separately; the path is passed through verbatim either way.
+    var data = json || {};
+    location.href = data.redirectUrl || data.authUrl || '/success.html';
   }
 
   async function submitForm(data, errorEl) {
@@ -1191,6 +1194,7 @@
   var connectForm = document.getElementById('connect-form');
   var connectInput = document.getElementById('connectVoucherCode');
   var connectError = document.getElementById('form-error') || document.getElementById('connect-form-error');
+  var connectErrorText = document.getElementById('form-error-text');
   var connectSubmitBtn = document.getElementById('quick-submit-btn') || document.getElementById('connect-submit-btn');
   var connectSubmitText = document.getElementById('connect-btn-text');
   var connectSubmitSpinner = document.getElementById('connect-btn-spinner');
@@ -1221,10 +1225,12 @@
       }
     }
     if (connectError) {
-      connectError.textContent = '';
-      connectError.classList.add('hidden');
+      // Clears the text span only; the warning glyph must survive the reset.
+      showConnectError('');
     }
     setFieldError('connectVoucherCode', '');
+    var resetInput = connectInput || document.getElementById('connectVoucherCode');
+    if (resetInput) resetInput.classList.remove('invalid');
     var input = connectInput || document.getElementById('connectVoucherCode');
     if (input) setTimeout(function () { input.focus(); }, 60);
   }
@@ -1237,8 +1243,26 @@
 
   function showConnectError(message) {
     if (!connectError) return;
-    connectError.textContent = message;
+    var text = String(message == null ? '' : message);
+
+    // The alert row now has an inline warning glyph, so text must land in the
+    // span inside it — writing to the container would delete the icon.
+    if (connectErrorText) connectErrorText.textContent = text;
+    else connectError.textContent = text;
+
+    if (!text) {
+      connectError.classList.add('hidden');
+      connectError.classList.remove('is-shaking');
+      return;
+    }
+
     connectError.classList.remove('hidden');
+    // Repeat failures keep the element mounted, so the entrance animation has
+    // already played: restart the shake (a reflow is required between the two
+    // class toggles or the browser ignores the change).
+    connectError.classList.remove('is-shaking');
+    void connectError.offsetWidth;
+    connectError.classList.add('is-shaking');
   }
 
   if (connectOpenBtn) {
@@ -1301,16 +1325,18 @@
       event.preventDefault();
 
       var input = connectInput || document.getElementById('connectVoucherCode');
-      var code = (input && input.value ? input.value : '').replace(/\s+/g, '').trim();
-      if (connectError) {
-        connectError.textContent = '';
-        connectError.classList.add('hidden');
-      }
+      // PINs are minted lowercase (`vnq4wx`). Strip the separators people type
+      // when reading a printed card and normalise the case before the request.
+      var code = (input && input.value ? input.value : '').replace(/\s+/g, '').toLowerCase().trim();
+      showConnectError('');
       setFieldError('connectVoucherCode', '');
+      if (input) input.classList.remove('invalid');
       if (!code) {
         setFieldError('connectVoucherCode', 'Voucher code is required.');
-        showConnectError('Voucher code is required.');
-        if (input) input.focus();
+        if (input) {
+          input.classList.add('invalid');
+          input.focus();
+        }
         return;
       }
 
@@ -1323,15 +1349,21 @@
           clientMac: gatewayContext.mac || undefined,
           clientIp: gatewayContext.ip || undefined,
         });
-        if (connectSubmitText) connectSubmitText.textContent = 'Connected \u2014 redirecting\u2026';
-        // Server-built ext_login URL, with the original destination attached.
+        // Success state: keep the button spinner spinning while the gateway
+        // handshake navigates away, so the popup never flashes idle controls.
+        if (connectSubmitText) connectSubmitText.textContent = 'Connected! Redirecting\u2026';
         redirectToSuccess(json);
       } catch (err) {
         setConnectLoading(false);
         var message = (err && err.message) || 'Could not activate that voucher. Please try again.';
-        setFieldError('connectVoucherCode', message);
+        // One message, one place: the alert. The field hint stays empty so the
+        // same sentence is never stacked twice inside the popup.
+        setFieldError('connectVoucherCode', '');
         showConnectError(message);
-        if (input) input.focus();
+        if (input) {
+          input.classList.add('invalid');
+          input.focus();
+        }
       }
     });
   }
@@ -1435,7 +1467,15 @@ function clearErrors() {
     setFieldError(f, '');
   });
   var fe = document.getElementById('form-error');
-  if (fe) { fe.textContent = ''; fe.classList.add('hidden'); }
+  if (fe) {
+    // Only blank the message span — clearing the container would delete the
+    // inline warning glyph that ships in the markup.
+    var feText = document.getElementById('form-error-text');
+    if (feText) feText.textContent = '';
+    else fe.textContent = '';
+    fe.classList.add('hidden');
+    fe.classList.remove('is-shaking');
+  }
   var se = document.getElementById('signup-form-error');
   if (se) { se.textContent = ''; se.classList.add('hidden'); }
 }

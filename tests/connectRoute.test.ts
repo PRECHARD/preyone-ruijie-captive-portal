@@ -109,7 +109,7 @@ describe('gateway param forwarding', () => {
   it('navigates to the server-built ext_login URL without rewriting it', () => {
     // redirectToSuccess() must hand the URL over untouched — re-encoding the
     // query is what previously produced duplicate/corrupted params.
-    expect(portalJs).toMatch(/location\.href\s*=\s*json\.redirectUrl/);
+    expect(portalJs).toMatch(/location\.href = data\.redirectUrl \|\| data\.authUrl \|\| '\/success\.html'/);
   });
 
   it('points the sign-in page at /connect', () => {

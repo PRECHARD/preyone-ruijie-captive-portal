@@ -180,9 +180,9 @@ describe('portal.js — popup wiring and gateway context', () => {
   it('shows a loading state, an inline error, and hands the server URL straight over', () => {
     expect(portalJs).toContain('function setConnectLoading');
     expect(portalJs).toContain('function showConnectError');
-    expect(portalJs).toContain("'Connected \\u2014 redirecting\\u2026'");
+    expect(portalJs).toContain("'Connected! Redirecting\\u2026'");
     // redirectToSuccess() stays the single navigation point (never rebuilt here).
-    expect(portalJs).toMatch(/location\.href\s*=\s*json\.redirectUrl/);
+    expect(portalJs).toMatch(/location\.href = data\.redirectUrl \|\| data\.authUrl \|\| '\/success\.html'/);
   });
 
   it('no longer double-binds Connect Now through the old scroll handler', () => {

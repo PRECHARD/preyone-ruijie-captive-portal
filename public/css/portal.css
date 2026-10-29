@@ -547,7 +547,78 @@ body.portal-body {
   color: var(--cyan);
 }
 
-#form-error,
+/* ── Request-level form alert (#form-error, #signup-form-error) ──
+   One flex row: warning glyph, then the message. `#form-error` deliberately no
+   longer carries `.field-error` — that class is the small inline hint under a
+   single input, and having both meant the same sentence rendered twice (once
+   under the voucher box, once above the buttons). */
+.form-alert {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  margin-bottom: 14px;
+  border: 1px solid rgba(255, 59, 48, 0.3);
+  border-radius: 8px;
+  background: rgba(255, 59, 48, 0.12);
+  color: #ff453a;
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.45;
+  text-align: left;
+  box-shadow:
+    0 0 18px rgba(255, 59, 48, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  backdrop-filter: blur(6px);
+  animation: alert-slide-in 0.28s cubic-bezier(0.22, 0.68, 0.35, 1) both;
+}
+
+.form-alert.hidden {
+  display: none;
+}
+
+.form-alert__icon {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  color: currentColor;
+  filter: drop-shadow(0 0 6px rgba(255, 59, 48, 0.55));
+}
+
+.form-alert__text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+@keyframes alert-slide-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes alert-shake {
+  0%, 100% { transform: translateX(0); }
+  18% { transform: translateX(-5px); }
+  36% { transform: translateX(4px); }
+  54% { transform: translateX(-3px); }
+  72% { transform: translateX(2px); }
+  88% { transform: translateX(-1px); }
+}
+
+/* Re-added by portal.js on every failed attempt: the entrance animation only
+   plays once because the element stays in the DOM, so the shake is what tells
+   the customer the second submit also failed. */
+.form-alert.is-shaking {
+  animation: alert-shake 0.42s ease-in-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .form-alert,
+  .form-alert.is-shaking {
+    animation: none;
+  }
+}
+
 #signup-form-error {
   background: rgba(255, 0, 0, 0.1);
   border: 1px solid #ff4444;
@@ -4599,19 +4670,12 @@ body.modal-open {
   text-decoration: underline;
 }
 
-/* The popup's own error slot (#form-error). portal.js also writes field-level
-   errors into #err-connectVoucherCode; this one is for whole-request failures. */
+/* The popup's request-level error slot (#form-error). It is a single
+   `.form-alert` (icon + one line of text) positioned directly above the
+   action row; the per-field hint under the input is #err-connectVoucherCode
+   and must never repeat the same sentence. */
 .connect-modal-card #form-error {
-  margin: 0 0 0.7rem;
-  padding: 0;
-  text-align: center;
-  font-size: 0.78rem;
-  line-height: 1.45;
-  color: #ff8fa3;
-}
-
-.connect-modal-card #form-error.hidden {
-  display: none;
+  margin: 0 0 0.85rem;
 }
 
 /* The page behind the popup must not scroll while it is open. */
