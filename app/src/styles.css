@@ -505,7 +505,7 @@ body {
   margin-bottom: 16px;
 }
 
-/* Per-module accents so the four workspace tiles are told apart at a glance
+/* Per-module accents so the workspace tiles are told apart at a glance
    instead of all reading as the same magenta tile. */
 .gw-icon--pos {
   background: linear-gradient(135deg, #0f7a3d, #22c55e);
@@ -514,6 +514,10 @@ body {
 .gw-icon--invoice {
   background: linear-gradient(135deg, #0b5f73, var(--cyan));
   box-shadow: 0 8px 24px rgba(0, 229, 255, 0.35);
+}
+.gw-icon--homeautomate {
+  background: linear-gradient(135deg, #5b21b6, #38bdf8);
+  box-shadow: 0 8px 24px rgba(56, 189, 248, 0.35);
 }
 .gw-icon--wifi {
   background: linear-gradient(135deg, var(--magenta), var(--pink));

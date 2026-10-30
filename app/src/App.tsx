@@ -55,6 +55,14 @@ const MODULES: Module[] = [
     phase: 'Desktop',
   },
   {
+    key: 'homeautomate',
+    title: 'Home Automation',
+    desc: 'IoT dashboard — devices, scenes, schedules and live telemetry.',
+    prodUrl: '//homeautomate.preyone.com',
+    devUrl: 'http://localhost:5175',
+    phase: 'Preview',
+  },
+  {
     key: 'wifi',
     title: 'UltraNet WiFi',
     desc: 'Captive portal, vouchers and network operations.',
@@ -369,6 +377,7 @@ function GatewayHome({
               <div className={`gw-icon gw-icon--${m.key}`}>
                 {m.key === 'pos' && '₵'}
                 {m.key === 'invoice' && '◈'}
+                {m.key === 'homeautomate' && '⌂'}
                 {m.key === 'wifi' && '✶'}
                 {m.key === 'admin' && '⌘'}
               </div>

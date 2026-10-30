@@ -29,6 +29,7 @@ import { alertsRouter } from './routes/alerts';
 import { voucherAnalyticsRouter } from './routes/voucherAnalytics';
 import { reportsRouter } from './routes/reports';
 import { ensureStarlinkSchema } from './db/starlink';
+import { serveSpaBundle, spaDistDir } from './utils/spaHost';
 import { errorHandler } from './middleware/errorHandler';
 import { maintenanceCheck } from './middleware/maintenanceMode';
 import { scheduleSessionCleanup } from './services/sessionCleanup';
@@ -356,6 +357,25 @@ app.use((req, res, next) => {
       });
     }
     return res.status(503).send('Gateway build not found. Run `cd app && npm run build`.');
+  }
+
+  // invoice.preyone.com → Invoicing workspace SPA (12 document types, UBL
+  // export, AR aging). The build may live outside this repo — point
+  // INVOICE_DIST at it rather than copying a second bundle in.
+  if (host === 'invoice.preyone.com') {
+    if (serveSpaBundle(req, res, spaDistDir('INVOICE_DIST', path.join('invoice', 'dist')))) return;
+    return res
+      .status(503)
+      .send('Invoicing build not found. Run `cd invoice && npm run build` or set INVOICE_DIST to an external bundle.');
+  }
+
+  // homeautomate.preyone.com → Home Automation / IoT dashboard SPA. Same
+  // contract as the other hosts: built bundle, env override, clear 503.
+  if (host === 'homeautomate.preyone.com') {
+    if (serveSpaBundle(req, res, spaDistDir('HOMEAUTOMATE_DIST', path.join('homeautomate', 'dist')))) return;
+    return res
+      .status(503)
+      .send('Home Automation build not found. Run `cd homeautomate && npm run build` or set HOMEAUTOMATE_DIST to an external bundle.');
   }
 
   // Any IP or unknown host → captive portal (with proper static file serving)
