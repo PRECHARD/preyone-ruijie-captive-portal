@@ -46,8 +46,19 @@ function normalize(block: string): string {
 
 const indexFooter = normalize(dedent(footerLines('index.html')));
 
+const EVERY_PAGE = [
+  'data.html',
+  'terms.html',
+  'account-login.html',
+  'forgot-password.html',
+  'manage-account.html',
+  'reset-password.html',
+  'success.html',
+  'verify-email.html',
+];
+
 describe('footer parity across WiFi pages', () => {
-  for (const page of ['data.html', 'terms.html']) {
+  for (const page of EVERY_PAGE) {
     it(`${page} ships the same footer block as index.html`, () => {
       const block = normalize(dedent(footerLines(page)));
       expect(block).toBe(indexFooter);
@@ -70,7 +81,18 @@ describe('footer parity across WiFi pages', () => {
       // an older query string pins these pages to the pre-redesign stylesheet.
       expect(read(page)).toMatch(/\/css\/portal\.css\?v=(5[2-9]|[6-9]\d)/);
     });
+  }
 
+  // Pages that load portal.js / account.js get the year from those bundles;
+  // these ones carry the inline filler so the shared footer never renders blank.
+  for (const page of [
+    'data.html',
+    'terms.html',
+    'forgot-password.html',
+    'reset-password.html',
+    'success.html',
+    'verify-email.html',
+  ]) {
     it(`${page} fills the copyright year even without portal.js`, () => {
       expect(read(page)).toContain("querySelectorAll('#current-year')");
     });
@@ -86,7 +108,7 @@ describe('footer parity across WiFi pages', () => {
     expect(footer).toBeGreaterThan(-1);
   });
 
-  it('keeps both pages mounting the footer inside .portal-shell', () => {
+  it('keeps /data and /terms mounting the footer inside .portal-shell', () => {
     for (const page of ['data.html', 'terms.html']) {
       const html = read(page);
       const footer = html.indexOf(FOOTER_OPEN);
