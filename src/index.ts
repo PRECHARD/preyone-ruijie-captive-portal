@@ -8,6 +8,7 @@ import compression from 'compression';
 import cookieParser from 'cookie-parser';
 import morgan from 'morgan';
 import fs from 'fs';
+import { createServer } from 'http';
 
 import { authRouter } from './routes/auth';
 import { adminRouter } from './routes/admin';
@@ -22,6 +23,7 @@ import { transitRouter } from './routes/transit';
 import { transitWebRouter } from './routes/transitWeb';
 import { systemAdminRouter } from './routes/systemAdmin';
 import { starlinkRouter } from './routes/starlink';
+import { homeAutomateRouter } from './routes/homeautomate';
 import { ruijieRouter } from './routes/ruijie';
 import { currencyRouter } from './routes/currency';
 import { usageRouter } from './routes/usage';
@@ -36,6 +38,7 @@ import { scheduleSessionCleanup } from './services/sessionCleanup';
 import { ensureVoucherRuijieSchema, startRuijieAccountingPolling } from './services/ruijieService';
 import { scheduleAccessLogCleanup } from './services/accessLogCleanup';
 import { scheduleHandoverReminders } from './services/handoverReminder';
+import { attachHomeAutomationSocket } from './services/iotHub';
 import { startVoucherMonitor } from './services/voucherMonitorService';
 import { startVoucherPoolWorker } from './services/voucherPool';
 import { startRuijieVoucherStatusWorker } from './services/ruijieVoucherStatusSync';
@@ -415,6 +418,10 @@ app.use('/api/site', siteInvoicesRouter);
 app.use('/api/transit', transitRouter);
 app.use('/api/pos', posRouter);
 app.use('/api/starlink', starlinkRouter);
+// Home automation (homeautomate.preyone.com): device CRUD, telemetry, triggers
+// and the StarLink uptime feed. The live push channel is the WebSocket upgrade
+// handler attached to the HTTP server below (/api/homeautomate/stream).
+app.use('/api/homeautomate', homeAutomateRouter);
 // Ruijie Cloud maint-API proxy — admin-auth guarded inside the router.
 // Mounted under /api/ so the subdomain middleware (line ~169) is bypassed and
 // it cannot collide with gatewayRouter's /api/radius + /api/gateway paths.
@@ -492,8 +499,17 @@ if (!process.env.JWT_SECRET || process.env.JWT_SECRET === 'preyone-jwt-secret-ch
   console.warn('WARNING: JWT_SECRET not set or using the insecure default. Set a strong JWT_SECRET in .env.');
 }
 
-// Start server
-app.listen(PORT, () => {
+// Start server. A plain `app.listen` cannot be upgraded to a WebSocket, so the
+// Express app is wrapped in an http.Server and the home-automation hub attaches
+// its /api/homeautomate/stream upgrade handler to it.
+const server = createServer(app);
+try {
+  attachHomeAutomationSocket(server);
+} catch (err) {
+  console.error('Home automation socket failed to attach:', err);
+}
+
+server.listen(PORT, () => {
   console.log(`Captive portal running on http://0.0.0.0:${PORT}`);
 
   // Starlink customer portal: create its additive tables (IF NOT EXISTS) at
@@ -564,3 +580,4 @@ app.listen(PORT, () => {
 });
 
 export default app;
+export { server };

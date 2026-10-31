@@ -3666,9 +3666,25 @@ adminRouter.get('/company', requireRole('CEO'), async (_req: Request, res: Respo
 
 adminRouter.put('/company', requireRole('CEO'), async (req: Request, res: Response) => {
   const {
-    name, tagline, address, email, supportPhone, website, logoPath,
+    name, tagline, address, email, supportPhone, website, logoPath, logoUrl,
     currency, taxPct, invoicePrefix, quotePrefix, receiptFooter, termsText,
+    businessProfile, invoiceTemplateId, posThemeId,
+    posHardware, invoiceSettings, kdsEnabled, tableServiceEnabled,
   } = req.body as any;
+
+  // The Global Settings Hub sends the presentation choices (profile, template,
+  // theme, hardware layout, invoicing defaults) but this handler used to drop
+  // them silently, so picking a theme appeared to save and then reverted on the
+  // next load. They are persisted here with the same COALESCE semantics.
+  const profile =
+    typeof businessProfile === 'string' && businessProfile.trim() ? businessProfile.trim() : null;
+  const templateId =
+    invoiceTemplateId === undefined || invoiceTemplateId === null ? null : Number(invoiceTemplateId);
+  const themeId =
+    posThemeId === undefined || posThemeId === null ? null : Number(posThemeId);
+  const kds = typeof kdsEnabled === 'boolean' ? kdsEnabled : null;
+  const tables = typeof tableServiceEnabled === 'boolean' ? tableServiceEnabled : null;
+
   const { rows } = await pool.query(
     `UPDATE companies SET
        name           = COALESCE($1,  name),
@@ -3684,14 +3700,92 @@ adminRouter.put('/company', requireRole('CEO'), async (req: Request, res: Respon
        quote_prefix   = COALESCE($11, quote_prefix),
        receipt_footer = COALESCE($12, receipt_footer),
        terms_text     = COALESCE($13, terms_text),
+       logo_url             = COALESCE($15, logo_url),
+       business_profile     = COALESCE($16, business_profile),
+       invoice_template_id  = COALESCE($17, invoice_template_id),
+       pos_theme_id         = COALESCE($18, pos_theme_id),
+       pos_settings         = COALESCE($19::jsonb, pos_settings),
+       invoice_settings     = COALESCE($20::jsonb, invoice_settings),
+       kds_enabled          = COALESCE($21, kds_enabled),
+       table_service_enabled= COALESCE($22, table_service_enabled),
        updated_by     = $14, updated_at = NOW()
+     WHERE id = COALESCE($23::uuid, (SELECT id FROM companies ORDER BY created_at LIMIT 1))
      RETURNING *`,
     [name ?? null, tagline ?? null, address ?? null, email ?? null, supportPhone ?? null,
      website ?? null, logoPath ?? null, currency ?? null, taxPct ?? null, invoicePrefix ?? null,
-     quotePrefix ?? null, receiptFooter ?? null, termsText ?? null, req.adminUser!.id]
+     quotePrefix ?? null, receiptFooter ?? null, termsText ?? null, req.adminUser!.id,
+     logoUrl ?? null, profile, Number.isFinite(templateId) ? templateId : null,
+     Number.isFinite(themeId) ? themeId : null,
+     posHardware === undefined ? null : JSON.stringify(posHardware),
+     invoiceSettings === undefined ? null : JSON.stringify(invoiceSettings),
+     kds, tables, targetCompanyId(req)]
   );
   await recordAuditLog(req.adminUser!.id, req.adminUser!.fullName, 'company_update', 'companies', rows[0]?.id, `Company profile updated`);
   res.json(rows[0]);
+});
+
+/**
+ * Company id for settings writes.
+ *
+ * A platform admin may name an explicit company (rare, but the hub supports
+ * it); otherwise the session's portal company wins and only falls back to the
+ * singleton when the account is unassigned. This keeps the previously-global
+ * UPDATE from editing another tenant's branding.
+ */
+function targetCompanyId(req: Request): string | null {
+  const explicit = typeof (req.body as any)?.companyId === 'string' ? (req.body as any).companyId : null;
+  if (explicit) return explicit;
+  const sessionCompany = (req.adminUser as { portalCompanyId?: string | null } | undefined)?.portalCompanyId;
+  return sessionCompany ?? null;
+}
+
+// Logo upload for the Global Settings Hub.
+//
+// The hub sends a data URL (FileReader output) so no multipart parser is needed.
+// Only PNG/JPEG/WebP under 2 MB are accepted; the bytes are decoded, size- and
+// magic-checked, then written under public/images so every SPA can render them
+// from the same origin (CSP-safe, no external host).
+adminRouter.post('/company/logo', requireRole('CEO', 'Manager'), async (req: Request, res: Response) => {
+  const dataUrl = typeof req.body?.dataUrl === 'string' ? req.body.dataUrl : '';
+  const match = /^data:image\/(png|jpe?g|webp);base64,([A-Za-z0-9+/=\s]+)$/i.exec(dataUrl);
+  if (!match) {
+    res.status(422).json({ error: 'logo must be a PNG, JPEG or WebP data URL' });
+    return;
+  }
+  const ext = match[1].toLowerCase() === 'jpeg' ? 'jpg' : match[1].toLowerCase();
+  const bytes = Buffer.from(match[2].replace(/\s/g, ''), 'base64');
+  if (bytes.length === 0) {
+    res.status(422).json({ error: 'logo image is empty' });
+    return;
+  }
+  if (bytes.length > 2 * 1024 * 1024) {
+    res.status(413).json({ error: 'logo must be 2 MB or smaller' });
+    return;
+  }
+  const magicOk =
+    (ext === 'png' && bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) ||
+    ((ext === 'jpg' || ext === 'jpeg') && bytes[0] === 0xff && bytes[1] === 0xd8) ||
+    (ext === 'webp' && bytes.subarray(0, 4).toString('ascii') === 'RIFF' && bytes.subarray(8, 12).toString('ascii') === 'WEBP');
+  if (!magicOk) {
+    res.status(422).json({ error: 'logo file content does not match its declared image type' });
+    return;
+  }
+
+  const filename = `company-logo-${Date.now()}-${crypto.randomBytes(4).toString('hex')}.${ext}`;
+  const imagesDir = path.join(__dirname, '..', '..', 'public', 'images');
+  fs.mkdirSync(imagesDir, { recursive: true });
+  fs.writeFileSync(path.join(imagesDir, filename), bytes);
+
+  const publicUrl = `/images/${filename}`;
+  const companyId = targetCompanyId(req);
+  await pool.query(
+    `UPDATE companies
+        SET logo_url = $1, logo_path = $2, updated_at = NOW()
+      WHERE ($3::uuid IS NULL AND id = (SELECT id FROM companies ORDER BY created_at LIMIT 1))
+         OR id = $3::uuid`,
+    [publicUrl, filename, companyId]
+  );
+  res.json({ logoUrl: publicUrl, filename, bytes: bytes.length });
 });
 
 // ═══════════════════════════════════════════════════════

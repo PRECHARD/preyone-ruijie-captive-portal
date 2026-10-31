@@ -2202,6 +2202,26 @@ CREATE INDEX IF NOT EXISTS idx_payments_user_id ON payments (user_id);
       console.warn(`Skipped subscription upgrade: ${v2UpgradePath} not found.`);
     }
 
+    // ── Presentation + IoT layers (v3) ─────────────────────────────────────
+    // These files were previously committed but never executed by migrate(),
+    // so a fresh database came up without invoice_templates / pos_themes,
+    // companies.business_profile, or the invoicing currency columns. They are
+    // applied in order — v3_2 references invoice_templates from v3 — and each
+    // file is idempotent, so re-running against a live database is safe.
+    const ecosystemMigrations = [
+      'v3_master_ecosystem.sql',
+      'v3_2_ecosystem.sql',
+    ];
+    for (const file of ecosystemMigrations) {
+      const migrationPath = path.resolve(__dirname, '../../db/migrations', file);
+      if (fs.existsSync(migrationPath)) {
+        await client.query(fs.readFileSync(migrationPath, 'utf8'));
+        console.log(`Applied db/migrations/${file}.`);
+      } else {
+        console.warn(`Skipped ${file}: ${migrationPath} not found.`);
+      }
+    }
+
     console.log('Migration complete. Packages + transit + RBAC seeded.');
   } finally {
     client.release();

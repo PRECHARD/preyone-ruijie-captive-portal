@@ -8,6 +8,17 @@ import { requireAdminAuth, requireRole } from '../middleware/adminAuth';
 import { INACTIVITY_TIMEOUT_SEC } from '../sessionPolicy';
 import { requireCompany } from '../middleware/company';
 import { requireDeviceAuth } from '../middleware/deviceAuth';
+import { INVOICE_DOCUMENT_TYPES, ALL_DOCUMENT_TYPES } from '../services/pesepay';
+import { POS_THEMES, CURRENCIES } from '../catalog/ecosystem';
+import { themeCssVariables, themeCssBlock } from '../utils/themeVars';
+import { FINGERPRINT_HEADER } from '../middleware/deviceAuth';
+import {
+  DEFAULT_LEASE_DAYS,
+  MAX_LEASE_DAYS,
+  hashFingerprint,
+  mintOfflineLease,
+  verifyOfflineLease,
+} from '../services/posLease';
 
 /**
  * Preyone POS module — additive only.
@@ -300,10 +311,21 @@ const PAYMENT_METHODS = [
 ];
 
 // ── Company profile (read-only for staff clients) ───────────────────
-// Single source of truth for receipts / invoices / support phone.
-router.get('/company', async (_req, res) => {
-  const { rows } = await pool.query('SELECT * FROM companies ORDER BY created_at LIMIT 1');
-  res.json(rows[0] || { name: 'Preyone', currency: 'USD', tax_pct: 0, support_phone: '' });
+// Single source of truth for receipts / invoices / support phone. Scoped to the
+// caller's company: the previous global "first company" read branded every
+// tenant's receipts with whichever company happened to be created first.
+router.get('/company', async (req, res) => {
+  const { rows } = await pool.query('SELECT * FROM companies WHERE id = $1', [tenantId(req)]);
+  res.json(
+    rows[0] || {
+      name: 'Preyone',
+      currency: 'USD',
+      tax_pct: 0,
+      support_phone: '',
+      kds_enabled: false,
+      table_service_enabled: false,
+    }
+  );
 });
 
 // ── Company subscriptions (tenancy) — which modules this company owns ─
@@ -313,6 +335,326 @@ router.get('/company/subscriptions', (req, res) => {
     plan_tier: req.company!.plan_tier ?? null,
     modules: req.company!.modules,
   });
+});
+
+// ── Theme + catalogue (invoicing workspace & POS theming) ────────────
+//
+// The merchant picks one of the 20 seeded palettes; every surface derives its
+// surfaces, borders and readable ink from it. Returning the variables (not just
+// the hex values) is what lets the POS, invoice and IoT SPAs share one contract.
+
+// Document-number prefixes. Declared before DOC_TYPE_CATALOGUE: that catalogue
+// is a top-level initializer, so referencing this const from further down the
+// module hit the temporal dead zone and took the whole POS router down at import.
+const DOC_PREFIX: Record<string, string> = {
+  sale: 'RCP',
+  invoice: 'INV',
+  tax_invoice: 'TAX',
+  proforma: 'PRO',
+  receipt: 'REC',
+  sales_receipt: 'SR',
+  cash_receipt: 'CR',
+  quote: 'QUO',
+  quotation: 'QUO',
+  estimate: 'EST',
+  credit_memo: 'CM',
+  credit_note: 'CN',
+  purchase_order: 'PO',
+  delivery_note: 'DN',
+};
+
+const DOC_TYPE_CATALOGUE = INVOICE_DOCUMENT_TYPES.map((t) => ({
+  type: t.type,
+  label: t.label,
+  prefix: DOC_PREFIX[t.type] ?? t.prefix,
+  ar: t.ar,
+  credit: t.credit,
+}));
+
+async function loadThemeRow(companyId: string, themeId?: number | null) {
+  const { rows } = await pool.query(
+    `SELECT id, name, primary, secondary, accent, bg, text
+       FROM pos_themes
+      WHERE is_active AND ($1::int IS NULL OR id = $1)
+      ORDER BY id
+      LIMIT 1`,
+    [themeId ?? null]
+  );
+  if (rows.length > 0) return rows[0];
+  // Table missing / empty (migration not applied yet): fall back to the static
+  // mirror so the UI still renders the house theme instead of throwing.
+  const fallback = POS_THEMES.find((t) => t.id === themeId) ?? POS_THEMES[0];
+  return fallback;
+}
+
+async function resolveCompanyTheme(companyId: string) {
+  const { rows } = await pool.query(
+    `SELECT pos_theme_id FROM companies WHERE id = $1`,
+    [companyId]
+  );
+  const themeId = Number(rows[0]?.pos_theme_id) || 1;
+  return loadThemeRow(companyId, themeId);
+}
+
+router.get('/theme', async (req, res) => {
+  const theme = await resolveCompanyTheme(tenantId(req));
+  res.json({ theme, css: themeCssVariables(theme as any), cssBlock: themeCssBlock(theme as any) });
+});
+
+router.patch('/theme', requireRole(...MANAGER_ROLES), async (req, res) => {
+  const themeId = num(req.body?.themeId);
+  if (!Number.isInteger(themeId) || themeId < 1 || themeId > 20) {
+    res.status(422).json({ error: 'themeId must be between 1 and 20' });
+    return;
+  }
+  await pool.query(
+    `UPDATE companies SET pos_theme_id = $1, updated_at = NOW() WHERE id = $2`,
+    [themeId, tenantId(req)]
+  );
+  const theme = await loadThemeRow(tenantId(req), themeId);
+  res.json({ theme, css: themeCssVariables(theme as any), cssBlock: themeCssBlock(theme as any) });
+});
+
+router.get('/catalog', async (req, res) => {
+  const cid = tenantId(req);
+  const [companyRes, templatesRes, themesRes] = await Promise.all([
+    pool.query(
+      `SELECT id, name, tagline, logo_url, logo_path, currency, tax_pct, business_profile,
+              kds_enabled, table_service_enabled, invoice_template_id, pos_theme_id
+         FROM companies WHERE id = $1`,
+      [cid]
+    ),
+    pool.query(
+      `SELECT id, name, description, layout, accent_color, show_logo
+         FROM invoice_templates WHERE is_active ORDER BY id`
+    ).catch(() => ({ rows: [] as any[] })),
+    pool.query(
+      `SELECT id, name, description, primary, secondary, accent, bg, text
+         FROM pos_themes WHERE is_active ORDER BY id`
+    ).catch(() => ({ rows: [] as any[] })),
+  ]);
+  const company = companyRes.rows[0] ?? {};
+  const templates = templatesRes.rows.length
+    ? templatesRes.rows.map((t: any) => ({
+        id: t.id,
+        name: t.name,
+        description: t.description,
+        layout: t.layout,
+        accentColor: t.accent_color,
+        showLogo: t.show_logo,
+      }))
+    : (await import('../catalog/ecosystem')).INVOICE_TEMPLATES;
+  const themes = themesRes.rows.length ? themesRes.rows : POS_THEMES;
+  res.json({
+    company,
+    templates,
+    themes,
+    currencies: CURRENCIES,
+    documentTypes: DOC_TYPE_CATALOGUE,
+    modules: {
+      kds: Boolean(company.kds_enabled) || company.business_profile === 'fast_food_qsr',
+      tables:
+        Boolean(company.table_service_enabled) || company.business_profile === 'restaurant_dine_in',
+    },
+  });
+});
+
+// Merchant-level module switches (QSR KDS routing, dine-in floor plan). Kept
+// separate from business_profile so a restaurant can run the till without the
+// floor plan (or enable the kitchen screen without re-profiling the business).
+router.patch('/company/modules', requireRole(...MANAGER_ROLES), async (req, res) => {
+  const cid = tenantId(req);
+  const kds = typeof req.body?.kds === 'boolean' ? req.body.kds : null;
+  const tables = typeof req.body?.tables === 'boolean' ? req.body.tables : null;
+  if (kds === null && tables === null) {
+    res.status(422).json({ error: 'Provide kds and/or tables as booleans' });
+    return;
+  }
+  const { rows } = await pool.query(
+    `UPDATE companies
+        SET kds_enabled = COALESCE($1, kds_enabled),
+            table_service_enabled = COALESCE($2, table_service_enabled),
+            updated_at = NOW()
+      WHERE id = $3
+      RETURNING kds_enabled, table_service_enabled`,
+    [kds, tables, cid]
+  );
+  res.json(rows[0]);
+});
+
+// ── Office-created documents (invoicing workspace) ───────────────────
+//
+// The till creates documents through /checkout (stock, serials, payments).
+// Office work is different: a draft invoice or quote has no shift, no stock
+// movement and no money yet. This endpoint persists any of the 12 document
+// types with line items, FX and template, and never touches inventory.
+router.post('/documents', async (req, res) => {
+  const b = req.body || {};
+  const cid = tenantId(req);
+  const docType = str(b.docType);
+  if (!(ALL_DOCUMENT_TYPES as readonly string[]).includes(docType) || docType === 'sale') {
+    res.status(422).json({
+      error: `docType must be one of: ${INVOICE_DOCUMENT_TYPES.map((t) => t.type).join(', ')}`,
+    });
+    return;
+  }
+
+  const rawItems = Array.isArray(b.items) ? b.items : [];
+  const items = rawItems
+    .map((it: any) => ({
+      description: str(it?.description),
+      price: round2(num(it?.price)),
+      qty: round2(num(it?.qty)) || 1,
+      productId: str(it?.productId) || null,
+    }))
+    .filter((it: any) => it.description.length > 0);
+  if (items.length === 0) {
+    res.status(422).json({ error: 'At least one line item with a description is required' });
+    return;
+  }
+
+  const { rows: compRows } = await pool.query(
+    `SELECT currency, tax_pct, invoice_template_id, name FROM companies WHERE id = $1`,
+    [cid]
+  );
+  const company = compRows[0] ?? {};
+  const currency = (str(b.currency) || str(company.currency) || 'USD').toUpperCase();
+  const exchangeRate = num(b.exchangeRate) > 0 ? num(b.exchangeRate) : 1;
+  const discountPct = num(b.discountPct);
+  const taxPct = b.taxPct === undefined || b.taxPct === null ? num(company.tax_pct) : num(b.taxPct);
+
+  const { lines, subtotal, taxAmount, total } = computeTotals(items as any, discountPct, taxPct);
+  const credit = docType === 'credit_memo' || docType === 'credit_note';
+  const signedTotal = credit ? -Math.abs(total) : total;
+
+  const status = ['draft', 'sent'].includes(str(b.status))
+    ? str(b.status)
+    : ['quote', 'estimate', 'proforma'].includes(docType)
+      ? 'sent'
+      : 'draft';
+
+  const issueDate = /^\d{4}-\d{2}-\d{2}$/.test(str(b.issueDate)) ? str(b.issueDate) : null;
+  const dueDate =
+    /^\d{4}-\d{2}-\d{2}$/.test(str(b.dueDate))
+      ? str(b.dueDate)
+      : issueDate && ['invoice', 'tax_invoice', 'proforma', 'sales_receipt'].includes(docType)
+        ? null // computed in SQL as issue + net days
+        : null;
+  const netDays = Number.isFinite(Number(b.netDays)) ? Math.max(0, Math.min(365, Number(b.netDays))) : 30;
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    let customerId = str(b.customerId) || null;
+    if (!customerId && b.customer && typeof b.customer === 'object') {
+      customerId = await upsertCustomer(client, b.customer);
+    }
+
+    const seq = await client.query(`SELECT nextval('pos_doc_number_seq') AS v`);
+    const docNumber = `${DOC_PREFIX[docType]}-${String(seq.rows[0].v).padStart(4, '0')}`;
+    const templateId = num(b.templateId) || num(company.invoice_template_id) || null;
+
+    const inserted = await client.query(
+      `INSERT INTO pos_documents
+         (doc_number, doc_type, channel, status, customer_id, cashier_id, issue_date, due_date,
+          subtotal, discount_pct, tax_pct, total, amount_paid, notes, company_id,
+          currency, exchange_rate, template_id, doc_meta)
+       VALUES ($1,$2,'office',$3,$4,$5,
+               COALESCE($6::date, CURRENT_DATE),
+               COALESCE($7::date, COALESCE($6::date, CURRENT_DATE) + ($8::int * INTERVAL '1 day')),
+               $9,$10,$11,$12,0,$13,$14,$15,$16,$17,$18)
+       RETURNING *`,
+      [
+        docNumber,
+        docType,
+        status,
+        customerId,
+        req.adminUser!.id,
+        issueDate,
+        dueDate,
+        netDays,
+        subtotal,
+        round2(discountPct),
+        round2(taxPct),
+        signedTotal,
+        str(b.notes) || null,
+        cid,
+        currency,
+        exchangeRate,
+        templateId,
+        JSON.stringify({
+          taxAmount,
+          netDays,
+          credit,
+          poNumber: str(b.poNumber) || null,
+          reference: str(b.reference) || null,
+        }),
+      ]
+    );
+    const doc = inserted.rows[0];
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      await client.query(
+        `INSERT INTO pos_document_items (document_id, product_id, description, price, qty, line_total, position)
+         VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+        [doc.id, line.productId ?? null, line.description, line.price, line.qty, line.lineTotal, line.position]
+      );
+    }
+
+    await client.query(
+      `INSERT INTO pos_document_events (document_id, company_id, event, detail, actor_id)
+       VALUES ($1,$2,'created',$3,$4)`,
+      [doc.id, cid, JSON.stringify({ docType, total: signedTotal, currency }), req.adminUser!.id]
+    ).catch(() => undefined); // pre-migration databases simply skip the audit row
+
+    await client.query('COMMIT');
+    res.status(201).json({ ...doc, items: lines });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    throw err;
+  } finally {
+    client.release();
+  }
+});
+
+// Mark a document as sent (quote/invoice handed to the customer). Idempotent.
+router.post('/documents/:id/send', async (req, res) => {
+  const cid = tenantId(req);
+  const { rows } = await pool.query(
+    `UPDATE pos_documents
+        SET status = CASE WHEN status IN ('draft') THEN 'unpaid' ELSE status END,
+            sent_at = NOW(),
+            updated_at = NOW()
+      WHERE id = $1 AND company_id = $2 AND status <> 'void'
+      RETURNING *`,
+    [req.params.id, cid]
+  );
+  if (rows.length === 0) {
+    res.status(404).json({ error: 'Document not found' });
+    return;
+  }
+  await pool.query(
+    `INSERT INTO pos_document_events (document_id, company_id, event, detail, actor_id)
+     VALUES ($1,$2,'sent',$3,$4)`,
+    [rows[0].id, cid, JSON.stringify({ to: str(req.body?.to) || null }), req.adminUser!.id]
+  ).catch(() => undefined);
+  res.json(rows[0]);
+});
+
+// Append-only document timeline (audit trail for the workspace drawer).
+router.get('/documents/:id/events', async (req, res) => {
+  const { rows } = await pool.query(
+    `SELECT e.*, u.full_name AS actor_name
+       FROM pos_document_events e
+       JOIN pos_documents d ON d.id = e.document_id
+       LEFT JOIN admin_users u ON u.id = e.actor_id
+      WHERE e.document_id = $1 AND d.company_id = $2
+      ORDER BY e.created_at DESC`,
+    [req.params.id, tenantId(req)]
+  );
+  res.json(rows);
 });
 
 // ── Device registration (Admin only) ─────────────────────────────────
@@ -340,10 +682,22 @@ router.post('/devices/register', requireAdminAuth, async (req, res) => {
   );
   if (!(await enforceSubscriptionGuard(res, companyId, existingRows.length > 0))) return;
 
+  // Hardware binding: SHA-256 of the machine fingerprint presented at
+  // enrolment. From here on every device-authenticated call must present the
+  // same fingerprint, so a token copied to another machine fails closed.
+  const fingerprint =
+    str(req.body?.fingerprint) ||
+    str(req.headers[FINGERPRINT_HEADER] as string | undefined) ||
+    '';
+  const fingerprintHash = hashFingerprint(fingerprint);
+  const leaseDays = Math.min(MAX_LEASE_DAYS, Math.max(1, num(req.body?.lease_days) || DEFAULT_LEASE_DAYS));
+
   const deviceToken = crypto.randomBytes(32).toString('hex'); // 64-char token
   const { rows } = await pool.query(
-    `INSERT INTO pos_devices (device_id, device_type, name, shop_id, device_token, status, company_id, paired_at, last_seen_at)
-     VALUES ($1,$2,$3,$4,$5,'active',$6,NOW(),NOW())
+    `INSERT INTO pos_devices
+       (device_id, device_type, name, shop_id, device_token, status, company_id,
+        paired_at, last_seen_at, fingerprint_hash, lease_days, enrolled_at)
+     VALUES ($1,$2,$3,$4,$5,'active',$6,NOW(),NOW(),$7,$8,NOW())
      ON CONFLICT (device_id) DO UPDATE SET
        device_type = EXCLUDED.device_type,
        name = EXCLUDED.name,
@@ -352,9 +706,15 @@ router.post('/devices/register', requireAdminAuth, async (req, res) => {
        status = EXCLUDED.status,
        last_seen = NOW(),
        last_seen_at = NOW(),
+       -- A re-enrolment MAY rotate the fingerprint (hardware replaced) but only
+       -- through this admin-authenticated endpoint; a blank fingerprint never
+       -- clears an existing binding.
+       fingerprint_hash = COALESCE(EXCLUDED.fingerprint_hash, pos_devices.fingerprint_hash),
+       lease_days = EXCLUDED.lease_days,
        updated_at = NOW()
-     RETURNING id, device_id, device_type, name, shop_id, device_token, status, company_id, paired_at`,
-    [hardwareSerial, deviceType, deviceName, shopId, deviceToken, companyId]
+     RETURNING id, device_id, device_type, name, shop_id, device_token, status,
+               company_id, paired_at, fingerprint_hash IS NOT NULL AS bound, lease_days`,
+    [hardwareSerial, deviceType, deviceName, shopId, deviceToken, companyId, fingerprintHash, leaseDays]
   );
   const device = rows[0];
   res.json({
@@ -363,6 +723,9 @@ router.post('/devices/register', requireAdminAuth, async (req, res) => {
     company_id: device.company_id,
     shop_id: device.shop_id,
     device_name: device.name,
+    hardware_bound: device.bound === true,
+    lease_days: device.lease_days,
+    fingerprint_header: FINGERPRINT_HEADER,
   });
 });
 
@@ -496,9 +859,13 @@ router.post('/devices/auto-register', requireAdminAuth, async (req, res) => {
 // Returns this device's registration status and quota info.
 router.get('/devices/mine', requireDeviceAuth, async (req, res) => {
   const device = req.device!;
+  // Look the row up by HARDWARE id: the middleware already authenticated the
+  // token, and comparing device_token against device_id silently matched
+  // nothing (every till got a 404 from this endpoint).
   const { rows } = await pool.query(
-    `SELECT id, device_id, device_uuid, device_type, name, shop_id, status, last_seen_at, paired_at, app_version
-       FROM pos_devices WHERE device_token = $1`,
+    `SELECT id, device_id, device_uuid, device_type, name, shop_id, status, last_seen_at, paired_at,
+            app_version, fingerprint_hash IS NOT NULL AS hardware_bound, lease_days, lease_expires_at
+       FROM pos_devices WHERE device_id = $1 AND status = 'active'`,
     [device.device_id]
   );
   if (rows.length === 0) {
@@ -516,6 +883,91 @@ router.get('/devices/mine', requireDeviceAuth, async (req, res) => {
       limits: DEVICE_TYPE_QUOTA,
       current: Object.fromEntries(quotaSummary.rows.map((r: { device_type: string; cnt: number }) => [r.device_type, r.cnt])),
     },
+  });
+});
+
+// ── Offline lease (7-day cryptographic cut-off) ───────────────────────
+//
+// GET /devices/mine above tells the till whether it is bound; these two routes
+// let it work through an outage and let the client verify the lease offline.
+//
+//   POST /devices/lease          (device token)  → mint a fresh 7-day lease
+//   POST /devices/verify-lease   (public)        → verify any lease offline
+//
+// The lease is HMAC-SHA256 signed (POS_LEASE_SECRET, falling back to
+// JWT_SECRET) and carries the fingerprint hash, so a copied lease file is
+// useless on other hardware.
+router.post('/devices/lease', requireDeviceAuth, async (req, res) => {
+  const device = req.device!;
+  const { rows } = await pool.query(
+    `SELECT id, device_id, company_id, shop_id, fingerprint_hash, lease_days
+       FROM pos_devices WHERE device_id = $1 AND status = 'active'`,
+    [device.device_id]
+  );
+  const row = rows[0];
+  if (!row) {
+    res.status(404).json({ error: 'Device not found' });
+    return;
+  }
+  if (!row.fingerprint_hash) {
+    res.status(409).json({
+      error: 'Device is not hardware-bound. Re-enrol with a fingerprint before taking a lease.',
+      code: 'DEVICE_NOT_BOUND',
+    });
+    return;
+  }
+  const days = Math.min(MAX_LEASE_DAYS, Math.max(1, num(row.lease_days) || DEFAULT_LEASE_DAYS));
+  const lease = mintOfflineLease(
+    {
+      did: row.device_id,
+      cid: row.company_id ?? null,
+      sid: row.shop_id ?? null,
+      fph: row.fingerprint_hash,
+    },
+    { days }
+  );
+  await pool.query(
+    `UPDATE pos_devices SET lease_expires_at = $2, last_seen_at = NOW() WHERE id = $1`,
+    [row.id, lease.expiresAt]
+  );
+  res.json({
+    lease: lease.lease,
+    expires_at: lease.expiresAt,
+    days: lease.days,
+    device_id: row.device_id,
+    company_id: row.company_id,
+    shop_id: row.shop_id,
+    clock: new Date().toISOString(),
+  });
+});
+
+// Public on purpose: an offline till has no session to authenticate with. The
+// endpoint is stateless, reveals nothing beyond the lease the caller already
+// holds, and is rate-limited like the other auth surfaces.
+const leaseVerifyLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 120,
+  message: { error: 'Too many lease checks, try again shortly' },
+});
+
+router.post('/devices/verify-lease', leaseVerifyLimiter, (req, res) => {
+  const lease = str(req.body?.lease);
+  const fingerprint = str(req.body?.fingerprint) || str(req.headers[FINGERPRINT_HEADER] as string | undefined) || '';
+  const deviceId = str(req.body?.device_id) || undefined;
+  const result = verifyOfflineLease(lease, {
+    fingerprint: fingerprint || undefined,
+    deviceId,
+  });
+  if (!result.valid) {
+    res.status(401).json({ valid: false, reason: result.reason, claims: result.claims ?? null });
+    return;
+  }
+  const claims = result.claims!;
+  res.json({
+    valid: true,
+    claims: { ...claims, fph: undefined },
+    expiresAt: new Date(claims.exp * 1000).toISOString(),
+    secondsRemaining: Math.max(0, claims.exp - Math.floor(Date.now() / 1000)),
   });
 });
 
@@ -916,23 +1368,6 @@ interface CartItemInput {
   price?: number | string;
   qty?: number | string;
 }
-
-const DOC_PREFIX: Record<string, string> = {
-  sale: 'RCP',
-  invoice: 'INV',
-  tax_invoice: 'TAX',
-  proforma: 'PRO',
-  receipt: 'REC',
-  sales_receipt: 'SR',
-  cash_receipt: 'CR',
-  quote: 'QUO',
-  quotation: 'QUO',
-  estimate: 'EST',
-  credit_memo: 'CM',
-  credit_note: 'CN',
-  purchase_order: 'PO',
-  delivery_note: 'DN',
-};
 
 export function computeTotals(items: CartItemInput[], discountPct: number, taxPct: number) {
   let subtotal = 0;

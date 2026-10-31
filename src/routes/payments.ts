@@ -20,6 +20,7 @@ import {
   PESEPAY_FAILED_STATUSES,
 } from '../services/pesepayService';
 import type { PesepayCurrency, PesepayRail } from '../services/pesepayService';
+import { getPesepayReturnUrlForTarget } from '../services/pesepay';
 import { isRuijieCloudConfigured, findRuijieProfile, mintRuijieVoucherForTier } from '../services/ruijieMint';
 import { claimPooledVoucher, refillVoucherPool } from '../services/voucherPool';
 import { requireStarlinkAuth } from '../middleware/starlinkAuth';
@@ -1629,9 +1630,12 @@ paymentsRouter.post('/pesepay/initiate', requireAdminAuth, async (req: Request, 
         return;
       }
     } else {
+      // Tenant-scoped: a document belonging to another company must never be
+      // chargeable, even with a guessed UUID. The currency is read too, so an
+      // intent cannot be raised in USD against a ZiG invoice.
       const { rows: docRows } = await pool.query(
-        'SELECT id, total, amount_paid, shift_id FROM pos_documents WHERE id = $1',
-        [targetId]
+        'SELECT id, total, amount_paid, shift_id, currency FROM pos_documents WHERE id = $1 AND company_id = $2',
+        [targetId, tenantId]
       );
       if (docRows.length === 0) {
         res.status(404).json({ error: 'Document not found' });
@@ -1639,6 +1643,13 @@ paymentsRouter.post('/pesepay/initiate', requireAdminAuth, async (req: Request, 
       }
       if (targetType === 'shift' && shiftId && docRows[0].shift_id !== shiftId) {
         res.status(400).json({ error: 'Document does not belong to the supplied shift' });
+        return;
+      }
+      const docCurrency = normalizeGatewayCurrency(docRows[0].currency || currencyCode);
+      if (docCurrency && docCurrency !== currencyCode) {
+        res.status(400).json({
+          error: `Document is denominated in ${docCurrency}; raise the payment in that currency (ZWG is sent as ZiG).`,
+        });
         return;
       }
       const balance = Number(docRows[0].total) - Number(docRows[0].amount_paid);
@@ -1680,6 +1691,14 @@ paymentsRouter.post('/pesepay/initiate', requireAdminAuth, async (req: Request, 
       phone: body.phone,
       email: body.email,
       fullName: body.fullName,
+      // Each surface returns the customer to its own app; the settlement
+      // webhook stays central (/api/payments/pesepay/callback).
+      returnUrl: getPesepayReturnUrlForTarget(
+        targetType === 'invoice' || (targetType === 'subscription' && subscriptionModule === 'invoice')
+          ? 'invoice'
+          : 'pos',
+        reference
+      ),
     });
 
     if (!pesepayResponse.success) {
