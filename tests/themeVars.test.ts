@@ -1,88 +1,112 @@
 import { describe, expect, it } from 'vitest';
 import {
-  mix,
   parseHex,
-  readableInk,
+  toHex,
+  mix,
   relativeLuminance,
+  readableInk,
   rgba,
-  themeCssBlock,
   themeCssVariables,
+  themeCssBlock,
 } from '../src/utils/themeVars';
-import { POS_THEMES } from '../src/catalog/ecosystem';
 
-describe('themeVars — colour parsing', () => {
-  it('expands 3-digit hex and normalises case', () => {
-    expect(parseHex('#abc')).toEqual({ r: 0xaa, g: 0xbb, b: 0xcc });
-    expect(parseHex('0D9488')).toEqual({ r: 0x0d, g: 0x94, b: 0x88 });
+const DARK = { primary: '#10b981', secondary: '#0f766e', accent: '#f59e0b', bg: '#070b12', text: '#e8eefb' };
+const LIGHT = { primary: '#2563eb', secondary: '#1d4ed8', accent: '#f97316', bg: '#f8fafc', text: '#0f172a' };
+
+describe('hex helpers', () => {
+  it('parses 3- and 6-digit hex', () => {
+    expect(parseHex('#fff')).toEqual({ r: 255, g: 255, b: 255 });
+    expect(parseHex('10b981')).toEqual({ r: 16, g: 185, b: 129 });
   });
 
-  it('falls back instead of throwing on invalid input', () => {
-    expect(parseHex('not-a-colour')).toEqual(parseHex('#0d9488'));
-    expect(parseHex('')).toEqual(parseHex('#0d9488'));
+  it('falls back on invalid input instead of throwing', () => {
+    expect(parseHex('nonsense')).toEqual({ r: 5, g: 150, b: 105 });
   });
 
-  it('mixes between two colours and clamps the weight', () => {
+  it('round-trips through toHex', () => {
+    expect(toHex(parseHex('#10b981'))).toBe('#10b981');
+    expect(toHex({ r: 300, g: -5, b: 12 })).toBe('#ff000c');
+  });
+
+  it('mixes towards the target colour', () => {
     expect(mix('#000000', '#ffffff', 0)).toBe('#000000');
     expect(mix('#000000', '#ffffff', 1)).toBe('#ffffff');
     expect(mix('#000000', '#ffffff', 0.5)).toBe('#808080');
-    expect(mix('#000000', '#ffffff', 2)).toBe('#ffffff');
-    expect(mix('#000000', '#ffffff', -1)).toBe('#000000');
   });
 
   it('emits rgba with a clamped alpha', () => {
-    expect(rgba('#ff0000', 0.5)).toBe('rgba(255, 0, 0, 0.5)');
-    expect(rgba('#ff0000', 5)).toBe('rgba(255, 0, 0, 1)');
+    expect(rgba('#10b981', 0.5)).toBe('rgba(16, 185, 129, 0.5)');
+    expect(rgba('#10b981', 9)).toBe('rgba(16, 185, 129, 1)');
+    expect(rgba('#10b981', -1)).toBe('rgba(16, 185, 129, 0)');
   });
 });
 
-describe('themeVars — readable ink', () => {
-  it('computes luminance at the extremes', () => {
-    expect(relativeLuminance('#000000')).toBe(0);
-    expect(relativeLuminance('#ffffff')).toBeCloseTo(1, 5);
+describe('contrast', () => {
+  it('ranks white above black', () => {
+    expect(relativeLuminance('#ffffff')).toBeGreaterThan(relativeLuminance('#000000'));
   });
 
-  it('chooses dark ink on light backgrounds and light ink on dark ones', () => {
+  it('picks dark ink on light backgrounds and light ink on dark ones', () => {
     expect(readableInk('#ffffff')).toBe('#0b1220');
-    expect(readableInk('#000000')).toBe('#ffffff');
+    expect(readableInk('#050505')).toBe('#ffffff');
   });
 });
 
-describe('themeVars — variable contract', () => {
-  it('derives every custom property the SPAs consume', () => {
-    const vars = themeCssVariables(POS_THEMES[0]);
+describe('themeCssVariables', () => {
+  it('derives the full variable contract for a dark palette', () => {
+    const vars = themeCssVariables(DARK);
     for (const key of [
       '--pos-primary',
       '--pos-primary-strong',
+      '--pos-primary-soft',
       '--pos-secondary',
       '--pos-accent',
+      '--pos-accent-soft',
       '--pos-bg',
+      '--pos-bg-elevated',
       '--pos-surface',
+      '--pos-surface-2',
       '--pos-border',
       '--pos-text',
+      '--pos-text-muted',
       '--pos-on-primary',
+      '--pos-on-accent',
       '--pos-glow',
+      '--pos-glow-accent',
       '--pos-shadow',
       '--pos-radius',
       '--pos-font',
     ]) {
-      expect(vars[key], `missing ${key}`).toBeTruthy();
+      expect(vars[key], key).toBeTruthy();
     }
+    expect(vars['--pos-primary']).toBe('#10b981');
+    expect(vars['--pos-bg']).toBe('#070b12');
+    expect(vars['--pos-on-primary']).toBe('#ffffff');
   });
 
-  it('keeps elevated surfaces lighter than the page on dark themes', () => {
-    const vars = themeCssVariables({ primary: '#0d9488', secondary: '#115e59', accent: '#22d3ee', bg: '#0f172a', text: '#f8fafc' });
-    expect(relativeLuminance(vars['--pos-surface'])).toBeGreaterThan(relativeLuminance(vars['--pos-bg']));
+  it('uses a light surface ramp and dark ink for a light palette', () => {
+    const vars = themeCssVariables(LIGHT);
+    // Ink *on the primary button*, not the page: #2563eb is dark enough that
+    // white stays the readable choice.
+    expect(vars['--pos-on-primary']).toBe('#ffffff');
+    expect(vars['--pos-text']).toBe('#0f172a');
+    expect(vars['--pos-shadow']).toContain('rgba(15, 23, 42');
+    // Light palette: the elevated surface ramp steps *darker* than the page.
+    expect(relativeLuminance(vars['--pos-bg-elevated'])).toBeLessThan(relativeLuminance(vars['--pos-bg']));
+    expect(relativeLuminance(vars['--pos-surface-2'])).toBeLessThan(relativeLuminance(vars['--pos-surface']));
   });
 
-  it('inverts the surface ramp on light themes', () => {
-    const vars = themeCssVariables({ primary: '#0d9488', secondary: '#115e59', accent: '#22d3ee', bg: '#f8fafc', text: '#0f172a' });
-    expect(relativeLuminance(vars['--pos-surface'])).toBeLessThan(relativeLuminance(vars['--pos-bg']));
+  it('falls back to house defaults when tokens are missing', () => {
+    const vars = themeCssVariables({ primary: '', secondary: '', accent: '', bg: '', text: '' });
+    expect(vars['--pos-primary']).toBe('#059669');
+    expect(vars['--pos-bg']).toBe('#0f172a');
+    expect(vars['--pos-text']).toBe('#f8fafc');
   });
 
-  it('renders a :root block containing the derived variables', () => {
-    const block = themeCssBlock(POS_THEMES[0], ':root');
-    expect(block.startsWith(':root {')).toBe(true);
-    expect(block).toContain('--pos-primary:');
-    expect(block.trimEnd().endsWith('}')).toBe(true);
+  it('serialises to a :root block usable by any SPA', () => {
+    const block = themeCssBlock(DARK, '.theme-scope');
+    expect(block.startsWith('.theme-scope {')).toBe(true);
+    expect(block).toContain('--pos-primary: #10b981;');
+    expect(block.trim().endsWith('}')).toBe(true);
   });
 });

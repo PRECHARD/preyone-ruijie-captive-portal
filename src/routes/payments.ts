@@ -29,6 +29,9 @@ import { PLAN_TIERS } from './subscription';
 import { isCeoExclusiveTier } from '../config/packages';
 import { sendOnlinePaymentReceiptEmail } from '../services/notificationService';
 import type { OnlinePaymentEmailData } from '../services/notificationService';
+import { settleDocumentPayment } from '../services/documentSettlement';
+import type { DocumentSettlement } from '../services/documentSettlement';
+import { broadcastToCompany } from '../services/iotHub';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'preyone-jwt-secret-change-in-production';
 let _jwtSecretWarned = false;
@@ -1442,7 +1445,7 @@ function asUuid(value: unknown): string | null {
 }
 
 async function applyDocumentPayment(
-  client: any,
+  client: PoolClient,
   intent: PesepayIntentRow,
   reference: string
 ): Promise<Record<string, unknown>> {
@@ -1451,7 +1454,11 @@ async function applyDocumentPayment(
   }
 
   const { rows } = await client.query(
-    `SELECT id, doc_number, total, amount_paid, shift_id FROM pos_documents WHERE id = $1 FOR UPDATE`,
+    `SELECT id, doc_number, total, amount_paid, shift_id,
+            COALESCE(currency, 'USD') AS currency
+       FROM pos_documents
+      WHERE id = $1
+      FOR UPDATE`,
     [intent.target_id]
   );
 
@@ -1476,25 +1483,33 @@ async function applyDocumentPayment(
     [doc.id, intent.amount, intent.payment_method, reference, intent.shift_id || doc.shift_id]
   );
 
-  const { rows: updated } = await client.query(
-    `UPDATE pos_documents
-        SET amount_paid = LEAST(total, amount_paid + $2),
-            status = CASE WHEN amount_paid + $2 >= total THEN 'paid' ELSE 'partial' END,
-            updated_at = NOW()
-      WHERE id = $1
-      RETURNING status`,
-    [doc.id, intent.amount]
-  );
+  // Advance the document, book the ledger row and apply stock exactly once.
+  // The service locks the document row and is idempotent per reference, so a
+  // replayed webhook (or a status poll racing it) is safe.
+  const settlement = await settleDocumentPayment(client, {
+    documentId: doc.id,
+    amount: Number(intent.amount),
+    paymentMethod: intent.payment_method,
+    paymentReference: reference,
+    paidAt: new Date(),
+  });
 
   return {
-    documentId: doc.id,
-    documentNumber: doc.doc_number,
-    status: updated.length > 0 ? updated[0].status : 'paid',
+    documentId: settlement.documentId,
+    documentNumber: settlement.documentNumber,
+    status: settlement.status,
+    companyId: settlement.companyId,
+    amountPaid: settlement.amountPaid,
+    currency: settlement.currency,
+    saleRecorded: settlement.saleRecorded,
+    stockApplied: settlement.stockApplied,
+    stockMovements: settlement.stockMovements,
+    transitionedToPaid: settlement.transitionedToPaid,
   };
 }
 
 async function applySubscriptionPayment(
-  client: any,
+  client: PoolClient,
   intent: PesepayIntentRow
 ): Promise<Record<string, unknown>> {
   if (!intent.subscription_module) {
@@ -1521,6 +1536,147 @@ async function applySubscriptionPayment(
     planTier: rows[0].plan_tier,
     status: rows[0].status,
   };
+}
+
+// The customer's browser polls /pesepay/status after returning from the rail.
+// A webhook can be delayed by the provider, so that poll is also used as a
+// settlement safety net: it checks the gateway directly and, on SUCCESS, runs
+// the exact same settlement path as the callback. Throttled per intent so a
+// room full of tabs cannot hammer Pesepay.
+const INTENT_RECONCILE_GAP_MS = 8_000;
+const intentReconciledAt = new Map<string, number>();
+
+async function dispatchIntentPayment(client: PoolClient, intent: PesepayIntentRow, reference: string) {
+  return intent.target_type === 'starlink'
+    ? applyStarlinkPayment(
+        client,
+        { target_id: intent.target_id, amount: Number(intent.amount), provider_reference: undefined },
+        reference
+      )
+    : intent.target_type === 'subscription'
+    ? applySubscriptionPayment(client, intent)
+    : applyDocumentPayment(client, intent, reference);
+}
+
+/**
+ * Confirm a pending intent against Pesepay and settle it if the gateway says
+ * the money arrived. Returns the intent status to report to the caller.
+ */
+async function reconcilePesepayIntent(
+  intentId: string,
+  providerReference: string
+): Promise<{ status: string; settled: boolean }> {
+  const now = Date.now();
+  const last = intentReconciledAt.get(intentId) ?? 0;
+  if (now - last < INTENT_RECONCILE_GAP_MS) return { status: '', settled: false };
+  intentReconciledAt.set(intentId, now);
+
+  let check: Awaited<ReturnType<typeof verifyPaymentStatus>>;
+  try {
+    check = await verifyPaymentStatus(providerReference);
+  } catch (err) {
+    console.error('Pesepay status reconciliation failed:', err);
+    return { status: '', settled: false };
+  }
+
+  const gatewayStatus = String(check.status || '').toUpperCase();
+
+  if (!PESEPAY_SUCCESS_STATUSES.includes(gatewayStatus)) {
+    // A hard failure is recorded so the UI stops waiting. A timeout / not
+    // found / error is left pending: the customer may still pay, and the
+    // webhook remains authoritative.
+    if (PESEPAY_FAILED_STATUSES.includes(gatewayStatus)) {
+      await pool.query(
+        `UPDATE pesepay_intents SET status = 'failed' WHERE id = $1 AND status = 'pending'`,
+        [intentId]
+      );
+      return { status: 'failed', settled: false };
+    }
+    return { status: '', settled: false };
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows } = await client.query(
+      `SELECT id, reference, tenant_id, amount, currency, payment_method, target_type,
+              target_id, shift_id, subscription_module, plan_tier, status
+         FROM pesepay_intents
+        WHERE id = $1
+        FOR UPDATE`,
+      [intentId]
+    );
+    if (rows.length === 0) {
+      await client.query('ROLLBACK');
+      return { status: '', settled: false };
+    }
+    const intent = rows[0] as PesepayIntentRow;
+    if (intent.status === 'completed') {
+      await client.query('COMMIT');
+      return { status: 'completed', settled: false };
+    }
+
+    if (check.amount !== undefined && check.amount !== null) {
+      if (Math.abs(Number(intent.amount) - Number(check.amount)) > 0.01) {
+        await client.query('ROLLBACK');
+        console.error(
+          `Pesepay reconciliation amount mismatch for ${intent.reference}: intent=${intent.amount} gateway=${check.amount}`
+        );
+        return { status: '', settled: false };
+      }
+    }
+
+    const applied = await dispatchIntentPayment(client, intent, providerReference);
+
+    await client.query(
+      `UPDATE pesepay_intents
+          SET status = 'completed', completed_at = NOW(), provider_reference = COALESCE($2, provider_reference)
+        WHERE id = $1`,
+      [intent.id, providerReference]
+    );
+
+    if (intent.target_type === 'invoice') {
+      await client.query(
+        `UPDATE site_invoices
+            SET status = CASE WHEN $2 = 'paid' THEN 'success' ELSE status END,
+                updated_at = NOW()
+          WHERE intent_id = $1`,
+        [intent.id, String((applied as Record<string, unknown>).status ?? '')]
+      );
+    }
+
+    await client.query('COMMIT');
+
+    const settlement = applied as Partial<DocumentSettlement> & Record<string, unknown>;
+    if (intent.target_type === 'invoice' && settlement.companyId) {
+      const movements = settlement.stockMovements ?? [];
+      broadcastToCompany(settlement.companyId, {
+        type: 'telemetry',
+        payload: {
+          event: 'invoice.paid',
+          source: 'status-poll',
+          documentId: settlement.documentId ?? null,
+          documentNumber: settlement.documentNumber ?? null,
+          status: settlement.status ?? null,
+          amountPaid: settlement.amountPaid ?? null,
+          currency: settlement.currency ?? null,
+          paymentMethod: settlement.paymentMethod ?? intent.payment_method,
+          saleRecorded: settlement.saleRecorded ?? false,
+          stockApplied: settlement.stockApplied ?? false,
+          stockMovements: movements,
+          lowStock: movements.filter((m) => m.lowStock),
+        },
+      });
+    }
+
+    return { status: 'completed', settled: true };
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    console.error('Pesepay status reconciliation failed:', err);
+    return { status: '', settled: false };
+  } finally {
+    client.release();
+  }
 }
 
 paymentsRouter.post('/pesepay/initiate', requireAdminAuth, async (req: Request, res: Response) => {
@@ -1661,11 +1817,12 @@ paymentsRouter.post('/pesepay/initiate', requireAdminAuth, async (req: Request, 
 
     const reference = `PREYONE-${uuidv4().substring(0, 8).toUpperCase()}-${Date.now()}`;
 
-    await pool.query(
+    const intentInsert = await pool.query(
       `INSERT INTO pesepay_intents
          (reference, tenant_id, amount, currency, payment_method, purpose, reason_for_payment,
           target_type, target_id, shift_id, subscription_module, plan_tier)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+       RETURNING id`,
       [
         reference,
         tenantId,
@@ -1717,8 +1874,11 @@ paymentsRouter.post('/pesepay/initiate', requireAdminAuth, async (req: Request, 
       [reference, pesepayResponse.referenceNumber || null, pesepayResponse.redirectUrl || null, pesepayResponse.pollUrl || null]
     );
 
+    const intentId = intentInsert.rows[0]?.id ?? null;
     res.json({
       success: true,
+      intentId,
+      statusToken: intentId ? signPesepayStatusToken(intentId, reference) : null,
       referenceNumber: reference,
       pesepayReference: pesepayResponse.referenceNumber || reference,
       redirectUrl: pesepayResponse.redirectUrl,
@@ -1773,6 +1933,90 @@ export function signPesepayStatusToken(intentId: string, reference?: string): st
   });
 }
 
+/**
+ * POST /api/payments/pesepay/authorize
+ *
+ * Second leg of the O'mari rail for invoice payments. `/pesepay/initiate`
+ * already sent the OTP to the payer and stored Pesepay's referenceNumber on the
+ * intent; this spends the OTP. Settlement itself still happens on the webhook
+ * (or the status poll's reconciliation), never here — so a replay cannot
+ * double-book a payment.
+ */
+paymentsRouter.post('/pesepay/authorize', requireAdminAuth, pesepayStatusLimiter, async (req: Request, res: Response) => {
+  const intentId = asUuid(req.body?.intentId || req.body?.intent_id);
+  const otp = String(req.body?.otp || req.body?.pin || '').trim();
+
+  if (!intentId) {
+    res.status(422).json({ error: 'intentId is required' });
+    return;
+  }
+  if (!/^\d{4,8}$/.test(otp)) {
+    res.status(422).json({ error: 'Enter the numeric authorization PIN sent to your phone.' });
+    return;
+  }
+
+  // Same tenant resolution as /pesepay/initiate: the session company, never the
+  // request body. A guessed intent UUID from another company must 404.
+  const sessionCompanyId =
+    (req.adminUser as { portalCompanyId?: string | null } | undefined)?.portalCompanyId ?? null;
+
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, tenant_id, reference, provider_reference, payment_method, status
+         FROM pesepay_intents
+        WHERE id = $1`,
+      [intentId]
+    );
+    if (rows.length === 0) {
+      res.status(404).json({ error: 'Payment not found' });
+      return;
+    }
+
+    const intent = rows[0];
+    if (sessionCompanyId && intent.tenant_id !== sessionCompanyId) {
+      res.status(404).json({ error: 'Payment not found' });
+      return;
+    }
+
+    if (intent.status === 'completed') {
+      res.status(200).json({ success: true, status: 'completed' });
+      return;
+    }
+    if (intent.status !== 'pending') {
+      res.status(409).json({ error: 'This payment can no longer be authorized.' });
+      return;
+    }
+    if (!String(intent.payment_method || '').toLowerCase().includes('omari')) {
+      res.status(422).json({ error: 'This payment method does not use an authorization PIN.' });
+      return;
+    }
+
+    const reference = String(intent.provider_reference || intent.reference || '');
+    if (!reference) {
+      res.status(409).json({ error: 'The payment reference is not ready yet. Please try again.' });
+      return;
+    }
+
+    const auth = await authorizeOmariPayment(reference, otp);
+    if (!auth.success) {
+      const message = auth.error || 'The authorization PIN was not accepted. Please try again.';
+      if (auth.detail) console.error(`Pesepay intent ${intentId} O'mari authorization detail: ${auth.detail}`);
+      res.status(422).json({ success: false, status: 'failed', error: message });
+      return;
+    }
+
+    res.status(200).json({
+      success: true,
+      status: 'processing',
+      referenceNumber: auth.referenceNumber ?? reference,
+      message: auth.message || 'Authorization accepted. Waiting for the payment to complete.',
+    });
+  } catch (err) {
+    console.error("Pesepay O'mari authorization failed", err);
+    res.status(500).json({ error: 'We could not authorize that payment. Please try again.' });
+  }
+});
+
 paymentsRouter.get('/pesepay/status/:intentId', pesepayStatusLimiter, async (req: Request, res: Response) => {
   const intentId = req.params.intentId;
   const queryToken = typeof req.query.token === 'string' ? req.query.token : null;
@@ -1806,19 +2050,33 @@ paymentsRouter.get('/pesepay/status/:intentId', pesepayStatusLimiter, async (req
   }
 
   try {
-    const { rows } = await pool.query(
-      `SELECT id, reference, provider_reference, amount, currency, status, created_at, completed_at
-         FROM pesepay_intents
-        WHERE id = $1`,
-      [intentId]
-    );
-    if (rows.length === 0) {
+    let intent: any = null;
+    const readIntent = async () => {
+      const { rows } = await pool.query(
+        `SELECT id, reference, provider_reference, amount, currency, status, created_at, completed_at
+           FROM pesepay_intents
+          WHERE id = $1`,
+        [intentId]
+      );
+      return rows[0] ?? null;
+    };
+
+    intent = await readIntent();
+    if (!intent) {
       // Same response as a wrong token so the endpoint cannot be used to test
       // which intent ids exist.
       res.status(404).json({ error: 'Payment not found' });
       return;
     }
-    const intent = rows[0];
+
+    // Webhook safety net: a poll from the customer's tab settles the invoice
+    // even when the provider's callback is delayed or dropped.
+    if (String(intent.status) === 'pending' && intent.provider_reference && isPesepayConfigured()) {
+      const reconciled = await reconcilePesepayIntent(intent.id, String(intent.provider_reference));
+      if (reconciled.status) {
+        intent = (await readIntent()) ?? intent;
+      }
+    }
 
     res.json({
       status: PESEDPAY_PUBLIC_STATUS[String(intent.status)] ?? 'PENDING',
@@ -1935,12 +2193,7 @@ paymentsRouter.post('/pesepay/callback', async (req: Request, res: Response) => 
         }
       }
 
-      const applied =
-        intent.target_type === 'starlink'
-          ? await applyStarlinkPayment(client, { target_id: intent.target_id, amount: Number(intent.amount), provider_reference: undefined }, reference)
-          : intent.target_type === 'subscription'
-          ? await applySubscriptionPayment(client, intent)
-          : await applyDocumentPayment(client, intent, reference);
+      const applied = await dispatchIntentPayment(client, intent, reference);
 
       await client.query(
         `UPDATE pesepay_intents
@@ -1966,6 +2219,29 @@ paymentsRouter.post('/pesepay/callback', async (req: Request, res: Response) => 
       }
 
       await client.query('COMMIT');
+
+      // Realtime telemetry goes out only once the transaction is durable, so a
+      // dashboard can never show revenue/stock that later rolls back.
+      const settlement = applied as Partial<DocumentSettlement> & Record<string, unknown>;
+      if (intent.target_type === 'invoice' && settlement.companyId) {
+        const movements = settlement.stockMovements ?? [];
+        broadcastToCompany(settlement.companyId, {
+          type: 'telemetry',
+          payload: {
+            event: 'invoice.paid',
+            documentId: settlement.documentId ?? null,
+            documentNumber: settlement.documentNumber ?? null,
+            status: settlement.status ?? null,
+            amountPaid: settlement.amountPaid ?? null,
+            currency: settlement.currency ?? null,
+            paymentMethod: settlement.paymentMethod ?? intent.payment_method,
+            saleRecorded: settlement.saleRecorded ?? false,
+            stockApplied: settlement.stockApplied ?? false,
+            stockMovements: movements,
+            lowStock: movements.filter((m) => m.lowStock),
+          },
+        });
+      }
 
       res.json({
         success: true,

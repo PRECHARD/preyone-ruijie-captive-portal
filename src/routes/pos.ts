@@ -19,6 +19,8 @@ import {
   mintOfflineLease,
   verifyOfflineLease,
 } from '../services/posLease';
+import { settleDocumentPayment } from '../services/documentSettlement';
+import { broadcastToCompany } from '../services/iotHub';
 
 /**
  * Preyone POS module — additive only.
@@ -372,27 +374,35 @@ const DOC_TYPE_CATALOGUE = INVOICE_DOCUMENT_TYPES.map((t) => ({
 }));
 
 async function loadThemeRow(companyId: string, themeId?: number | null) {
-  const { rows } = await pool.query(
-    `SELECT id, name, primary, secondary, accent, bg, text
-       FROM pos_themes
-      WHERE is_active AND ($1::int IS NULL OR id = $1)
-      ORDER BY id
-      LIMIT 1`,
-    [themeId ?? null]
-  );
-  if (rows.length > 0) return rows[0];
-  // Table missing / empty (migration not applied yet): fall back to the static
-  // mirror so the UI still renders the house theme instead of throwing.
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, name, primary, secondary, accent, bg, text
+         FROM pos_themes
+        WHERE is_active AND ($1::int IS NULL OR id = $1)
+        ORDER BY id
+        LIMIT 1`,
+      [themeId ?? null]
+    );
+    if (rows.length > 0) return rows[0];
+  } catch {
+    // Pre-v3.2 database: pos_themes does not exist yet. Fall through to the
+    // static mirror so the till still renders the house palette.
+  }
   const fallback = POS_THEMES.find((t) => t.id === themeId) ?? POS_THEMES[0];
   return fallback;
 }
 
 async function resolveCompanyTheme(companyId: string) {
-  const { rows } = await pool.query(
-    `SELECT pos_theme_id FROM companies WHERE id = $1`,
-    [companyId]
-  );
-  const themeId = Number(rows[0]?.pos_theme_id) || 1;
+  let themeId = 1;
+  try {
+    const { rows } = await pool.query(
+      `SELECT pos_theme_id FROM companies WHERE id = $1`,
+      [companyId]
+    );
+    themeId = Number(rows[0]?.pos_theme_id) || 1;
+  } catch {
+    /* companies.pos_theme_id not migrated yet */
+  }
   return loadThemeRow(companyId, themeId);
 }
 
@@ -423,6 +433,13 @@ router.get('/catalog', async (req, res) => {
               kds_enabled, table_service_enabled, invoice_template_id, pos_theme_id
          FROM companies WHERE id = $1`,
       [cid]
+    ).catch(() =>
+      // Pre-v3.2 database: the presentation columns do not exist yet. Return a
+      // minimal company so the workspace still opens with house defaults.
+      pool.query(
+        `SELECT id, name, tagline, logo_path, currency, tax_pct FROM companies WHERE id = $1`,
+        [cid]
+      )
     ),
     pool.query(
       `SELECT id, name, description, layout, accent_color, show_logo
@@ -480,6 +497,46 @@ router.patch('/company/modules', requireRole(...MANAGER_ROLES), async (req, res)
     [kds, tables, cid]
   );
   res.json(rows[0]);
+});
+
+// Invoicing workspace defaults: which of the 20 PDF templates a tenant's
+// documents render with, plus the copy that appears on them. This is separate
+// from the admin Global Settings Hub so the invoice SPA can save a template
+// without needing a CEO-only `/api/admin/company` PUT.
+router.patch('/invoice-settings', requireRole(...MANAGER_ROLES), async (req, res) => {
+  const cid = tenantId(req);
+  const b = req.body || {};
+  const templateId =
+    b.templateId === undefined || b.templateId === null ? null : Number(b.templateId);
+  if (templateId !== null && (!Number.isInteger(templateId) || templateId < 1 || templateId > 20)) {
+    res.status(422).json({ error: 'templateId must be between 1 and 20' });
+    return;
+  }
+  const currency = str(b.currency) ? str(b.currency).toUpperCase() : null;
+  const taxPct = b.taxPct === undefined || b.taxPct === null ? null : round2(num(b.taxPct));
+  const { rows } = await pool.query(
+    `UPDATE companies
+        SET invoice_template_id = COALESCE($1, invoice_template_id),
+            currency            = COALESCE($2, currency),
+            tax_pct             = COALESCE($3, tax_pct),
+            terms_text          = COALESCE($4, terms_text),
+            receipt_footer      = COALESCE($5, receipt_footer),
+            invoice_settings    = COALESCE($6::jsonb, invoice_settings),
+            updated_at          = NOW()
+      WHERE id = $7
+      RETURNING id, name, logo_url, currency, tax_pct, invoice_template_id,
+                terms_text, receipt_footer, invoice_settings`,
+    [
+      templateId,
+      currency,
+      taxPct,
+      str(b.termsText) || null,
+      str(b.footer) || null,
+      b.settings === undefined ? null : JSON.stringify(b.settings),
+      cid,
+    ]
+  );
+  res.json(rows[0] ?? {});
 });
 
 // ── Office-created documents (invoicing workspace) ───────────────────
@@ -1601,8 +1658,13 @@ router.post('/checkout', async (req, res) => {
     const docInsert = await client.query(
       `INSERT INTO pos_documents
          (doc_number, doc_type, channel, status, customer_id, cashier_id, shift_id,
-          issue_date, due_date, subtotal, discount_pct, tax_pct, total, amount_paid, notes, company_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,CURRENT_DATE,$8,$9,$10,$11,$12,$13,$14,$15)
+          issue_date, due_date, subtotal, discount_pct, tax_pct, total, amount_paid, notes, company_id,
+          stock_applied_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,CURRENT_DATE,$8,$9,$10,$11,$12,$13,$14,$15,
+               -- Stock is decremented inline below for every tracked line, so the
+               -- document is marked as stock-applied from the start. A later
+               -- invoice settlement therefore cannot decrement it a second time.
+               NOW())
        RETURNING *`,
       [
         docNumber,
@@ -1796,30 +1858,62 @@ router.post('/documents/:id/payments', async (req, res) => {
       );
       shiftId = open.rows.length > 0 ? open.rows[0].id : shiftId;
     }
-    await client.query(
+    const paymentInsert = await client.query(
       `INSERT INTO pos_document_payments (document_id, amount, method, reference, recorded_by, shift_id)
-       VALUES ($1,$2,$3,$4,$5,$6)`,
+       VALUES ($1,$2,$3,$4,$5,$6)
+       RETURNING id`,
       [doc.id, amount, method, reference, me.id, shiftId]
     );
+    const paymentId = paymentInsert.rows[0]?.id;
     if (method === 'on_account' && doc.customer_id) {
       await client.query(
         `UPDATE pos_customers SET credit_balance = credit_balance + $1, updated_at = NOW() WHERE id = $2`,
         [amount, doc.customer_id]
       );
     }
-    const sums = await client.query(
-      `SELECT COALESCE(SUM(amount),0) AS paid FROM pos_document_payments WHERE document_id = $1`,
-      [doc.id]
+
+    // One code path for invoice settlement: advances the document, books the
+    // ledger row and decrements stock exactly once. The document row is
+    // already locked above, so a concurrent till/app payment cannot double
+    // count.
+    const settlement = await settleDocumentPayment(client, {
+      documentId: doc.id,
+      amount,
+      paymentMethod: method,
+      paymentReference: reference || `manual-${paymentId}`,
+      paidAt: new Date(),
+      soldById: me.id,
+      soldByName: me.fullName ?? null,
+    });
+
+    const refreshed = await client.query(
+      'SELECT * FROM pos_documents WHERE id = $1 AND company_id = $2',
+      [doc.id, tenantId(req)]
     );
-    const paid = round2(num(sums.rows[0].paid));
-    const newStatus = doc.doc_type === 'void' ? doc.status : statusForPaid(doc.doc_type, num(doc.total), paid);
-    const updated = await client.query(
-      `UPDATE pos_documents SET amount_paid = LEAST($3,total), status = $4, updated_at = NOW()
-        WHERE id = $1 AND company_id = $2 RETURNING *`,
-      [doc.id, tenantId(req), paid, newStatus]
-    );
+
     await client.query('COMMIT');
-    res.json({ ...updated.rows[0], balanceDue: round2(Math.max(num(updated.rows[0].total) - paid, 0)) });
+
+    if (settlement.companyId) {
+      broadcastToCompany(settlement.companyId, {
+        type: 'telemetry',
+        payload: {
+          event: 'document.paid',
+          documentId: settlement.documentId,
+          documentNumber: settlement.documentNumber,
+          status: settlement.status,
+          amountPaid: settlement.amountPaid,
+          currency: settlement.currency,
+          paymentMethod: settlement.paymentMethod,
+          saleRecorded: settlement.saleRecorded,
+          stockApplied: settlement.stockApplied,
+          stockMovements: settlement.stockMovements,
+          lowStock: settlement.stockMovements.filter((m) => m.lowStock),
+        },
+      });
+    }
+
+    const row = refreshed.rows[0] ?? { ...doc, status: settlement.status, amount_paid: settlement.amountPaid };
+    res.json({ ...row, balanceDue: round2(Math.max(Number(row.total) - Number(row.amount_paid), 0)) });
   } catch (e) {
     await client.query('ROLLBACK');
     throw e;
@@ -1858,7 +1952,7 @@ router.post('/documents/:id/void', requireRole(...MANAGER_ROLES), async (req, re
       );
     }
     const updated = await client.query(
-      `UPDATE pos_documents SET status = 'void', updated_at = NOW()
+      `UPDATE pos_documents SET status = 'void', stock_applied_at = NULL, updated_at = NOW()
         WHERE id = $1 AND company_id = $2 RETURNING *`,
       [req.params.id, tenantId(req)]
     );

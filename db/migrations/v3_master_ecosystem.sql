@@ -77,7 +77,7 @@ CREATE TABLE IF NOT EXISTS pos_themes (
 );
 
 INSERT INTO pos_themes (id, name, description, primary_color, secondary_color, accent_color, bg_color, text_color) VALUES
-  (1,  'Preyone Dark',    'House dark theme with brand teal accents.',  '#0d9488', '#134e4a', '#14b8a6', '#0f172a', '#f8fafc'),
+  (1,  'Preyone Dark',    'Preyone Slate: emerald and amber on deep slate.', '#059669', '#0f172a', '#d97706', '#0f172a', '#f8fafc'),
   (2,  'Ocean Blue',      'Deep navy with bright cyan highlights.',     '#0ea5e9', '#0c4a6e', '#38bdf8', '#082f49', '#f0f9ff'),
   (3,  'Forest Green',    'Earthy greens for grocers and markets.',     '#16a34a', '#14532d', '#4ade80', '#052e16', '#f7fee7'),
   (4,  'Sunset Orange',   'Warm orange for cafes and QSR.',            '#ea580c', '#7c2d12', '#fb923c', '#431407', '#fff7ed'),

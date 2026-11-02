@@ -931,7 +931,7 @@ const codes = a.voucher_data?.codes;
           data_limit_gb: data.data_limit_gb,
           bandwidth_mbps_up: data.bandwidth_mbps_up,
           bandwidth_mbps_down: data.bandwidth_mbps_down,
-          holder_name: [data.first_name, data.last_name].filter(Boolean).join(' ') || data.alias || data.redemption_name || null,
+          holder_name: data.holder_name || [data.first_name, data.last_name].filter(Boolean).join(' ') || data.alias || data.redemption_name || null,
           expires_at: data.expires_at,
           activated_at: data.activated_at,
           created_at: data.created_at,
@@ -1639,12 +1639,15 @@ const codes = a.voucher_data?.codes;
         const gb = (b?: number | null) => (b == null ? null : (b / (1024 ** 3)).toFixed(2) + ' GB');
         const trafficUsed = gb(v.traffic_used_bytes);
         const trafficTotal = v.traffic_total_bytes == null ? null : gb(v.traffic_total_bytes);
-        const holderName = [v.first_name, v.last_name].filter(Boolean).join(' ') || v.alias || null;
+        const holderName = v.holder_name || [v.first_name, v.last_name].filter(Boolean).join(' ') || v.alias || null;
         // Redemption row is the source of truth for the person + MAC + login time;
-        // the users account (if any) only supplements it.
-        const redemptionName = v.redemption_name || holderName || null;
+        // the captured holder name (Customer Details Required) outranks it because
+        // it is the name staff recorded at the sale, and the users account only
+        // supplements it.
+        const redemptionName = v.holder_name || v.redemption_name || holderName || null;
         const redemptionMac = v.redemption_mac || v.mac_address || null;
         const redemptionAt = v.redemption_at || v.first_redeemed_at || null;
+        const redemptionPhone = v.holder_phone || v.phone || null;
         const theRedemptions = Array.isArray(v.redemptions) ? v.redemptions : [];
         const devices = (Array.isArray(v.devices) && v.devices.length > 0)
           ? v.devices
@@ -1678,12 +1681,12 @@ const codes = a.voucher_data?.codes;
                 <div className="vd-cell"><span className="vd-label">Expires</span><span className="vd-value">{fmtDate(v.expires_at)}</span></div>
               </div>
 
-              {(redemptionName || v.phone || redemptionMac || redemptionAt || trafficUsed || theRedemptions.length > 0) && (
+              {(redemptionName || redemptionPhone || redemptionMac || redemptionAt || trafficUsed || theRedemptions.length > 0) && (
                 <section className="vd-section">
                   <h4 className="vd-section-title">Redemption</h4>
                   <div className="vd-grid">
                     <div className="vd-cell"><span className="vd-label">Holder</span><span className="vd-value">{redemptionName || '—'}</span></div>
-                    <div className="vd-cell"><span className="vd-label">Phone</span><span className="vd-value">{v.phone || '—'}</span></div>
+                    <div className="vd-cell"><span className="vd-label">Phone</span><span className="vd-value">{redemptionPhone || '—'}</span></div>
                     <div className="vd-cell"><span className="vd-label">MAC</span><span className="vd-value vd-mono">{redemptionMac || '—'}</span></div>
                     <div className="vd-cell"><span className="vd-label">Redeemed on</span><span className="vd-value">{redemptionAt ? fmtDate(redemptionAt) : '—'}</span></div>
                     <div className="vd-cell"><span className="vd-label">Traffic</span><span className="vd-value">{trafficUsed ? `${trafficUsed}${trafficTotal ? ' / ' + trafficTotal : ''}` : '—'}</span></div>

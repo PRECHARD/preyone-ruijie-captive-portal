@@ -107,17 +107,24 @@ describe('buildSalesCsv', () => {
 });
 
 describe('previousMonthPeriod', () => {
-  it('covers the whole previous calendar month in UTC', () => {
+  it('covers the last closed 3rd-to-3rd trading cycle in UTC', () => {
     const period = previousMonthPeriod(new Date('2026-10-27T09:00:00.000Z'));
-    expect(period.from.toISOString()).toBe('2026-09-01T00:00:00.000Z');
-    expect(period.to.toISOString()).toBe('2026-10-01T00:00:00.000Z');
+    expect(period.from.toISOString()).toBe('2026-09-03T00:00:00.000Z');
+    expect(period.to.toISOString()).toBe('2026-10-03T00:00:00.000Z');
     expect(period.label).toBe('September 2026');
+  });
+
+  it('keeps the 1st-2nd in the cycle that is still open', () => {
+    const period = previousMonthPeriod(new Date('2026-10-02T09:00:00.000Z'));
+    expect(period.from.toISOString()).toBe('2026-08-03T00:00:00.000Z');
+    expect(period.to.toISOString()).toBe('2026-09-03T00:00:00.000Z');
+    expect(period.label).toBe('August 2026');
   });
 
   it('rolls the year back for a January report', () => {
     const period = previousMonthPeriod(new Date('2027-01-03T08:00:00.000Z'));
-    expect(period.from.toISOString()).toBe('2026-12-01T00:00:00.000Z');
-    expect(period.to.toISOString()).toBe('2027-01-01T00:00:00.000Z');
+    expect(period.from.toISOString()).toBe('2026-12-03T00:00:00.000Z');
+    expect(period.to.toISOString()).toBe('2027-01-03T00:00:00.000Z');
     expect(period.label).toBe('December 2026');
   });
 });

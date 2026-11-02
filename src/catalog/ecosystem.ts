@@ -70,7 +70,7 @@ export const INVOICE_TEMPLATES: InvoiceTemplate[] = [
 ];
 
 export const POS_THEMES: PosTheme[] = [
-  { id: 1, name: 'Preyone Dark', description: 'House dark theme with brand teal accents.', primary: '#0d9488', secondary: '#134e4a', accent: '#14b8a6', bg: '#0f172a', text: '#f8fafc' },
+  { id: 1, name: 'Preyone Dark', description: 'Preyone Slate: emerald and amber on deep slate.', primary: '#059669', secondary: '#0f172a', accent: '#d97706', bg: '#0f172a', text: '#f8fafc' },
   { id: 2, name: 'Ocean Blue', description: 'Deep navy with bright cyan highlights.', primary: '#0ea5e9', secondary: '#0c4a6e', accent: '#38bdf8', bg: '#082f49', text: '#f0f9ff' },
   { id: 3, name: 'Forest Green', description: 'Earthy greens for grocers and markets.', primary: '#16a34a', secondary: '#14532d', accent: '#4ade80', bg: '#052e16', text: '#f7fee7' },
   { id: 4, name: 'Sunset Orange', description: 'Warm orange for cafes and QSR.', primary: '#ea580c', secondary: '#7c2d12', accent: '#fb923c', bg: '#431407', text: '#fff7ed' },

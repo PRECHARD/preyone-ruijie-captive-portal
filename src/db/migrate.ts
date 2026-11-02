@@ -1788,6 +1788,36 @@ CREATE INDEX IF NOT EXISTS idx_payments_user_id ON payments (user_id);
       ELSE 'Unused'
     END AS status
   FROM vouchers v;
+
+  -- ── Document settlement ledger (v3.2.0-master) ────────────────────────────
+  -- A payment confirmed by Pesepay for an invoice/POS document now books its
+  -- own row in sales, so the ledger is no longer voucher-only: the voucher
+  -- columns become nullable and the row remembers the document it came from.
+  ALTER TABLE sales ALTER COLUMN voucher_id   DROP NOT NULL;
+  ALTER TABLE sales ALTER COLUMN voucher_code DROP NOT NULL;
+  ALTER TABLE sales ADD COLUMN IF NOT EXISTS document_id UUID REFERENCES pos_documents(id) ON DELETE SET NULL;
+  ALTER TABLE sales ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'voucher';
+
+  CREATE INDEX IF NOT EXISTS idx_sales_document ON sales (document_id);
+
+  -- One ledger row per document + gateway reference. A replayed webhook (or a
+  -- status poll racing the webhook) can never double-book the same payment.
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_document_payment_ref
+    ON sales (document_id, payment_reference)
+    WHERE document_id IS NOT NULL AND payment_reference IS NOT NULL;
+
+  -- Stock is applied exactly once, when a document first reaches 'paid'. The
+  -- marker makes replaying a callback or re-saving a manual payment a no-op,
+  -- and is cleared by a void so a restocked document can settle again.
+  ALTER TABLE pos_documents ADD COLUMN IF NOT EXISTS stock_applied_at TIMESTAMPTZ;
+
+  -- The till already offers InnBucks / O'mari / PayGo, but the CHECK
+  -- constraint still only allowed the original rails — so a successful
+  -- Pesepay settlement of an invoice failed at the payment insert. Widen it to
+  -- match PAYMENT_METHODS in routes/pos.ts.
+  ALTER TABLE pos_document_payments DROP CONSTRAINT IF EXISTS pos_document_payments_method_check;
+  ALTER TABLE pos_document_payments ADD CONSTRAINT pos_document_payments_method_check
+    CHECK (method IN ('cash', 'card', 'ecocash', 'innbucks', 'paygo', 'omari', 'bank', 'pesepay', 'other', 'on_account'));
 `;
 
 (async () => {
@@ -2221,6 +2251,25 @@ CREATE INDEX IF NOT EXISTS idx_payments_user_id ON payments (user_id);
         console.warn(`Skipped ${file}: ${migrationPath} not found.`);
       }
     }
+
+    // ── v3.2.0-master house palette ────────────────────────────────────────
+    // The seed above is ON CONFLICT DO NOTHING, so an existing install keeps
+    // whatever theme 1 it already has. Move the ORIGINAL teal house theme to
+    // Preyone Slate (emerald #059669 / amber #D97706 on #0F172A), but only when
+    // it is still exactly the old stock palette — a merchant who customised
+    // theme 1 keeps their colours.
+    await client.query(`
+      UPDATE pos_themes
+         SET primary_color   = '#059669',
+             secondary_color = '#0f172a',
+             accent_color    = '#d97706',
+             bg_color        = '#0f172a',
+             text_color      = '#f8fafc',
+             description     = 'Preyone Slate: emerald and amber on deep slate.'
+       WHERE id = 1
+         AND primary_color = '#0d9488'
+         AND bg_color = '#0f172a';
+    `);
 
     console.log('Migration complete. Packages + transit + RBAC seeded.');
   } finally {

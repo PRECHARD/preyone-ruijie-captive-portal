@@ -19,39 +19,74 @@ function getTransporter() {
 }
 
 // ── Email header helper with logo ─────────────────────────────────────
+// Table-based masthead with explicit logo dimensions so Outlook, Gmail and
+// mobile clients all lay it out identically. The gradient is layered over a
+// solid #0a0f1d so it degrades gracefully where gradients are stripped.
 function emailHeader(title: string): string {
   const baseUrl = process.env.BASE_URL || 'http://localhost:3000';
-  return `<div style="background:#0a0a0a;padding:32px 24px 16px;text-align:center">
-    <img src="${baseUrl}/images/preyone-logo-mainInverse.png" alt="Preyone UltraNet WiFi" style="max-width:160px;height:auto;margin-bottom:12px;display:block;margin-left:auto;margin-right:auto" />
-    <h1 style="color:#ffffff;margin:0 0 16px;font-size:22px;font-family:'Montserrat',Arial,sans-serif;font-weight:600">${title}</h1>
-    <div style="height:3px;background:linear-gradient(90deg,#ff00ff,#00d4ff);border-radius:2px"></div>
-  </div>`;
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;background:#0a0f1d">
+    <tr>
+      <td align="center" style="padding:0;background:#0a0f1d">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;background:#0a0f1d;background-image:linear-gradient(160deg,#0a0f1d 0%,#101a33 55%,#0a0f1d 100%);border-bottom:1px solid #1c3a5e">
+          <tr>
+            <td align="center" style="padding:32px 16px 20px">
+              <img src="${baseUrl}/images/preyone-logo-mainInverse-optimized.png" width="160" height="90" alt="Preyone UltraNet WiFi" style="display:block;width:160px;max-width:100%;height:auto;margin:0 auto 14px;border:0;outline:none;text-decoration:none" />
+              <h1 style="margin:0 0 16px;color:#f8fafc;font-family:'Montserrat','Segoe UI',Arial,sans-serif;font-size:22px;line-height:1.3;font-weight:700;letter-spacing:0.2px">${title}</h1>
+              <table role="presentation" width="180" cellpadding="0" cellspacing="0" border="0" style="width:180px;max-width:100%;margin:0 auto;border-collapse:collapse">
+                <tr>
+                  <td height="3" style="height:3px;line-height:3px;font-size:0;background:#00ccff;background-image:linear-gradient(90deg,#ff00ff,#00d4ff);border-radius:3px">&nbsp;</td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>`;
 }
 
 // ── Email footer helper with WhatsApp + links ─────────────────────
 function emailFooter(): string {
   const baseUrl = process.env.BASE_URL || 'http://localhost:3000';
-  return `<div style="background:#0a0a0a;padding:28px 24px 20px;text-align:center;font-family:'Montserrat',Arial,sans-serif;border-top:2px solid #1a1a2e">
-    <img src="${baseUrl}/images/preyone-logo-mainInverse.png" alt="Preyone" style="max-width:120px;height:auto;margin-bottom:16px;display:block;margin-left:auto;margin-right:auto" />
-    <div style="margin-bottom:16px">
-      <a href="https://wa.me/263771327202" style="display:inline-block;background:linear-gradient(135deg,#25D366,#128C7E);color:#ffffff;padding:10px 28px;border-radius:50px;text-decoration:none;font-size:13px;font-weight:700;box-shadow:0 4px 14px rgba(37,211,102,0.3)">Chat on WhatsApp</a>
-    </div>
-    <p style="margin:0 0 12px;font-size:13px;color:#94a3b8">
-      <a href="mailto:support@preyone.com" style="color:#71ff2f;text-decoration:none;font-weight:600">support@preyone.com</a>
-      <span style="color:#334155;margin:0 8px">|</span>
-      <a href="tel:+263771327202" style="color:#13d8ff;text-decoration:none;font-weight:600">+263 771 327 202</a>
-    </p>
-    <div style="margin-bottom:14px;font-size:12px;color:#475569">
-      <a href="${baseUrl}/terms.html" style="color:#13d8ff;text-decoration:none;margin:0 10px;font-weight:500">Terms of Service</a>
-      <span style="color:#334155">•</span>
-      <a href="https://www.preyone.com" style="color:#71ff2f;text-decoration:none;margin:0 10px;font-weight:500">Main Website</a>
-      <span style="color:#334155">•</span>
-      <a href="${baseUrl}" style="color:#8b4dff;text-decoration:none;margin:0 10px;font-weight:500">WiFi Portal</a>
-    </div>
-    <div style="height:2px;background:linear-gradient(90deg,#71ff2f,#13d8ff,#8b4dff);border-radius:2px;margin-bottom:14px;max-width:300px;margin-left:auto;margin-right:auto"></div>
-    <p style="margin:0;font-size:11px;color:#475569">&copy; ${new Date().getFullYear()} Preyone Enterprises. All rights reserved.</p>
-    <p style="margin:6px 0 0;font-size:10px;color:#334155;font-style:italic;letter-spacing:0.3px">Innovating with IT Excellence, Driven by Faith, Growing Beyond Boundaries.</p>
-  </div>`;
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;background:#070b14">
+    <tr>
+      <td align="center" style="padding:0;background:#070b14">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;background:#070b14;border-top:1px solid #14213a">
+          <tr>
+            <td align="center" style="padding:28px 16px 22px;font-family:'Montserrat','Segoe UI',Arial,sans-serif">
+              <img src="${baseUrl}/images/preyone-logo-mainInverse-optimized.png" width="120" height="68" alt="Preyone" style="display:block;width:120px;max-width:100%;height:auto;margin:0 auto 16px;border:0;outline:none;text-decoration:none" />
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 auto 16px;border-collapse:separate">
+                <tr>
+                  <td align="center" style="border-radius:50px;background:#25D366;background-image:linear-gradient(135deg,#25D366,#128C7E)">
+                    <a href="https://wa.me/263771327202" style="display:inline-block;padding:10px 28px;color:#ffffff;font-size:13px;font-weight:700;line-height:1.2;text-decoration:none;border-radius:50px">Chat on WhatsApp</a>
+                  </td>
+                </tr>
+              </table>
+              <p style="margin:0 0 12px;font-size:13px;line-height:1.7;color:#94a3b8">
+                <a href="mailto:support@preyone.com" style="color:#71ff2f;text-decoration:none;font-weight:600">support@preyone.com</a>
+                <span style="color:#334155;margin:0 8px">|</span>
+                <a href="tel:+263771327202" style="color:#13d8ff;text-decoration:none;font-weight:600">+263 771 327 202</a>
+              </p>
+              <p style="margin:0 0 14px;font-size:12px;line-height:1.8;color:#475569">
+                <a href="${baseUrl}/terms.html" style="color:#13d8ff;text-decoration:none;margin:0 8px;font-weight:500">Terms of Service</a>
+                <span style="color:#334155">&bull;</span>
+                <a href="https://www.preyone.com" style="color:#71ff2f;text-decoration:none;margin:0 8px;font-weight:500">Main Website</a>
+                <span style="color:#334155">&bull;</span>
+                <a href="${baseUrl}" style="color:#8b4dff;text-decoration:none;margin:0 8px;font-weight:500">WiFi Portal</a>
+              </p>
+              <table role="presentation" width="300" cellpadding="0" cellspacing="0" border="0" style="width:300px;max-width:100%;margin:0 auto 14px;border-collapse:collapse">
+                <tr>
+                  <td height="2" style="height:2px;line-height:2px;font-size:0;background:#13d8ff;background-image:linear-gradient(90deg,#71ff2f,#13d8ff,#8b4dff);border-radius:2px">&nbsp;</td>
+                </tr>
+              </table>
+              <p style="margin:0;font-size:11px;line-height:1.6;color:#475569">&copy; ${new Date().getFullYear()} Preyone Enterprises. All rights reserved.</p>
+              <p style="margin:6px 0 0;font-size:10px;line-height:1.6;color:#334155;font-style:italic;letter-spacing:0.3px">Innovating with IT Excellence, Driven by Faith, Growing Beyond Boundaries.</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>`;
 }
 
 // ── Generic email helper ──────────────────────────────────────────────
@@ -102,15 +137,38 @@ export async function sendTransactionalEmail(opts: {
 
 /** Exported so the report templates reuse the same masthead/footer genre. */
 export function buildEmailShell(title: string, bodyHtml: string): string {
-  return `<div style="background:#0a0f1d;padding:0;margin:0">
-    ${emailHeader(title)}
-    <div style="background:#0a0f1d;padding:8px 24px 32px">
-      <div style="max-width:640px;margin:0 auto;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.10);border-radius:16px;padding:28px 24px;-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px)">
-        ${bodyHtml}
-      </div>
-    </div>
-    ${emailFooter()}
-  </div>`;
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="dark light" />
+  <title>${title}</title>
+</head>
+<body style="margin:0;padding:0;width:100%;background:#0a0f1d;font-family:'Montserrat','Segoe UI',Arial,sans-serif;color:#e2e8f0">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;background:#0a0f1d">
+    <tr>
+      <td align="center" style="padding:0;background:#0a0f1d">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:680px;margin:0 auto;border-collapse:collapse">
+          <tr><td style="padding:0">${emailHeader(title)}</td></tr>
+          <tr>
+            <td style="padding:8px 16px 32px;background:#0a0f1d">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:640px;margin:0 auto;border-collapse:separate;background:#0f172a;border:1px solid #1e3a5f;border-radius:16px">
+                <tr>
+                  <td style="padding:28px 22px;background:#0f172a;border-radius:16px;box-shadow:0 0 28px rgba(0,204,255,0.12),0 18px 48px rgba(0,0,0,0.45)">
+                    ${bodyHtml}
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr><td style="padding:0">${emailFooter()}</td></tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
 }
 
 // ── Admin signup: confirmation to the new user ────────────────────────
@@ -149,7 +207,7 @@ function buildAdminWelcomeHtml(fullName: string, email: string, role: string, st
 
   if (isActivated) {
     return `
-<div style="font-family:'Segoe UI',Arial,sans-serif;max-width:560px;margin:32px auto;background:#0a0a0a;border-radius:16px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.12),0 0 40px rgba(113,255,47,0.08)">
+<div style="font-family:'Segoe UI',Arial,sans-serif;max-width:560px;margin:32px auto;background:#0a0f1d;border-radius:16px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.12),0 0 40px rgba(113,255,47,0.08)">
   ${emailHeader('Admin Console')}
 
   <!-- Hero Section -->
@@ -225,7 +283,7 @@ function buildAdminWelcomeHtml(fullName: string, email: string, role: string, st
   }
 
   return `
-<div style="font-family:'Segoe UI',Arial,sans-serif;max-width:560px;margin:32px auto;background:#0a0a0a;border-radius:16px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.12),0 0 40px rgba(113,255,47,0.08)">
+<div style="font-family:'Segoe UI',Arial,sans-serif;max-width:560px;margin:32px auto;background:#0a0f1d;border-radius:16px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.12),0 0 40px rgba(113,255,47,0.08)">
   ${emailHeader('Staff Account Created')}
 
   <!-- Hero -->
@@ -297,7 +355,7 @@ export async function sendAdminApprovedNotification(email: string, fullName: str
     email,
     'Your Preyone Staff Account Has Been Approved',
     `
-<div style="font-family:'Segoe UI',Arial,sans-serif;max-width:560px;margin:32px auto;background:#0a0a0a;border-radius:16px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.12),0 0 40px rgba(113,255,47,0.08)">
+<div style="font-family:'Segoe UI',Arial,sans-serif;max-width:560px;margin:32px auto;background:#0a0f1d;border-radius:16px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.12),0 0 40px rgba(113,255,47,0.08)">
   ${emailHeader('Account Approved')}
 
   <!-- Hero -->
@@ -375,7 +433,7 @@ export async function sendAdminSignupNotification(
   }
   const adminEmails: string[] = rows.map((r: any) => r.email);
   const adminUrl = process.env.ADMIN_BASE_URL || process.env.BASE_URL || 'https://admin.preyone.com';
-  const html = `<div style="font-family:'Segoe UI',Arial,sans-serif;max-width:560px;margin:32px auto;background:#0a0a0a;border-radius:16px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.12),0 0 40px rgba(113,255,47,0.08)">
+  const html = `<div style="font-family:'Segoe UI',Arial,sans-serif;max-width:560px;margin:32px auto;background:#0a0f1d;border-radius:16px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.12),0 0 40px rgba(113,255,47,0.08)">
     ${emailHeader('New Staff Signup')}
     <div style="padding:24px 32px">
       <div style="width:64px;height:64px;border-radius:50%;background:linear-gradient(135deg,rgba(19,216,255,0.12),rgba(139,77,255,0.12));display:flex;align-items:center;justify-content:center;margin:0 auto 16px;box-shadow:0 0 20px rgba(19,216,255,0.12)">
@@ -407,7 +465,7 @@ export async function sendAdminRejectedNotification(email: string, fullName: str
     email,
     'Your Preyone Staff Account Application',
     `
-<div style="font-family:'Segoe UI',Arial,sans-serif;max-width:560px;margin:32px auto;background:#0a0a0a;border-radius:16px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.12)">
+<div style="font-family:'Segoe UI',Arial,sans-serif;max-width:560px;margin:32px auto;background:#0a0f1d;border-radius:16px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.12)">
   ${emailHeader('Application Status')}
 
   <!-- Hero -->
@@ -469,7 +527,7 @@ export async function sendPasswordResetEmail(email: string, resetToken: string, 
   return sendMail(
     email,
     'Reset Your Preyone Admin Password',
-    `<div style="font-family:'Segoe UI',Arial,sans-serif;max-width:560px;margin:32px auto;background:#0a0a0a;border-radius:16px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.12),0 0 40px rgba(113,255,47,0.08)">
+    `<div style="font-family:'Segoe UI',Arial,sans-serif;max-width:560px;margin:32px auto;background:#0a0f1d;border-radius:16px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.12),0 0 40px rgba(113,255,47,0.08)">
       ${emailHeader('Password Reset')}
       <div style="padding:24px 32px;text-align:center">
         <div style="width:64px;height:64px;border-radius:50%;background:linear-gradient(135deg,rgba(113,255,47,0.12),rgba(19,216,255,0.12));display:flex;align-items:center;justify-content:center;margin:0 auto 16px;box-shadow:0 0 20px rgba(113,255,47,0.12)">
@@ -497,7 +555,7 @@ export async function sendPortalEmailVerification(email: string, token: string, 
   return sendMail(
     email,
     'Verify Your Email — Preyone WiFi',
-    `<div style="font-family:'Segoe UI',Arial,sans-serif;max-width:560px;margin:32px auto;background:#0a0a0a;border-radius:16px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.12),0 0 40px rgba(113,255,47,0.08)">
+    `<div style="font-family:'Segoe UI',Arial,sans-serif;max-width:560px;margin:32px auto;background:#0a0f1d;border-radius:16px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.12),0 0 40px rgba(113,255,47,0.08)">
       ${emailHeader('Verify Your Email')}
       <div style="padding:24px 32px;text-align:center">
         <div style="width:64px;height:64px;border-radius:50%;background:linear-gradient(135deg,rgba(19,216,255,0.12),rgba(139,77,255,0.12));display:flex;align-items:center;justify-content:center;margin:0 auto 16px;box-shadow:0 0 20px rgba(19,216,255,0.12)">
@@ -521,7 +579,7 @@ export async function sendPortalForgotPassword(email: string, token: string, ful
   return sendMail(
     email,
     'Reset Your Password — Preyone WiFi',
-    `<div style="font-family:'Segoe UI',Arial,sans-serif;max-width:560px;margin:32px auto;background:#0a0a0a;border-radius:16px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.12),0 0 40px rgba(113,255,47,0.08)">
+    `<div style="font-family:'Segoe UI',Arial,sans-serif;max-width:560px;margin:32px auto;background:#0a0f1d;border-radius:16px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.12),0 0 40px rgba(113,255,47,0.08)">
       ${emailHeader('Reset Your Password')}
       <div style="padding:24px 32px;text-align:center">
         <div style="width:64px;height:64px;border-radius:50%;background:linear-gradient(135deg,rgba(113,255,47,0.12),rgba(19,216,255,0.12));display:flex;align-items:center;justify-content:center;margin:0 auto 16px;box-shadow:0 0 20px rgba(113,255,47,0.12)">
@@ -551,7 +609,7 @@ export async function sendPortalAccountCreated(
   return sendMail(
     email,
     'Your Preyone WiFi Account Has Been Created — Verify Your Email',
-    `<div style="font-family:'Segoe UI',Arial,sans-serif;max-width:560px;margin:32px auto;background:#0a0a0a;border-radius:16px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.12),0 0 40px rgba(113,255,47,0.08)">
+    `<div style="font-family:'Segoe UI',Arial,sans-serif;max-width:560px;margin:32px auto;background:#0a0f1d;border-radius:16px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.12),0 0 40px rgba(113,255,47,0.08)">
       ${emailHeader('Account Created')}
       <div style="padding:24px 32px">
         <div style="width:64px;height:64px;border-radius:50%;background:linear-gradient(135deg,rgba(113,255,47,0.12),rgba(19,216,255,0.12));display:flex;align-items:center;justify-content:center;margin:0 auto 16px;box-shadow:0 0 20px rgba(113,255,47,0.12)">
@@ -604,7 +662,7 @@ export async function sendPortalSignupConfirmation(
   return sendMail(
     email,
     'Your Preyone WiFi Session is Ready',
-    `<div style="font-family:'Segoe UI',Arial,sans-serif;max-width:560px;margin:32px auto;background:#0a0a0a;border-radius:16px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.12),0 0 40px rgba(113,255,47,0.08)">
+    `<div style="font-family:'Segoe UI',Arial,sans-serif;max-width:560px;margin:32px auto;background:#0a0f1d;border-radius:16px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.12),0 0 40px rgba(113,255,47,0.08)">
       ${emailHeader('Welcome to Preyone WiFi!')}
       <div style="padding:24px 32px">
         <div style="width:64px;height:64px;border-radius:50%;background:linear-gradient(135deg,rgba(113,255,47,0.12),rgba(19,216,255,0.12));display:flex;align-items:center;justify-content:center;margin:0 auto 16px;box-shadow:0 0 20px rgba(113,255,47,0.12)">
@@ -644,7 +702,7 @@ export async function sendStarlinkPasswordReset(email: string, resetToken: strin
   return sendMail(
     email,
     'Reset Your Preyone Starlink Portal Password',
-    `<div style="font-family:'Segoe UI',Arial,sans-serif;max-width:560px;margin:32px auto;background:#0a0a0a;border-radius:16px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.12),0 0 40px rgba(0,229,255,0.08)">
+    `<div style="font-family:'Segoe UI',Arial,sans-serif;max-width:560px;margin:32px auto;background:#0a0f1d;border-radius:16px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.12),0 0 40px rgba(0,229,255,0.08)">
       ${emailHeader('Starlink Portal Password Reset')}
       <div style="padding:24px 32px;text-align:center">
         <p style="margin:0 0 12px;font-size:15px;color:#cbd5e1;line-height:1.6">Hi <strong style="color:#ffffff">${fullName}</strong>,</p>
@@ -691,7 +749,7 @@ export async function sendSubscriptionExpiryWarningEmail(
   return sendMail(
     to,
     `Your Preyone subscription expires in ${dayLabel}`,
-    `<div style="font-family:'Segoe UI',Arial,sans-serif;max-width:560px;margin:32px auto;background:#0a0a0a;border-radius:16px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.12),0 0 40px rgba(0,229,255,0.08)">
+    `<div style="font-family:'Segoe UI',Arial,sans-serif;max-width:560px;margin:32px auto;background:#0a0f1d;border-radius:16px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.12),0 0 40px rgba(0,229,255,0.08)">
       ${emailHeader('Subscription Expiry Warning')}
       <div style="padding:24px 32px;text-align:center">
         <p style="margin:0 0 12px;font-size:15px;color:#cbd5e1;line-height:1.6">Hi <strong style="color:#ffffff">${safeName}</strong>,</p>
@@ -716,7 +774,7 @@ export async function sendSubscriptionExpiryUrgentEmail(
   return sendMail(
     to,
     'URGENT: Your Preyone subscription expires tomorrow',
-    `<div style="font-family:'Segoe UI',Arial,sans-serif;max-width:560px;margin:32px auto;background:#0a0a0a;border-radius:16px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.12),0 0 40px rgba(255,68,68,0.08)">
+    `<div style="font-family:'Segoe UI',Arial,sans-serif;max-width:560px;margin:32px auto;background:#0a0f1d;border-radius:16px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.12),0 0 40px rgba(255,68,68,0.08)">
       ${emailHeader('Subscription Expires Tomorrow')}
       <div style="padding:24px 32px;text-align:center">
         <p style="margin:0 0 12px;font-size:15px;color:#cbd5e1;line-height:1.6">Hi <strong style="color:#ffffff">${safeName}</strong>,</p>

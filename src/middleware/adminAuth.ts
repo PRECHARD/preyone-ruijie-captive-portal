@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 import { pool } from '../db/pool';
 import { FIELD_STAFF_ROLES, loadPermissions } from './rbac';
 import { INACTIVITY_TIMEOUT_SEC, MAX_SESSION_LIFETIME_SEC } from '../sessionPolicy';
+import { PREYONE_COOKIE } from '../utils/ssoCookie';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'preyone-jwt-secret-change-in-production';
 let _jwtSecretWarned = false;
@@ -81,9 +82,21 @@ function decode(token: string): DecodedAdminToken {
   return jwt.verify(token, getJwtSecret(), { algorithms: ['HS256'] }) as DecodedAdminToken;
 }
 
+/**
+ * Session token for an admin call.
+ *
+ * Bearer wins, then the wildcard `.preyone.com` SSO cookie. Sharing the cookie
+ * is what lets invoice.preyone.com and homeautomate.preyone.com reuse the
+ * console login: the cookie is httpOnly (so JS cannot read it) and sameSite=lax
+ * (so a cross-site form POST cannot ride it). The token still goes through the
+ * same JWT + session-row + RBAC checks either way.
+ */
 function bearerToken(req: Request): string | undefined {
   const auth = req.headers.authorization;
-  return auth?.startsWith('Bearer ') ? auth.slice(7) : undefined;
+  if (auth?.startsWith('Bearer ')) return auth.slice(7).trim() || undefined;
+  const cookies = (req as Request & { cookies?: Record<string, unknown> }).cookies;
+  const cookie = cookies?.[PREYONE_COOKIE];
+  return typeof cookie === 'string' && cookie ? cookie : undefined;
 }
 
 /**

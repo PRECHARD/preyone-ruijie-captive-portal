@@ -67,6 +67,11 @@ export default function GlobalSettingsHub() {
   const [posThemeId, setPosThemeId] = useState(1);
   const [posHardware, setPosHardware] = useState<PosHardware>({});
   const [invoiceSettings, setInvoiceSettings] = useState<InvoiceSettings>({});
+  // Module toggles are independent of the business profile: a retail tenant can
+  // switch the kitchen screen on without re-profiling, and a restaurant can run
+  // the till without the floor plan.
+  const [kdsEnabled, setKdsEnabled] = useState(false);
+  const [tableServiceEnabled, setTableServiceEnabled] = useState(false);
 
   // Billing snapshot for the General tab header.
   const [plan, setPlan] = useState<{ plan_type?: string; subscription_status?: string; subscription_expires_at?: string | null; max_devices?: number } | null>(null);
@@ -93,6 +98,8 @@ export default function GlobalSettingsHub() {
     setPosThemeId(Number(row.pos_theme_id) || 1);
     setPosHardware((row.pos_hardware ?? {}) as PosHardware);
     setInvoiceSettings((row.invoice_settings ?? {}) as InvoiceSettings);
+    setKdsEnabled(Boolean(row.kds_enabled));
+    setTableServiceEnabled(Boolean(row.table_service_enabled));
     setPlan({
       plan_type: row.plan_type,
       subscription_status: row.subscription_status,
@@ -125,6 +132,7 @@ export default function GlobalSettingsHub() {
         invoicePrefix, quotePrefix, receiptFooter, termsText,
         logoUrl, businessProfile, invoiceTemplateId, posThemeId,
         posHardware, invoiceSettings,
+        kdsEnabled, tableServiceEnabled,
         ...extra,
       };
       const updated = await api.put<any>('/company', body);
@@ -137,7 +145,7 @@ export default function GlobalSettingsHub() {
     }
   }, [name, email, supportPhone, website, address, currency, taxPct, invoicePrefix, quotePrefix,
       receiptFooter, termsText, logoUrl, businessProfile, invoiceTemplateId, posThemeId,
-      posHardware, invoiceSettings, hydrate]);
+      posHardware, invoiceSettings, kdsEnabled, tableServiceEnabled, hydrate]);
 
   const onPickLogo = async (file: File) => {
     const dataUrl = await new Promise<string>((resolve, reject) => {
@@ -416,11 +424,45 @@ export default function GlobalSettingsHub() {
           </section>
 
           <section className="card">
+            <span className="gsh-section-label">Live module switches</span>
+            <div className="auth-form">
+              <div className="auth-field">
+                <label className="hint" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <input
+                    type="checkbox"
+                    checked={kdsEnabled}
+                    onChange={(e) => setKdsEnabled(e.target.checked)}
+                  />
+                  Enable the kitchen display (KDS routing &amp; modifier tickets)
+                </label>
+                <div className="hint">
+                  Adds the KDS workspace to the till. Fast Food / QSR profiles enable this by default; it can be
+                  switched independently for any merchant.
+                </div>
+              </div>
+              <div className="auth-field">
+                <label className="hint" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <input
+                    type="checkbox"
+                    checked={tableServiceEnabled}
+                    onChange={(e) => setTableServiceEnabled(e.target.checked)}
+                  />
+                  Enable fine-dining table service &amp; the floor plan
+                </label>
+                <div className="hint">
+                  Adds the TABLES workspace, table assignment at checkout and bill splitting. Restaurant profiles
+                  enable this by default.
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section className="card">
             <span className="gsh-section-label">Station printer routing</span>
             <div className="hint">
-              Kitchen / bar station routing rules and the interactive floor plan are part of <strong>Phase 2</strong> of the
-              Fast Food &amp; KDS workstream. The business mode selected above is saved now and drives which layout the
-              till loads.
+              Kitchen / bar station routing rules follow the KDS switch above. The business mode selected in
+              this tab still drives the default layout the till loads, and the two toggles are saved with the
+              rest of the hub so <strong>pos.preyone.com</strong> updates on the next sign-in.
             </div>
           </section>
         </>

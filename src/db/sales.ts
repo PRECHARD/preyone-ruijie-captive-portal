@@ -1,4 +1,5 @@
 import { pool } from './pool';
+import { revenueCycleEndSql, revenueCycleMonthSql, revenueCycleStartSql } from '../services/revenueCycle';
 
 export interface StaffSalesItem {
   package_name: string;
@@ -94,10 +95,15 @@ export async function getPlatformWeeklyRevenue(): Promise<{ day: string; revenue
 }
 
 export async function getPlatformMonthlyRevenue(): Promise<number> {
+  // Cycle runs from the 3rd to the 2nd of the following month; see
+  // services/revenueCycle.ts. The 1st-2nd remain part of the closing cycle.
+  const cycleStart = revenueCycleStartSql();
+  const cycleEnd = revenueCycleEndSql();
   const { rows } = await pool.query(
     `SELECT COALESCE(SUM(v.price_amount), 0) AS total
      FROM vouchers v
-     WHERE DATE_TRUNC('month', v.created_at) = DATE_TRUNC('month', CURRENT_DATE)`
+     WHERE v.created_at >= ${cycleStart}
+       AND v.created_at <  ${cycleEnd}`
   );
   return parseFloat(rows[0]?.total) || 0;
 }
@@ -109,7 +115,7 @@ export async function getPlatformMonthlyTarget(): Promise<number> {
        FROM (
          SELECT target_amount
          FROM sales_targets
-         WHERE target_month = DATE_TRUNC('month', CURRENT_DATE)
+         WHERE target_month = ${revenueCycleMonthSql()}
          LIMIT 1
          UNION ALL SELECT 0
        ) t`

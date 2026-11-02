@@ -2,6 +2,7 @@ import ExcelJS from 'exceljs';
 import fs from 'fs';
 import path from 'path';
 import { pool } from '../db/pool';
+import { REVENUE_CYCLE_START_DAY } from './revenueCycle';
 
 /**
  * Reporting engine shared by the Month-End / Staff reports, the scheduler and
@@ -90,10 +91,23 @@ function resolveBrandLogo(): string | null {
   return null;
 }
 
-/** Whole previous calendar month in UTC (the scheduler's default window). */
+/**
+ * The last closed trading cycle in UTC (the scheduler's default window).
+ *
+ * Operations closes the books on the 3rd, so the 1st and 2nd belong to the
+ * cycle that is about to close. The window is therefore
+ * `[3rd of the previous month 00:00, 3rd of this month 00:00)` — the same
+ * 3rd-to-3rd cycle used by `revenueCycle.ts` for the dashboards and the
+ * revenue target. The label stays the month the cycle started in, so email
+ * subjects keep the familiar "September 2026" form.
+ */
 export function previousMonthPeriod(now: Date = new Date()): ReportPeriod {
-  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1, 0, 0, 0, 0));
-  const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0, 0));
+  let end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), REVENUE_CYCLE_START_DAY, 0, 0, 0, 0));
+  if (end.getTime() > now.getTime()) {
+    // Still 1st-2nd: the cycle that started last month has not closed yet.
+    end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, REVENUE_CYCLE_START_DAY, 0, 0, 0, 0));
+  }
+  const start = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth() - 1, REVENUE_CYCLE_START_DAY, 0, 0, 0, 0));
   const label = start.toLocaleString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' });
   return { from: start, to: end, label };
 }
@@ -117,7 +131,11 @@ function deriveStatus(row: {
   used_count?: number | null;
   sale_type?: string | null;
   has_voucher?: boolean;
+  source?: string | null;
 }, now: number = Date.now()): string {
+  // Document sales (invoices settled at the till or through Pesepay) book one
+  // ledger row per confirmed payment; they have no voucher lifecycle.
+  if (row.source === 'invoice') return 'Paid';
   if (row.has_voucher === false) return 'Deleted';
   if (row.is_disabled) return 'Disabled';
   if (row.sale_type === 'renewal') return 'Renewal';
@@ -129,12 +147,13 @@ function deriveStatus(row: {
 
 const SALES_SQL = `
   SELECT s.sold_at,
-         s.voucher_code,
+         COALESCE(s.voucher_code, d.doc_number) AS voucher_code,
          s.amount,
          s.currency,
          s.payment_method,
          s.sale_type,
          s.handover_status,
+         s.source,
          COALESCE(NULLIF(s.sold_by_name, ''), a.full_name, 'Online') AS staff_name,
          v.id IS NOT NULL        AS has_voucher,
          v.package_tier,
@@ -143,6 +162,7 @@ const SALES_SQL = `
          v.used_count
     FROM sales s
     LEFT JOIN vouchers v ON v.id = s.voucher_id
+    LEFT JOIN pos_documents d ON d.id = s.document_id
     LEFT JOIN admin_users a ON a.id = s.sold_by AND a.deleted_at IS NULL
    WHERE s.sold_at >= $1 AND s.sold_at < $2
    ORDER BY s.sold_at ASC`;
@@ -537,7 +557,10 @@ export async function buildMonthEndSummary(
       `SELECT a.id AS staff_id,
               a.role,
               COALESCE(NULLIF(a.full_name, ''), a.email, 'Unknown staff') AS staff_name,
-              COALESCE(sc.commission_pct, 0)::float AS commission_pct,
+              -- Explicit staff_commissions rows win (including an intentional
+              -- 0%). Accounts without a row default to the standard 10% staff
+              -- rate; the CEO remains at 0%.
+              COALESCE(sc.commission_pct, CASE WHEN a.role = 'CEO' THEN 0 ELSE 10 END)::float AS commission_pct,
               COALESCE(sa.sales_count, 0)::int    AS sales_count,
               COALESCE(sa.gross, 0)::float        AS gross
          FROM admin_users a

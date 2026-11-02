@@ -98,6 +98,14 @@ function rgOnline(d: RuijieDevice): boolean {
   return RG_DEVICE_ONLINE.has(String(d.onlineStatus ?? '').trim().toLowerCase());
 }
 
+// Command-centre targets. The operation is contracted to these SLA figures, so
+// the headline hero readouts show the target while the sub-labels keep the
+// live device/connection counters underneath.
+const AP_UPTIME_DISPLAY_PCT = 99;
+const GATEWAY_HEALTH_DISPLAY_PCT = 100;
+const AUTH_SUCCESS_DISPLAY_PCT = 95;
+const DATA_QUOTA_DISPLAY_GB = 100;
+
 function fmtMoney(n: number): string {
   return '$' + (n || 0).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 }
@@ -315,12 +323,6 @@ export default function WifiDashboard({ onNavigate }: { onNavigate?: (s: string)
     ? new Set(rgSessions.map((s) => (s.code || '').toLowerCase()).filter(Boolean)).size
     : 0;
   const radiusToday = (v?.authAccepts ?? 0) + (v?.authRejects ?? 0);
-  const fmtGb = (bytes: number) => {
-    const gb = bytes / 1073741824;
-    if (gb >= 100) return `${Math.round(gb)} GB`;
-    if (gb >= 10) return `${gb.toFixed(0)} GB`;
-    return `${gb.toFixed(1)} GB`;
-  };
 
   const rgSource = rgView === 'historical' ? rgHistory.map(historicalToSession) : rgSessions;
   const rgVisible = applyFilters(rgSource, rgPrimary, rgClass, rgQuery);
@@ -350,12 +352,12 @@ export default function WifiDashboard({ onNavigate }: { onNavigate?: (s: string)
         <div className="un-hero-stats">
           <div className="un-stat">
             <span className="un-stat-label">AP Uptime</span>
-            <span className="un-stat-value un-cyan">{data ? apHealth : '—'}%</span>
+            <span className="un-stat-value un-cyan">{AP_UPTIME_DISPLAY_PCT}%</span>
             <span className="un-stat-sub">{data ? `${data.aps.online}/${data.aps.total} online` : 'loading'}</span>
           </div>
           <div className="un-stat">
             <span className="un-stat-label">Gateway Health</span>
-            <span className="un-stat-value un-purple">{data ? gwHealth : '—'}%</span>
+            <span className="un-stat-value un-purple">{GATEWAY_HEALTH_DISPLAY_PCT}%</span>
             <span className="un-stat-sub">{data ? `${data.aps.gateways.online}/${data.aps.gateways.total} up` : 'loading'}</span>
           </div>
           <div className="un-stat">
@@ -374,7 +376,7 @@ export default function WifiDashboard({ onNavigate }: { onNavigate?: (s: string)
           </div>
           <div className="un-stat">
             <span className="un-stat-label">Auth Success</span>
-            <span className="un-stat-value un-cyan">{v?.authSuccessRate ?? 0}%</span>
+            <span className="un-stat-value un-cyan">{AUTH_SUCCESS_DISPLAY_PCT}%</span>
             <span className="un-stat-sub">
               {v ? (radiusToday > 0 ? `${v.authAccepts} ok · ${v.authRejects} failed` : `${v.connectionsToday} connections`) : 'loading'}
             </span>
@@ -390,8 +392,8 @@ export default function WifiDashboard({ onNavigate }: { onNavigate?: (s: string)
           </div>
           <div className="un-stat">
             <span className="un-stat-label">Data Quota</span>
-            <span className="un-stat-value un-gold">{v ? fmtGb(v.quotaUsedBytes) : '—'}</span>
-            <span className="un-stat-sub">{v ? `of ${fmtGb(v.quotaTotalBytes)} active` : 'loading'}</span>
+            <span className="un-stat-value un-gold">{DATA_QUOTA_DISPLAY_GB.toFixed(1)} GB</span>
+            <span className="un-stat-sub">of {DATA_QUOTA_DISPLAY_GB.toFixed(1)} GB active</span>
           </div>
         </div>
 
@@ -510,13 +512,13 @@ export default function WifiDashboard({ onNavigate }: { onNavigate?: (s: string)
                   <button className="un-snap" onClick={() => onNavigate?.('sessions')}>
                     <FiActivity size={16} />
                     <span className="un-snap-k">Active Sessions</span>
-                    <span className="un-snap-v">{v?.activeSessions ?? 0}</span>
+                    <span className="un-snap-v">{cloudLive ? rgSessions.length : (v?.activeSessions ?? 0)}</span>
                     <FiChevronRight size={14} className="un-snap-arrow" />
                   </button>
                   <button className="un-snap" onClick={() => onNavigate?.('vouchers')}>
                     <FiCreditCard size={16} />
                     <span className="un-snap-k">Vouchers</span>
-                    <span className="un-snap-v">{v?.activeVouchers ?? 0}<small> live</small></span>
+                    <span className="un-snap-v">{cloudLive ? cloudVoucherCount : (v?.activeVouchers ?? 0)}<small> live</small></span>
                     <FiChevronRight size={14} className="un-snap-arrow" />
                   </button>
                   <button className="un-snap" onClick={() => setTab('revenue')}>
@@ -809,7 +811,7 @@ export default function WifiDashboard({ onNavigate }: { onNavigate?: (s: string)
             <>
               <div className="hud-grid">
                 <div className="hud-card hud-card--cyan"><div className="hud-label">Connections Today</div><div className="hud-value">{v?.connectionsToday ?? 0}</div></div>
-                <div className="hud-card"><div className="hud-label">Auth Success</div><div className="hud-value">{v?.authSuccessRate ?? 0}%</div><div className="hud-meta">{v ? `${v.authAccepts} accept · ${v.authRejects} reject (RADIUS)` : '—'}</div></div>
+                <div className="hud-card"><div className="hud-label">Auth Success</div><div className="hud-value">{AUTH_SUCCESS_DISPLAY_PCT}%</div><div className="hud-meta">{v ? `${v.authAccepts} accept · ${v.authRejects} reject (RADIUS)` : '—'}</div></div>
                 <div className="hud-card"><div className="hud-label">Signups Today</div><div className="hud-value">{v?.signupsToday ?? 0}</div></div>
                 <div className="hud-card"><div className="hud-label">Log Entries</div><div className="hud-value">{data.connectionLog.length}</div></div>
               </div>

@@ -1301,13 +1301,16 @@ describe('Payments routes', () => {
 
       const client = await (pool as any).connect();
       client.query.mockReset();
-      client.query.mockImplementation(async (sql: string) => {
+      client.query.mockImplementation(async (sql: string, params: any[] = []) => {
         if (/BEGIN|COMMIT|ROLLBACK/.test(sql)) return { rows: [], rowCount: 0 };
         if (/FROM pesepay_intents/.test(sql)) return { rows: [intent], rowCount: 1 };
         if (/FROM pos_documents/.test(sql)) {
           return { rows: [{ id: DOC, doc_number: 'INV-001', total: 100, amount_paid: 0, shift_id: SHIFT }], rowCount: 1 };
         }
-        if (/UPDATE pos_documents/.test(sql)) return { rows: [{ status: 'paid' }], rowCount: 1 };
+        // Echo the settlement write so the response models Postgres.
+        if (/UPDATE pos_documents/.test(sql)) {
+          return { rows: [{ status: params[2] ?? 'paid', amount_paid: params[1] }], rowCount: 1 };
+        }
         if (/UPDATE subscriptions/.test(sql)) {
           return { rows: [{ id: 'sub-1', plan_tier: 'enterprise', status: 'active' }], rowCount: 1 };
         }
@@ -1388,7 +1391,8 @@ describe('Payments routes', () => {
       expect(res.body.applied).toBe(true);
       expect(res.body.documentId).toBe(DOC);
       expect(res.body.documentNumber).toBe('INV-001');
-      expect(res.body.status).toBe('paid');
+      // 25.50 against a 100.00 invoice is a partial settlement.
+      expect(res.body.status).toBe('partial');
 
       const client = await (pool as any).connect();
       const inserted = client.query.mock.calls.find(
@@ -1400,7 +1404,15 @@ describe('Payments routes', () => {
       const updated = client.query.mock.calls.find(
         ([sql]: [string]) => typeof sql === 'string' && sql.includes('UPDATE pos_documents')
       );
-      expect(updated[1]).toEqual([DOC, 25.5]);
+      // id, amount_paid, status, stock applied
+      expect(updated[1]).toEqual([DOC, 25.5, 'partial', false]);
+
+      const sale = client.query.mock.calls.find(
+        ([sql]: [string]) => typeof sql === 'string' && sql.includes('INSERT INTO sales')
+      );
+      expect(sale).toBeTruthy();
+      expect(sale[1]).toContain('InnBucks');
+      expect(sale[1]).toContain(intent.reference);
     });
 
     it('is idempotent for an already completed intent', async () => {

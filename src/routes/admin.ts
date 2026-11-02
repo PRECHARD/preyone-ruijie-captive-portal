@@ -14,7 +14,6 @@ import {
 import { isRuijieCloudConfigured, mintRuijieVoucherForTier } from '../services/ruijieMint';
 import {
   getStaffDailySalesItemized,
-  getPlatformDailySalesItemized,
   getStaffDailyRevenue,
   getPlatformDailyRevenue,
   getPlatformYesterdayRevenue,
@@ -29,6 +28,7 @@ import { RuijieApiError, RATE_LIMIT_CODE, isRateLimitError } from '../services/r
 import { claimPooledVoucherForStaff, releasePooledVouchers } from '../services/voucherPool';
 import { syncRuijieVoucherStatuses } from '../services/ruijieVoucherStatusSync';
 import { loadRevenueTarget, parseRevenueTarget, saveRevenueTarget } from '../services/revenueTarget';
+import { revenueCycleEndSql, revenueCycleStartSql } from '../services/revenueCycle';
 import { isCeoExclusiveTier } from '../config/packages';
 import { queueRuijieUserGroupProvisioning } from '../services/ruijieUserGroups';
 import ExcelJS from 'exceljs';
@@ -1430,7 +1430,7 @@ adminRouter.get('/dashboard', requirePermission(PERMISSIONS.COMPANY_ADMIN), asyn
     const { rows: activeSessions } = await pool.query(`SELECT COUNT(*)::int AS count FROM users WHERE session_expires_at > NOW()`);
     const { rows: dailyR } = await pool.query(`SELECT COALESCE(SUM(amount), 0)::float AS amount, COUNT(*)::int AS count FROM sales WHERE sold_at >= CURRENT_DATE`);
     const { rows: weeklyR } = await pool.query(`SELECT COALESCE(SUM(amount), 0)::float AS amount, COUNT(*)::int AS count FROM sales WHERE sold_at >= DATE_TRUNC('week', CURRENT_DATE)`);
-    const { rows: monthlyR } = await pool.query(`SELECT COALESCE(SUM(amount), 0)::float AS amount, COUNT(*)::int AS count FROM sales WHERE sold_at >= DATE_TRUNC('month', CURRENT_DATE)`);
+    const { rows: monthlyR } = await pool.query(`SELECT COALESCE(SUM(amount), 0)::float AS amount, COUNT(*)::int AS count FROM sales WHERE sold_at >= ${revenueCycleStartSql()} AND sold_at < ${revenueCycleEndSql()}`);
     const { rows: dailySales } = await pool.query(`SELECT DATE(sold_at) AS day, COALESCE(SUM(amount),0)::float AS revenue, COUNT(*)::int AS count FROM sales WHERE sold_at >= NOW() - INTERVAL '14 days' GROUP BY DATE(sold_at) ORDER BY day`);
     const { rows: dailySignups } = await pool.query(`SELECT DATE(created_at) AS day, COUNT(*)::int AS count FROM users WHERE created_at >= NOW() - INTERVAL '14 days' GROUP BY DATE(created_at) ORDER BY day`);
     const { rows: byTier } = await pool.query(`SELECT v.package_tier, COUNT(*)::int AS count, COALESCE(SUM(v.price_amount),0)::float AS total FROM vouchers v WHERE v.package_tier IS NOT NULL AND v.price_amount > 0 GROUP BY v.package_tier ORDER BY total DESC`);
@@ -1662,7 +1662,7 @@ adminRouter.get('/dashboard/sales', requirePermission(PERMISSIONS.COMPANY_ADMIN)
   `);
   const { rows: monthly } = await pool.query(`
     SELECT COALESCE(SUM(amount), 0)::float AS amount, COUNT(*)::int AS count
-    FROM sales WHERE sold_at >= DATE_TRUNC('month', CURRENT_DATE)
+    FROM sales WHERE sold_at >= ${revenueCycleStartSql()} AND sold_at < ${revenueCycleEndSql()}
   `);
   const { rows: total } = await pool.query(`
     SELECT COALESCE(SUM(amount), 0)::float AS amount, COUNT(*)::int AS count FROM sales
@@ -3704,7 +3704,7 @@ adminRouter.put('/company', requireRole('CEO'), async (req: Request, res: Respon
        business_profile     = COALESCE($16, business_profile),
        invoice_template_id  = COALESCE($17, invoice_template_id),
        pos_theme_id         = COALESCE($18, pos_theme_id),
-       pos_settings         = COALESCE($19::jsonb, pos_settings),
+       pos_hardware         = COALESCE($19::jsonb, pos_hardware),
        invoice_settings     = COALESCE($20::jsonb, invoice_settings),
        kds_enabled          = COALESCE($21, kds_enabled),
        table_service_enabled= COALESCE($22, table_service_enabled),
@@ -3875,9 +3875,10 @@ adminRouter.delete('/devices/:id', requireRole('CEO'), async (req: Request, res:
 adminRouter.get('/dashboard/ultranet/sales-summary', async (req: Request, res: Response) => {
   try {
     const user = req.adminUser!;
-    const isStaff = user.role === 'Staff';
+    // "My Sales" is personal for every authenticated account — a CEO or
+    // Manager can sell vouchers too, so it must not be limited to role Staff.
     const [mySales, platformDaily, platformYesterday, weekly, monthly, target, matrix, velocity, activity] = await Promise.all([
-      isStaff ? getStaffDailyRevenue(user.id) : Promise.resolve(0),
+      getStaffDailyRevenue(user.id),
       getPlatformDailyRevenue(),
       getPlatformYesterdayRevenue(),
       getPlatformWeeklyRevenue(),
@@ -3888,7 +3889,7 @@ adminRouter.get('/dashboard/ultranet/sales-summary', async (req: Request, res: R
       getRecentActivity(20),
     ]);
     const [itemized] = await Promise.all([
-      isStaff ? getStaffDailySalesItemized(user.id) : getPlatformDailySalesItemized(),
+      getStaffDailySalesItemized(user.id),
     ]);
     res.json({ mySales, platformDaily, platformYesterday, weekly, monthly, target, matrix, velocity, activity, itemized });
   } catch (e: any) {

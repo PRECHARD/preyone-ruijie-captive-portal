@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api, type Product, type StaffUser, type CheckoutResult, type CompanyProfile } from '../api';
+import type { LiveStock } from '../realtime';
 import CheckoutModal from './CheckoutModal';
 import ReceiptModal from './ReceiptModal';
 
@@ -8,13 +9,15 @@ interface Props {
   notify: (msg: string, kind?: 'ok' | 'error') => void;
   onApiError: (e: unknown) => boolean;
   onShiftChanged: () => Promise<void>;
+  liveStock?: Record<string, LiveStock>;
+  stockTick?: number;
 }
 
 type DocType = 'sale' | 'invoice' | 'quotation';
 
 const money = (n: number): string => `$${(Number(n) || 0).toFixed(2)}`;
 
-export default function Terminal({ user, notify, onApiError, onShiftChanged }: Props) {
+export default function Terminal({ user, notify, onApiError, onShiftChanged, liveStock, stockTick = 0 }: Props) {
   const [products, setProducts] = useState<Product[]>([]);
   const [query, setQuery] = useState('');
   const [cart, setCart] = useState<CartLineState[]>([]);
@@ -41,6 +44,16 @@ export default function Terminal({ user, notify, onApiError, onShiftChanged }: P
       .then(setProducts)
       .catch((e) => { if (!onApiError(e)) notify('Could not load products', 'error'); });
   }, [notify, onApiError]);
+
+  // A settlement committed elsewhere (another till, Pesepay) arrives as
+  // telemetry: pull the authoritative stock while the live overlay paints the
+  // decrement immediately.
+  useEffect(() => {
+    if (!stockTick) return;
+    api.products()
+      .then(setProducts)
+      .catch(() => { /* the overlay already shows the movement */ });
+  }, [stockTick]);
 
   useEffect(() => {
     api.company()
@@ -171,13 +184,30 @@ export default function Terminal({ user, notify, onApiError, onShiftChanged }: P
         ) : (
           <div className="product-grid">
             {filtered.map((p) => {
-              const low = p.track_stock && Number(p.stock_qty) <= Number(p.low_stock_threshold);
+              const live = liveStock?.[p.id];
+              // Only the last few seconds count as "just moved" so a stale
+              // entry does not pin a decrement arrow on the grid forever.
+              const justMoved = Boolean(live) && Date.now() - (live?.at ?? 0) < 8_000;
+              const shownStock = justMoved && live ? live.qty : Number(p.stock_qty);
+              const moved = justMoved && live ? live.previous - live.qty : 0;
+              const low = p.track_stock && shownStock <= Number(p.low_stock_threshold);
               return (
-                <button className="product-card" key={p.id} onClick={() => addToCart(p)}>
+                <button
+                  className={`product-card ${justMoved && moved > 0 ? 'stock-moved' : ''}`}
+                  key={p.id}
+                  onClick={() => addToCart(p)}
+                >
                   <span className="p-name">{p.name}</span>
                   <span className="p-price">{money(Number(p.price))}</span>
-                  <span className={`p-stock ${low ? 'low' : ''}`}>
-                    {p.track_stock ? `${Number(p.stock_qty)} in stock` : 'service'}
+                  <span className={`p-stock ${low ? 'low' : ''} ${justMoved && moved > 0 ? 'decrement' : ''}`}>
+                    {p.track_stock ? (
+                      <>
+                        {shownStock} in stock
+                        {justMoved && moved > 0 && <em className="stock-delta">−{moved}</em>}
+                      </>
+                    ) : (
+                      'service'
+                    )}
                   </span>
                 </button>
               );

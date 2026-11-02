@@ -1,4 +1,5 @@
 import { pool } from '../db/pool';
+import { revenueCycleEndSql, revenueCycleStartSql } from './revenueCycle';
 
 /**
  * Company-wide monthly revenue target.
@@ -54,15 +55,17 @@ export async function loadRevenueTarget(): Promise<RevenueTargetSnapshot> {
     readSetting(REVENUE_TARGET_KEYS.updatedBy),
   ]);
 
+  const cycleStart = revenueCycleStartSql();
+  const cycleEnd = revenueCycleEndSql();
   const { rows } = await pool.query(
     `SELECT COALESCE(SUM(amount), 0)::float AS achieved,
             COUNT(*)::int                    AS sales_count,
             MIN(currency)                    AS currency,
-            date_trunc('month', NOW())::date AS month_start,
-            (date_trunc('month', NOW()) + INTERVAL '1 month')::date AS next_month
+            ${cycleStart}::date              AS month_start,
+            ${cycleEnd}::date                AS next_month
        FROM sales
-      WHERE sold_at >= date_trunc('month', NOW())
-        AND sold_at <  date_trunc('month', NOW()) + INTERVAL '1 month'`
+      WHERE sold_at >= ${cycleStart}
+        AND sold_at <  ${cycleEnd}`
   );
   const row = rows[0] ?? {};
   const target = Math.max(0, Number(targetRaw) || 0);

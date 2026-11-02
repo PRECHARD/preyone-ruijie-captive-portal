@@ -110,28 +110,32 @@ export function renderMonthEndHtml(vars: MonthEndTemplateVars): string {
 
   // Compiled-build fallback: same content, no external file required.
   const body = `
-    <div style="text-align:center;margin-bottom:18px">
-      <p style="margin:0;font-size:11px;letter-spacing:2px;text-transform:uppercase;color:#00ccff;font-weight:700">Preyone Admin Console</p>
-      <h2 style="margin:6px 0 4px;color:#ffffff;font-size:20px">Month-End Report</h2>
-      <p style="margin:0;color:#ffcc00;font-size:13px;font-weight:700">${values.PERIOD_LABEL}</p>
-    </div>
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="8" style="border-collapse:separate;margin-bottom:16px">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;text-align:center;margin-bottom:18px">
       <tr>
-        <td width="50%" style="background:rgba(255,204,0,0.07);border:1px solid rgba(255,204,0,0.28);border-radius:12px;padding:14px">
+        <td align="center" style="padding:0">
+          <p style="margin:0;font-size:11px;letter-spacing:2px;text-transform:uppercase;color:#00ccff;font-weight:700">Preyone Admin Console</p>
+          <h2 style="margin:6px 0 4px;color:#ffffff;font-size:20px;line-height:1.3">Month-End Report</h2>
+          <p style="margin:0;color:#ffcc00;font-size:13px;font-weight:700">${values.PERIOD_LABEL}</p>
+        </td>
+      </tr>
+    </table>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:separate;border-spacing:8px;margin-bottom:16px">
+      <tr>
+        <td width="50%" style="background:#151f35;border:1px solid #3d3418;border-radius:12px;padding:14px">
           <p style="margin:0 0 4px;font-size:10px;letter-spacing:1.4px;text-transform:uppercase;color:#a9b6cc">Total Monthly Revenue</p>
           <p style="margin:0;font-size:24px;font-weight:800;color:#ffcc00">${values.TOTAL_REVENUE}</p>
         </td>
-        <td width="50%" style="background:rgba(0,204,255,0.07);border:1px solid rgba(0,204,255,0.28);border-radius:12px;padding:14px">
+        <td width="50%" style="background:#112234;border:1px solid #174a63;border-radius:12px;padding:14px">
           <p style="margin:0 0 4px;font-size:10px;letter-spacing:1.4px;text-transform:uppercase;color:#a9b6cc">Total Sales Count</p>
           <p style="margin:0;font-size:24px;font-weight:800;color:#00ccff">${values.SALES_COUNT}</p>
         </td>
       </tr>
       <tr>
-        <td width="50%" style="background:rgba(168,85,247,0.07);border:1px solid rgba(168,85,247,0.28);border-radius:12px;padding:14px">
+        <td width="50%" style="background:#1a1630;border:1px solid #46307a;border-radius:12px;padding:14px">
           <p style="margin:0 0 4px;font-size:10px;letter-spacing:1.4px;text-transform:uppercase;color:#a9b6cc">Active Cash Handovers</p>
           <p style="margin:0;font-size:24px;font-weight:800;color:#c084fc">${values.ACTIVE_HANDOVERS}</p>
         </td>
-        <td width="50%" style="background:rgba(0,204,255,0.07);border:1px solid rgba(0,204,255,0.28);border-radius:12px;padding:14px">
+        <td width="50%" style="background:#112234;border:1px solid #174a63;border-radius:12px;padding:14px">
           <p style="margin:0 0 4px;font-size:10px;letter-spacing:1.4px;text-transform:uppercase;color:#a9b6cc">Staff Commissions</p>
           <p style="margin:0;font-size:24px;font-weight:800;color:#00ccff">${values.STAFF_COMMISSIONS}</p>
         </td>
@@ -139,8 +143,8 @@ export function renderMonthEndHtml(vars: MonthEndTemplateVars): string {
     </table>
     <p style="margin:0 0 8px;font-size:10px;letter-spacing:1.4px;text-transform:uppercase;color:#a9b6cc">Reconciliation Status</p>
     <p style="margin:0 0 18px;font-size:15px;font-weight:800;color:${values.RECON_COLOR}">${values.RECONCILIATION_STATUS}</p>
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:12px">
-      <thead><tr style="background:rgba(0,204,255,0.10)">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead><tr style="background:#122238">
         <th align="left" style="padding:8px;color:#a9b6cc">Staff</th>
         <th align="right" style="padding:8px;color:#a9b6cc">Sales</th>
         <th align="right" style="padding:8px;color:#a9b6cc">Gross</th>
@@ -158,12 +162,12 @@ export function buildStaffRowsHtml(summary: MonthEndSummary): string {
   }
   return summary.staffCommissions
     .map((line, index) => {
-      const bg = index % 2 === 0 ? 'rgba(255,255,255,0.02)' : 'transparent';
+      const bg = index % 2 === 0 ? '#101a2e' : '#0f172a';
       return `<tr style="background:${bg}">
-        <td align="left" style="padding:8px 10px;color:#e2e8f0;border-bottom:1px solid rgba(255,255,255,0.06)">${escapeHtml(line.staffName)}</td>
-        <td align="right" style="padding:8px 10px;color:#8ea0bb;border-bottom:1px solid rgba(255,255,255,0.06)">${line.salesCount}</td>
-        <td align="right" style="padding:8px 10px;color:#e2e8f0;border-bottom:1px solid rgba(255,255,255,0.06)">${escapeHtml(money(line.gross, summary.currency))}</td>
-        <td align="right" style="padding:8px 10px;color:#ffcc00;font-weight:700;border-bottom:1px solid rgba(255,255,255,0.06)">${escapeHtml(money(line.commissionDue, summary.currency))}</td>
+        <td align="left" style="padding:8px 8px;color:#e2e8f0;border-bottom:1px solid #1e3a5f">${escapeHtml(line.staffName)}</td>
+        <td align="right" style="padding:8px 8px;color:#8ea0bb;border-bottom:1px solid #1e3a5f">${line.salesCount}</td>
+        <td align="right" style="padding:8px 8px;color:#e2e8f0;border-bottom:1px solid #1e3a5f">${escapeHtml(money(line.gross, summary.currency))}</td>
+        <td align="right" style="padding:8px 8px;color:#ffcc00;font-weight:700;border-bottom:1px solid #1e3a5f">${escapeHtml(money(line.commissionDue, summary.currency))}</td>
       </tr>`;
     })
     .join('');
@@ -184,7 +188,7 @@ export function buildMonthEndEmailHtml(summary: MonthEndSummary): string {
     reconciledValue: money(summary.reconciledValue, summary.currency),
     approvedHandoverValue: money(summary.approvedHandoverValue, summary.currency),
     staffRowsHtml: buildStaffRowsHtml(summary),
-    logoUrl: `${baseUrl}/images/preyone-logo-mainInverse.png`,
+    logoUrl: `${baseUrl}/images/preyone-logo-mainInverse-optimized.png`,
   });
 }
 

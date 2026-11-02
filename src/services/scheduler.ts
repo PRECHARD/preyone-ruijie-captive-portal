@@ -11,9 +11,11 @@ import { sendMonthEndReportEmail } from './email';
  * Month-End / Staff report scheduler.
  *
  * Cron contract: `0 8 3 * *` — the 3rd of every month at 08:00, covering the
- * previous calendar month. Implemented with a self-scheduling `setTimeout`
- * (no `node-cron` dependency) plus a catch-up check, so a restart that misses
- * the exact minute still delivers the report later that day.
+ * trading cycle that closed at midnight on the 3rd (3rd of the previous month
+ * → 3rd of this month), which is the same window the dashboards report on.
+ * Implemented with a self-scheduling `setTimeout` (no `node-cron` dependency)
+ * plus a catch-up check, so a restart that misses the exact minute still
+ * delivers the report later that day.
  *
  * Four PM2 workers run this file. Sending is guarded three ways:
  *
@@ -80,7 +82,7 @@ export function nextDueAt(now: Date = new Date()): Date {
   return new Date(now.getFullYear(), now.getMonth() + 1, 3, 8, 0, 0, 0);
 }
 
-/** Period a given due-date reports on (the calendar month before it). */
+/** Period a given due-date reports on (the cycle that closed at that midnight). */
 export function periodForDueAt(dueAt: Date): ReportPeriod {
   return previousMonthPeriod(dueAt);
 }
@@ -105,6 +107,20 @@ async function writeSetting(key: string, value: string): Promise<void> {
 
 function periodKey(period: ReportPeriod): string {
   return period.from.toISOString().slice(0, 10);
+}
+
+/**
+ * Markers written before the 3rd-to-3rd cycle stored the 1st of the start
+ * month. Accept both shapes so the first run after switching to cycle windows
+ * cannot resend a period that has already been mailed.
+ */
+function legacyPeriodKey(period: ReportPeriod): string {
+  return `${period.from.toISOString().slice(0, 7)}-01`;
+}
+
+function isMarkedSent(marker: string | null, period: ReportPeriod): boolean {
+  if (!marker) return false;
+  return marker.startsWith(periodKey(period)) || marker.startsWith(legacyPeriodKey(period));
 }
 
 function parseRecipients(raw: string | null): string[] {
@@ -151,7 +167,7 @@ export async function runMonthEndReport(opts: {
   if (recipients.length === 0) return { ...base, reason: 'no_recipients' };
 
   const alreadySent = await readSetting(SETTING_LAST_SENT);
-  if (!opts.force && alreadySent && alreadySent.startsWith(periodKey(period))) {
+  if (!opts.force && isMarkedSent(alreadySent, period)) {
     return { ...base, reason: 'already_sent' };
   }
 
@@ -165,7 +181,7 @@ export async function runMonthEndReport(opts: {
     // Re-check under the lock: another worker may have finished while we waited.
     if (!opts.force) {
       const sentNow = await readSetting(SETTING_LAST_SENT);
-      if (sentNow && sentNow.startsWith(periodKey(period))) {
+      if (isMarkedSent(sentNow, period)) {
         return { ...base, reason: 'already_sent' };
       }
     }
@@ -257,7 +273,7 @@ async function tick(trigger: 'scheduler' | 'catch-up' = 'scheduler'): Promise<vo
     const dueAt = mostRecentDueAt(now);
     const period = periodForDueAt(dueAt);
     const lastSent = await readSetting(SETTING_LAST_SENT);
-    const due = !lastSent || !lastSent.startsWith(periodKey(period));
+    const due = !isMarkedSent(lastSent, period);
     if (due) {
       const result = await runMonthEndReport({ period, trigger });
       if (result.reason === 'smtp_unavailable_or_rejected') {

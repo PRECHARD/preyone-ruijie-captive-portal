@@ -29,10 +29,10 @@ interface Rgb {
 
 const HEX = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i;
 
-export function parseHex(value: string, fallback = '#0d9488'): Rgb {
+export function parseHex(value: string, fallback = '#059669'): Rgb {
   const raw = String(value || '').trim();
   const match = HEX.exec(raw);
-  if (!match) return parseHex(fallback, '#0d9488');
+  if (!match) return parseHex(fallback, '#059669');
   let hex = match[1];
   if (hex.length === 3) hex = hex.split('').map((c) => c + c).join('');
   return {
@@ -87,7 +87,7 @@ export function rgba(value: string, alpha: number): string {
 export function themeCssVariables(theme: PosThemeTokens): Record<string, string> {
   const bg = theme.bg || '#0f172a';
   const text = theme.text || '#f8fafc';
-  const primary = theme.primary || '#0d9488';
+  const primary = theme.primary || '#059669';
   const accent = theme.accent || primary;
   const secondary = theme.secondary || mix(bg, primary, 0.35);
 

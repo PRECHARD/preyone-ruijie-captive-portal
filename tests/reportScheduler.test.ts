@@ -121,15 +121,17 @@ describe('nextDueAt', () => {
 });
 
 describe('periodForDueAt', () => {
-  it('reports the month before the due date', () => {
+  it('reports the cycle that closed on the due date', () => {
     const period = periodForDueAt(localDue(2026, 9));
-    expect(period.from.toISOString()).toBe('2026-09-01T00:00:00.000Z');
-    expect(period.to.toISOString()).toBe('2026-10-01T00:00:00.000Z');
+    expect(period.from.toISOString()).toBe('2026-09-03T00:00:00.000Z');
+    expect(period.to.toISOString()).toBe('2026-10-03T00:00:00.000Z');
     expect(period.label).toBe('September 2026');
   });
 
   it('handles a January run (reports December)', () => {
     const period = periodForDueAt(localDue(2027, 0));
+    expect(period.from.toISOString()).toBe('2026-12-03T00:00:00.000Z');
+    expect(period.to.toISOString()).toBe('2027-01-03T00:00:00.000Z');
     expect(period.label).toBe('December 2026');
   });
 });
@@ -151,10 +153,20 @@ describe('runMonthEndReport', () => {
         Array.isArray(params) &&
         params[0] === 'month_end_report_last_sent'
     );
-    expect(marker?.[1]?.[1]).toBe('2026-09-01');
+    expect(marker?.[1]?.[1]).toBe('2026-09-03');
   });
 
   it('refuses to resend a period that is already marked sent', async () => {
+    settings.month_end_report_last_sent = '2026-09-03';
+
+    const result = await runMonthEndReport({ period });
+
+    expect(result.sent).toBe(false);
+    expect(result.reason).toBe('already_sent');
+    expect(mail.send).not.toHaveBeenCalled();
+  });
+
+  it('treats a pre-cycle marker (1st of the month) as already sent', async () => {
     settings.month_end_report_last_sent = '2026-09-01';
 
     const result = await runMonthEndReport({ period });

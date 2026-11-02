@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api, type Product } from '../api';
+import type { LiveStock } from '../realtime';
 
 const money = (n: number): string => `$${(Number(n) || 0).toFixed(2)}`;
 
@@ -21,7 +22,15 @@ const emptyDraft: Draft = {
   price: '', costPrice: '', stockQty: '0', trackStock: true, lowStockThreshold: '3',
 };
 
-export default function StockManager({ onChanged }: { onChanged?: () => void }) {
+export default function StockManager({
+  onChanged,
+  liveStock,
+  stockTick = 0,
+}: {
+  onChanged?: () => void;
+  liveStock?: Record<string, LiveStock>;
+  stockTick?: number;
+}) {
   const [products, setProducts] = useState<Product[]>([]);
   const [query, setQuery] = useState('');
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -33,6 +42,12 @@ export default function StockManager({ onChanged }: { onChanged?: () => void }) 
     api.products().then(setProducts).catch(() => {});
   };
   useEffect(load, []);
+
+  // A sale finalised anywhere in the company refreshes the ledger view at once,
+  // so the low-stock list never lags behind the counter.
+  useEffect(() => {
+    if (stockTick) load();
+  }, [stockTick]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -163,9 +178,13 @@ export default function StockManager({ onChanged }: { onChanged?: () => void }) 
         </thead>
         <tbody>
           {filtered.map((p) => {
-            const low = p.track_stock && Number(p.stock_qty) <= Number(p.low_stock_threshold);
+            const live = liveStock?.[p.id];
+            const justMoved = Boolean(live) && Date.now() - (live?.at ?? 0) < 8_000;
+            const shownStock = justMoved && live ? live.qty : Number(p.stock_qty);
+            const moved = justMoved && live ? live.previous - live.qty : 0;
+            const low = p.track_stock && shownStock <= Number(p.low_stock_threshold);
             return (
-              <tr key={p.id} className={p.active ? '' : 'archived'}>
+              <tr key={p.id} className={`${p.active ? '' : 'archived'} ${justMoved && moved > 0 ? 'stock-decrement' : ''}`}>
                 <td>{p.name}{!p.active && ' (archived)'}</td>
                 <td>{p.sku || p.barcode || '—'}</td>
                 <td>{p.category || '—'}</td>
@@ -174,7 +193,8 @@ export default function StockManager({ onChanged }: { onChanged?: () => void }) 
                 <td style={{ textAlign: 'right' }}>
                   {!p.track_stock ? '—' : (
                     <span className={low ? 'stock-low' : ''}>
-                      {Number(p.stock_qty)}
+                      {shownStock}
+                      {justMoved && moved > 0 && <em className="stock-delta">−{moved}</em>}
                     </span>
                   )}
                 </td>

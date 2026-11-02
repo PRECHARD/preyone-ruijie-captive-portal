@@ -72,6 +72,7 @@ interface VoucherSaleDetail {
   traffic_used_bytes?: number;
   traffic_total_bytes?: number | null;
   holder_name?: string | null;
+  holder_phone?: string | null;
 }
 
 const lc = (s?: string | null) => (s || '').toLowerCase();
@@ -156,6 +157,36 @@ export default function ConsumptionDetailModal({ code, row, onClose }: Props) {
     setActionMsg('PIN copied.');
   };
 
+  // Captured holder details (Customer Details Required / Edit Holder) outrank
+  // the portal account and the redemption row because they are the name staff
+  // recorded at the sale. The roster row supplies a fallback for cloud-only
+  // vouchers that have no local sales record in this modal.
+  const holderName = sale
+    ? (sale.holder_name
+      || [sale.first_name, sale.last_name].filter(Boolean).join(' ')
+      || sale.alias
+      || sale.redemption_name
+      || null)
+    : (row?.holderName ?? null);
+  const holderPhone = sale?.holder_phone || sale?.phone || row?.holderPhone || null;
+  const redemptionMac = sale?.redemption_mac || sale?.mac_address || null;
+  const redemptionAt = sale?.redemption_at || sale?.first_redeemed_at || null;
+  const trafficUsed = gb(sale?.traffic_used_bytes);
+  const trafficTotal = gb(sale?.traffic_total_bytes);
+  const maxDevices = sale?.effective_max_devices ?? sale?.max_devices ?? null;
+
+  // Shared canvas input for Download / Print / WhatsApp. Keeping the holder in
+  // this object is what makes the name survive into the exported JPEG.
+  const cardData = sale
+    ? { ...sale, holder_name: holderName }
+    : {
+        code,
+        package_tier: row?.packageName ?? null,
+        price_amount: row?.priceAmount ?? null,
+        holder_name: holderName,
+        expires_at: row?.expiryTime ?? null,
+      };
+
   const waText = () => {
     const v = sale;
     return [
@@ -197,7 +228,7 @@ export default function ConsumptionDetailModal({ code, row, onClose }: Props) {
     if (!code) return;
     const c = document.createElement('canvas');
     try {
-      await drawVoucherCanvas(c, sale ?? { code }, user?.fullName || 'Preyone UltraNet');
+      await drawVoucherCanvas(c, cardData, user?.fullName || 'Preyone UltraNet');
       const blob = await new Promise<Blob | null>((resolve) => c.toBlob(resolve, 'image/jpeg', 0.95));
       if (!blob) { setActionMsg('Could not render the voucher card.'); return; }
       const url = URL.createObjectURL(blob);
@@ -220,7 +251,7 @@ export default function ConsumptionDetailModal({ code, row, onClose }: Props) {
     c.width = 800;
     c.height = 450;
     try {
-      await drawVoucherCanvas(c, sale ?? { code }, user?.fullName || 'Preyone UltraNet');
+      await drawVoucherCanvas(c, cardData, user?.fullName || 'Preyone UltraNet');
       const doc = new jsPDF('portrait', 'mm', 'a4');
       const imgData = c.toDataURL('image/jpeg', 0.95);
       const pw = 210, ph = 297, m = 10;
@@ -259,24 +290,21 @@ export default function ConsumptionDetailModal({ code, row, onClose }: Props) {
     setSharing(true);
     setActionMsg('Preparing the voucher image…');
     try {
-      const data = sale
-        ? {
-            code: sale.code,
-            package_tier: sale.package_tier,
-            price_amount: sale.price_amount,
-            duration_min: sale.duration_min,
-            is_uncapped: sale.is_uncapped,
-            data_limit_gb: sale.data_limit_gb,
-            bandwidth_mbps_up: sale.bandwidth_mbps_up,
-            bandwidth_mbps_down: sale.bandwidth_mbps_down,
-            holder_name: holderName,
-            expires_at: sale.expires_at,
-            activated_at: sale.activated_at,
-            created_at: sale.created_at,
-          }
-        : { code };
       const result = await shareVoucherJpeg({
-        data,
+        data: {
+          code,
+          package_tier: sale?.package_tier ?? row?.packageName ?? null,
+          price_amount: sale?.price_amount ?? row?.priceAmount ?? null,
+          duration_min: sale?.duration_min ?? null,
+          is_uncapped: sale?.is_uncapped ?? null,
+          data_limit_gb: sale?.data_limit_gb ?? null,
+          bandwidth_mbps_up: sale?.bandwidth_mbps_up ?? null,
+          bandwidth_mbps_down: sale?.bandwidth_mbps_down ?? null,
+          holder_name: holderName,
+          expires_at: sale?.expires_at ?? row?.expiryTime ?? null,
+          activated_at: sale?.activated_at ?? null,
+          created_at: sale?.created_at ?? null,
+        },
         code,
         issuedByName: user?.fullName || 'Preyone UltraNet',
         text: `Voucher PIN: ${lc(code)}\n` + waText(),
@@ -288,15 +316,6 @@ export default function ConsumptionDetailModal({ code, row, onClose }: Props) {
       setSharing(false);
     }
   };
-
-  const holderName = sale
-    ? ([sale.first_name, sale.last_name].filter(Boolean).join(' ') || sale.alias || sale.redemption_name || sale.holder_name || null)
-    : null;
-  const redemptionMac = sale?.redemption_mac || sale?.mac_address || null;
-  const redemptionAt = sale?.redemption_at || sale?.first_redeemed_at || null;
-  const trafficUsed = gb(sale?.traffic_used_bytes);
-  const trafficTotal = gb(sale?.traffic_total_bytes);
-  const maxDevices = sale?.effective_max_devices ?? sale?.max_devices ?? null;
 
   return (
     <Modal open={!!code} onClose={onClose} title={code ? `Voucher ${lc(code)}` : 'Voucher'} wide>
@@ -388,12 +407,12 @@ export default function ConsumptionDetailModal({ code, row, onClose }: Props) {
               <div className="vd-cell"><span className="vd-label">Expires</span><span className="vd-value">{fmtDate(sale.expires_at)}</span></div>
             </div>
 
-            {(holderName || sale.phone || redemptionMac || redemptionAt || trafficUsed) && (
+            {(holderName || holderPhone || redemptionMac || redemptionAt || trafficUsed) && (
               <section className="vd-section">
                 <h4 className="vd-section-title">Redemption</h4>
                 <div className="vd-grid">
                   <div className="vd-cell"><span className="vd-label">Holder</span><span className="vd-value">{holderName || '—'}</span></div>
-                  <div className="vd-cell"><span className="vd-label">Phone</span><span className="vd-value">{sale.phone || '—'}</span></div>
+                  <div className="vd-cell"><span className="vd-label">Phone</span><span className="vd-value">{holderPhone || '—'}</span></div>
                   <div className="vd-cell"><span className="vd-label">MAC</span><span className="vd-value vd-mono">{redemptionMac || '—'}</span></div>
                   <div className="vd-cell"><span className="vd-label">Redeemed on</span><span className="vd-value">{fmtDate(redemptionAt)}</span></div>
                   <div className="vd-cell"><span className="vd-label">Traffic</span><span className="vd-value">{trafficUsed ? `${trafficUsed}${trafficTotal ? ' / ' + trafficTotal : ''}` : '—'}</span></div>

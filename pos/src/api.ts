@@ -167,12 +167,60 @@ export interface CompanyProfile {
   quote_prefix: string | null;
   receipt_footer: string | null;
   terms_text: string | null;
+  logo_url?: string | null;
+  kds_enabled?: boolean;
+  table_service_enabled?: boolean;
+}
+
+export interface PosThemeTokens {
+  id?: number;
+  name?: string;
+  primary: string;
+  secondary: string;
+  accent: string;
+  bg: string;
+  text: string;
+}
+
+export interface ThemeResponse {
+  theme: PosThemeTokens;
+  css: Record<string, string>;
+  cssBlock: string;
+}
+
+export interface CatalogResponse {
+  company: CompanyProfile & { id?: string; invoice_template_id?: number; pos_theme_id?: number };
+  templates: Array<{
+    id: number;
+    name: string;
+    description: string;
+    layout: string;
+    accentColor: string;
+    showLogo: boolean;
+  }>;
+  themes: PosThemeTokens[];
+  currencies: Array<{ code: string; name: string; symbol: string }>;
+  documentTypes: Array<{ type: string; label: string; prefix: string; ar: boolean; credit: boolean }>;
+  modules: { kds: boolean; tables: boolean };
 }
 
 export const api = {
   tillOperators: () => req<TillOperator[]>('/auth/operators'),
 
   company: () => req<CompanyProfile>('/company'),
+
+  /** Active palette + the derived CSS variables every surface consumes. */
+  theme: () => req<ThemeResponse>('/theme'),
+  setTheme: (themeId: number) =>
+    req<ThemeResponse>('/theme', { method: 'PATCH', body: JSON.stringify({ themeId }) }),
+
+  /** Templates, themes, document types and module toggles in one read. */
+  catalog: () => req<CatalogResponse>('/catalog'),
+  setModules: (patch: { kds?: boolean; tables?: boolean }) =>
+    req<{ kds_enabled: boolean; table_service_enabled: boolean }>('/company/modules', {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
 
   loginPin: async (userId: string, pin: string) =>
     req<{ token: string; user: StaffUser }>('/auth/pin', {

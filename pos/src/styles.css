@@ -24,26 +24,22 @@
 }
 
 :root {
-  --ink-900: #050e24;
-  --navy-800: #272c5e;
-  --navy-700: #122b70;
-  --violet: #36116a;
-  --line-soft: #e5e5f5;
-  --muted: #6d6786;
-  --ok: #1c7a37;
-  --warn: #a05e03;
+  --ink-900: #0f172a;
+  --navy-800: #0f172a;
+  --navy-700: #065f46;
+  --violet: #059669;
+  --line-soft: #dbe4f0;
+  --muted: #64748b;
+  --ok: #059669;
+  --warn: #d97706;
   --danger: #b3261e;
   --grad-brand: linear-gradient(
     100deg,
-    #14002e 0%,
-    #170133 7%,
-    #200644 17%,
-    #300e5f 28%,
-    #36116a 32%,
-    #4a1064 43%,
-    #640e5d 61%,
-    #740e58 77%,
-    #7a0e57 90%
+    #064e3b 0%,
+    #047857 32%,
+    #059669 62%,
+    #b45309 86%,
+    #d97706 100%
   );
 }
 
@@ -507,3 +503,73 @@ input:focus, select:focus, button:focus-visible {
   transition: all 0.15s ease;
 }
 .hr-pay:hover { background: var(--violet); color: #fff; box-shadow: 0 3px 12px rgba(124, 58, 237, 0.3); }
+
+/* -- Live settlement telemetry --------------------------- */
+.live-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0.32rem 0.7rem;
+  border-radius: 999px;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  background: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.72);
+  transition: background 0.2s ease, color 0.2s ease;
+}
+.live-badge.on { color: #d1fae5; background: rgba(5, 150, 105, 0.3); }
+.live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #94a3b8;
+  flex: none;
+}
+.live-badge.on .live-dot {
+  background: #34d399;
+  animation: live-pulse 2s ease-out infinite;
+}
+@keyframes live-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.65); }
+  70% { box-shadow: 0 0 0 7px rgba(52, 211, 153, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0); }
+}
+
+.product-card.stock-moved {
+  animation: stock-flash 0.9s ease both;
+  border: 1px solid rgba(5, 150, 105, 0.45);
+}
+@keyframes stock-flash {
+  0% { background: rgba(5, 150, 105, 0.18); transform: scale(0.985); }
+  100% { background: #fff; transform: none; }
+}
+.p-stock.decrement { color: #b91c1c !important; font-weight: 700; }
+.stock-delta {
+  display: inline-block;
+  margin-left: 5px;
+  font-style: normal;
+  font-weight: 800;
+  color: #b91c1c;
+  animation: delta-rise 1.8s ease forwards;
+}
+@keyframes delta-rise {
+  0% { opacity: 0; transform: translateY(5px); }
+  18% { opacity: 1; transform: none; }
+  75% { opacity: 1; }
+  100% { opacity: 0.35; }
+}
+
+/* Low-stock rows and labels breathe instead of shouting. */
+.product-card .p-stock.low,
+.stock-low {
+  animation: low-pulse 2.6s ease-in-out infinite;
+}
+@keyframes low-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+.stock-table tr.stock-decrement td {
+  background: rgba(5, 150, 105, 0.08);
+  transition: background 0.3s ease;
+}

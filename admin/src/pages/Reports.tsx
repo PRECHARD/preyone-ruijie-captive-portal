@@ -458,7 +458,7 @@ export default function Reports({ onNavigate, canPeakHours }: Props = {}) {
               <span className="glass-stat__value glass-stat__value--gold">
                 ${Number(monthEnd?.totalRevenue || 0).toFixed(2)}
               </span>
-              <span className="glass-stat__meta">{monthEnd?.period?.label || 'Previous month'}</span>
+              <span className="glass-stat__meta">{monthEnd?.period?.label || 'Previous cycle'}</span>
             </div>
             <div className="glass-stat">
               <span className="glass-stat__label">Sales Count</span>
@@ -491,9 +491,9 @@ export default function Reports({ onNavigate, canPeakHours }: Props = {}) {
             </div>
             <div className="glass-panel__body">
               <p style={{ margin: '0 0 14px', fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.7 }}>
-                The auto-email covers the previous calendar month and attaches the same ledger these
-                buttons download. Columns: Timestamp · Voucher Code · Package Tier · Amount · Payment Rail ·
-                Staff / Sold By · Status.
+                The auto-email covers the trading cycle that closed on the 3rd (3rd of the previous month
+                to the 3rd of this month) and attaches the same ledger these buttons download. Columns:
+                Timestamp · Voucher Code · Package Tier · Amount · Payment Rail · Staff / Sold By · Status.
               </p>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                 <button

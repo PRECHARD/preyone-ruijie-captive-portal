@@ -50,8 +50,9 @@ ALTER TABLE companies ADD COLUMN IF NOT EXISTS table_service_enabled  BOOLEAN NO
 
 -- Free-form settings blobs for the Global Settings Hub tabs (POS hardware
 -- layout, invoicing/tax defaults). JSONB keeps forward-compatible extras
--- without a migration per toggle.
-ALTER TABLE companies ADD COLUMN IF NOT EXISTS pos_settings      JSONB NOT NULL DEFAULT '{}'::jsonb;
+-- without a migration per toggle. Both columns are declared in
+-- v3_master_ecosystem.sql; the guard keeps this file safe to re-run.
+ALTER TABLE companies ADD COLUMN IF NOT EXISTS pos_hardware      JSONB NOT NULL DEFAULT '{}'::jsonb;
 ALTER TABLE companies ADD COLUMN IF NOT EXISTS invoice_settings  JSONB NOT NULL DEFAULT '{}'::jsonb;
 
 UPDATE companies SET kds_enabled = TRUE
