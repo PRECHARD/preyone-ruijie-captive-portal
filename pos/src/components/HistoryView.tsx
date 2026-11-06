@@ -32,8 +32,10 @@ const balanceOf = (d: PosDocument): number =>
 export default function HistoryView({ notify, onApiError }: HistoryViewProps) {
   const [docs, setDocs] = useState<PosDocument[]>([]);
   const [filter, setFilter] = useState<Filter>('');
+  const [search, setSearch] = useState('');
   const [open, setOpen] = useState<PosDocument | null>(null);
   const [payFor, setPayFor] = useState<PosDocument | null>(null);
+  const [convertingId, setConvertingId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(
@@ -91,8 +93,34 @@ export default function HistoryView({ notify, onApiError }: HistoryViewProps) {
           hour: '2-digit', minute: '2-digit',
         });
 
+  const q = search.trim().toLowerCase();
+  const visible = q
+    ? docs.filter(
+        (d) =>
+          d.doc_number.toLowerCase().includes(q) ||
+          (d.customer_name || '').toLowerCase().includes(q) ||
+          (d.cashier_name || '').toLowerCase().includes(q) ||
+          d.doc_type.toLowerCase().includes(q) ||
+          d.status.toLowerCase().includes(q)
+      )
+    : docs;
+
+  const convert = async (d: PosDocument) => {
+    setConvertingId(d.id);
+    try {
+      const updated = await api.convertToInvoice(d.id);
+      notify(`${d.doc_number} converted to ${updated.doc_number}`, 'ok');
+      await load();
+    } catch (e) {
+      if (!onApiError(e)) notify(e instanceof Error ? e.message : 'Conversion failed', 'error');
+    } finally {
+      setConvertingId(null);
+    }
+  };
+
   const emptyText =
-    filter === 'invoice' ? 'No invoices yet.'
+    q ? 'No documents match your search.'
+    : filter === 'invoice' ? 'No invoices yet.'
     : filter === 'quotation' ? 'No quotations yet.'
     : filter === 'sale' ? 'No sales yet.'
     : 'No documents yet.';
@@ -102,6 +130,12 @@ export default function HistoryView({ notify, onApiError }: HistoryViewProps) {
       <div className="history-head">
         <span className="history-title">SALES &amp; DOCUMENTS</span>
         <div className="history-filters">
+          <input
+            className="hist-search"
+            placeholder="Search number or customer…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
           {FILTERS.map((f) => (
             <button
               key={f.key}
@@ -117,13 +151,14 @@ export default function HistoryView({ notify, onApiError }: HistoryViewProps) {
 
       {loading ? (
         <div className="empty-note">Loading…</div>
-      ) : docs.length === 0 ? (
+      ) : visible.length === 0 ? (
         <div className="empty-note">{emptyText}</div>
       ) : (
         <div className="history-list">
-          {docs.map((d) => {
+          {visible.map((d) => {
             const due = balanceOf(d);
             const payable = due > 0 && d.status !== 'void';
+            const convertible = (d.doc_type === 'quotation' || d.doc_type === 'sale') && d.status !== 'void';
             return (
               <div className="history-item" key={d.id}>
                 <button className="history-row" onClick={() => openDoc(d)}>
@@ -132,22 +167,34 @@ export default function HistoryView({ notify, onApiError }: HistoryViewProps) {
                     {d.doc_type !== 'sale' && (
                       <span className={`hr-tag ${d.doc_type}`}>{d.doc_type}</span>
                     )}
+                    <span className={`hr-status ${d.status}`}>{d.status}</span>
                     <span className="hr-amt">{money(d.total)}</span>
                     <span className="hr-arrow">›</span>
                   </div>
                   <div className="hr-sub">
-                    {d.status}
-                    {payable ? ` • due ${money(due)}` : ''}
-                    {' • '}{fmtDate(d.created_at)}
+                    {payable ? `due ${money(due)} • ` : ''}
+                    {fmtDate(d.created_at)}
                     {d.cashier_name ? ` • Served by: ${d.cashier_name}` : ''}
                     {d.customer_name ? ` • ${d.customer_name}` : ''}
                   </div>
                 </button>
-                {payable && (
-                  <button className="hr-pay" onClick={() => setPayFor(d)}>
-                    Take payment
-                  </button>
-                )}
+                <div className="hr-actions">
+                  {convertible && (
+                    <button
+                      className="hr-convert"
+                      disabled={convertingId === d.id}
+                      onClick={() => convert(d)}
+                      title="Convert this quotation or sale into an invoice"
+                    >
+                      {convertingId === d.id ? '…' : '→ Invoice'}
+                    </button>
+                  )}
+                  {payable && (
+                    <button className="hr-pay" onClick={() => setPayFor(d)}>
+                      Take payment
+                    </button>
+                  )}
+                </div>
               </div>
             );
           })}

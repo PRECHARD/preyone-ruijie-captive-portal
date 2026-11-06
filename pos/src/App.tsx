@@ -10,6 +10,8 @@ import SparesSearch from './components/SparesSearch';
 import KdsBoard from './components/KdsBoard';
 import TableGrid from './components/TableGrid';
 import RepairIntake from './components/RepairIntake';
+import SettingsView from './components/SettingsView';
+import CloudSyncIndicator from './components/CloudSyncIndicator';
 import { applyPosTheme } from './theme';
 import { useRealtimeSales } from './realtime';
 
@@ -18,13 +20,17 @@ export interface Toast {
   kind: 'ok' | 'error';
 }
 
+type View = 'home' | 'sell' | 'stock' | 'history' | 'spares' | 'kds' | 'tables' | 'repairs' | 'settings';
+
 export default function App() {
   const [user, setUser] = useState<StaffUser | null>(auth.user());
   const [shift, setShift] = useState<Shift | null>(null);
   const [shiftTotals, setShiftTotals] = useState<MethodTotal[]>([]);
   const [shiftLoading, setShiftLoading] = useState(true);
   const [showX, setShowX] = useState(false);
-  const [view, setView] = useState<'sell' | 'stock' | 'history' | 'spares' | 'kds' | 'tables' | 'repairs'>('sell');
+  const [view, setView] = useState<View>('home');
+  const [homeTab, setHomeTab] = useState<'register' | 'documents'>('register');
+  const [switching, setSwitching] = useState(false);
   const [toast, setToast] = useState<Toast | null>(null);
   // Null until the catalog loads, so a pre-migration backend never hides the
   // KDS/floor-plan buttons from a merchant who can already use them.
@@ -101,6 +107,7 @@ export default function App() {
     setUser(null);
     setShift(null);
     setShowX(false);
+    setView('home');
   };
 
   const sessionExpired = useCallback(
@@ -136,6 +143,7 @@ export default function App() {
               {live.sale ? 'LEDGER LIVE' : live.connected ? 'LIVE' : 'OFFLINE'}
             </span>
             <div className="spacer" />
+            <button className={`chip ${view === 'home' ? 'ok' : ''}`} onClick={() => setView('home')}>HOME</button>
             {user.role !== 'Cashier' && (
               <>
                 <button className={`chip ${view === 'sell' ? 'ok' : ''}`} onClick={() => setView('sell')}>SELL</button>
@@ -150,17 +158,25 @@ export default function App() {
                 <button className={`chip ${view === 'repairs' ? 'ok' : ''}`} onClick={() => setView('repairs')}>REPAIRS</button>
               </>
             )}
-            <button className={`chip ${view === 'history' ? 'ok' : ''}`} onClick={() => setView('history')}>HISTORY</button>
+            <button className={`chip ${view === 'settings' ? 'ok' : ''}`} onClick={() => setView('settings')}>
+              SETTINGS
+            </button>
             {shift && (
               <button className="chip ok" onClick={() => setShowX(true)}>
                 SHIFT OPEN · ${shiftValue.toFixed(2)}
               </button>
             )}
+            <CloudSyncIndicator />
             <span className="chip">{user.fullName}</span>
+            <button className="ghost-btn" onClick={() => setSwitching(true)} title="Hand the till to another cashier">
+              Switch
+            </button>
             <button className="ghost-btn" onClick={logout}>Sign out</button>
           </header>
 
-          {shiftLoading ? (
+          {view === 'settings' ? (
+            <SettingsView user={user} notify={notify} onApiError={sessionExpired} />
+          ) : shiftLoading ? (
             <div className="empty-note">Checking till…</div>
           ) : !shift ? (
             <ShiftGate
@@ -175,25 +191,75 @@ export default function App() {
             />
           ) : view === 'stock' ? (
             <StockManager liveStock={live.stock} stockTick={live.tick} />
-           ) : view === 'spares' ? (
-             <SparesSearch />
-           ) : view === 'kds' ? (
-             <KdsBoard notify={notify} />
-           ) : view === 'tables' ? (
-             <TableGrid notify={notify} />
-           ) : view === 'repairs' ? (
-             <RepairIntake notify={notify} />
+          ) : view === 'spares' ? (
+            <SparesSearch />
+          ) : view === 'kds' ? (
+            <KdsBoard notify={notify} />
+          ) : view === 'tables' ? (
+            <TableGrid notify={notify} />
+          ) : view === 'repairs' ? (
+            <RepairIntake notify={notify} />
           ) : view === 'history' ? (
             <HistoryView notify={notify} onApiError={sessionExpired} />
-          ) : (
+          ) : view === 'sell' ? (
             <Terminal
               user={user}
               notify={notify}
               onApiError={sessionExpired}
               onShiftChanged={refreshShift}
+              shiftId={shift.id}
               liveStock={live.stock}
               stockTick={live.tick}
             />
+          ) : (
+            <div className="home-pane">
+              <div className="home-tabs">
+                <button
+                  className={`hist-tab${homeTab === 'register' ? ' on' : ''}`}
+                  onClick={() => setHomeTab('register')}
+                >
+                  Register
+                </button>
+                <button
+                  className={`hist-tab${homeTab === 'documents' ? ' on' : ''}`}
+                  onClick={() => setHomeTab('documents')}
+                >
+                  Invoices &amp; Quotes
+                </button>
+              </div>
+              <div className="home-body">
+                {homeTab === 'register' ? (
+                  <Terminal
+                    user={user}
+                    notify={notify}
+                    onApiError={sessionExpired}
+                    onShiftChanged={refreshShift}
+                    shiftId={shift.id}
+                    liveStock={live.stock}
+                    stockTick={live.tick}
+                  />
+                ) : (
+                  <HistoryView notify={notify} onApiError={sessionExpired} />
+                )}
+              </div>
+            </div>
+          )}
+
+          {switching && (
+            <div className="modal-backdrop" onClick={() => setSwitching(false)}>
+              <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+                <h3 className="modal-title">Switch cashier</h3>
+                <p className="hint">Select the next operator and enter their PIN to hand over the till.</p>
+                <PinLogin
+                  onLoggedIn={(t, u) => {
+                    handleLoggedIn(t, u);
+                    setSwitching(false);
+                    notify(`Now serving as ${u.fullName}`);
+                  }}
+                />
+                <button className="secondary-btn" onClick={() => setSwitching(false)}>Cancel</button>
+              </div>
+            </div>
           )}
         </div>
       )}

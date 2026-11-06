@@ -187,4 +187,4 @@ ALTER TABLE pos_document_items ADD COLUMN IF NOT EXISTS serial_number TEXT;
 
 ALTER TABLE pos_document_payments DROP CONSTRAINT IF EXISTS pos_document_payments_method_check;
 ALTER TABLE pos_document_payments ADD CONSTRAINT pos_document_payments_method_check
-  CHECK (method IN ('cash', 'card', 'ecocash', 'bank', 'pesepay', 'other', 'on_account'));
+  CHECK (method IN ('cash', 'card', 'ecocash', 'innbucks', 'paygo', 'omari', 'bank', 'pesepay', 'other', 'on_account'));

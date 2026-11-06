@@ -27,6 +27,7 @@ const INIT = { deviceId: '', deviceType: 'android', name: '', branch: '', appVer
 export default function PosDevices() {
   const { user } = useAuth();
   const isCEO = user?.role === 'CEO';
+  const isMgmt = user?.role === 'CEO' || user?.role === 'Manager';
 
   const [rows, setRows] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -35,6 +36,9 @@ export default function PosDevices() {
   const [msg, setMsg] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(INIT);
+  const [editRow, setEditRow] = useState<any>(null);
+  const [editForm, setEditForm] = useState<any>(null);
+  const [editSaving, setEditSaving] = useState(false);
 
   const fetch = useCallback(async () => {
     try {
@@ -54,6 +58,29 @@ export default function PosDevices() {
   const remove = async (id: string) => {
     if (!confirm('Remove this device permanently?')) return;
     try { await api.del(`/devices/${id}`); await fetch(); } catch (e: any) { setMsg(e.message); }
+  };
+
+  const openEdit = (r: any) => {
+    setEditRow(r);
+    setEditForm({
+      name: r.name || '', branch: r.branch || '', appVersion: r.app_version || '',
+      serverUrl: r.server_url || '', notes: r.notes || '',
+    });
+  };
+
+  const saveEdit = async () => {
+    if (!editRow) return;
+    setEditSaving(true);
+    try {
+      await api.put(`/devices/${editRow.id}`, {
+        name: editForm.name, branch: editForm.branch || undefined,
+        appVersion: editForm.appVersion || undefined, serverUrl: editForm.serverUrl || undefined,
+        notes: editForm.notes || undefined,
+      });
+      setEditRow(null);
+      await fetch();
+    } catch (e: any) { setMsg(e.message); }
+    setEditSaving(false);
   };
 
   const registerDevice = async () => {
@@ -114,8 +141,9 @@ export default function PosDevices() {
               { key: 'app_version', label: 'Version', width: '90px', render: (r: any) => r.app_version || '—' },
               { key: 'last_seen', label: 'Last Seen', width: '110px', render: (r: any) => timeAgo(r.last_seen) },
               { key: 'status', label: 'Status', width: '110px', render: (r: any) => <span style={{ color: STATUS_COLOR[r.status] || 'var(--text)' }}>{r.status.toUpperCase()}</span> },
-              { key: 'actions', label: '', width: '160px', render: (r: any) => (
+              { key: 'actions', label: '', width: '200px', render: (r: any) => (
                 <div style={{ display: 'flex', gap: 4 }}>
+                  {isMgmt && <button className="btn-sm" onClick={() => openEdit(r)}>Edit</button>}
                   {r.status !== 'suspended'
                     ? <button className="btn-sm" disabled={busy === r.id} onClick={() => act(r.id, 'suspend')}>Suspend</button>
                     : <button className="btn-sm" disabled={busy === r.id} onClick={() => act(r.id, 'activate')}>Activate</button>}
@@ -162,6 +190,36 @@ export default function PosDevices() {
           </div>
           <button className="auth-btn" onClick={registerDevice}>Register Device</button>
         </div>
+      </Modal>
+
+      <Modal open={!!editRow} onClose={() => { if (!editSaving) setEditRow(null); }} title={editRow ? `Edit Device — ${editRow.device_id}` : 'Edit Device'}>
+        {editRow && editForm && (
+          <div className="auth-form">
+            <div className="auth-field">
+              <label>Device / Location Name</label>
+              <input value={editForm.name} onChange={e => setEditForm({ ...editForm, name: e.target.value })} placeholder="e.g. Till Tablet (Hall)" />
+            </div>
+            <div className="auth-field">
+              <label>Branch</label>
+              <input value={editForm.branch} onChange={e => setEditForm({ ...editForm, branch: e.target.value })} placeholder="e.g. Hall, Head Office" />
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+              <div className="auth-field">
+                <label>App Version</label>
+                <input value={editForm.appVersion} onChange={e => setEditForm({ ...editForm, appVersion: e.target.value })} placeholder="e.g. 2.4.3" />
+              </div>
+              <div className="auth-field">
+                <label>Server URL</label>
+                <input value={editForm.serverUrl} onChange={e => setEditForm({ ...editForm, serverUrl: e.target.value })} placeholder="https://…:3000" />
+              </div>
+            </div>
+            <div className="auth-field">
+              <label>Notes</label>
+              <textarea rows={2} value={editForm.notes} onChange={e => setEditForm({ ...editForm, notes: e.target.value })} style={{ width: '100%', background: 'var(--card)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 8, padding: 10, fontFamily: 'inherit' }} placeholder="Optional notes" />
+            </div>
+            <button className="auth-btn" onClick={saveEdit} disabled={editSaving}>{editSaving ? 'Saving…' : 'Save Changes'}</button>
+          </div>
+        )}
       </Modal>
     </div>
   );

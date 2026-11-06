@@ -35,6 +35,20 @@ function readFingerprint(req: Request): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
+export interface DeviceAuth {
+  device_id: string;
+  company_id: string | null;
+  shop_id: number | null;
+}
+
+declare global {
+  namespace Express {
+    interface Request {
+      device?: DeviceAuth;
+    }
+  }
+}
+
 /**
  * Device hardware auth middleware.
  *

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, Fragment } from 'react';
+﻿import { useState, useEffect, useCallback, useRef, Fragment } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../api/client';
 import { showToast } from '../utils/toast';
@@ -112,7 +112,7 @@ interface ClockStatus {
 const APPROVAL_TIERS = ['PreMax', 'PreUltra', 'PreExecutive'];
 
 function fmtDur(m: number): string {
-  if (!m) return '—';
+  if (!m) return 'â€”';
   if (m >= 43200) return Math.round(m / 43200) + 'mo';
   if (m >= 1440) return Math.round(m / 1440) + 'd';
   if (m >= 60) return Math.round(m / 60) + 'h';
@@ -123,14 +123,14 @@ function fmtDur(m: number): string {
  * Ledger timestamps (created / activated / last seen / first redeemed).
  *
  * `vouchers.expires_at` is NULL for "never expires", and `expires_at` columns
- * used to be handed to `new Date(null)`, which is epoch 0 — that is where the
- * "1/1/1970" rows in the detail sheet came from. Null/garbage now renders `—`
+ * used to be handed to `new Date(null)`, which is epoch 0 â€” that is where the
+ * "1/1/1970" rows in the detail sheet came from. Null/garbage now renders `â€”`
  * so an absent stored date is never invented here (the customer-facing share
  * text is the one place a date is derived; see utils/voucherExpiry.ts).
  */
 function fmtDate(d?: string | number | null): string {
   const parsed = parseVoucherDate(d);
-  return parsed ? parsed.toLocaleString() : '—';
+  return parsed ? parsed.toLocaleString() : 'â€”';
 }
 
 const PAYMENT_METHODS = ['Cash', 'EcoCash', 'OneMoney', 'Omari', 'InnBucks'];
@@ -152,7 +152,7 @@ export default function Vouchers() {
   const isMgmt = role === 'CEO' || role === 'Manager';
   const needsClockIn = role !== 'CEO';
   // admin.ts puts company.admin on renew/reset-mac/disable/delete. It is seeded
-  // for CEO, Manager, SUPER_ADMIN and COMPANY_ADMIN — never Staff — so without
+  // for CEO, Manager, SUPER_ADMIN and COMPANY_ADMIN â€” never Staff â€” so without
   // this gate Staff would see the buttons and only ever get a 403 back.
   const canManageVoucher =
     user?.permissions?.includes('company.admin') ||
@@ -193,10 +193,10 @@ export default function Vouchers() {
   const [detailVoucher, setDetailVoucher] = useState<Voucher | null>(null);
   const [releasingMac, setReleasingMac] = useState(false);
 
-  // ── Renew / Resell ──
+  // â”€â”€ Renew / Resell â”€â”€
   // Re-arms an expired or spent voucher under the same PIN. The backend books a
   // sale_type='renewal' row on every call, so the revenue always lands in the
-  // reports — the price field therefore defaults from the voucher but is never
+  // reports â€” the price field therefore defaults from the voucher but is never
   // blanked out to a zero.
   const [renewTarget, setRenewTarget] = useState<Voucher | null>(null);
   const [renewDuration, setRenewDuration] = useState(60);
@@ -219,7 +219,7 @@ export default function Vouchers() {
   const [deleteTarget, setDeleteTarget] = useState<Voucher | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
 
-  // ── High-stakes (>= $4.99) customer capture + inline holder editing ──
+  // â”€â”€ High-stakes (>= $4.99) customer capture + inline holder editing â”€â”€
   // The modal intercepts generation so no >=$4.99 voucher can be created
   // without a customer name; Edit Holder patches holder_name/holder_phone via
   // PATCH /vouchers/:id (backend allowlists those two fields only).
@@ -233,6 +233,7 @@ export default function Vouchers() {
   const [editName, setEditName] = useState('');
   const [editPhone, setEditPhone] = useState('');
   const [editSaving, setEditSaving] = useState(false);
+  const [voucherActionBusy, setVoucherActionBusy] = useState<string | null>(null);
   const [editError, setEditError] = useState('');
 
   const loadClockStatus = useCallback(() => {
@@ -249,10 +250,14 @@ export default function Vouchers() {
 
   useEffect(() => {
     api.get<Package[]>('/packages').then(setPackages).catch(() => {});
+    api.get<{ vouchers: Voucher[] }>('/vouchers').then(data => setVouchers(data.vouchers)).catch(() => {});
+    // Staff: opening Vouchers means they've seen their approved requests â€”
+    // clears the persistent "new approvals" badge (POST /notifications/acknowledge).
+    api.post('/notifications/acknowledge').catch(() => {});
     if (isMgmt) {
       api.get<ApprovalRequest[]>('/vouchers/pending-approvals').then(setPendingApprovals).catch(() => {});
     }
-    // Initial myApprovals fetch — record already-approved IDs so they don't trigger
+    // Initial myApprovals fetch â€” record already-approved IDs so they don't trigger
     api.get<ApprovalRequest[]>('/vouchers/my-approvals').then(approvals => {
       setMyApprovals(approvals);
       for (const a of approvals) {
@@ -262,11 +267,11 @@ export default function Vouchers() {
   }, [isMgmt]);
 
   // The list is the operator's live view of the network: a client redeems, a
-  // handset binds, an expiry passes — none of that waits for someone to refresh
+  // handset binds, an expiry passes â€” none of that waits for someone to refresh
   // this screen. So it re-reads itself:
   //   1. Every page is walked. The endpoint defaults to 25 rows and this UI has
   //      no pager, so a single call silently hid everything older than the
-  //      newest page — which is why already-bound codes looked like they had
+  //      newest page â€” which is why already-bound codes looked like they had
   //      vanished from the list.
   //   2. On an interval, merging into any open detail sheet so the drawer never
   //      contradicts the row behind it.
@@ -403,7 +408,7 @@ const codes = a.voucher_data?.codes;
     await submitCreate('', '');
   };
 
-  // Generation half of handleCreate — runs only after the holder gate (or for
+  // Generation half of handleCreate â€” runs only after the holder gate (or for
   // sub-threshold sales, which skip the modal entirely).
   const submitCreate = async (hName: string, hPhone: string): Promise<boolean> => {
     if (!selectedPkg) return false;
@@ -464,7 +469,7 @@ const codes = a.voucher_data?.codes;
     }
   };
 
-  // Inline holder edit — PATCH allowlists holderName/holderPhone server-side,
+  // Inline holder edit â€” PATCH allowlists holderName/holderPhone server-side,
   // so PIN, price and expiry can never be touched from here.
   const saveEditHolder = async () => {
     if (!editHolderVoucher) return;
@@ -486,6 +491,83 @@ const codes = a.voucher_data?.codes;
     }
   };
 
+  // â”€â”€ Disable / re-enable + extend expiry (POST /vouchers/:id/â€¦) â”€â”€
+  const reloadVouchers = () => {
+    api.get<{ vouchers: Voucher[] }>('/vouchers').then(data => setVouchers(data.vouchers)).catch(() => {});
+  };
+
+  const handleToggleDisable = async (v: Voucher) => {
+    const disable = v.status !== 'Disabled';
+    const ok = window.confirm(
+      disable
+        ? `Disable voucher ${lc(v.code)}? It can no longer be redeemed.`
+        : `Re-enable voucher ${lc(v.code)}?`
+    );
+    if (!ok) return;
+    setVoucherActionBusy(v.id);
+    try {
+      await api.post(`/vouchers/${v.id}/disable`, { disabled: disable });
+      showToast({
+        title: disable ? 'Voucher Disabled' : 'Voucher Enabled',
+        message: `"${lc(v.code)}" is now ${disable ? 'disabled' : 'active'}`,
+        type: 'success',
+      });
+      reloadVouchers();
+      setDetailVoucher(prev => (prev && prev.id === v.id ? { ...prev, status: disable ? 'Disabled' : undefined } : prev));
+    } catch (err: any) {
+      showToast({ title: 'Failed', message: err.message || 'Could not update voucher', type: 'error' });
+    } finally {
+      setVoucherActionBusy(null);
+    }
+  };
+
+  const handleExtend = async (v: Voucher) => {
+    const input = window.prompt(
+      'Extend validity by how many minutes?\n(e.g. 60 = 1 hour, 1440 = 1 day, 10080 = 1 week)',
+      '1440'
+    );
+    if (!input) return;
+    const minutes = parseInt(input, 10);
+    if (!Number.isFinite(minutes) || minutes <= 0) {
+      showToast({ title: 'Invalid', message: 'Minutes must be a positive whole number', type: 'error' });
+      return;
+    }
+    setVoucherActionBusy(v.id);
+    try {
+      const data = await api.post<{ expires_at: string | null }>(`/vouchers/${v.id}/extend`, { minutes });
+      showToast({
+        title: 'Voucher Extended',
+        message: `"${lc(v.code)}" +${minutes} min (new expiry: ${data.expires_at ? fmtDate(data.expires_at) : 'never'})`,
+        type: 'success',
+      });
+      reloadVouchers();
+      setDetailVoucher(prev => (prev && prev.id === v.id ? { ...prev, expires_at: data.expires_at ?? prev.expires_at } : prev));
+    } catch (err: any) {
+      showToast({ title: 'Failed', message: err.message || 'Could not extend voucher', type: 'error' });
+    } finally {
+      setVoucherActionBusy(null);
+    }
+  };
+
+  // â”€â”€ Archive (soft-delete) â€” DELETE /vouchers/:id (management only) â”€â”€
+  const handleArchive = async (v: Voucher) => {
+    const ok = window.confirm(
+      `Archive voucher ${lc(v.code)}? It will be soft-deleted (disabled + hidden from lists). Redemption history is preserved.`
+    );
+    if (!ok) return;
+    setVoucherActionBusy(v.id);
+    try {
+      await api.del(`/vouchers/${v.id}`);
+      showToast({ title: 'Voucher Archived', message: `"${lc(v.code)}" archived`, type: 'success' });
+      reloadVouchers();
+      setDetailVoucher(null);
+    } catch (err: any) {
+      showToast({ title: 'Failed', message: err.message || 'Could not archive voucher', type: 'error' });
+    } finally {
+      setVoucherActionBusy(null);
+    }
+  };
+
   const handleApprovalRequest = async () => {
     if (!selectedPkg) return;
     try {
@@ -498,7 +580,7 @@ const codes = a.voucher_data?.codes;
         paymentMethod: vPayMethod,
         paymentReference: IS_MOBILE_MONEY(vPayMethod) ? vPayRef.trim() : undefined,
       });
-      setVStatus({ type: 'success', msg: '✓ ' + data.message });
+      setVStatus({ type: 'success', msg: 'âœ“ ' + data.message });
       api.get<ApprovalRequest[]>('/vouchers/my-approvals').then(setMyApprovals).catch(() => {});
     } catch (err: any) {
       setVStatus({ type: 'error', msg: err.message || 'Failed to submit request' });
@@ -563,7 +645,7 @@ const codes = a.voucher_data?.codes;
         paymentMethod: bulkPayMethod,
         paymentReference: IS_MOBILE_MONEY(bulkPayMethod) ? bulkPayRef.trim() : undefined,
       });
-      setBulkStatus({ type: 'success', msg: '✓ ' + data.message });
+      setBulkStatus({ type: 'success', msg: 'âœ“ ' + data.message });
       api.get<ApprovalRequest[]>('/vouchers/my-approvals').then(setMyApprovals).catch(() => {});
     } catch (err: any) {
       setBulkStatus({ type: 'error', msg: err.message || 'Failed' });
@@ -704,7 +786,7 @@ const codes = a.voucher_data?.codes;
       });
       showToast({
         title: 'Voucher renewed',
-        message: data?.message || `${lc(renewTarget.code)} resold for $${price.toFixed(2)} — sale recorded`,
+        message: data?.message || `${lc(renewTarget.code)} resold for $${price.toFixed(2)} â€” sale recorded`,
         type: 'success',
       });
       setRenewTarget(null);
@@ -900,7 +982,7 @@ const codes = a.voucher_data?.codes;
     '',
     `Code: ${lc(v.code)}`,
     `Package: ${v.package_tier || 'Standard'}`,
-    `Price: ${v.price_amount ? '$' + parseFloat(v.price_amount).toFixed(2) : '—'}`,
+    `Price: ${v.price_amount ? '$' + parseFloat(v.price_amount).toFixed(2) : 'â€”'}`,
     `Duration: ${fmtDur(v.duration_min)}`,
     `Speed: ${v.bandwidth_mbps_up}/${v.bandwidth_mbps_down} Mbps`,
     `Data: ${v.is_uncapped ? 'Unlimited' : (v.data_limit_gb ?? 'Unlimited') + ' GB'}`,
@@ -916,7 +998,7 @@ const codes = a.voucher_data?.codes;
     const code = lc(data.code);
     if (!code) return;
     setSharingWa(true);
-    setVStatus({ type: 'success', msg: 'Preparing the voucher image…' });
+    setVStatus({ type: 'success', msg: 'Preparing the voucher imageâ€¦' });
     try {
       // Renders the same canvas card as Download/Print and hands WhatsApp a real
       // JPEG File via the native share sheet; desktop falls back to download +
@@ -985,7 +1067,7 @@ const codes = a.voucher_data?.codes;
       {/* Clock-in / Clock-out Banner */}
       {needsClockIn && clockStatus !== null && (
         <div className={'clock-banner ' + (isClockedIn ? 'clocked-in' : 'clocked-out')}>
-          <span className="clock-status-icon">{isClockedIn ? '✓' : '✕'}</span>
+          <span className="clock-status-icon">{isClockedIn ? 'âœ“' : 'âœ•'}</span>
           <span>
             {isClockedIn
               ? 'Clocked In' + (clockStatus?.log ? ' since ' + new Date(clockStatus.log.clock_in).toLocaleTimeString() : '')
@@ -1022,7 +1104,7 @@ const codes = a.voucher_data?.codes;
                 <div className="pkg-badges">
                   <span className="pkg-badge"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="6" cy="6" r="5" /><path d="M6 3v3l2 2" /></svg>{fmtDur(pkg.duration_min)}</span>
                   <span className="pkg-badge"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M1 4h10M1 8h10" /><rect x="1" y="2" width="10" height="8" rx="1" /></svg>{pkg.bandwidth_mbps_up}/{pkg.bandwidth_mbps_down} Mbps</span>
-                  <span className="pkg-badge"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="2" y="1" width="8" height="10" rx="1" /><path d="M2 5h8" /></svg>{pkg.is_uncapped ? 'Unlim' : (pkg.data_limit_gb ?? '—') + 'GB'}</span>
+                  <span className="pkg-badge"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="2" y="1" width="8" height="10" rx="1" /><path d="M2 5h8" /></svg>{pkg.is_uncapped ? 'Unlim' : (pkg.data_limit_gb ?? 'â€”') + 'GB'}</span>
                 </div>
               </div>
             ))}
@@ -1030,7 +1112,7 @@ const codes = a.voucher_data?.codes;
 
           <div className="voucher-code-bar">
             <div className="vcb-selected">
-              <span className="vcb-pkg-badge">{selectedPkg?.tier_name || '—'}</span>
+              <span className="vcb-pkg-badge">{selectedPkg?.tier_name || 'â€”'}</span>
             </div>
             <div className="vcb-code">
               <label>Voucher Code</label>
@@ -1139,7 +1221,7 @@ const codes = a.voucher_data?.codes;
       <div className="voucher-card-actions-bar">
             <button className="btn-action btn-action--wa" onClick={() => { void shareWhatsApp(); }} disabled={sharingWa}>
               <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
-              {sharingWa ? 'Preparing…' : 'WhatsApp'}
+              {sharingWa ? 'Preparingâ€¦' : 'WhatsApp'}
             </button>
             <button className="btn-action btn-action--copy" onClick={copyAllVoucher}>
               <svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2"><rect x="5" y="2" width="13" height="15" rx="2"/><polyline points="2 5 2 18 15 18"/></svg>
@@ -1292,7 +1374,7 @@ const codes = a.voucher_data?.codes;
                       <td style={{ color: '#fff', fontWeight: 600 }}>{a.requested_by_name}</td>
                       <td>{a.request_type}</td>
                       <td>{a.package_tier}</td>
-                      <td><span className="money money--sm">{a.price_amount ? '$' + Number(a.price_amount).toFixed(2) : '—'}</span></td>
+                      <td><span className="money money--sm">{a.price_amount ? '$' + Number(a.price_amount).toFixed(2) : 'â€”'}</span></td>
                       <td>{a.voucher_count ?? 1}</td>
                       <td style={{ fontSize: 11, color: 'var(--text-dim)' }}>{a.created_at ? new Date(a.created_at).toLocaleString() : ''}</td>
                       <td>
@@ -1342,15 +1424,15 @@ const codes = a.voucher_data?.codes;
                               {codes.length === 1 ? codes[0] : codes[0] + ' +' + (codes.length - 1) + ' more'}
                             </span>
                           ) : (
-                            <span className="code-cell">{lc(a.voucher_data?.code) || '—'}</span>
+                            <span className="code-cell">{lc(a.voucher_data?.code) || 'â€”'}</span>
                           )}
                         </td>
-                        <td>{a.package_tier || '—'}</td>
-                        <td style={{ fontSize: 11, textTransform: 'uppercase', color: 'var(--text-dim)' }}>{a.request_type || '—'}</td>
-                        <td><span className="money money--sm">{a.price_amount ? '$' + Number(a.price_amount).toFixed(2) : '—'}</span></td>
+                        <td>{a.package_tier || 'â€”'}</td>
+                        <td style={{ fontSize: 11, textTransform: 'uppercase', color: 'var(--text-dim)' }}>{a.request_type || 'â€”'}</td>
+                        <td><span className="money money--sm">{a.price_amount ? '$' + Number(a.price_amount).toFixed(2) : 'â€”'}</span></td>
                         <td><span className={'badge badge--' + (a.status === 'approved' ? 'yes' : a.status === 'rejected' ? 'no' : 'warn')}>{a.status}</span></td>
                         <td>{fmtDate(a.created_at)}</td>
-                        <td>{a.approved_by_name || '—'}</td>
+                        <td>{a.approved_by_name || 'â€”'}</td>
                       </tr>
                       {isExpanded && (
                         <tr className="expand-row">
@@ -1441,7 +1523,7 @@ const codes = a.voucher_data?.codes;
               disabled={syncingStatuses}
               title="Pull the latest usage, online state and expiry from Ruijie Cloud for online and staff-issued vouchers."
             >
-              {syncingStatuses ? 'Syncing…' : 'Sync Statuses'}
+              {syncingStatuses ? 'Syncingâ€¦' : 'Sync Statuses'}
             </button>
           )}
           <span
@@ -1450,7 +1532,7 @@ const codes = a.voucher_data?.codes;
           >
             <span className="live-dot" />
             <span className="live-pill__label">Live</span>
-            <span className="live-pill__time">{lastSyncedAt ? `synced ${lastSyncedAt.toLocaleTimeString()}` : 'syncing…'}</span>
+            <span className="live-pill__time">{lastSyncedAt ? `synced ${lastSyncedAt.toLocaleTimeString()}` : 'syncingâ€¦'}</span>
           </span>
         </div>
       </div>
@@ -1482,7 +1564,7 @@ const codes = a.voucher_data?.codes;
                       )}
                     </span>
                   </td>
-                  <td><span className="money money--sm">{v.price_amount ? '$' + parseFloat(v.price_amount).toFixed(2) : '—'}</span></td>
+                  <td><span className="money money--sm">{v.price_amount ? '$' + parseFloat(v.price_amount).toFixed(2) : 'â€”'}</span></td>
                   <td>{fmtDur(v.duration_min)}</td>
                   <td>{v.bandwidth_mbps_up}/{v.bandwidth_mbps_down} Mbps</td>
                   <td>{v.is_uncapped ? 'Unlimited' : (v.data_limit_gb ?? 'Unlimited') + ' GB'}</td>
@@ -1496,13 +1578,13 @@ const codes = a.voucher_data?.codes;
                   <td>
                     <span
                       className={`dev-chip ${bound ? 'dev-chip--live' : 'dev-chip--idle'}`}
-                      title={`${v.device_count ?? 0} of ${maxDevices ?? '—'} device slots in use`}
+                      title={`${v.device_count ?? 0} of ${maxDevices ?? 'â€”'} device slots in use`}
                     >
                       {bound && <span className="live-dot" />}
-                      {v.device_count ?? 0}/{maxDevices ?? '—'}
+                      {v.device_count ?? 0}/{maxDevices ?? 'â€”'}
                     </span>
                   </td>
-                  <td>{v.package_tier || <span className="muted">—</span>}</td>
+                  <td>{v.package_tier || <span className="muted">â€”</span>}</td>
                   <td>{fmtDate(v.created_at)}</td>
                   <td>
                     <div className="row-actions">
@@ -1525,6 +1607,22 @@ const codes = a.voucher_data?.codes;
                       >
                         Edit Holder
                       </button>
+                      <button
+                        className="btn-sm"
+                        disabled={voucherActionBusy === v.id}
+                        onClick={() => handleToggleDisable(v)}
+                        aria-label={`${v.status === 'Disabled' ? 'Enable' : 'Disable'} voucher ${lc(v.code)}`}
+                      >
+                        {voucherActionBusy === v.id ? 'â€¦' : v.status === 'Disabled' ? 'Enable' : 'Disable'}
+                      </button>
+                      <button
+                        className="btn-sm"
+                        disabled={voucherActionBusy === v.id}
+                        onClick={() => handleExtend(v)}
+                        aria-label={`Extend voucher ${lc(v.code)}`}
+                      >
+                        Extend
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -1535,7 +1633,7 @@ const codes = a.voucher_data?.codes;
         )}
       </div>
 
-      {/* ── High-stakes (>= $4.99) customer capture — gates generation ── */}
+      {/* â”€â”€ High-stakes (>= $4.99) customer capture â€” gates generation â”€â”€ */}
       {holderModal && (() => {
         const gatePrice = holderModal === 'single'
           ? parseFloat(vPrice || '0')
@@ -1548,7 +1646,7 @@ const codes = a.voucher_data?.codes;
           >
             <div className="holder-capture">
               <p className="holder-capture__lead">
-                This sale is <strong>${gatePrice.toFixed(2)}</strong>{holderModal === 'bulk' ? ' per voucher' : ''} — record the customer before the voucher{holderModal === 'bulk' ? 's are' : ' is'} generated.
+                This sale is <strong>${gatePrice.toFixed(2)}</strong>{holderModal === 'bulk' ? ' per voucher' : ''} â€” record the customer before the voucher{holderModal === 'bulk' ? 's are' : ' is'} generated.
               </p>
               <label className="holder-capture__label" htmlFor="holder-name-input">Customer Full Name / Holder Name *</label>
               <input
@@ -1578,7 +1676,7 @@ const codes = a.voucher_data?.codes;
                   onClick={submitHolderModal}
                   disabled={holderSaving || !holderName.trim()}
                 >
-                  {holderSaving ? 'Generating…' : 'Confirm & Generate'}
+                  {holderSaving ? 'Generatingâ€¦' : 'Confirm & Generate'}
                 </button>
               </div>
             </div>
@@ -1586,12 +1684,12 @@ const codes = a.voucher_data?.codes;
         );
       })()}
 
-      {/* ── Edit Holder (row action → PATCH /vouchers/:id) ── */}
+      {/* â”€â”€ Edit Holder (row action â†’ PATCH /vouchers/:id) â”€â”€ */}
       {editHolderVoucher && (
         <Modal
           open
           onClose={() => { if (!editSaving) setEditHolderVoucher(null); }}
-          title={`Edit Holder — ${lc(editHolderVoucher.code)}`}
+          title={`Edit Holder â€” ${lc(editHolderVoucher.code)}`}
         >
           <div className="holder-capture">
             <p className="holder-capture__lead">
@@ -1625,7 +1723,7 @@ const codes = a.voucher_data?.codes;
                 onClick={saveEditHolder}
                 disabled={editSaving || (!editName.trim() && !editPhone.trim())}
               >
-                {editSaving ? 'Saving…' : 'Save Holder'}
+                {editSaving ? 'Savingâ€¦' : 'Save Holder'}
               </button>
             </div>
           </div>
@@ -1667,17 +1765,17 @@ const codes = a.voucher_data?.codes;
               </div>
 
               <div className="vd-grid">
-                <div className="vd-cell"><span className="vd-label">Price</span><span className="vd-value">{v.price_amount ? '$' + parseFloat(v.price_amount).toFixed(2) : '—'}</span></div>
+                <div className="vd-cell"><span className="vd-label">Price</span><span className="vd-value">{v.price_amount ? '$' + parseFloat(v.price_amount).toFixed(2) : 'â€”'}</span></div>
                 <div className="vd-cell"><span className="vd-label">Duration</span><span className="vd-value">{fmtDur(v.duration_min)}</span></div>
                 <div className="vd-cell"><span className="vd-label">Bandwidth</span><span className="vd-value">{v.bandwidth_mbps_up}/{v.bandwidth_mbps_down} Mbps</span></div>
                 <div className="vd-cell"><span className="vd-label">Data</span><span className="vd-value">{v.is_uncapped ? 'Unlimited' : (v.data_limit_gb ?? 'Unlimited') + ' GB'}</span></div>
                 <div className="vd-cell"><span className="vd-label">Uses</span><span className="vd-value">{v.used_count}/{v.max_uses}</span></div>
-                <div className="vd-cell"><span className="vd-label">Devices</span><span className="vd-value">{(v.device_count ?? 0)}/{maxDevices ?? '—'}</span></div>
-                <div className="vd-cell"><span className="vd-label">Package</span><span className="vd-value">{v.package_tier || '—'}</span></div>
+                <div className="vd-cell"><span className="vd-label">Devices</span><span className="vd-value">{(v.device_count ?? 0)}/{maxDevices ?? 'â€”'}</span></div>
+                <div className="vd-cell"><span className="vd-label">Package</span><span className="vd-value">{v.package_tier || 'â€”'}</span></div>
                 <div className="vd-cell"><span className="vd-label">Created</span><span className="vd-value">{fmtDate(v.created_at)}</span></div>
-                <div className="vd-cell"><span className="vd-label">Activated</span><span className="vd-value">{v.activated_at ? fmtDate(v.activated_at) : '—'}</span></div>
-                <div className="vd-cell"><span className="vd-label">Last seen</span><span className="vd-value">{v.last_seen_at ? fmtDate(v.last_seen_at) : '—'}</span></div>
-                <div className="vd-cell"><span className="vd-label">First redeemed</span><span className="vd-value">{v.first_redeemed_at ? fmtDate(v.first_redeemed_at) : '—'}</span></div>
+                <div className="vd-cell"><span className="vd-label">Activated</span><span className="vd-value">{v.activated_at ? fmtDate(v.activated_at) : 'â€”'}</span></div>
+                <div className="vd-cell"><span className="vd-label">Last seen</span><span className="vd-value">{v.last_seen_at ? fmtDate(v.last_seen_at) : 'â€”'}</span></div>
+                <div className="vd-cell"><span className="vd-label">First redeemed</span><span className="vd-value">{v.first_redeemed_at ? fmtDate(v.first_redeemed_at) : 'â€”'}</span></div>
                 <div className="vd-cell"><span className="vd-label">Expires</span><span className="vd-value">{fmtDate(v.expires_at)}</span></div>
               </div>
 
@@ -1685,11 +1783,11 @@ const codes = a.voucher_data?.codes;
                 <section className="vd-section">
                   <h4 className="vd-section-title">Redemption</h4>
                   <div className="vd-grid">
-                    <div className="vd-cell"><span className="vd-label">Holder</span><span className="vd-value">{redemptionName || '—'}</span></div>
-                    <div className="vd-cell"><span className="vd-label">Phone</span><span className="vd-value">{redemptionPhone || '—'}</span></div>
-                    <div className="vd-cell"><span className="vd-label">MAC</span><span className="vd-value vd-mono">{redemptionMac || '—'}</span></div>
-                    <div className="vd-cell"><span className="vd-label">Redeemed on</span><span className="vd-value">{redemptionAt ? fmtDate(redemptionAt) : '—'}</span></div>
-                    <div className="vd-cell"><span className="vd-label">Traffic</span><span className="vd-value">{trafficUsed ? `${trafficUsed}${trafficTotal ? ' / ' + trafficTotal : ''}` : '—'}</span></div>
+                    <div className="vd-cell"><span className="vd-label">Holder</span><span className="vd-value">{redemptionName || 'â€”'}</span></div>
+                    <div className="vd-cell"><span className="vd-label">Phone</span><span className="vd-value">{redemptionPhone || 'â€”'}</span></div>
+                    <div className="vd-cell"><span className="vd-label">MAC</span><span className="vd-value vd-mono">{redemptionMac || 'â€”'}</span></div>
+                    <div className="vd-cell"><span className="vd-label">Redeemed on</span><span className="vd-value">{redemptionAt ? fmtDate(redemptionAt) : 'â€”'}</span></div>
+                    <div className="vd-cell"><span className="vd-label">Traffic</span><span className="vd-value">{trafficUsed ? `${trafficUsed}${trafficTotal ? ' / ' + trafficTotal : ''}` : 'â€”'}</span></div>
                   </div>
                   {theRedemptions.length > 0 && (
                     <>
@@ -1698,9 +1796,9 @@ const codes = a.voucher_data?.codes;
                         {theRedemptions.map((red, i) => (
                           <li key={i}>
                             {red.full_name || 'Unknown person'}
-                            {red.mac_address ? ` · ${red.mac_address}` : ''}
-                            {red.ip_address ? ` · ${red.ip_address}` : ''}
-                            {red.redeemed_at ? ` · ${fmtDate(red.redeemed_at)}` : ''}
+                            {red.mac_address ? ` Â· ${red.mac_address}` : ''}
+                            {red.ip_address ? ` Â· ${red.ip_address}` : ''}
+                            {red.redeemed_at ? ` Â· ${fmtDate(red.redeemed_at)}` : ''}
                           </li>
                         ))}
                       </ul>
@@ -1711,16 +1809,16 @@ const codes = a.voucher_data?.codes;
 
               <section className="vd-section">
                 <h4 className="vd-section-title">Device bindings</h4>
-                <p className="vd-count">{(v.device_count ?? macs.length)} of {maxDevices ?? '—'} device slot{(maxDevices ?? 2) === 1 ? '' : 's'} in use</p>
+                <p className="vd-count">{(v.device_count ?? macs.length)} of {maxDevices ?? 'â€”'} device slot{(maxDevices ?? 2) === 1 ? '' : 's'} in use</p>
                 {devices.length > 0 ? (
                   <ul className="vd-macs">
                     {devices.map(d => (
                       <li key={d.mac_address}>
                         <span className="vd-mono">{d.mac_address}</span>
-                        {d.label ? ` · ${d.label}` : ''}
-                        {d.bound_at ? ` · bound ${fmtDate(d.bound_at)}` : ''}
-                        {d.last_seen_at ? ` · last seen ${fmtDate(d.last_seen_at)}` : ''}
-                        {!d.is_active ? ' · released' : ''}
+                        {d.label ? ` Â· ${d.label}` : ''}
+                        {d.bound_at ? ` Â· bound ${fmtDate(d.bound_at)}` : ''}
+                        {d.last_seen_at ? ` Â· last seen ${fmtDate(d.last_seen_at)}` : ''}
+                        {!d.is_active ? ' Â· released' : ''}
                       </li>
                     ))}
                   </ul>
@@ -1733,9 +1831,42 @@ const codes = a.voucher_data?.codes;
                     onClick={() => handleReleaseMac(v)}
                     disabled={releasingMac || (v.device_count ?? macs.length) === 0}
                   >
-                    {releasingMac ? 'Releasing…' : 'Release all bindings'}
+                    {releasingMac ? 'Releasingâ€¦' : 'Release all bindings'}
                   </button>
                 )}
+              </section>
+
+              <section className="vd-section">
+                <h4 className="vd-section-title">Manage</h4>
+                <p className="vd-count">
+                  Block redemption or push the expiry date out. Changes are audit-logged.
+                </p>
+                <div className="vd-actions">
+                  <button
+                    className="btn-sm"
+                    disabled={voucherActionBusy === v.id}
+                    onClick={() => handleToggleDisable(v)}
+                  >
+                    {v.status === 'Disabled' ? 'Re-enable' : 'Disable'}
+                  </button>
+                  <button
+                    className="btn-sm"
+                    disabled={voucherActionBusy === v.id}
+                    onClick={() => handleExtend(v)}
+                  >
+                    Extend expiryâ€¦
+                  </button>
+                  {isMgmt && (
+                    <button
+                      className="btn-sm btn-reject"
+                      disabled={voucherActionBusy === v.id}
+                      onClick={() => handleArchive(v)}
+                      title="Soft-delete this voucher (history preserved)"
+                    >
+                      Archive
+                    </button>
+                  )}
+                </div>
               </section>
 
               <section className="vd-section">
@@ -1755,7 +1886,7 @@ const codes = a.voucher_data?.codes;
                   </button>
                   <button className="btn-action btn-action--wa" onClick={() => { void shareWhatsApp(v); }} aria-label="Share voucher on WhatsApp" title="Share on WhatsApp" disabled={sharingWa}>
                     <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
-                    <span className="vd-action-label">{sharingWa ? 'Preparing…' : 'Send via WhatsApp'}</span>
+                    <span className="vd-action-label">{sharingWa ? 'Preparingâ€¦' : 'Send via WhatsApp'}</span>
                   </button>
                 </div>
               </section>
@@ -1776,7 +1907,7 @@ const codes = a.voucher_data?.codes;
                       disabled={toggleBusy}
                       onClick={() => toggleDisable(v)}
                     >
-                      {toggleBusy ? '…' : v.is_disabled ? 'Enable' : 'Disable'}
+                      {toggleBusy ? 'â€¦' : v.is_disabled ? 'Enable' : 'Disable'}
                     </button>
                     <button className="btn-sm btn-danger" onClick={() => setDeleteTarget(v)}>
                       Delete
@@ -1789,14 +1920,14 @@ const codes = a.voucher_data?.codes;
         );
       })()}
 
-      {/* ── Renew / Resell (POST /vouchers/:id/renew) ──
+      {/* â”€â”€ Renew / Resell (POST /vouchers/:id/renew) â”€â”€
           Same PIN, new period, and the payment is written to `sales` as
           sale_type='renewal', so resale revenue counts towards every report. */}
       {renewTarget && (
         <Modal
           open
           onClose={() => { if (!renewSaving) setRenewTarget(null); }}
-          title={`Renew / Resell — ${lc(renewTarget.code)}`}
+          title={`Renew / Resell â€” ${lc(renewTarget.code)}`}
         >
           <div className="holder-capture">
             <p className="holder-capture__lead">
@@ -1817,7 +1948,7 @@ const codes = a.voucher_data?.codes;
               </option>
               {mintPackages.map(p => (
                 <option key={p.tier_name} value={p.tier_name}>
-                  {p.display_name || p.tier_name} — ${parseFloat(String(p.price_amount || 0)).toFixed(2)} · {fmtDur(p.duration_min)} · {p.is_uncapped ? 'Unlimited' : `${p.data_limit_gb ?? 'Unlimited'} GB`} · {p.bandwidth_mbps_up}/{p.bandwidth_mbps_down} Mbps
+                  {p.display_name || p.tier_name} â€” ${parseFloat(String(p.price_amount || 0)).toFixed(2)} Â· {fmtDur(p.duration_min)} Â· {p.is_uncapped ? 'Unlimited' : `${p.data_limit_gb ?? 'Unlimited'} GB`} Â· {p.bandwidth_mbps_up}/{p.bandwidth_mbps_down} Mbps
                 </option>
               ))}
             </select>
@@ -1831,7 +1962,7 @@ const codes = a.voucher_data?.codes;
                   <div className="vd-cell"><span className="vd-label">Price</span><span className="vd-value">${parseFloat(String(renewSelectedPkg.price_amount || 0)).toFixed(2)}</span></div>
                 </div>
                 <p className="renew-hint">
-                  Swaps {renewTarget.package_tier || 'custom'} → {renewSelectedPkg.tier_name}: speed, data quota,
+                  Swaps {renewTarget.package_tier || 'custom'} â†’ {renewSelectedPkg.tier_name}: speed, data quota,
                   validity and device cap are copied onto the voucher. PIN, bound devices and history are untouched.
                 </p>
               </>
@@ -1901,14 +2032,14 @@ const codes = a.voucher_data?.codes;
             <div className="holder-capture__actions">
               <button className="btn-sm" onClick={() => setRenewTarget(null)} disabled={renewSaving}>Cancel</button>
               <button className="btn-action btn-action--download" onClick={submitRenew} disabled={renewSaving}>
-                {renewSaving ? 'Recording…' : `Renew for $${(parseFloat(renewPrice) || 0).toFixed(2)}`}
+                {renewSaving ? 'Recordingâ€¦' : `Renew for $${(parseFloat(renewPrice) || 0).toFixed(2)}`}
               </button>
             </div>
           </div>
         </Modal>
       )}
 
-      {/* ── Delete (DELETE /vouchers/:id) — soft delete, reverses nothing ── */}
+      {/* â”€â”€ Delete (DELETE /vouchers/:id) â€” soft delete, reverses nothing â”€â”€ */}
       {deleteTarget && (
         <Modal
           open
@@ -1922,7 +2053,7 @@ const codes = a.voucher_data?.codes;
               in your active lists.
             </p>
             <p className="holder-capture__lead">
-              Already received money for it? Use <strong>Renew / Resell</strong> instead — that re-arms the same PIN
+              Already received money for it? Use <strong>Renew / Resell</strong> instead â€” that re-arms the same PIN
               and records the payment.
             </p>
             <div className="holder-capture__actions">
@@ -1932,7 +2063,7 @@ const codes = a.voucher_data?.codes;
                 onClick={confirmDelete}
                 disabled={deleteBusy}
               >
-                {deleteBusy ? 'Deleting…' : 'Delete permanently'}
+                {deleteBusy ? 'Deletingâ€¦' : 'Delete permanently'}
               </button>
             </div>
           </div>

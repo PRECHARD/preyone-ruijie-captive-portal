@@ -1,10 +1,11 @@
-import { useState, useEffect, useCallback } from 'react';
+﻿import { useState, useEffect, useCallback } from 'react';
 import { api, ruijieApi } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { showToast } from '../utils/toast';
 import Spinner from '../components/Spinner';
 import EmptyState from '../components/EmptyState';
 import Badge from '../components/Badge';
+import Modal from '../components/Modal';
 
 type Props = { onNavigate?: (s: string) => void; canPeakHours?: boolean };
 
@@ -19,12 +20,15 @@ export default function Reports({ onNavigate, canPeakHours }: Props = {}) {
   const [pending, setPending] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // ── Ruijie accounting sub-tab ──
+  // â”€â”€ Ruijie accounting sub-tab â”€â”€
   const [acctStatus, setAcctStatus] = useState<any>(null);
   const [acctVouchers, setAcctVouchers] = useState<any[]>([]);
   const [syncing, setSyncing] = useState(false);
+  const [voucherSyncBusy, setVoucherSyncBusy] = useState<string | null>(null);
+  const [voucherDetail, setVoucherDetail] = useState<any>(null);
+  const [exporting, setExporting] = useState<string | null>(null);
 
-  // ── Month-End report sub-tab ──
+  // â”€â”€ Month-End report sub-tab â”€â”€
   const [monthEnd, setMonthEnd] = useState<any>(null);
   const [sendingReport, setSendingReport] = useState(false);
 
@@ -47,7 +51,7 @@ export default function Reports({ onNavigate, canPeakHours }: Props = {}) {
       if (r?.skipped) {
         showToast({ title: 'Sync Skipped', message: r.reason || 'Ruijie Cloud not configured', type: 'warning' });
       } else if (r?.errors?.length) {
-        showToast({ title: 'Sync Finished With Errors', message: `${r.updated ?? 0} updated · ${r.errors[0]}`, type: 'warning' });
+        showToast({ title: 'Sync Finished With Errors', message: `${r.updated ?? 0} updated Â· ${r.errors[0]}`, type: 'warning' });
       } else {
         showToast({
           title: 'Accounting Synced',
@@ -63,7 +67,7 @@ export default function Reports({ onNavigate, canPeakHours }: Props = {}) {
     }
   };
 
-  // Client-side CSV — no backend round-trip, works while offline.
+  // Client-side CSV â€” no backend round-trip, works while offline.
   const exportAccountingCsv = () => {
     if (acctVouchers.length === 0) {
       showToast({ title: 'Nothing To Export', message: 'No vouchers have usage data yet', type: 'warning' });
@@ -177,6 +181,86 @@ export default function Reports({ onNavigate, canPeakHours }: Props = {}) {
     }
   };
 
+  const downloadBlob = (blob: Blob, filename: string) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const exportAllStaffSales = async () => {
+    const token = api.getToken();
+    if (!token) return;
+    setExporting('all-staff');
+    try {
+      const res = await fetch('/api/admin/staff-sales/export', { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) {
+        let msg = 'Export failed';
+        try { const err = await res.json(); msg = err.error || msg; } catch {}
+        throw new Error(msg);
+      }
+      downloadBlob(await res.blob(), 'Preyone_All_Staff_Sales.xlsx');
+      showToast({ title: 'Exported', message: 'All-staff sales workbook downloaded', type: 'success' });
+    } catch (e: any) {
+      showToast({ title: 'Export Failed', message: e.message, type: 'error' });
+    } finally {
+      setExporting(null);
+    }
+  };
+
+  const exportRevenueCsv = async () => {
+    const token = api.getToken();
+    if (!token) return;
+    setExporting('revenue');
+    try {
+      const res = await fetch('/api/admin/revenue/export', { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) {
+        let msg = 'Export failed';
+        try { const err = await res.json(); msg = err.error || msg; } catch {}
+        throw new Error(msg);
+      }
+      downloadBlob(await res.blob(), `Preyone_Revenue_${new Date().toISOString().slice(0, 10)}.csv`);
+      showToast({ title: 'Exported', message: 'Revenue CSV downloaded', type: 'success' });
+    } catch (e: any) {
+      showToast({ title: 'Export Failed', message: e.message, type: 'error' });
+    } finally {
+      setExporting(null);
+    }
+  };
+
+  // â”€â”€ Per-voucher Ruijie verify (POST /vouchers/:code/sync) â”€â”€
+  const verifyVoucherOnRuijie = async (code: string) => {
+    setVoucherSyncBusy(code);
+    try {
+      const r = await ruijieApi.post<any>(`/vouchers/${encodeURIComponent(code)}/sync`);
+      if (r?.skipped) {
+        showToast({ title: 'Skipped', message: r.reason || 'Ruijie Cloud not configured', type: 'warning' });
+      } else if (r?.found === false || r?.status === 'missing') {
+        showToast({ title: 'Not Found on Ruijie', message: `Voucher ${code} is missing from Ruijie Cloud`, type: 'warning' });
+      } else {
+        showToast({ title: 'Synced', message: `Voucher ${code} verified on Ruijie Cloud`, type: 'success' });
+      }
+    } catch (e: any) {
+      showToast({ title: 'Sync Failed', message: e.message || 'Voucher sync failed', type: 'error' });
+    } finally {
+      setVoucherSyncBusy(null);
+      loadAccounting();
+    }
+  };
+
+  const openVoucherDetail = async (code: string) => {
+    try {
+      const r = await ruijieApi.get<any>(`/vouchers/${encodeURIComponent(code)}`);
+      setVoucherDetail(r);
+    } catch (e: any) {
+      showToast({ title: 'Lookup Failed', message: e.message, type: 'error' });
+    }
+  };
+
   if (loading) return <Spinner />;
 
   return (
@@ -203,6 +287,11 @@ export default function Reports({ onNavigate, canPeakHours }: Props = {}) {
 
       {tab === 'revenue' && revenue && (
         <>
+          <div style="display: flex; justify-content: flex-end; margin-bottom: 12px">
+            <button className="btn-sm" onClick={exportRevenueCsv} disabled={exporting === 'revenue'} title="Download completed transactions as CSV">
+              {exporting === 'revenue' ? 'Exporting…' : 'Export Revenue CSV'}
+            </button>
+          </div>
           <div className="glass-stats">
             <div className="glass-stat glass-stat--gold">
               <span className="glass-stat__label">Total Revenue</span>
@@ -252,7 +341,7 @@ export default function Reports({ onNavigate, canPeakHours }: Props = {}) {
                         <td>{t.created_at ? new Date(t.created_at).toLocaleString() : '-'}</td>
                         <td><span className="code-cell">{t.code || t.voucher_code || '-'}</span></td>
                         <td>
-                          <div style={{ fontWeight: 600 }}>{t.user_name || '—'}</div>
+                          <div style={{ fontWeight: 600 }}>{t.user_name || 'â€”'}</div>
                           {t.user_phone && <div className="muted">{t.user_phone}</div>}
                         </td>
                         <td>{t.package_tier || t.tier || '-'}</td>
@@ -272,6 +361,11 @@ export default function Reports({ onNavigate, canPeakHours }: Props = {}) {
 
       {tab === 'sales' && staffSales && (
         <>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+            <button className="btn-sm" onClick={exportAllStaffSales} disabled={exporting === 'all-staff'} title="Download every staff member's sales in one workbook">
+              {exporting === 'all-staff' ? 'Exportingâ€¦' : 'Export All Staff Sales (Excel)'}
+            </button>
+          </div>
           {staffSales.staffSummary?.length > 0 && (
             <div className="card" style={{ marginBottom: 20 }}>
               <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', fontWeight: 600, fontSize: 13 }}>Staff Performance</div>
@@ -282,7 +376,7 @@ export default function Reports({ onNavigate, canPeakHours }: Props = {}) {
                     {staffSales.staffSummary.map((s: any, i: number) => (
                       <tr key={s.id || i} style={(s.role || '').toUpperCase() === 'CEO' ? { background: 'rgba(212,175,55,0.08)' } : undefined}>
                         <td style={{ fontWeight: 600 }}>
-                          {(s.role || '').toUpperCase() === 'CEO' ? '👑 ' : ''}{s.full_name}
+                          {(s.role || '').toUpperCase() === 'CEO' ? 'ðŸ‘‘ ' : ''}{s.full_name}
                         </td>
                         <td><Badge variant={s.role === 'CEO' ? 'gold' : s.role === 'Manager' ? 'info' : 'default'}>{s.role}</Badge></td>
                         <td>{s.total_sales || 0}</td>
@@ -320,11 +414,11 @@ export default function Reports({ onNavigate, canPeakHours }: Props = {}) {
                   <tbody>
                     {staffSales.allSales.map((s: any, i: number) => (
                       <tr key={i}>
-                        <td>{s.created_at ? new Date(s.created_at).toLocaleString() : '—'}</td>
+                        <td>{s.created_at ? new Date(s.created_at).toLocaleString() : 'â€”'}</td>
                         <td><span className="code-cell">{s.code}</span></td>
-                        <td>{s.package_tier || '—'}</td>
+                        <td>{s.package_tier || 'â€”'}</td>
                         <td><span className="money money--sm">${Number(s.price_amount || 0).toFixed(2)} USD</span></td>
-                        <td>{s.sold_by_name || s.sold_by || '—'}</td>
+                        <td>{s.sold_by_name || s.sold_by || 'â€”'}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -342,7 +436,7 @@ export default function Reports({ onNavigate, canPeakHours }: Props = {}) {
                   <tbody>
                     {staffSales.dailyBreakdown.map((d: any, i: number) => (
                       <tr key={i}>
-                        <td>{d.sale_date ? new Date(d.sale_date).toLocaleDateString() : '—'}</td>
+                        <td>{d.sale_date ? new Date(d.sale_date).toLocaleDateString() : 'â€”'}</td>
                         <td style={{ fontWeight: 600 }}>{d.full_name}</td>
                         <td><Badge variant={d.role === 'Manager' ? 'info' : 'default'}>{d.role}</Badge></td>
                         <td>{d.sales_count || 0}</td>
@@ -359,7 +453,7 @@ export default function Reports({ onNavigate, canPeakHours }: Props = {}) {
 
       {tab === 'handovers' && (
         pending.length === 0 ? (
-          <EmptyState icon="✅" title="No Pending Handovers" message="All cash handovers have been processed." />
+          <EmptyState icon="âœ…" title="No Pending Handovers" message="All cash handovers have been processed." />
         ) : (
           <div className="card">
             <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', fontWeight: 600, fontSize: 13 }}>
@@ -368,8 +462,8 @@ export default function Reports({ onNavigate, canPeakHours }: Props = {}) {
             {pending.map((h: any) => (
               <div key={h.id} className="alert-row">
                 <div style={{ flex: 1 }}>
-                  <div className="alert-title">{h.staff_name || 'Staff'} — <span className="money">${Number(h.total_amount || 0).toFixed(2)} USD</span></div>
-                  <div className="alert-meta">{h.created_at ? new Date(h.created_at).toLocaleString() : ''} · {h.sale_count || h.sales?.length || 0} sale(s)</div>
+                  <div className="alert-title">{h.staff_name || 'Staff'} â€” <span className="money">${Number(h.total_amount || 0).toFixed(2)} USD</span></div>
+                  <div className="alert-meta">{h.created_at ? new Date(h.created_at).toLocaleString() : ''} Â· {h.sale_count || h.sales?.length || 0} sale(s)</div>
                 </div>
                 <div style={{ display: 'flex', gap: 6 }}>
                   <button className="btn-sm btn-approve" onClick={() => approveHandover(h.id)}>Approve Handover</button>
@@ -385,16 +479,16 @@ export default function Reports({ onNavigate, canPeakHours }: Props = {}) {
           <div className="glass-stats">
             <div className="glass-stat">
               <span className="glass-stat__label">Vouchers With Usage</span>
-              <span className="glass-stat__value glass-stat__value--cyan">{acctStatus?.vouchers?.withUsage ?? '—'}</span>
+              <span className="glass-stat__value glass-stat__value--cyan">{acctStatus?.vouchers?.withUsage ?? 'â€”'}</span>
             </div>
             <div className="glass-stat glass-stat--green">
               <span className="glass-stat__label">Synced To Cloud</span>
-              <span className="glass-stat__value glass-stat__value--green">{acctStatus?.vouchers?.bySyncStatus?.synced ?? '—'}</span>
+              <span className="glass-stat__value glass-stat__value--green">{acctStatus?.vouchers?.bySyncStatus?.synced ?? 'â€”'}</span>
             </div>
             <div className="glass-stat glass-stat--gold">
               <span className="glass-stat__label">Missing / Pending</span>
               <span className="glass-stat__value glass-stat__value--gold" style={{ fontSize: '1.5rem' }}>
-                {acctStatus ? `${acctStatus.vouchers.bySyncStatus.missing} / ${acctStatus.vouchers.bySyncStatus.pending}` : '—'}
+                {acctStatus ? `${acctStatus.vouchers.bySyncStatus.missing} / ${acctStatus.vouchers.bySyncStatus.pending}` : 'â€”'}
               </span>
             </div>
             <div className="glass-stat glass-stat--violet">
@@ -415,31 +509,46 @@ export default function Reports({ onNavigate, canPeakHours }: Props = {}) {
                 disabled={syncing}
                 title="Pull live usage from Ruijie Cloud into voucher records"
               >
-                {syncing ? 'Syncing…' : 'Sync Now'}
+                {syncing ? 'Syncingâ€¦' : 'Sync Now'}
               </button>
             </div>
             <div style={{ padding: '10px 16px', fontSize: 11.5, color: 'var(--text-dim)' }}>
               Reconciles cumulative data usage from Ruijie Cloud into local vouchers (never touches expiry, PIN or uses).
               Auto-sync runs every {acctStatus?.pollingIntervalMin ?? '5'} min when cloud credentials are configured.
-              {!acctStatus?.configured && <strong style={{ color: 'var(--orange)' }}> Cloud is not configured — sync will be skipped.</strong>}
+              {!acctStatus?.configured && <strong style={{ color: 'var(--orange)' }}> Cloud is not configured â€” sync will be skipped.</strong>}
             </div>
             {acctVouchers.length === 0 ? (
               <div className="table-empty"><p>No vouchers have usage data yet.</p></div>
             ) : (
               <div className="card-table">
                 <table className="data-table">
-                  <thead><tr><th>Voucher</th><th>Holder</th><th>Data Used</th><th>Last Sync</th><th>Status</th></tr></thead>
+                  <thead><tr><th>Voucher</th><th>Holder</th><th>Data Used</th><th>Last Sync</th><th>Status</th><th></th></tr></thead>
                   <tbody>
                     {acctVouchers.map((v: any) => (
                       <tr key={v.id}>
                         <td><span className="code-cell">{v.code}</span></td>
-                        <td>{v.holder_name || '—'}{v.holder_phone && <span className="muted" style={{ display: 'block', fontSize: 11 }}>{v.holder_phone}</span>}</td>
+                        <td>{v.holder_name || 'â€”'}{v.holder_phone && <span className="muted" style={{ display: 'block', fontSize: 11 }}>{v.holder_phone}</span>}</td>
                         <td><span className="money money--sm">{v.data_consumed_mb >= 1024 ? (v.data_consumed_mb / 1024).toFixed(1) + ' GB' : Number(v.data_consumed_mb).toFixed(1) + ' MB'}</span></td>
-                        <td className="muted" style={{ fontSize: 12 }}>{v.last_accounting_sync ? new Date(v.last_accounting_sync).toLocaleString() : '—'}</td>
+                        <td className="muted" style={{ fontSize: 12 }}>{v.last_accounting_sync ? new Date(v.last_accounting_sync).toLocaleString() : 'â€”'}</td>
                         <td>
                           <Badge variant={v.ruijie_sync_status === 'synced' ? 'approved' : v.ruijie_sync_status === 'missing' ? 'rejected' : 'pending'}>
                             {v.ruijie_sync_status || 'never'}
                           </Badge>
+                        </td>
+                        <td>
+                          <div style={{ display: 'flex', gap: 4 }}>
+                            <button
+                              className="btn-sm"
+                              disabled={voucherSyncBusy === v.code}
+                              onClick={() => verifyVoucherOnRuijie(v.code)}
+                              title="Verify this voucher exists on Ruijie Cloud"
+                            >
+                              {voucherSyncBusy === v.code ? 'â€¦' : 'Verify on Ruijie'}
+                            </button>
+                            <button className="btn-sm" onClick={() => openVoucherDetail(v.code)} title="View local + Ruijie audit record">
+                              Details
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -448,6 +557,58 @@ export default function Reports({ onNavigate, canPeakHours }: Props = {}) {
               </div>
             )}
           </div>
+
+          <Modal open={!!voucherDetail} onClose={() => setVoucherDetail(null)} title={voucherDetail?.voucher ? `Voucher ${voucherDetail.voucher.code}` : 'Voucher Details'}>
+            {voucherDetail && (
+              <div className="auth-form">
+                {!voucherDetail.configured && (
+                  <div style={{ color: 'var(--orange)', fontSize: 13, marginBottom: 8 }}>
+                    Ruijie Cloud is not configured â€” audit record may be unavailable.
+                  </div>
+                )}
+                <div className="auth-field">
+                  <label>Local Voucher</label>
+                  <div style={{ fontSize: 13, lineHeight: 1.7 }}>
+                    <div><b>Code:</b> {voucherDetail.voucher?.code}</div>
+                    <div><b>Package:</b> {voucherDetail.voucher?.package_tier || 'â€”'}</div>
+                    <div><b>Holder:</b> {voucherDetail.voucher?.holder_name || 'â€”'}{voucherDetail.voucher?.holder_phone ? ` (${voucherDetail.voucher.holder_phone})` : ''}</div>
+                    <div><b>Data used:</b> {voucherDetail.voucher?.data_consumed_mb != null ? `${Number(voucherDetail.voucher.data_consumed_mb).toFixed(1)} MB` : 'â€”'}</div>
+                    <div><b>Uses:</b> {voucherDetail.voucher?.used_count ?? 'â€”'}</div>
+                    <div><b>Sync status:</b> {voucherDetail.voucher?.ruijie_sync_status || 'never'}</div>
+                    <div><b>Last accounting sync:</b> {voucherDetail.voucher?.last_accounting_sync ? new Date(voucherDetail.voucher.last_accounting_sync).toLocaleString() : 'â€”'}</div>
+                    <div><b>Expires:</b> {voucherDetail.voucher?.expires_at ? new Date(voucherDetail.voucher.expires_at).toLocaleString() : 'â€”'}</div>
+                    <div><b>Disabled:</b> {voucherDetail.voucher?.is_disabled ? 'Yes' : 'No'}</div>
+                  </div>
+                </div>
+                <div className="auth-field">
+                  <label>Ruijie Audit Record</label>
+                  {voucherDetail.ruijie ? (
+                    <div style={{ fontSize: 13, lineHeight: 1.7 }}>
+                      <div><b>Code No:</b> {voucherDetail.ruijie.code_no}</div>
+                      <div><b>Group ID:</b> {voucherDetail.ruijie.user_group_id || 'â€”'}</div>
+                      <div><b>Profile UUID:</b> {voucherDetail.ruijie.profile_uuid || 'â€”'}</div>
+                      <div><b>Expiry:</b> {voucherDetail.ruijie.ruijie_expiry ? new Date(voucherDetail.ruijie.ruijie_expiry).toLocaleString() : 'â€”'}</div>
+                      <div><b>Source:</b> {voucherDetail.ruijie.source || 'â€”'}</div>
+                      <div><b>Created:</b> {voucherDetail.ruijie.created_at ? new Date(voucherDetail.ruijie.created_at).toLocaleString() : 'â€”'}</div>
+                      <div><b>Comment:</b> {voucherDetail.ruijie.comment || 'â€”'}</div>
+                    </div>
+                  ) : (
+                    <div className="muted" style={{ fontSize: 13 }}>No Ruijie audit record found for this code.</div>
+                  )}
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
+                  <button className="btn-sm" onClick={() => setVoucherDetail(null)}>Close</button>
+                  <button
+                    className="btn-sm btn-approve"
+                    disabled={voucherSyncBusy === voucherDetail.voucher?.code}
+                    onClick={() => { verifyVoucherOnRuijie(voucherDetail.voucher.code); }}
+                  >
+                    {voucherSyncBusy === voucherDetail.voucher?.code ? 'Verifyingâ€¦' : 'Verify on Ruijie'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </Modal>
         </>
       )}
       {tab === 'month-end' && (
@@ -462,7 +623,7 @@ export default function Reports({ onNavigate, canPeakHours }: Props = {}) {
             </div>
             <div className="glass-stat">
               <span className="glass-stat__label">Sales Count</span>
-              <span className="glass-stat__value glass-stat__value--cyan">{monthEnd?.salesCount ?? '—'}</span>
+              <span className="glass-stat__value glass-stat__value--cyan">{monthEnd?.salesCount ?? 'â€”'}</span>
               <span className="glass-stat__meta">
                 Avg ${Number(monthEnd?.averageSale || 0).toFixed(2)}
               </span>
@@ -477,7 +638,7 @@ export default function Reports({ onNavigate, canPeakHours }: Props = {}) {
             <div className="glass-stat glass-stat--green">
               <span className="glass-stat__label">Reconciliation</span>
               <span className="glass-stat__value glass-stat__value--green" style={{ fontSize: '1.6rem' }}>
-                {monthEnd?.reconciliationStatus || '—'}
+                {monthEnd?.reconciliationStatus || 'â€”'}
               </span>
               <span className="glass-stat__meta">
                 Difference ${Number(monthEnd?.reconciliationDifference || 0).toFixed(2)}
@@ -487,13 +648,13 @@ export default function Reports({ onNavigate, canPeakHours }: Props = {}) {
 
           <div className="glass-panel" style={{ marginBottom: 20 }}>
             <div className="glass-panel__head">
-              <span>Month-End Report · runs automatically on the 3rd at 08:00</span>
+              <span>Month-End Report Â· runs automatically on the 3rd at 08:00</span>
             </div>
             <div className="glass-panel__body">
               <p style={{ margin: '0 0 14px', fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.7 }}>
                 The auto-email covers the trading cycle that closed on the 3rd (3rd of the previous month
                 to the 3rd of this month) and attaches the same ledger these buttons download. Columns:
-                Timestamp · Voucher Code · Package Tier · Amount · Payment Rail · Staff / Sold By · Status.
+                Timestamp Â· Voucher Code Â· Package Tier Â· Amount Â· Payment Rail Â· Staff / Sold By Â· Status.
               </p>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                 <button
@@ -541,7 +702,7 @@ export default function Reports({ onNavigate, canPeakHours }: Props = {}) {
                     onClick={sendMonthEndNow}
                     disabled={sendingReport}
                   >
-                    {sendingReport ? 'Sending…' : 'Send Now'}
+                    {sendingReport ? 'Sendingâ€¦' : 'Send Now'}
                   </button>
                 )}
               </div>

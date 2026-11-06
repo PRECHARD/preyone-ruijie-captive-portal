@@ -16,10 +16,12 @@ export default function Bandwidth() {
   const [bw, setBw] = useState<any>(null);
   const [top, setTop] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [qos, setQos] = useState<any>(null);
 
   const fetch = useCallback(async () => {
     try { setBw(await api.get('/bandwidth')); } catch { /* ignore */ }
     try { setTop(await api.get('/bandwidth/top-users')); } catch { /* ignore */ }
+    try { setQos(await api.get('/qos-view')); } catch { /* ignore */ }
     setLoading(false);
   }, []);
 
@@ -78,6 +80,46 @@ export default function Bandwidth() {
             ]}
             data={top}
           />
+        </div>
+      )}
+
+      {qos && (
+        <div className="card" style={{ marginTop: 20 }}>
+          <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', fontWeight: 600, fontSize: 13, display: 'flex', alignItems: 'center', gap: 12 }}>
+            <span style={{ flex: 1 }}>Network QoS</span>
+            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+              {qos.totalActiveProfiles} active · {qos.throttledUsers} throttled · {qos.matchingQoS} matching package
+            </span>
+          </div>
+          {qos.profiles?.length > 0 ? (
+            <Table
+              columns={[
+                { key: 'full_name', label: 'User' },
+                { key: 'voucher_code', label: 'Voucher', width: '110px', render: (r: any) => <span className="code-cell">{r.voucher_code || '—'}</span> },
+                { key: 'tier_name', label: 'Package', width: '110px', render: (r: any) => r.display_name || r.tier_name || '—' },
+                { key: 'applied_bw', label: 'Applied (Up/Down)', width: '150px', render: (r: any) => (
+                  <span>{(r.bandwidth_up_kbps / 1000).toFixed(0)}/{(r.bandwidth_down_kbps / 1000).toFixed(0)} Mbps</span>
+                ) },
+                { key: 'package_bw', label: 'Package (Up/Down)', width: '150px', render: (r: any) => (
+                  r.package_bw_up != null
+                    ? <span>{r.package_bw_up}/{r.package_bw_down} Mbps</span>
+                    : <span className="muted">—</span>
+                ) },
+                { key: 'throttled', label: 'QoS', width: '90px', render: (r: any) => {
+                  const throttled = r.bandwidth_up_kbps < (r.package_bw_up || 0) * 1000;
+                  return (
+                    <span className={'status-chip status-chip--' + (throttled ? 'disabled' : 'active')}>
+                      {throttled ? 'THROTTLED' : 'OK'}
+                    </span>
+                  );
+                } },
+                { key: 'data_used_bytes', label: 'Data Used', width: '100px', render: (r: any) => fmtBytes(r.data_used_bytes) },
+              ]}
+              data={qos.profiles}
+            />
+          ) : (
+            <div className="table-empty">No active QoS profiles.</div>
+          )}
         </div>
       )}
     </div>

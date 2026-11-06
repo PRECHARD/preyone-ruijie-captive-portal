@@ -3,6 +3,38 @@
 ## Project Overview
 Ruijie captive portal system for Preyone UltraNet Wi-Fi. Voucher-based internet access with gateway integration via RADIUS and ext_login.
 
+## SCOPE LOCK — Admin console UNLOCKED for Global Settings Hub (2026-10-15)
+
+> **Status change (2026-10-15):** The admin console was permanently frozen at the 12:00 2026-10-13
+> state. The user has now **explicitly unlocked it** to host the new **Global Settings Hub**
+> (`admin/src/pages/GlobalSettingsHub.tsx`, section `global-settings`). Admin console edits are
+> permitted for this feature only. The admin **auth screens / sign-in / sign-up / 2FA and the
+> `Login.css` template remain frozen** — do not touch them.
+
+**Active focus:**
+- **Global Settings Hub** (`admin/` — General, POS Hardware & Layout, Fast Food & KDS, Invoicing & Taxes)
+- **Invoice system** (`invoice.preyone.com`)
+- **POS** (`pos.preyone.com`, `pos/` SPA, thermal printing, till)
+
+### Credentials (prod)
+- **Web POS** `https://pos.preyone.com` — Prechard Muvirimi PIN `2468`; Lesly `1122`; Praise `3344`.
+- **Invoice** `https://invoice.preyone.com` — `admin@preyone.com` / `Preyone2026!`.
+
+### Host routing (`src/index.ts`)
+- `admin.preyone.com` / `starlink.preyone.com` → `admin/dist` (LOCKED)
+- `app.preyone.com` → `app/dist` gateway (LOCKED)
+- `pos.preyone.com` → `pos/dist` (POS till SPA — ACTIVE)
+- `invoice.preyone.com` → invoice app (ACTIVE)
+- `wifi.preyone.com` → captive portal
+- `preyone.com` / `www` → `site/dist` main site
+- `/api/*` works on any host; `/downloads/*` resolves via `storage/downloads` first.
+
+### Shell quirks
+- Use `curl.exe` not `curl`. PowerShell `<` redirection unsupported — write scripts to files, then `bash`.
+- `git archive HEAD <paths> --output=<tar>` (needs `HEAD`; a bare path is "not a valid object name").
+- The VPS runs compiled `dist/index.js`: after extracting source you MUST `npm run build` (tsc) on the
+  server, then `pm2 restart preyone-portal --update-env`.
+
 ## CRITICAL: DO NOT MODIFY
 
 The following files and flows are confirmed working and MUST NOT be changed without explicit user approval:

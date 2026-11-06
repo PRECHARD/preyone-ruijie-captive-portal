@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { transitApi } from '../api/client';
 import Table from '../components/Table';
 import Modal from '../components/Modal';
-import { FiAlertOctagon, FiRefreshCw, FiSmartphone, FiPower, FiUnlock, FiPlus } from 'react-icons/fi';
+import { FiAlertOctagon, FiRefreshCw, FiSmartphone, FiPower, FiUnlock, FiPlus, FiXOctagon, FiLink2, FiDownloadCloud } from 'react-icons/fi';
 import { useAuth } from '../context/AuthContext';
 import '../styles/pages.css';
 import '../styles/transit.css';
@@ -66,6 +66,11 @@ export default function TransitDevices() {
   const [working, setWorking] = useState(false);
   const [statusFilter, setStatusFilter] = useState('ALL');
 
+  // ── Device action modals (disable / reset-binding / require-update) ──
+  const [actionModal, setActionModal] = useState<{ type: 'disable' | 'reset' | 'update'; device: DeviceRow } | null>(null);
+  const [minAppVersion, setMinAppVersion] = useState('');
+  const [actionBusy, setActionBusy] = useState(false);
+
   const [blockedRows, setBlockedRows] = useState<BlockedRow[]>([]);
   const [blockedLoading, setBlockedLoading] = useState(false);
   const [search, setSearch] = useState('');
@@ -123,6 +128,28 @@ export default function TransitDevices() {
       setError(e.message);
     } finally {
       setWorking(false);
+    }
+  };
+
+  const runDeviceAction = async () => {
+    if (!actionModal) return;
+    const { type, device } = actionModal;
+    setActionBusy(true);
+    try {
+      if (type === 'disable') {
+        await transitApi.post(`/devices/${device.device_uuid}/disable`);
+      } else if (type === 'reset') {
+        await transitApi.post(`/devices/${device.device_uuid}/reset-binding`);
+      } else if (type === 'update') {
+        await transitApi.post(`/devices/${device.device_uuid}/require-update`, { minAppVersion });
+      }
+      setActionModal(null);
+      setMinAppVersion('');
+      load();
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setActionBusy(false);
     }
   };
 
@@ -217,9 +244,26 @@ export default function TransitDevices() {
                   )},
                   { key: 'actions', label: '', render: r => (
                     r.status !== 'REVOKED' ? (
-                      <button className="tx-btn-danger" onClick={() => setConfirm(r)} disabled={r.status !== 'ACTIVE'}>
-                        <FiAlertOctagon /> Revoke Device Access
-                      </button>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-end' }}>
+                        <button className="tx-btn-danger" onClick={() => setConfirm(r)} disabled={r.status !== 'ACTIVE'}>
+                          <FiAlertOctagon /> Revoke Device Access
+                        </button>
+                        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                          {r.status === 'ACTIVE' && (
+                            <button className="btn-sm" onClick={() => setActionModal({ type: 'disable', device: r })}>
+                              <FiXOctagon /> Disable
+                            </button>
+                          )}
+                          {r.status !== 'UNBOUND' && (
+                            <button className="btn-sm" onClick={() => setActionModal({ type: 'reset', device: r })}>
+                              <FiLink2 /> Reset Binding
+                            </button>
+                          )}
+                          <button className="btn-sm" onClick={() => { setMinAppVersion(r.app_version || ''); setActionModal({ type: 'update', device: r }); }}>
+                            <FiDownloadCloud /> Require Update
+                          </button>
+                        </div>
+                      </div>
                     ) : <span className="tx-muted">revoked{r.revoked_at ? ` ${new Date(r.revoked_at).toLocaleString()}` : ''}</span>
                   )},
                 ]}
@@ -244,6 +288,65 @@ export default function TransitDevices() {
                   <button className="btn-secondary" onClick={() => setConfirm(null)}>Cancel</button>
                   <button className="tx-btn-danger" onClick={revoke} disabled={working}>
                     <FiPower /> {working ? 'Revoking…' : 'Revoke Device Access'}
+                  </button>
+                </div>
+              </>
+            )}
+          </Modal>
+
+          <Modal
+            open={!!actionModal}
+            onClose={() => { if (!actionBusy) { setActionModal(null); setMinAppVersion(''); } }}
+            title={
+              actionModal?.type === 'disable' ? 'Disable Device?' :
+              actionModal?.type === 'reset' ? 'Reset Device Binding?' :
+              'Require App Update?'
+            }
+          >
+            {actionModal && (
+              <>
+                {actionModal.type === 'disable' && (
+                  <p style={{ color: 'var(--text-muted)', fontSize: 14, lineHeight: 1.6 }}>
+                    Disable <b style={{ color: 'var(--text)' }}>{actionModal.device.device_uuid}</b>? The device stops
+                    syncing immediately, but its binding and signing key are <b>retained</b> — you can reset the binding
+                    later to re-pair it.
+                  </p>
+                )}
+                {actionModal.type === 'reset' && (
+                  <p style={{ color: 'var(--text-muted)', fontSize: 14, lineHeight: 1.6 }}>
+                    Reset the binding on <b style={{ color: 'var(--text)' }}>{actionModal.device.device_uuid}</b>? The
+                    device returns to <b>UNBOUND</b> state and must be re-paired by staff. Signing key and minimum
+                    version are cleared.
+                  </p>
+                )}
+                {actionModal.type === 'update' && (
+                  <>
+                    <p style={{ color: 'var(--text-muted)', fontSize: 14, lineHeight: 1.6 }}>
+                      Set a minimum app version for <b style={{ color: 'var(--text)' }}>{actionModal.device.device_uuid}</b>.
+                      The device is prompted to update on next check-in.
+                    </p>
+                    <div className="tx-field" style={{ marginTop: 12 }}>
+                      <label>Minimum App Version (x.y.z)</label>
+                      <input
+                        placeholder="e.g. 2.5.0"
+                        value={minAppVersion}
+                        onChange={e => setMinAppVersion(e.target.value)}
+                      />
+                    </div>
+                  </>
+                )}
+                {error && <div className="auth-error" style={{ marginBottom: 10 }}>{error}</div>}
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
+                  <button className="btn-secondary" onClick={() => { setActionModal(null); setMinAppVersion(''); }}>Cancel</button>
+                  <button
+                    className={actionModal.type === 'disable' ? 'tx-btn-danger' : 'btn-primary'}
+                    onClick={runDeviceAction}
+                    disabled={actionBusy || (actionModal.type === 'update' && !/^\d+\.\d+\.\d+/.test(minAppVersion))}
+                  >
+                    {actionBusy ? 'Working…' :
+                      actionModal.type === 'disable' ? 'Disable Device' :
+                      actionModal.type === 'reset' ? 'Reset Binding' :
+                      'Set Minimum Version'}
                   </button>
                 </div>
               </>

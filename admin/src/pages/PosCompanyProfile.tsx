@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { api } from '../api/client';
+import { api, currencyApi } from '../api/client';
 import Spinner from '../components/Spinner';
 
 const INIT = {
@@ -13,6 +13,11 @@ export default function PosCompanyProfile() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
+  const [rates, setRates] = useState<any[]>([]);
+  const [rateTarget, setRateTarget] = useState('ZWG');
+  const [rateValue, setRateValue] = useState('');
+  const [rateSaving, setRateSaving] = useState(false);
+  const [rateMsg, setRateMsg] = useState('');
 
   const fetch = useCallback(async () => {
     try {
@@ -25,6 +30,12 @@ export default function PosCompanyProfile() {
         invoicePrefix: c.invoice_prefix || 'INV', quotePrefix: c.quote_prefix || 'QT',
         receiptFooter: c.receipt_footer || '', termsText: c.terms_text || '',
       });
+    } catch { /* keep defaults */ }
+    try {
+      const r: any = await currencyApi.get('/rates');
+      setRates(r.rates || []);
+      const zg = (r.rates || []).find((x: any) => x.target_currency === 'ZWG');
+      if (zg) { setRateTarget('ZWG'); setRateValue(String(zg.rate)); }
     } catch { /* keep defaults */ }
     setLoading(false);
   }, []);
@@ -45,6 +56,23 @@ export default function PosCompanyProfile() {
       setTimeout(() => setMsg(''), 4000);
     } catch (e: any) { setMsg(e.message); }
     setSaving(false);
+  };
+
+  const saveRate = async () => {
+    const rate = parseFloat(rateValue);
+    if (!rateTarget.trim() || !Number.isFinite(rate) || rate <= 0) {
+      setRateMsg('Enter a valid target currency and positive rate.');
+      return;
+    }
+    setRateSaving(true); setRateMsg('');
+    try {
+      await currencyApi.post('/rates', { target_currency: rateTarget.trim().toUpperCase(), rate });
+      setRateMsg(`USD → ${rateTarget.trim().toUpperCase()} rate set to ${rate}. Tills pick this up on next rate refresh.`);
+      setTimeout(() => setRateMsg(''), 5000);
+      const r: any = await currencyApi.get('/rates');
+      setRates(r.rates || []);
+    } catch (e: any) { setRateMsg(e.message); }
+    setRateSaving(false);
   };
 
   if (loading) return <Spinner />;
@@ -129,6 +157,41 @@ export default function PosCompanyProfile() {
             <textarea rows={3} value={form.termsText} onChange={set('termsText')} style={{ width: '100%', background: 'var(--card)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 8, padding: 10, fontFamily: 'inherit' }} placeholder="Optional terms shown on invoices / quotations" />
           </div>
           <button className="auth-btn" onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save Company Profile'}</button>
+        </div>
+      </div>
+
+      <div className="card" style={{ marginTop: 20 }}>
+        <div className="auth-form">
+          <div className="auth-field">
+            <label style={{ fontWeight: 700, fontSize: 14 }}>Currency Exchange Rates</label>
+            <p className="text-sm text-muted" style={{ marginTop: 0 }}>
+              Set the USD → local currency rate used by the till for ZiG/local pricing display.
+            </p>
+          </div>
+          {rates.length > 0 && (
+            <div style={{ marginBottom: 12, fontSize: 13 }}>
+              {rates.map((r: any) => (
+                <div key={r.target_currency} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', borderBottom: '1px solid var(--border)' }}>
+                  <span>USD → {r.target_currency}</span>
+                  <span style={{ fontWeight: 700 }}>{r.rate}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            <div className="auth-field">
+              <label>Target Currency</label>
+              <input value={rateTarget} onChange={e => setRateTarget(e.target.value)} placeholder="ZWG" />
+            </div>
+            <div className="auth-field">
+              <label>Rate (1 USD = ?)</label>
+              <input type="number" step="any" min="0" value={rateValue} onChange={e => setRateValue(e.target.value)} placeholder="e.g. 26.5" />
+            </div>
+          </div>
+          {rateMsg && (
+            <div className={rateMsg.includes('valid') ? 'form-status form-status--error' : 'form-status form-status--success'} style={{ marginBottom: 8 }}>{rateMsg}</div>
+          )}
+          <button className="auth-btn" onClick={saveRate} disabled={rateSaving}>{rateSaving ? 'Saving…' : 'Save Rate'}</button>
         </div>
       </div>
     </div>

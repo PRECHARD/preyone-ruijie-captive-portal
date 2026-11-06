@@ -21,6 +21,7 @@ import {
 } from '../services/posLease';
 import { settleDocumentPayment } from '../services/documentSettlement';
 import { broadcastToCompany } from '../services/iotHub';
+import { enforceSubscriptionGuard } from '../middleware/subscriptionGuard';
 
 /**
  * Preyone POS module — additive only.

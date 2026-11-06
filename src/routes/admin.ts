@@ -12,6 +12,13 @@ import {
   sendCashHandoverSubmittedEmail,
 } from '../services/notificationService';
 import { isRuijieCloudConfigured, mintRuijieVoucherForTier } from '../services/ruijieMint';
+import { TIER_CATALOG } from './subscription';
+import {
+  BUSINESS_PROFILES,
+  CURRENCIES,
+  INVOICE_TEMPLATES,
+  POS_THEMES,
+} from '../catalog/ecosystem';
 import {
   getStaffDailySalesItemized,
   getStaffDailyRevenue,
@@ -3657,6 +3664,28 @@ adminRouter.get('/catalogues', requireRole('CEO'), async (_req: Request, res: Re
   } catch {
     res.json(fallback);
   }
+
+// Accepts a self-contained data:image URL, validates it, and returns it for the
+// caller to persist via PUT /company (logo_url). Storing the data URL (rather
+// than a file path) keeps the logo rendering on every host - the CSP already
+// allows data: images - and avoids a multipart upload dependency.
+adminRouter.post('/company/logo', requireRole('CEO'), async (req: Request, res: Response) => {
+  const { dataUrl } = req.body as { dataUrl?: string };
+  if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/')) {
+    res.status(422).json({ error: 'dataUrl must be a data:image/... URL' });
+    return;
+  }
+  const match = /^data:image\/(png|jpe?g|webp|gif|svg\+xml);base64,([A-Za-z0-9+/=]+)$/.exec(dataUrl);
+  if (!match) {
+    res.status(422).json({ error: 'Unsupported image format or encoding' });
+    return;
+  }
+  if (match[2].length > 2_800_000) { // ~2 MB decoded
+    res.status(413).json({ error: 'Logo too large - keep it under 2 MB' });
+    return;
+  }
+  res.json({ logoUrl: dataUrl });
+});
 });
 
 adminRouter.get('/company', requireRole('CEO'), async (_req: Request, res: Response) => {
