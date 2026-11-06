@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   ApiError,
   api,
@@ -16,6 +17,9 @@ import {
 } from './api';
 import { applyCssVars } from './theme';
 import { OnlinePaymentModal, ReceiptPreview } from './payments';
+import { DocumentSheet, TemplateThumb, type SheetDoc } from './DocumentSheet';
+import Sidebar, { type View } from './components/Sidebar';
+import './document.css';
 
 /* ────────────────────────────── helpers ────────────────────────────── */
 
@@ -51,11 +55,6 @@ function money(value: unknown, currency = 'USD'): string {
   return `${currency} ${formatted}`;
 }
 
-function qty(value: unknown): string {
-  const n = Number(value) || 0;
-  return Number.isInteger(n) ? String(n) : n.toFixed(2);
-}
-
 function dateLabel(value?: string | null): string {
   if (!value) return '—';
   const d = new Date(value);
@@ -77,23 +76,6 @@ function errorText(err: unknown): string {
 
 /* ────────────────────────────── chrome ─────────────────────────────── */
 
-function Brand({ company }: { company?: Company | null }) {
-  const logo = company?.logo_url || (company?.logo_path ? `/images/${company.logo_path}` : null);
-  return (
-    <div className="brand">
-      {logo ? (
-        <img className="brand-logo" src={logo} alt={`${company?.name ?? 'Preyone'} logo`} />
-      ) : (
-        <div className="brand-mark">P</div>
-      )}
-      <div>
-        <div className="brand-name">{company?.name || 'Preyone'}</div>
-        <div className="brand-sub">Invoicing</div>
-      </div>
-    </div>
-  );
-}
-
 function StatusBadge({ status }: { status: string }) {
   const key = ['paid', 'unpaid', 'partial', 'draft', 'sent', 'void'].includes(status) ? status : 'sent';
   return <span className={`badge ${key}`}>{status}</span>;
@@ -107,13 +89,32 @@ function LoginPanel({ onSignedIn }: { onSignedIn: () => void }) {
   const [code, setCode] = useState('');
   const [challenge, setChallenge] = useState<string | null>(null);
   const [masked, setMasked] = useState('');
+  const [expiresAt, setExpiresAt] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [resending, setResending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [expired, setExpired] = useState(false);
+
+  const resetToSignIn = (message?: string) => {
+    setChallenge(null);
+    setCode('');
+    setMasked('');
+    setExpiresAt(null);
+    setExpired(false);
+    setNotice(null);
+    setError(message ?? null);
+  };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (challenge && !/^\d{6}$/.test(code)) {
+      setError('Enter the 6-digit code from the email.');
+      return;
+    }
     setBusy(true);
     setError(null);
+    setNotice(null);
     try {
       const path = challenge ? '/api/admin/auth/verify-2fa' : '/api/admin/auth/login';
       const body = challenge ? { challengeToken: challenge, code } : { email, password };
@@ -124,10 +125,23 @@ function LoginPanel({ onSignedIn }: { onSignedIn: () => void }) {
         body: JSON.stringify(body),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || 'Sign-in failed');
+      if (!res.ok) {
+        // The challenge itself is gone: keeping the form up would only fail on
+        // every retry, so send the user back to the password step.
+        if (data.code === 'CHALLENGE_EXPIRED' || data.code === 'TOO_MANY_ATTEMPTS') {
+          resetToSignIn(data.error || 'Please sign in again.');
+          return;
+        }
+        if (data.code === 'CODE_EXPIRED') setExpired(true);
+        throw new Error(data.error || 'Sign-in failed');
+      }
       if (data.requires2fa) {
         setChallenge(data.challengeToken);
         setMasked(data.maskedEmail || '');
+        setExpiresAt(data.expiresAt || null);
+        setCode('');
+        setError(null);
+        setNotice(null);
         return;
       }
       if (data.token) localStorage.setItem('gateway_token', data.token);
@@ -139,6 +153,45 @@ function LoginPanel({ onSignedIn }: { onSignedIn: () => void }) {
     }
   };
 
+  const resend = async () => {
+    if (!challenge) return;
+    setResending(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const res = await fetch('/api/admin/auth/resend-2fa', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ challengeToken: challenge }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        if (data.code === 'CHALLENGE_EXPIRED') {
+          resetToSignIn(data.error || 'Please sign in again.');
+          return;
+        }
+        throw new Error(data.error || 'Could not resend the code');
+      }
+      // A resend also refreshes the challenge token, so a code requested near
+      // the end of the window is not handed back with a token about to die.
+      if (data.challengeToken) setChallenge(data.challengeToken);
+      if (data.maskedEmail) setMasked(data.maskedEmail);
+      if (data.expiresAt) setExpiresAt(data.expiresAt);
+      setCode('');
+      setExpired(false);
+      setNotice(data.message || 'A new code has been sent.');
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setResending(false);
+    }
+  };
+
+  const expiryLabel = expiresAt
+    ? new Date(expiresAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    : null;
+
   return (
     <div className="auth-wrap">
       <form className="card auth-card" onSubmit={submit}>
@@ -148,19 +201,52 @@ function LoginPanel({ onSignedIn }: { onSignedIn: () => void }) {
             ? `Enter the code sent to ${masked || 'your email'}.`
             : 'Your Preyone session is shared across every workspace.'}
         </p>
+        {notice && <div className="banner ok">{notice}</div>}
         {error && <div className="banner error">{error}</div>}
+        {challenge && expired && !error && (
+          <div className="banner error">That code has expired. Request a new one.</div>
+        )}
         {challenge ? (
-          <label className="field">
-            <span>6-digit code</span>
-            <input
-              className="input"
-              value={code}
-              onChange={(e) => setCode(e.target.value)}
-              inputMode="numeric"
-              autoFocus
-              required
-            />
-          </label>
+          <>
+            <label className="field">
+              <span>6-digit code</span>
+              <input
+                className="input"
+                value={code}
+                onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                pattern="\d{6}"
+                maxLength={6}
+                autoFocus
+                required
+              />
+            </label>
+            {expiryLabel && (
+              <p className="auth-hint">
+                {expired ? 'That code expired at ' : 'Code expires at '}
+                {expiryLabel}. Didn&apos;t get it? Resend below.
+              </p>
+            )}
+            <button className="btn primary" disabled={busy || resending} type="submit">
+              {busy && <span className="spinner" aria-hidden />}
+              {busy ? 'Please wait…' : 'Verify'}
+            </button>
+            <div className="auth-actions">
+              <button className="btn ghost" type="button" onClick={resend} disabled={busy || resending}>
+                {resending && <span className="spinner" aria-hidden />}
+                {resending ? 'Sending…' : 'Resend code'}
+              </button>
+              <button
+                className="btn ghost"
+                type="button"
+                onClick={() => resetToSignIn()}
+                disabled={busy || resending}
+              >
+                Use a different account
+              </button>
+            </div>
+          </>
         ) : (
           <>
             <label className="field">
@@ -185,11 +271,12 @@ function LoginPanel({ onSignedIn }: { onSignedIn: () => void }) {
                 required
               />
             </label>
+            <button className="btn primary" disabled={busy} type="submit">
+              {busy && <span className="spinner" aria-hidden />}
+              {busy ? 'Please wait…' : 'Sign in'}
+            </button>
           </>
         )}
-        <button className="btn primary" disabled={busy} type="submit">
-          {busy ? 'Please wait…' : challenge ? 'Verify' : 'Sign in'}
-        </button>
       </form>
     </div>
   );
@@ -241,6 +328,43 @@ function Composer({
   const discount = (subtotal * (Number(discountPct) || 0)) / 100;
   const total = subtotal - discount;
   const taxPortion = total - total / (1 + (Number(taxPct) || 0) / 100);
+
+  const selectedTemplate = templates.find((t) => t.id === Number(templateId)) ?? templates[0];
+
+  const previewDueDate = useMemo(() => {
+    if (!issueDate) return null;
+    const d = new Date(`${issueDate}T00:00:00`);
+    if (Number.isNaN(d.getTime())) return null;
+    d.setDate(d.getDate() + (Number(netDays) || 0));
+    return d.toISOString().slice(0, 10);
+  }, [issueDate, netDays]);
+
+  // The live A4 proof. It uses the exact same component as the saved document
+  // and print view, so what the user sees while typing is what gets issued.
+  const previewDoc: SheetDoc = {
+    docType,
+    number: `${types.find((t) => t.type === docType)?.prefix ?? 'DOC'}-0000`,
+    status: 'draft',
+    issueDate,
+    dueDate: ['invoice', 'tax_invoice', 'sales_receipt', 'proforma'].includes(docType) ? previewDueDate : null,
+    customerName: customerName.trim() || 'Customer name',
+    customerAddress: customerAddress.trim() || undefined,
+    customerEmail: customerEmail.trim() || undefined,
+    items: lines.map((l) => ({
+      description: l.description.trim() || 'Line item description',
+      qty: Number(l.qty) || 0,
+      price: Number(l.price) || 0,
+    })),
+    notes: notes.trim() || undefined,
+    poNumber: poNumber.trim() || undefined,
+    reference: reference.trim() || undefined,
+    subtotal,
+    discountPct: Number(discountPct) || 0,
+    taxPct: Number(taxPct) || 0,
+    total,
+    amountPaid: 0,
+    currency,
+  };
 
   const setLine = (key: number, patch: Partial<DraftLine>) =>
     setLines((prev) => prev.map((l) => (l.key === key ? { ...l, ...patch } : l)));
@@ -300,28 +424,41 @@ function Composer({
 
         {error && <div className="banner error">{error}</div>}
 
-        <div className="form-grid">
-          <label className="field">
-            <span>Document type</span>
-            <select className="select" value={docType} onChange={(e) => setDocType(e.target.value)}>
-              {types.map((t) => (
-                <option key={t.type} value={t.type}>
-                  {t.label} ({t.prefix})
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="field">
-            <span>Template</span>
-            <select className="select" value={templateId} onChange={(e) => setTemplateId(e.target.value)}>
+        <div className="composer-layout">
+          <div>
+            <div className="panel-title" style={{ marginBottom: 6 }}>Document template</div>
+            <p className="muted small" style={{ marginTop: 0, marginBottom: 10 }}>
+              All 20 templates are A4 documents — pick one and the proof beside the form updates instantly.
+            </p>
+            <div className="template-strip" role="listbox" aria-label="Document template">
               {templates.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.id}. {t.name}
-                </option>
+                <button
+                  key={t.id}
+                  type="button"
+                  role="option"
+                  aria-selected={Number(templateId) === t.id}
+                  className={`template-strip-item ${Number(templateId) === t.id ? 'selected' : ''}`}
+                  onClick={() => setTemplateId(String(t.id))}
+                  title={`${t.id}. ${t.name} — ${t.description}`}
+                >
+                  <TemplateThumb template={t} />
+                  <span className="template-strip-name">{t.name}</span>
+                </button>
               ))}
-            </select>
-          </label>
-          <label className="field span-2">
+            </div>
+
+            <div className="form-grid">
+              <label className="field">
+                <span>Document type</span>
+                <select className="select" value={docType} onChange={(e) => setDocType(e.target.value)}>
+                  {types.map((t) => (
+                    <option key={t.type} value={t.type}>
+                      {t.label} ({t.prefix})
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field span-2">
             <span>Bill to — customer</span>
             <input
               className="input"
@@ -459,20 +596,43 @@ function Composer({
           </div>
         </div>
 
-        <label className="field" style={{ marginTop: 18 }}>
-          <span>Notes / payment instructions</span>
-          <textarea className="textarea" value={notes} onChange={(e) => setNotes(e.target.value)} />
-        </label>
+            <label className="field" style={{ marginTop: 18 }}>
+              <span>Notes / payment instructions</span>
+              <textarea className="textarea" value={notes} onChange={(e) => setNotes(e.target.value)} />
+            </label>
 
-        <div className="form-actions">
-          <button type="button" className="btn ghost" onClick={onClose}>
-            Cancel
-          </button>
-          <button className="btn primary" disabled={busy} type="submit">
-            {busy ? 'Creating…' : 'Create draft'}
-          </button>
+            <div className="form-actions">
+              <button type="button" className="btn ghost" onClick={onClose}>
+                Cancel
+              </button>
+              <button className="btn primary" disabled={busy} type="submit">
+                {busy ? 'Creating…' : 'Create draft'}
+              </button>
+            </div>
+          </div>
+
+          <aside className="composer-preview no-print">
+            <div className="panel-title" style={{ marginBottom: 4 }}>
+              Live A4 proof
+            </div>
+            <p className="muted small" style={{ marginTop: 0, marginBottom: 10 }}>
+              {selectedTemplate ? `${selectedTemplate.id}. ${selectedTemplate.name}` : 'House template'} · updates as you type
+            </p>
+            <div className="a4-preview-shell">
+              <DocumentSheet doc={previewDoc} company={catalog.company} template={selectedTemplate} />
+            </div>
+          </aside>
         </div>
       </form>
+
+      {/* Print the draft exactly as previewed, from a body-level copy so the
+          sheet is never clipped by the modal's scroll container. */}
+      {createPortal(
+        <div className="a4-print-host">
+          <DocumentSheet doc={previewDoc} company={catalog.company} template={selectedTemplate} printRoot />
+        </div>,
+        document.body
+      )}
     </div>
   );
 }
@@ -483,12 +643,14 @@ function DocumentDrawer({
   id,
   templates,
   types,
+  company,
   onClose,
   onChanged,
 }: {
   id: string;
   templates: InvoiceTemplate[];
   types: DocType[];
+  company: Company;
   onClose: () => void;
   onChanged: () => void;
 }) {
@@ -522,6 +684,36 @@ function DocumentDrawer({
 
   const balance = doc ? Number(doc.total) - Number(doc.amount_paid) : 0;
   const template = templates.find((t) => t.id === Number(doc?.template_id)) ?? templates[0];
+
+  const raw = doc as unknown as { discount_pct?: string | number; tax_pct?: string | number } | null;
+  const meta = (doc?.doc_meta ?? {}) as Record<string, unknown>;
+  const drawerSheet: SheetDoc | null = doc
+    ? {
+        docType: doc.doc_type,
+        number: doc.doc_number,
+        status: doc.status,
+        issueDate: doc.issue_date,
+        dueDate: doc.due_date,
+        customerName: doc.customer?.name || doc.customer_name || 'Walk-in customer',
+        customerAddress: doc.customer?.address || null,
+        customerEmail: doc.customer?.email || null,
+        items: doc.items.map((it) => ({
+          description: it.description,
+          qty: it.qty,
+          price: it.price,
+          line_total: it.line_total,
+        })),
+        notes: doc.notes,
+        poNumber: (meta.poNumber as string) || (meta.po_number as string) || null,
+        reference: (meta.reference as string) || null,
+        subtotal: Number(doc.subtotal) || 0,
+        discountPct: Number(raw?.discount_pct) || 0,
+        taxPct: Number(raw?.tax_pct) || 0,
+        total: Number(doc.total) || 0,
+        amountPaid: Number(doc.amount_paid) || 0,
+        currency: doc.currency || 'USD',
+      }
+    : null;
 
   const act = async (fn: () => Promise<unknown>) => {
     setBusy(true);
@@ -616,60 +808,15 @@ function DocumentDrawer({
 
             <div className="split">
               <div>
-                <div className="card" style={{ padding: 20, background: '#fff', color: '#0f172a' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 18 }}>
-                    <div>
-                      <div style={{ fontSize: 20, fontWeight: 800, color: template?.accentColor || '#0f172a' }}>
-                        {typeLabel(types, doc.doc_type).toUpperCase()}
-                      </div>
-                      <div style={{ fontSize: 12, color: '#64748b' }}>{doc.doc_number}</div>
-                    </div>
-                    <div style={{ textAlign: 'right', fontSize: 12, color: '#475569' }}>
-                      <div>Issued {dateLabel(doc.issue_date)}</div>
-                      <div>Due {dateLabel(doc.due_date)}</div>
-                    </div>
+                <div className="card drawer-doc-card no-print">
+                  <div className="a4-preview-shell">
+                    {drawerSheet && (
+                      <DocumentSheet doc={drawerSheet} company={company} template={template} />
+                    )}
                   </div>
-                  <div style={{ margin: '18px 0', fontSize: 12, color: '#334155' }}>
-                    <strong>Bill to</strong>
-                    <div>{doc.customer?.name || doc.customer_name || 'Walk-in customer'}</div>
-                    {doc.customer?.address && <div>{doc.customer.address}</div>}
-                    {doc.customer?.email && <div>{doc.customer.email}</div>}
-                  </div>
-                  <table>
-                    <thead>
-                      <tr>
-                        <th style={{ color: '#64748b', borderColor: '#e2e8f0' }}>Description</th>
-                        <th className="num" style={{ color: '#64748b', borderColor: '#e2e8f0' }}>Qty</th>
-                        <th className="num" style={{ color: '#64748b', borderColor: '#e2e8f0' }}>Price</th>
-                        <th className="num" style={{ color: '#64748b', borderColor: '#e2e8f0' }}>Total</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {doc.items.map((item, i) => (
-                        <tr key={item.id ?? i} style={{ cursor: 'default' }}>
-                          <td style={{ borderColor: '#eef2f7', color: '#0f172a' }}>{item.description}</td>
-                          <td className="num" style={{ borderColor: '#eef2f7', color: '#0f172a' }}>{qty(item.qty)}</td>
-                          <td className="num" style={{ borderColor: '#eef2f7', color: '#0f172a' }}>{money(item.price, doc.currency || 'USD')}</td>
-                          <td className="num" style={{ borderColor: '#eef2f7', color: '#0f172a' }}>
-                            {money(item.line_total ?? Number(item.qty) * Number(item.price), doc.currency || 'USD')}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  <div className="summary-box" style={{ color: '#334155' }}>
-                    <div className="summary-row">
-                      <span>Subtotal</span>
-                      <span className="mono">{money(doc.subtotal, doc.currency || 'USD')}</span>
-                    </div>
-                    <div className="summary-row">
-                      <span>Paid</span>
-                      <span className="mono">{money(doc.amount_paid, doc.currency || 'USD')}</span>
-                    </div>
-                    <div className="summary-row total" style={{ color: '#0f172a', borderColor: '#e2e8f0' }}>
-                      <span>Balance due</span>
-                      <span className="mono">{money(balance, doc.currency || 'USD')}</span>
-                    </div>
+                  <div className="drawer-doc-caption">
+                    {template ? `Template ${template.id} · ${template.name}` : 'House template'} · A4 ·{' '}
+                    {money(balance, doc.currency || 'USD')} balance
                   </div>
                 </div>
               </div>
@@ -766,6 +913,16 @@ function DocumentDrawer({
       )}
 
       {receiptOpen && doc && <ReceiptPreview doc={doc} onClose={() => setReceiptOpen(false)} />}
+
+      {/* The same sheet again, portalled straight to <body>, so Print/PDF is
+          never clipped by the drawer's scroll container. */}
+      {drawerSheet &&
+        createPortal(
+          <div className="a4-print-host">
+            <DocumentSheet doc={drawerSheet} company={company} template={template} printRoot />
+          </div>,
+          document.body
+        )}
     </>
   );
 }
@@ -788,6 +945,37 @@ function SettingsPanel({
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  const selectedTemplate = catalog.templates.find((t) => t.id === templateId) ?? catalog.templates[0];
+  const sampleDue = (() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 30);
+    return d.toISOString().slice(0, 10);
+  })();
+
+  // Proof for the picker: the same A4 component that renders issued documents
+  // and the print view, fed a representative invoice.
+  const sampleDoc: SheetDoc = {
+    docType: 'invoice',
+    number: 'INV-0042',
+    status: 'draft',
+    issueDate: today(),
+    dueDate: sampleDue,
+    customerName: 'Acme Trading (Pvt) Ltd',
+    customerAddress: '14 Borrowdale Road\nHarare',
+    customerEmail: 'accounts@acme.co.zw',
+    items: [
+      { description: 'Managed Wi-Fi — October', qty: 1, price: 850 },
+      { description: 'Additional access point', qty: 2, price: 125 },
+      { description: 'On-site installation', qty: 1, price: 150 },
+    ],
+    notes: 'Payment by bank transfer. Reference the invoice number.',
+    subtotal: 1250,
+    taxPct: Number(taxPct) || 0,
+    total: 1250,
+    amountPaid: 0,
+    currency,
+  };
 
   const save = async () => {
     setBusy(true);
@@ -853,6 +1041,7 @@ function SettingsPanel({
         <div className="panel-head" style={{ padding: 0, border: 'none', marginBottom: 14 }}>
           <div className="panel-title">Brand & defaults</div>
           <button className="btn primary" type="button" disabled={busy} onClick={() => void save()}>
+            {busy && <span className="spinner" aria-hidden />}
             {busy ? 'Saving…' : 'Save defaults'}
           </button>
         </div>
@@ -914,30 +1103,45 @@ function SettingsPanel({
       <div className="card" style={{ padding: 20, marginBottom: 18 }}>
         <div className="panel-title" style={{ marginBottom: 4 }}>PDF templates</div>
         <p className="muted small" style={{ marginTop: 0, marginBottom: 14 }}>
-          20 professional layouts. The selected template is the default for every new document.
+          One A4 house design, 20 finishes. Every template keeps the same structure — gradient masthead, ruled item table and footer band — and only the palette, wordmark and density change.
         </p>
-        <div className="template-grid">
-          {catalog.templates.map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              className={`template-card ${templateId === t.id ? 'selected' : ''}`}
-              onClick={() => setTemplateId(t.id)}
-            >
-              <div
-                className={`tpl-preview ${t.layout}`}
-                style={{ color: t.accentColor }}
+        <div className="settings-templates">
+          <div className="template-grid">
+            {catalog.templates.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                className={`template-card ${templateId === t.id ? 'selected' : ''}`}
+                onClick={() => setTemplateId(t.id)}
+                title={t.description}
               >
-                <div className="bar" style={{ background: t.accentColor, width: t.showLogo ? '34%' : '52%' }} />
-                <div className="line" style={{ width: '78%' }} />
-                <div className="line" style={{ width: '62%' }} />
-                <div className="line" style={{ width: '70%' }} />
-                <div className="line" style={{ width: '45%' }} />
+                <TemplateThumb template={t} />
+                <h4>{t.name}</h4>
+                <p>{t.description}</p>
+              </button>
+            ))}
+          </div>
+          <aside className="settings-preview">
+            <div className="settings-preview-head">
+              <div>
+                <div className="panel-title" style={{ marginBottom: 2 }}>
+                  {selectedTemplate ? selectedTemplate.name : 'House template'}
+                </div>
+                <div className="muted small">A4 proof · updates with the template and terms</div>
               </div>
-              <h4>{t.id}. {t.name}</h4>
-              <p>{t.description}</p>
-            </button>
-          ))}
+              <span className="muted small">{selectedTemplate ? `#${selectedTemplate.id}` : ''}</span>
+            </div>
+            <div className="a4-preview-shell">
+              <DocumentSheet
+                doc={sampleDoc}
+                company={{ ...catalog.company, terms_text: terms || catalog.company.terms_text }}
+                template={selectedTemplate}
+              />
+            </div>
+            <div className="muted small" style={{ marginTop: 8 }}>
+              Save defaults to make this the template for every new document.
+            </div>
+          </aside>
         </div>
       </div>
 
@@ -970,8 +1174,6 @@ function SettingsPanel({
 }
 
 /* ─────────────────────────────── app ───────────────────────────────── */
-
-type View = 'documents' | 'aging' | 'settings';
 
 const AR_BUCKETS: Array<{ key: keyof ArAging['buckets']; label: string; tone?: string }> = [
   { key: 'current', label: 'Current' },
@@ -1075,9 +1277,13 @@ export default function App() {
   if (loading) {
     return (
       <div className="app-shell">
-        <aside className="sidebar">
-          <Brand company={null} />
-        </aside>
+        <Sidebar
+          company={null}
+          view="documents"
+          typeFilter="all"
+          statusFilter="all"
+          types={FALLBACK_TYPES}
+        />
         <main className="main">
           <div className="skeleton" style={{ width: 220, height: 28, marginBottom: 18 }} />
           <div className="stats">
@@ -1095,46 +1301,28 @@ export default function App() {
 
   return (
     <div className="app-shell">
-      <aside className="sidebar">
-        <Brand company={catalog?.company} />
-
-        <div className="nav-section">
-          <div className="nav-label">Workspace</div>
-          <button className={`nav-item ${view === 'documents' ? 'active' : ''}`} onClick={() => setView('documents')} type="button">
-            <span className="nav-dot" /> All documents
-          </button>
-          <button className={`nav-item ${view === 'aging' ? 'active' : ''}`} onClick={() => setView('aging')} type="button">
-            <span className="nav-dot" /> AR aging
-          </button>
-          <button className={`nav-item ${view === 'settings' ? 'active' : ''}`} onClick={() => setView('settings')} type="button">
-            <span className="nav-dot" /> Templates & theme
-          </button>
-        </div>
-
-        <div className="nav-section">
-          <div className="nav-label">Document types</div>
-          {types.map((t) => (
-            <button
-              key={t.type}
-              type="button"
-              className={`nav-item ${view === 'documents' && typeFilter === t.type ? 'active' : ''}`}
-              onClick={() => {
-                setView('documents');
-                setTypeFilter((prev) => (prev === t.type ? 'all' : t.type));
-              }}
-            >
-              <span className="muted mono" style={{ fontSize: 10 }}>{t.prefix}</span>
-              {t.label}
-            </button>
-          ))}
-        </div>
-
-        <div className="sidebar-footer">
-          Preyone Invoicing v3.2
-          <br />
-          UBL / Peppol ready
-        </div>
-      </aside>
+      <Sidebar
+        company={catalog?.company}
+        view={view}
+        typeFilter={typeFilter}
+        statusFilter={statusFilter}
+        types={types}
+        onView={setView}
+        onAllDocuments={() => {
+          setView('documents');
+          setTypeFilter('all');
+          setStatusFilter('all');
+        }}
+        onType={(type) => {
+          setView('documents');
+          setTypeFilter((prev) => (prev === type ? 'all' : type));
+        }}
+        onStatus={(status) => {
+          setView('documents');
+          setStatusFilter((prev) => (prev === status ? 'all' : status));
+        }}
+        onNewDocument={() => setComposerOpen(true)}
+      />
 
       <main className="main">
         <div className="topbar">
@@ -1151,11 +1339,17 @@ export default function App() {
             </p>
           </div>
           <div className="topbar-actions">
-            <button className="btn ghost" type="button" onClick={refreshAll}>
-              Refresh
+            <span className="status-chip" title="Pesepay USD checkout is available on this workspace">
+              <span className="status-dot" aria-hidden />
+              {catalog?.company.currency || 'USD'} ledger
+            </span>
+            <button className="btn ghost" type="button" onClick={refreshAll} disabled={docsLoading}>
+              {docsLoading ? <span className="spinner" aria-hidden /> : <span className="btn-glyph" aria-hidden>↻</span>}
+              {docsLoading ? 'Syncing…' : 'Refresh'}
             </button>
             <button className="btn primary" type="button" onClick={() => setComposerOpen(true)}>
-              + New document
+              <span className="btn-plus" aria-hidden>+</span>
+              New document
             </button>
           </div>
         </div>
@@ -1333,6 +1527,7 @@ export default function App() {
           id={openDocId}
           templates={templates}
           types={types}
+          company={catalog.company}
           onClose={() => setOpenDocId(null)}
           onChanged={refreshAll}
         />

@@ -304,6 +304,9 @@ export function OnlinePaymentModal({
             <p className="sheet-sub">
               {doc.doc_number} · {money(balance, currency)} outstanding
             </p>
+            <span className="pay-chip">
+              Pesepay · {currency}
+            </span>
           </div>
           <button type="button" className="icon-btn" onClick={onClose} aria-label="Close">
             ✕

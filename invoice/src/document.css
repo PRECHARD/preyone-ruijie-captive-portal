@@ -1,0 +1,564 @@
+/* ─────────────────────────────────────────────────────────────────────────
+   A4 document sheet — ported verbatim from the previous Preyone invoice
+   deployment (/opt/preyone-invoice/src/styles/document.css).
+
+   The structure is the house template: brand lockup + wordmark, bill-to /
+   meta grid, gradient item table, gradient grand total, notes, and the
+   full-bleed footer band. Only the colour stops and a few density rules
+   change per template, so every one of the 20 templates stays in the same
+   A4 genre.
+
+   Selectors are namespaced under `.a4-doc` because the workspace already
+   uses `.sheet` for its modal panels.
+   ───────────────────────────────────────────────────────────────────────── */
+
+/* Poppins ships with the bundle (public/fonts) exactly as the previous
+   deployment did, so the sheet keeps its original typography offline. */
+@font-face {
+  font-family: 'Poppins';
+  src: url('/fonts/Poppins-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Poppins';
+  src: url('/fonts/Poppins-Medium.woff2') format('woff2');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Poppins';
+  src: url('/fonts/Poppins-SemiBold.woff2') format('woff2');
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Poppins';
+  src: url('/fonts/Poppins-Bold.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+.a4-doc {
+  --doc-grad: linear-gradient(100deg, #14002e 0%, #170133 7%, #200644 17%, #300e5f 28%, #36116a 32%, #4a1064 43%, #640e5d 61%, #740e58 77%, #7a0e57 90%);
+  --doc-row-tint: linear-gradient(rgba(255, 255, 255, .57), rgba(255, 255, 255, .57)), var(--doc-grad);
+  --doc-ink: #241b3a;
+  --doc-muted: #6d6786;
+  --doc-line: #e5e5f5;
+  --doc-thanks: #122b70;
+  --doc-band-text: #fff;
+  box-sizing: border-box;
+  color: var(--doc-ink);
+  font-family: 'Poppins', 'Segoe UI', sans-serif;
+}
+
+.a4-doc *,
+.a4-doc *::before,
+.a4-doc *::after { box-sizing: border-box; }
+
+.a4-sheet {
+  position: relative;
+  width: 210mm;
+  min-height: 297mm;
+  margin: 0 auto;
+  background: #fff;
+  color: var(--doc-ink);
+  font-family: 'Poppins', 'Segoe UI', sans-serif;
+  font-size: 9.5pt;
+  line-height: 1.45;
+  padding: 13mm 16mm 12mm;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.a4-sheet::before,
+.a4-sheet::after {
+  content: '';
+  position: absolute;
+  z-index: 0;
+  pointer-events: none;
+}
+.a4-sheet::before {
+  top: -30mm;
+  right: -34mm;
+  width: 90mm;
+  height: 90mm;
+  border-radius: 50%;
+  background: radial-gradient(circle at center, color-mix(in srgb, var(--doc-accent, #7a0e57) 12%, transparent), transparent 68%);
+}
+.a4-sheet::after {
+  bottom: -36mm;
+  left: -38mm;
+  width: 100mm;
+  height: 100mm;
+  border-radius: 50%;
+  background: radial-gradient(circle at center, color-mix(in srgb, var(--doc-accent, #300e5f) 10%, transparent), transparent 66%);
+}
+.a4-sheet > * { position: relative; z-index: 1; }
+
+.a4-doc-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10mm;
+}
+.a4-brand-logo { height: 15mm; width: auto; display: block; object-fit: contain; }
+.a4-brand-fallback {
+  height: 15mm;
+  min-width: 15mm;
+  padding: 0 4mm;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3mm;
+  background-image: var(--doc-grad);
+  color: #fff;
+  font-size: 18pt;
+  font-weight: 700;
+}
+.a4-doc-mark { display: inline-flex; flex-direction: column; align-items: stretch; }
+.a4-doc-mark img.a4-wordmark { height: 9.6mm; width: auto; display: block; margin-left: auto; }
+.a4-doc-mark .a4-wordmark-text {
+  align-self: flex-end;
+  font-size: 19pt;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--doc-accent, #7a0e57);
+}
+.a4-number-bar {
+  margin-top: 1.5mm;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 4.95mm;
+  white-space: nowrap;
+  background-image: var(--doc-grad);
+  color: #fff;
+  font-weight: 500;
+  font-size: 8.6pt;
+  letter-spacing: .08em;
+  padding: 0 3mm;
+}
+
+.a4-doc-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12mm;
+  margin-top: 10mm;
+}
+.a4-meta-label {
+  font-size: 8pt;
+  font-weight: 700;
+  letter-spacing: .08em;
+  color: var(--doc-accent, #36116a);
+  text-transform: uppercase;
+  margin-bottom: 1.6mm;
+}
+.a4-bill-to .a4-client-name {
+  font-size: 11pt;
+  font-weight: 600;
+  color: var(--doc-ink);
+}
+.a4-bill-to .a4-client-lines {
+  white-space: pre-line;
+  color: var(--doc-ink);
+}
+.a4-meta-grid {
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: .8mm 6mm;
+  font-size: 8.5pt;
+}
+.a4-meta-grid dt { color: var(--doc-muted); font-weight: 500; }
+.a4-meta-grid dd { margin: 0; font-weight: 600; color: var(--doc-ink); }
+
+.a4-items-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  margin-top: 9mm;
+}
+.a4-items-table col.a4-c-product { width: 48.82%; }
+.a4-items-table col.a4-c-price { width: 16.93%; }
+.a4-items-table col.a4-c-qty { width: 13.18%; }
+.a4-items-table col.a4-c-total { width: 21.07%; }
+
+.a4-items-table thead th {
+  background-image: var(--doc-grad);
+  color: #fff;
+  font-size: 10.5pt;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  height: 11.2mm;
+  padding: 0 5mm;
+  text-align: right;
+}
+.a4-items-table thead th:first-child { text-align: left; }
+
+.a4-items-table tbody td {
+  height: 9.6mm;
+  padding: 1mm 5mm;
+  vertical-align: middle;
+  border-left: .3mm solid var(--doc-line);
+  overflow-wrap: break-word;
+}
+.a4-items-table tbody td:first-child { border-left: none; text-align: left; }
+.a4-items-table tbody td.a4-num { text-align: right; font-variant-numeric: tabular-nums; }
+
+.a4-items-table tbody tr:nth-child(odd) td {
+  background-image: var(--doc-row-tint);
+  border-left-color: rgba(255, 255, 255, .9);
+}
+.a4-items-table tbody tr:nth-child(odd) td:first-child { border-left-color: transparent; }
+.a4-items-table tbody tr.a4-filler td { color: transparent; }
+
+.a4-totals-wrap {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 7mm;
+}
+.a4-totals { width: 82mm; }
+.a4-totals .a4-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 2.1mm 4mm;
+  font-size: 9pt;
+}
+.a4-totals .a4-row .a4-lbl { color: var(--doc-muted); font-weight: 500; letter-spacing: .04em; }
+.a4-totals .a4-row .a4-val { font-weight: 600; color: var(--doc-ink); font-variant-numeric: tabular-nums; }
+.a4-totals .a4-row.a4-grand {
+  margin-top: 1.6mm;
+  background-image: var(--doc-grad);
+  color: #fff;
+  padding: 3.2mm 4mm;
+}
+.a4-totals .a4-row.a4-grand .a4-lbl { color: rgba(255, 255, 255, .92); font-weight: 700; font-size: 10.5pt; letter-spacing: .08em; }
+.a4-totals .a4-row.a4-grand .a4-val { color: #fff; font-weight: 700; font-size: 11.5pt; }
+.a4-totals .a4-row.a4-paid-row { margin-top: 1.6mm; }
+.a4-totals .a4-row.a4-balance {
+  border-top: .3mm solid var(--doc-line);
+  margin-top: .8mm;
+  padding-top: 2mm;
+}
+.a4-totals .a4-row.a4-balance .a4-lbl { font-weight: 700; color: var(--doc-ink); }
+.a4-totals .a4-row.a4-balance .a4-val { font-weight: 700; font-size: 10.5pt; }
+
+.a4-notes-block { margin-top: 8mm; max-width: 120mm; }
+.a4-notes-block .a4-meta-label { margin-bottom: 1mm; }
+.a4-notes-block p { margin: 0; white-space: pre-line; font-size: 8.5pt; color: var(--doc-ink); }
+
+.a4-sheet-footer {
+  margin-top: auto;
+  margin-left: -16mm;
+  margin-right: -16mm;
+  margin-bottom: -12mm;
+  padding-top: 7mm;
+}
+.a4-thanks {
+  text-align: center;
+  font-size: 20pt;
+  font-weight: 700;
+  letter-spacing: .03em;
+  line-height: 1.1;
+  color: var(--doc-thanks);
+}
+.a4-terms-note {
+  margin-top: .6mm;
+  text-align: center;
+  font-size: 14pt;
+  font-weight: 700;
+  letter-spacing: .03em;
+  line-height: 1.15;
+  color: var(--doc-ink);
+}
+.a4-terms-text {
+  margin: 2.4mm 12mm 0;
+  font-size: 9pt;
+  font-weight: 500;
+  color: var(--doc-ink);
+  white-space: pre-line;
+  text-align: center;
+}
+.a4-tagline {
+  margin-top: 2.4mm;
+  text-align: center;
+  font-size: 9pt;
+  font-weight: 600;
+  letter-spacing: .02em;
+  color: var(--doc-ink);
+  opacity: .53;
+}
+.a4-footer-band {
+  position: relative;
+  margin-top: 3mm;
+  height: 26.8mm;
+  background-image: var(--doc-grad);
+  background-size: 100% 100%;
+  background-repeat: no-repeat;
+  color: var(--doc-band-text);
+}
+.a4-footer-band.a4-legacy-band { background-image: url('/brand/footer.svg'); }
+.a4-band-col {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+  font-size: 10pt;
+  line-height: 1.25;
+  white-space: nowrap;
+}
+.a4-band-col span { display: block; }
+.a4-band-address { left: 55.6%; }
+.a4-band-contact { left: 84%; }
+.a4-band-contact .a4-email { font-style: italic; }
+.a4-band-divider {
+  position: absolute;
+  top: 50%;
+  left: 69.5%;
+  transform: translate(-50%, -50%);
+  width: .3mm;
+  height: 8.3mm;
+  background: #fff;
+}
+
+.a4-stamp {
+  position: absolute;
+  z-index: 5;
+  top: 44%;
+  left: 50%;
+  width: 86mm;
+  transform: translate(-50%, -50%);
+  mix-blend-mode: multiply;
+  pointer-events: none;
+}
+
+/* ── density variants: same genre, different breathing room ───────────── */
+.a4-doc.layout-minimal .a4-items-table thead th { background-image: none; background-color: var(--doc-accent); }
+.a4-doc.layout-minimal .a4-totals .a4-row.a4-grand { background-image: none; background-color: var(--doc-accent); }
+.a4-doc.layout-minimal .a4-number-bar { background-image: none; background-color: var(--doc-accent); }
+.a4-doc.layout-minimal .a4-thanks { font-weight: 600; letter-spacing: .12em; font-size: 15pt; }
+.a4-doc.layout-minimal .a4-items-table tbody tr:nth-child(odd) td { background-image: none; background-color: color-mix(in srgb, var(--doc-accent) 7%, #fff); }
+
+.a4-doc.layout-compact .a4-sheet { font-size: 8.8pt; padding-top: 11mm; }
+.a4-doc.layout-compact .a4-doc-meta { margin-top: 7mm; }
+.a4-doc.layout-compact .a4-items-table { margin-top: 6mm; }
+.a4-doc.layout-compact .a4-items-table tbody td { height: 7.8mm; }
+.a4-doc.layout-compact .a4-items-table thead th { height: 9.4mm; }
+.a4-doc.layout-compact .a4-totals .a4-row { padding: 1.5mm 4mm; }
+.a4-doc.layout-compact .a4-totals-wrap { margin-top: 5mm; }
+
+/* ── previews ─────────────────────────────────────────────────────────── */
+.a4-preview-shell {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  border-radius: 14px;
+  border: 1px solid var(--pos-glass-edge, rgba(148, 163, 184, .14));
+  background:
+    radial-gradient(420px 240px at 100% 0%, rgba(5, 150, 105, .14), transparent 70%),
+    linear-gradient(160deg, rgba(148, 163, 184, .12), rgba(7, 12, 24, .58));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .05);
+  padding: 12px;
+}
+.a4-preview-shell .a4-doc { zoom: var(--preview-zoom, .38); }
+.a4-preview-shell .a4-sheet {
+  margin: 0 auto;
+  box-shadow:
+    0 30px 70px rgba(0, 0, 0, .55),
+    0 0 0 1px rgba(255, 255, 255, .05);
+}
+
+/* A4 thumbnail used by the template pickers: same proportions and band
+   positions as the real sheet, built from divs so 20 of them stay cheap. */
+.a4-thumb {
+  width: 100%;
+  aspect-ratio: 210 / 297;
+  border-radius: 9px;
+  padding: 6%;
+  border: 1px solid rgba(148, 163, 184, .12);
+  background:
+    radial-gradient(180px 120px at 100% 0%, rgba(5, 150, 105, .12), transparent 70%),
+    linear-gradient(160deg, rgba(148, 163, 184, .14), rgba(7, 12, 24, .5));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .05);
+}
+.a4-thumb-sheet {
+  height: 100%;
+  background: #fff;
+  border-radius: 3px;
+  padding: 9% 8% 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, .45);
+}
+.a4-thumb-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8%; }
+.a4-thumb-logo { width: 30%; height: 7px; border-radius: 2px; background: color-mix(in srgb, var(--doc-accent) 35%, #fff); }
+.a4-thumb-word { width: 24%; height: 5px; border-radius: 2px; background: var(--doc-accent); opacity: .7; }
+.a4-thumb-meta { display: flex; justify-content: space-between; margin-top: 12%; }
+.a4-thumb-meta i { display: block; width: 34%; height: 3px; border-radius: 2px; background: #cbd5e1; }
+.a4-thumb-band { height: 9px; margin-top: 10%; background-image: var(--doc-grad); border-radius: 1px; }
+.a4-thumb-row { height: 6px; margin-top: 5%; background: #eef1f6; }
+.a4-thumb-row.alt { background-image: var(--doc-row-tint); }
+.a4-thumb-total { height: 10px; width: 44%; margin: 9% 0 0 auto; background-image: var(--doc-grad); border-radius: 1px; }
+.a4-thumb-foot { height: 13%; margin: auto -8% 0; background-image: var(--doc-grad); }
+.a4-thumb.legacy .a4-thumb-foot { background-image: url('/brand/footer.svg'); background-size: 100% 100%; }
+.a4-thumb.layout-minimal .a4-thumb-band,
+.a4-thumb.layout-minimal .a4-thumb-total { background-image: none; background-color: var(--doc-accent); }
+.a4-thumb.layout-compact .a4-thumb-band { height: 7px; }
+.a4-thumb.layout-compact .a4-thumb-row { height: 5px; }
+
+/* Composer: form on the left, live A4 preview on the right. */
+.composer-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(300px, 1fr);
+  gap: 22px;
+  align-items: start;
+}
+.composer-preview {
+  position: sticky;
+  top: 0;
+  align-self: start;
+}
+.composer-preview .panel-title { margin-bottom: 8px; }
+.composer-preview .a4-preview-shell { padding: 12px; }
+.composer-preview .a4-preview-shell .a4-doc { --preview-zoom: .4; }
+
+.template-strip {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding: 4px 2px 10px;
+  scrollbar-width: thin;
+}
+.template-strip-item {
+  flex: 0 0 96px;
+  border: 1px solid var(--pos-glass-edge, rgba(148, 163, 184, .14));
+  background: rgba(148, 163, 184, .045);
+  border-radius: 11px;
+  padding: 5px;
+  text-align: left;
+  transition: border-color .18s ease, box-shadow .2s ease, transform .2s cubic-bezier(.2, .8, .2, 1), background .18s ease;
+}
+.template-strip-item:hover {
+  border-color: color-mix(in srgb, var(--pos-primary) 52%, var(--pos-glass-edge, rgba(148, 163, 184, .14)));
+  background: rgba(148, 163, 184, .075);
+  transform: translateY(-2px);
+  box-shadow: 0 14px 30px rgba(0, 0, 0, .28);
+}
+.template-strip-item.selected {
+  border-color: color-mix(in srgb, var(--pos-primary) 72%, transparent);
+  background: color-mix(in srgb, var(--pos-primary) 10%, rgba(148, 163, 184, .04));
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--pos-primary) 24%, transparent),
+    0 16px 34px rgba(0, 0, 0, .3);
+}
+.template-strip-item .a4-thumb { border-radius: 6px; padding: 4%; }
+.template-strip-name {
+  display: block;
+  margin-top: 5px;
+  font-size: 9.5px;
+  line-height: 1.25;
+  color: var(--pos-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.template-strip-item.selected .template-strip-name { color: var(--pos-text); }
+
+@media (max-width: 1180px) {
+  .composer-layout { grid-template-columns: 1fr; }
+  .composer-preview { position: static; }
+  .composer-preview .a4-preview-shell { max-width: 430px; margin: 0 auto; }
+}
+
+/* Settings: thumbnail grid on the left, full A4 proof on the right. */
+.settings-templates {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(290px, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+.settings-preview {
+  position: sticky;
+  top: 96px;
+  align-self: start;
+  padding: 14px;
+  border: 1px solid var(--pos-glass-edge, rgba(148, 163, 184, .14));
+  border-radius: 16px;
+  background: linear-gradient(160deg, rgba(148, 163, 184, .07), rgba(9, 16, 30, .42));
+  box-shadow:
+    0 22px 50px rgba(0, 0, 0, .28),
+    inset 0 1px 0 rgba(255, 255, 255, .05);
+  backdrop-filter: blur(14px) saturate(120%);
+}
+.settings-preview-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.settings-preview .a4-preview-shell { padding: 12px; }
+.settings-preview .a4-preview-shell .a4-doc { --preview-zoom: .36; }
+.template-card .a4-thumb { margin-bottom: 8px; }
+
+@media (max-width: 1180px) {
+  .settings-templates { grid-template-columns: 1fr; }
+  .settings-preview { position: static; }
+  .settings-preview .a4-preview-shell { max-width: 430px; margin: 0 auto; }
+}
+
+/* Drawer preview sits on a glass tray so the paper edge reads clearly. */
+.drawer-doc-card {
+  padding: 14px;
+  background:
+    radial-gradient(420px 240px at 100% 0%, rgba(5, 150, 105, .12), transparent 70%),
+    linear-gradient(160deg, rgba(148, 163, 184, .08), rgba(9, 16, 30, .38));
+}
+.drawer-doc-caption {
+  margin-top: 9px;
+  text-align: center;
+  font-size: 10.5px;
+  letter-spacing: .04em;
+  color: var(--pos-text-muted);
+}
+
+/* The print copy lives in a portal on <body>, hidden until Ctrl+P. */
+.a4-print-host { display: none; }
+
+/* ── print: only the tagged A4 sheet reaches the printer ──────────────── */
+@page { size: A4; margin: 0; }
+
+@media print {
+  html, body {
+    background: #fff !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .a4-print-host { display: block !important; }
+  body * { visibility: hidden; }
+  .a4-print,
+  .a4-print * { visibility: visible; }
+  .a4-print {
+    position: absolute;
+    inset: 0;
+    display: block !important;
+    background: #fff;
+  }
+  .a4-print .a4-sheet {
+    box-shadow: none;
+    margin: 0;
+    zoom: 1 !important;
+  }
+  .no-print { display: none !important; }
+}
