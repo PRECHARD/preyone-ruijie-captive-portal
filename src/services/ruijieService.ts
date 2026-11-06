@@ -622,6 +622,10 @@ export async function syncAccountingData(): Promise<AccountingSyncResult> {
   }
 
   if (!locked) {
+    // The loser must give the client back. Leaving it checked out leaked one
+    // connection per worker every 5 minutes until the pool was full and login
+    // timed out with "Internal server error".
+    client?.release();
     return {
       skipped: true,
       reason: 'another_worker_running',
