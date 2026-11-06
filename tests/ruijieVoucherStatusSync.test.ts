@@ -5,7 +5,7 @@ const mocks = vi.hoisted(() => ({
   clientQuery: vi.fn(),
   release: vi.fn(),
   isRuijieCloudConfigured: vi.fn(() => true),
-  getAllRuijieVouchers: vi.fn(async (): Promise<any[]> => []),
+  getRuijieRoster: vi.fn(async (): Promise<any> => ({ vouchers: [], fetchedAt: new Date(), stale: false })),
 }));
 
 vi.mock('../src/db/pool', () => ({
@@ -13,7 +13,9 @@ vi.mock('../src/db/pool', () => ({
 }));
 vi.mock('../src/services/ruijieCloud', () => ({
   isRuijieCloudConfigured: mocks.isRuijieCloudConfigured,
-  getAllRuijieVouchers: mocks.getAllRuijieVouchers,
+}));
+vi.mock('../src/services/ruijieRoster', () => ({
+  getRuijieRoster: mocks.getRuijieRoster,
 }));
 
 import {
@@ -47,7 +49,7 @@ function local(overrides: Partial<LocalVoucherState> = {}): LocalVoucherState {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.isRuijieCloudConfigured.mockReturnValue(true);
-  mocks.getAllRuijieVouchers.mockResolvedValue([]);
+  mocks.getRuijieRoster.mockResolvedValue({ vouchers: [], fetchedAt: new Date(), stale: false });
   mocks.connect.mockResolvedValue({ query: mocks.clientQuery, release: mocks.release });
   mocks.clientQuery.mockResolvedValue({ rows: [], rowCount: 0 });
 });
@@ -207,10 +209,14 @@ describe('planVoucherUpdate', () => {
 
 describe('syncRuijieVoucherStatuses', () => {
   it('updates all matched local vouchers without touching payment or pool metadata', async () => {
-    mocks.getAllRuijieVouchers.mockResolvedValue([
-      { voucherCode: 'alpha', usedTimeMin: 30, currentClients: 1, quotaMb: 1024, usedQuotaMb: 30 },
-      { voucherCode: 'BETA', usedTimeMin: 10 },
-    ]);
+    mocks.getRuijieRoster.mockResolvedValue({
+      vouchers: [
+        { voucherCode: 'alpha', usedTimeMin: 30, currentClients: 1, quotaMb: 1024, usedQuotaMb: 30 },
+        { voucherCode: 'BETA', usedTimeMin: 10 },
+      ],
+      fetchedAt: new Date(),
+      stale: false,
+    });
     mocks.clientQuery.mockImplementation(async (sql: string) => {
       if (sql.includes('pg_try_advisory_lock')) return { rows: [{ locked: true }], rowCount: 1 };
       if (sql.includes('FROM vouchers')) {
@@ -254,7 +260,7 @@ describe('syncRuijieVoucherStatuses', () => {
     mocks.clientQuery.mockResolvedValueOnce({ rows: [{ locked: false }], rowCount: 1 });
     const result = await syncRuijieVoucherStatuses({ force: true });
     expect(result).toMatchObject({ skipped: true, reason: 'another_worker_running' });
-    expect(mocks.getAllRuijieVouchers).not.toHaveBeenCalled();
+    expect(mocks.getRuijieRoster).not.toHaveBeenCalled();
     expect(mocks.release).toHaveBeenCalled();
   });
 });

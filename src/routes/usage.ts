@@ -1,11 +1,10 @@
 import { Router, Request, Response } from 'express';
 import rateLimit from 'express-rate-limit';
 import { pool } from '../db/pool';
-import {
-  fetchRuijieAccountingRecords,
-  listRuijieOnlineUsers,
-} from '../services/ruijieService';
-import { isRuijieCloudConfigured, getAllRuijieVouchers } from '../services/ruijieCloud';
+import { fetchRuijieAccountingRecords } from '../services/ruijieService';
+import { getRuijieSessionSnapshot } from '../services/ruijieSessionCache';
+import { getRuijieRoster } from '../services/ruijieRoster';
+import { isRuijieCloudConfigured } from '../services/ruijieCloud';
 import type { RuijieVoucher } from '../services/ruijieCloud';
 
 /**
@@ -105,7 +104,35 @@ function normalizeMac(raw?: unknown): string | null {
 // single-MAC endpoint — and the result is cached so the PWA's 15s polling
 // costs at most one Ruijie call per minute no matter how many devices poll.
 let liveUsageCache: { at: number; byMac: Map<string, number> } | null = null;
+let accountingCache: { at: number; byMac: Map<string, number> } | null = null;
 const LIVE_USAGE_CACHE_MS = 60_000;
+const ACCOUNTING_CACHE_MS = 5 * 60_000;
+
+function macKey(mac: unknown): string | null {
+  const m = String(mac ?? '').toLowerCase().replace(/[^a-f0-9]/g, '');
+  return m.length === 12 ? m : null;
+}
+
+/**
+ * Accounting history changes slowly and is only a fallback behind the
+ * per-voucher counters, so hold it for five minutes. This removes the last
+ * per-worker-per-minute upstream call from the polling endpoint.
+ */
+async function accountingUsageByMac(): Promise<Map<string, number>> {
+  if (accountingCache && Date.now() - accountingCache.at < ACCOUNTING_CACHE_MS) {
+    return accountingCache.byMac;
+  }
+  const byMac = new Map<string, number>();
+  const records = await fetchRuijieAccountingRecords().catch(() => []);
+  for (const r of records) {
+    const m = macKey(r.mac);
+    const n = Number(r.usedMb);
+    if (!m || !Number.isFinite(n)) continue;
+    byMac.set(m, Math.max(byMac.get(m) ?? 0, n));
+  }
+  accountingCache = { at: Date.now(), byMac };
+  return byMac;
+}
 
 async function liveUsageByMac(): Promise<Map<string, number>> {
   if (!isRuijieCloudConfigured()) return new Map();
@@ -113,23 +140,25 @@ async function liveUsageByMac(): Promise<Map<string, number>> {
     return liveUsageCache.byMac;
   }
 
+  // The shared session cache is cluster-wide, so four PM2 workers cost one
+  // upstream read per TTL instead of one per worker per minute.
+  const [session, accounting] = await Promise.all([
+    getRuijieSessionSnapshot({ telemetry: false }),
+    accountingUsageByMac(),
+  ]);
+
   const byMac = new Map<string, number>();
   const bump = (mac: unknown, mb: unknown) => {
-    const m = String(mac ?? '').toLowerCase().replace(/[^a-f0-9]/g, '');
+    const m = macKey(mac);
     const n = Number(mb);
-    if (m.length !== 12 || !Number.isFinite(n)) return;
+    if (!m || !Number.isFinite(n)) return;
     byMac.set(m, Math.max(byMac.get(m) ?? 0, n));
   };
 
-  // Either call failing must not take the endpoint down — an empty map just
-  // means we fall back to whatever the vouchers table already holds.
-  const [online, records] = await Promise.all([
-    // Only mac + usedMb are read here — skip the sta_users telemetry merge.
-    listRuijieOnlineUsers({ stationTelemetry: false }).catch(() => []),
-    fetchRuijieAccountingRecords().catch(() => []),
-  ]);
-  for (const u of online) bump(u.mac, u.usedMb);
-  for (const r of records) bump(r.mac, r.usedMb);
+  for (const u of session.users) bump(u.mac, u.usedMb);
+  for (const [mac, mb] of accounting) {
+    byMac.set(mac, Math.max(byMac.get(mac) ?? 0, mb));
+  }
 
   liveUsageCache = { at: Date.now(), byMac };
   return byMac;
@@ -149,7 +178,9 @@ async function ruijieVoucherByCode(rawCode: string): Promise<RuijieVoucher | nul
   if (!code || !isRuijieCloudConfigured()) return null;
   if (!voucherCache || Date.now() - voucherCache.at >= VOUCHER_CACHE_MS) {
     try {
-      const all = await getAllRuijieVouchers();
+      // Shared, cross-worker snapshot (TTL 120s, serve-stale) — never pull
+      // the whole roster from this polling endpoint.
+      const { vouchers: all } = await getRuijieRoster();
       const byCode = new Map<string, RuijieVoucher>();
       for (const v of all) {
         const key = (v.voucherCode || v.codeNo || '').trim().toLowerCase();
@@ -171,6 +202,7 @@ async function ruijieVoucherByCode(rawCode: string): Promise<RuijieVoucher | nul
 // Test-only: both module caches outlive a single request by design.
 export function __resetUsageCachesForTests(): void {
   liveUsageCache = null;
+  accountingCache = null;
   voucherCache = null;
 }
 

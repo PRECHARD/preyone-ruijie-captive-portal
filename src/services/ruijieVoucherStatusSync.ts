@@ -1,6 +1,7 @@
 import type { PoolClient } from 'pg';
 import { pool } from '../db/pool';
-import { getAllRuijieVouchers, isRuijieCloudConfigured } from './ruijieCloud';
+import { isRuijieCloudConfigured } from './ruijieCloud';
+import { getRuijieRoster } from './ruijieRoster';
 import type { RuijieVoucher } from './ruijieCloud';
 
 /**
@@ -290,7 +291,9 @@ export async function syncRuijieVoucherStatuses(
       return { ...summary, skipped: true, reason: 'another_worker_running' };
     }
 
-    const remote = await getAllRuijieVouchers();
+    // One shared snapshot for the monitor, analytics and usage readers; this
+    // sweep must never pull its own copy of the roster.
+    const { vouchers: remote } = await getRuijieRoster();
     summary.remoteCount = remote.length;
 
     const remoteByCode = new Map<string, RuijieVoucher>();

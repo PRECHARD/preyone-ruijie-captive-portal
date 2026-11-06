@@ -7,9 +7,14 @@ const cloud = vi.hoisted(() => ({
 }));
 
 const poolQuery = vi.hoisted(() => vi.fn());
+const poolClientQuery = vi.hoisted(() => vi.fn());
+const poolClientRelease = vi.hoisted(() => vi.fn());
 
 vi.mock('../src/db/pool', () => ({
-  pool: { query: poolQuery },
+  pool: {
+    query: poolQuery,
+    connect: async () => ({ query: poolClientQuery, release: poolClientRelease }),
+  },
 }));
 
 vi.mock('../src/services/ruijieCloud', () => ({
@@ -29,6 +34,12 @@ beforeEach(() => {
     if (/^\s*SELECT payload/i.test(sql)) return { rows: db.rows };
     return { rows: [{ fetched_at: new Date() }] };
   });
+  poolClientQuery.mockReset();
+  poolClientQuery.mockImplementation(async (sql: string) => {
+    if (/pg_try_advisory_lock/i.test(sql)) return { rows: [{ locked: true }] };
+    return { rows: [] };
+  });
+  poolClientRelease.mockReset();
   cloud.isConfigured.mockReturnValue(true);
   cloud.getAll.mockReset();
 });
@@ -88,5 +99,21 @@ describe('getRuijieRoster', () => {
 
     expect(cloud.getAll).toHaveBeenCalledTimes(1);
     expect(a.vouchers).toEqual(b.vouchers);
+  });
+
+  it('serves the cached snapshot without pulling when another worker holds the lease', async () => {
+    const fetchedAt = new Date(Date.now() - 10 * 60_000);
+    db.rows = [{ payload: [VOUCHER], fetched_at: fetchedAt }];
+    poolClientQuery.mockImplementation(async (sql: string) => {
+      if (/pg_try_advisory_lock/i.test(sql)) return { rows: [{ locked: false }] };
+      return { rows: [] };
+    });
+
+    const roster = await getRuijieRoster();
+
+    expect(cloud.getAll).not.toHaveBeenCalled();
+    expect(roster.vouchers).toEqual([VOUCHER]);
+    expect(roster.stale).toBe(true);
+    expect(roster.fetchedAt?.getTime()).toBe(fetchedAt.getTime());
   });
 });

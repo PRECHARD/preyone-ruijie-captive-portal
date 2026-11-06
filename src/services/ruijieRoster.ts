@@ -1,3 +1,4 @@
+import type { PoolClient } from 'pg';
 import { pool } from '../db/pool';
 import { getAllRuijieVouchers, isRuijieCloudConfigured } from './ruijieCloud';
 import type { RuijieVoucher } from './ruijieCloud';
@@ -37,8 +38,19 @@ const parsedTtl = Number(process.env.RUIJIE_ROSTER_TTL_MS ?? DEFAULT_TTL_MS);
 const TTL_MS = Number.isFinite(parsedTtl) && parsedTtl >= 15_000 ? parsedTtl : DEFAULT_TTL_MS;
 
 let memory: { vouchers: RuijieVoucher[]; fetchedAt: Date } | null = null;
-let pendingFetch: Promise<RuijieRoster> | null = null;
+let pendingFetch: Promise<RuijieRoster | null> | null = null;
 let warnedAboutCacheTable = false;
+
+/**
+ * Cross-worker lease. A stale snapshot is refreshed by exactly one PM2 worker;
+ * the others serve the last good snapshot instead of firing their own
+ * four-page pull and exhausting the tenant quota in the same second.
+ */
+const REFRESH_LOCK = 'preyone:ruijie-roster-refresh';
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function snapshotFrom(payload: unknown, fetchedAt: unknown): { vouchers: RuijieVoucher[]; fetchedAt: Date } | null {
   if (!Array.isArray(payload)) return null;
@@ -108,20 +120,65 @@ export async function getRuijieRoster(): Promise<RuijieRoster> {
   }
 
   if (!pendingFetch) {
-    pendingFetch = (async (): Promise<RuijieRoster> => {
+    pendingFetch = (async (): Promise<RuijieRoster | null> => {
+      let client: PoolClient | null = null;
+      let locked = false;
+      try {
+        client = await pool.connect();
+        const lock = await client.query(
+          `SELECT pg_try_advisory_lock(hashtext($1)::bigint) AS locked`,
+          [REFRESH_LOCK]
+        );
+        locked = Boolean(lock.rows[0]?.locked);
+      } catch {
+        // Cache table / pool unavailable: fall back to the uncoordinated pull.
+        client?.release();
+        client = null;
+        locked = true;
+      }
+
+      if (!locked) {
+        client?.release();
+        return null;
+      }
+
       try {
         const vouchers = await getAllRuijieVouchers();
         const fetchedAt = await writeSnapshot(vouchers);
         return { vouchers, fetchedAt, stale: false };
       } finally {
-        pendingFetch = null;
+        if (client) {
+          await client
+            .query(`SELECT pg_advisory_unlock(hashtext($1)::bigint)`, [REFRESH_LOCK])
+            .catch(() => undefined);
+          client.release();
+        }
       }
-    })();
+    })().finally(() => {
+      // Runs for both the leased and the not-leased path.
+      pendingFetch = null;
+    });
   }
   const pending = pendingFetch;
 
   try {
-    return await pending;
+    const refreshed = await pending;
+    if (refreshed) return refreshed;
+
+    // Another worker holds the lease. Wait briefly for its snapshot (cold
+    // start) and otherwise serve the last good one instead of piling on.
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      const latest = await readSnapshot();
+      if (latest) {
+        return {
+          vouchers: latest.vouchers,
+          fetchedAt: latest.fetchedAt,
+          stale: !isFresh(latest.fetchedAt),
+        };
+      }
+      await sleep(150);
+    }
+    throw new Error('roster refresh already in progress on another worker');
   } catch (err) {
     if (cached) {
       const msg = err instanceof Error ? err.message : String(err);

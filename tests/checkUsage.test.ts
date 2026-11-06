@@ -4,21 +4,28 @@ import request from 'supertest';
 
 const mocks = vi.hoisted(() => ({
   query: vi.fn(),
-  listRuijieOnlineUsers: vi.fn(),
+  getRuijieSessionSnapshot: vi.fn(),
   fetchRuijieAccountingRecords: vi.fn(),
   isRuijieCloudConfigured: vi.fn(() => true),
-  getAllRuijieVouchers: vi.fn(async (): Promise<any[]> => []),
+  getRuijieRoster: vi.fn(),
 }));
 
 vi.mock('../src/db/pool', () => ({ pool: { query: mocks.query } }));
 vi.mock('../src/services/ruijieService', () => ({
-  listRuijieOnlineUsers: mocks.listRuijieOnlineUsers,
   fetchRuijieAccountingRecords: mocks.fetchRuijieAccountingRecords,
 }));
 vi.mock('../src/services/ruijieCloud', () => ({
   isRuijieCloudConfigured: mocks.isRuijieCloudConfigured,
-  getAllRuijieVouchers: mocks.getAllRuijieVouchers,
 }));
+vi.mock('../src/services/ruijieRoster', () => ({
+  getRuijieRoster: mocks.getRuijieRoster,
+}));
+vi.mock('../src/services/ruijieSessionCache', () => ({
+  getRuijieSessionSnapshot: mocks.getRuijieSessionSnapshot,
+}));
+
+const rosterOf = (vouchers: any[]) => ({ vouchers, fetchedAt: new Date(), stale: false });
+const sessionsOf = (users: any[]) => ({ users, fetchedAt: new Date(), stale: false });
 
 import { usageRouter, __resetUsageCachesForTests } from '../src/routes/usage';
 
@@ -78,8 +85,8 @@ describe('GET /api/check-usage', () => {
     vi.clearAllMocks();
     __resetUsageCachesForTests();
     mocks.isRuijieCloudConfigured.mockReturnValue(true);
-    mocks.getAllRuijieVouchers.mockResolvedValue([]);
-    mocks.listRuijieOnlineUsers.mockResolvedValue([]);
+    mocks.getRuijieRoster.mockResolvedValue(rosterOf([]));
+    mocks.getRuijieSessionSnapshot.mockResolvedValue(sessionsOf([]));
     mocks.fetchRuijieAccountingRecords.mockResolvedValue([]);
     mocks.query.mockResolvedValue({ rows: [] });
   });
@@ -103,9 +110,9 @@ describe('GET /api/check-usage', () => {
     mocks.query.mockResolvedValue({
       rows: [localRow({ package_tier: null })],
     });
-    mocks.getAllRuijieVouchers.mockResolvedValue([
+    mocks.getRuijieRoster.mockResolvedValue(rosterOf([
       ruijieVoucher({ usedQuotaMb: 1089, usedTimeMin: 60, currentClients: 1 }),
-    ]);
+    ]));
 
     const res = await request(app).get('/api/check-usage').query({ voucher: 'abc123' });
     expect(res.status).toBe(200);
@@ -123,16 +130,16 @@ describe('GET /api/check-usage', () => {
     // the PWA polls every 15s — the roster must be reused inside the TTL
     const res2 = await request(app).get('/api/check-usage').query({ voucher: 'abc123' });
     expect(res2.status).toBe(200);
-    expect(mocks.getAllRuijieVouchers).toHaveBeenCalledTimes(1);
+    expect(mocks.getRuijieRoster).toHaveBeenCalledTimes(1);
   });
 
   it('never downgrades a known figure when Ruijie reports zero (sources merge by MAX)', async () => {
     mocks.query.mockResolvedValue({
       rows: [localRow({ data_consumed_mb: '888.8' })],
     });
-    mocks.getAllRuijieVouchers.mockResolvedValue([
+    mocks.getRuijieRoster.mockResolvedValue(rosterOf([
       ruijieVoucher({ usedQuotaMb: 0 }),
-    ]);
+    ]));
 
     const res = await request(app).get('/api/check-usage').query({ voucher: 'abc123' });
     expect(res.status).toBe(200);
@@ -144,7 +151,7 @@ describe('GET /api/check-usage', () => {
     mocks.query.mockResolvedValue({
       rows: [localRow({ data_consumed_mb: '123.4' })],
     });
-    mocks.getAllRuijieVouchers.mockRejectedValue(new Error('ruijie down'));
+    mocks.getRuijieRoster.mockRejectedValue(new Error('ruijie down'));
 
     const res = await request(app).get('/api/check-usage').query({ voucher: 'abc123' });
     expect(res.status).toBe(200);
@@ -163,19 +170,19 @@ describe('GET /api/check-usage', () => {
     const res = await request(app).get('/api/check-usage').query({ voucher: 'abc123' });
     expect(res.status).toBe(200);
     expect(res.body.usageSource).toBe('voucher_accounting');
-    expect(mocks.getAllRuijieVouchers).not.toHaveBeenCalled();
+    expect(mocks.getRuijieRoster).not.toHaveBeenCalled();
   });
 
   it('lets the live station roster win when its figure is larger (MAC supplied)', async () => {
     mocks.query.mockResolvedValue({
       rows: [localRow({ data_consumed_mb: '100' })],
     });
-    mocks.getAllRuijieVouchers.mockResolvedValue([
+    mocks.getRuijieRoster.mockResolvedValue(rosterOf([
       ruijieVoucher({ usedQuotaMb: 500 }),
-    ]);
-    mocks.listRuijieOnlineUsers.mockResolvedValue([
+    ]));
+    mocks.getRuijieSessionSnapshot.mockResolvedValue(sessionsOf([
       { mac: 'aabbccddee01', usedMb: 950 },
-    ]);
+    ]));
 
     const res = await request(app)
       .get('/api/check-usage')
@@ -188,10 +195,10 @@ describe('GET /api/check-usage', () => {
 
   it('reports onlineNow=false for a MAC the roster does not know', async () => {
     mocks.query.mockResolvedValue({ rows: [localRow()] });
-    mocks.getAllRuijieVouchers.mockResolvedValue([
+    mocks.getRuijieRoster.mockResolvedValue(rosterOf([
       ruijieVoucher({ usedQuotaMb: 10, currentClients: 1 }),
-    ]);
-    mocks.listRuijieOnlineUsers.mockResolvedValue([]);
+    ]));
+    mocks.getRuijieSessionSnapshot.mockResolvedValue(sessionsOf([]));
 
     const res = await request(app)
       .get('/api/check-usage')
@@ -202,14 +209,14 @@ describe('GET /api/check-usage', () => {
 
   it('answers a Ruijie-only code with customer activity straight from Ruijie', async () => {
     mocks.query.mockResolvedValue({ rows: [] }); // unknown to our DB
-    mocks.getAllRuijieVouchers.mockResolvedValue([
+    mocks.getRuijieRoster.mockResolvedValue(rosterOf([
       ruijieVoucher({
         voucherCode: 'zzz999',
         usedQuotaMb: 640,
         usedTimeMin: 120,
         currentClients: 0,
       }),
-    ]);
+    ]));
 
     const res = await request(app).get('/api/check-usage').query({ voucher: 'zzz999' });
     expect(res.status).toBe(200);
@@ -231,9 +238,9 @@ describe('GET /api/check-usage', () => {
 
   it('404s a Ruijie-only code with no customer activity (stock stays unprobeable)', async () => {
     mocks.query.mockResolvedValue({ rows: [] });
-    mocks.getAllRuijieVouchers.mockResolvedValue([
+    mocks.getRuijieRoster.mockResolvedValue(rosterOf([
       ruijieVoucher({ voucherCode: 'cold01', usedQuotaMb: 0, usedTimeMin: 0, currentClients: 0 }),
-    ]);
+    ]));
 
     const res = await request(app).get('/api/check-usage').query({ voucher: 'cold01' });
     expect(res.status).toBe(404);
@@ -242,14 +249,14 @@ describe('GET /api/check-usage', () => {
 
   it('404s an expired Ruijie-only code even when it has activity', async () => {
     mocks.query.mockResolvedValue({ rows: [] });
-    mocks.getAllRuijieVouchers.mockResolvedValue([
+    mocks.getRuijieRoster.mockResolvedValue(rosterOf([
       ruijieVoucher({
         voucherCode: 'old001',
         usedQuotaMb: 300,
         usedTimeMin: 90,
         expiryTime: Date.now() - 1000,
       }),
-    ]);
+    ]));
 
     const res = await request(app).get('/api/check-usage').query({ voucher: 'old001' });
     expect(res.status).toBe(404);
@@ -258,14 +265,14 @@ describe('GET /api/check-usage', () => {
 
   it('404s a disabled Ruijie-only code even when it has activity', async () => {
     mocks.query.mockResolvedValue({ rows: [] });
-    mocks.getAllRuijieVouchers.mockResolvedValue([
+    mocks.getRuijieRoster.mockResolvedValue(rosterOf([
       ruijieVoucher({
         voucherCode: 'off001',
         usedQuotaMb: 300,
         usedTimeMin: 90,
         disableStatus: 1,
       }),
-    ]);
+    ]));
 
     const res = await request(app).get('/api/check-usage').query({ voucher: 'off001' });
     expect(res.status).toBe(404);
@@ -274,7 +281,7 @@ describe('GET /api/check-usage', () => {
 
   it('returns the same generic 404 for a code neither side knows', async () => {
     mocks.query.mockResolvedValue({ rows: [] });
-    mocks.getAllRuijieVouchers.mockResolvedValue([]);
+    mocks.getRuijieRoster.mockResolvedValue(rosterOf([]));
 
     const res = await request(app).get('/api/check-usage').query({ voucher: 'ghost99' });
     expect(res.status).toBe(404);
@@ -283,7 +290,7 @@ describe('GET /api/check-usage', () => {
 
   it('reports unknown usage (not zero) when no source knows anything', async () => {
     mocks.query.mockResolvedValue({ rows: [localRow()] });
-    mocks.getAllRuijieVouchers.mockResolvedValue([]);
+    mocks.getRuijieRoster.mockResolvedValue(rosterOf([]));
 
     const res = await request(app).get('/api/check-usage').query({ voucher: 'abc123' });
     expect(res.status).toBe(200);

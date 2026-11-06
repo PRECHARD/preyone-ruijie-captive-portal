@@ -1,4 +1,5 @@
 import axios from 'axios';
+import type { PoolClient } from 'pg';
 import { pool } from '../db/pool';
 import { attachRuijieQuotaGuard } from './ruijieRateLimiter';
 import {
@@ -589,7 +590,62 @@ export interface AccountingSyncResult {
   errors: string[];
 }
 
+const ACCOUNTING_SYNC_LOCK = 'preyone:ruijie-accounting-sync';
+
+/**
+ * Cross-worker gate for the accounting sweep.
+ *
+ * PM2 runs four workers and each one used to sweep the same online/accounting
+ * feeds at the same moment. That single burst (3 calls x 4 workers) consumed
+ * the whole per-minute Ruijie budget and starved the roster refresh, the
+ * voucher status sweep and customer usage lookups.
+ *
+ * One worker runs; the others skip and keep serving the shared caches.
+ */
 export async function syncAccountingData(): Promise<AccountingSyncResult> {
+  if (!isRuijieCloudConfigured()) return runAccountingSync();
+
+  let client: PoolClient | null = null;
+  let locked = false;
+  try {
+    client = await pool.connect();
+    const lock = await client.query(
+      `SELECT pg_try_advisory_lock(hashtext($1)::bigint) AS locked`,
+      [ACCOUNTING_SYNC_LOCK]
+    );
+    locked = Boolean(lock.rows[0]?.locked);
+  } catch {
+    // DB coordination unavailable — keep the legacy single-shot behaviour.
+    client?.release();
+    client = null;
+    locked = true;
+  }
+
+  if (!locked) {
+    return {
+      skipped: true,
+      reason: 'another_worker_running',
+      onlineUsers: 0,
+      accountingRecords: 0,
+      matchedVouchers: 0,
+      updated: 0,
+      errors: [],
+    };
+  }
+
+  try {
+    return await runAccountingSync();
+  } finally {
+    if (client) {
+      await client
+        .query(`SELECT pg_advisory_unlock(hashtext($1)::bigint)`, [ACCOUNTING_SYNC_LOCK])
+        .catch(() => undefined);
+      client.release();
+    }
+  }
+}
+
+async function runAccountingSync(): Promise<AccountingSyncResult> {
   const result: AccountingSyncResult = {
     skipped: false,
     onlineUsers: 0,
