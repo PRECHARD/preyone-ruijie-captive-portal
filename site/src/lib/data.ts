@@ -26,6 +26,7 @@ export const NAV_LINKS: NavLink[] = [
   { label: 'Starlink Portal', to: '/starlink/portal' },
   { label: 'Hardware', to: '/#hardware' },
   { label: 'Services', to: '/services' },
+  { label: 'Business Apps', to: '/business-apps' },
   { label: 'Portfolio', to: '/portfolio' },
   { label: 'Pay Invoice', to: '/payment' },
   { label: 'Contact', to: '/#contact' },

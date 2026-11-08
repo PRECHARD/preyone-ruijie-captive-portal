@@ -6,6 +6,7 @@ import { Footer } from './components/Footer'
 import { Nav } from './components/Nav'
 import { WhatsAppFab } from './components/WhatsAppFab'
 import { AboutPage } from './pages/AboutPage'
+import { BusinessAppsPage } from './pages/BusinessAppsPage'
 import { HomePage } from './pages/HomePage'
 import { PaymentPage } from './pages/PaymentPage'
 import { PortfolioPage } from './pages/PortfolioPage'
@@ -52,6 +53,7 @@ export default function App() {
               <Route path="/" element={<HomePage />} />
               <Route path="/about" element={<AboutPage />} />
               <Route path="/services" element={<ServicesPage />} />
+              <Route path="/business-apps" element={<BusinessAppsPage />} />
               <Route path="/portfolio" element={<PortfolioPage />} />
               <Route path="/payment" element={<PaymentPage />} />
               <Route path="*" element={<HomePage />} />

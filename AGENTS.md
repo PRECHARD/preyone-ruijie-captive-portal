@@ -12,6 +12,8 @@ Ruijie captive portal system for Preyone UltraNet Wi-Fi. Voucher-based internet 
 > `Login.css` template remain frozen** — do not touch them.
 
 **Active focus:**
+- **Preyone 360 business-suite page** (`site/src/pages/BusinessAppsPage.tsx`, `/business-apps`) —
+  plan, status and next steps in `docs/PHASE1-BUSINESS-SUITE.md`
 - **Global Settings Hub** (`admin/` — General, POS Hardware & Layout, Fast Food & KDS, Invoicing & Taxes)
 - **Invoice system** (`invoice.preyone.com`)
 - **POS** (`pos.preyone.com`, `pos/` SPA, thermal printing, till)
@@ -25,6 +27,9 @@ Ruijie captive portal system for Preyone UltraNet Wi-Fi. Voucher-based internet 
 - `app.preyone.com` → `app/dist` gateway (LOCKED)
 - `pos.preyone.com` → `pos/dist` (POS till SPA — ACTIVE)
 - `invoice.preyone.com` → invoice app (ACTIVE)
+- `homeautomate.preyone.com` → `homeautomate/dist` (IoT dashboard SPA — ACTIVE; backend
+  `src/routes/homeautomate.ts` + `src/services/iotHub.ts`, tables `iot_devices` /
+  `iot_telemetry` / `iot_triggers` / `iot_events`)
 - `wifi.preyone.com` → captive portal
 - `preyone.com` / `www` → `site/dist` main site
 - `/api/*` works on any host; `/downloads/*` resolves via `storage/downloads` first.
@@ -235,6 +240,11 @@ Phone → Ruijie AP (WiFi) → EG105G-P Gateway → VPS (158.220.118.91)
 1. Build locally: `npm run build` (tsc)
 2. Build admin SPA: `cd admin && npm install && npm run build` (vite)
 3. Build site SPA: `cd site && npm install && npm run build && npm run optimize` (vite; sharp generates WebP/AVIF images)
+3b. Build home-automation SPA: `cd homeautomate && npm install && npm run build` → upload
+   `homeautomate/dist` to `/opt/preyone-portal/homeautomate/dist`. This bundle is git-ignored, so a
+   normal repo tarball will NOT include it — a missing bundle makes `homeautomate.preyone.com`
+   answer **503 "Home Automation build not found"** even though the API and DB tables are live
+   (fixed 2026-11-04).
    - Portal CSS is generated: `npm run build:portal-css` concatenates `public/css/portal/*.css`
      into `public/css/portal.css`. **Never hand-edit the generated file** — the deploy rebuild
      drops it (`tests/portalAssets.test.ts` fails if the two diverge).
