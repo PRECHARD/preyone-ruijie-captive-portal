@@ -39,6 +39,19 @@ const DEFAULT_RECIPIENTS = 'admin@preyone.com';
 /** Re-check at least this often so a missed 08:00 is picked up the same day. */
 const CHECK_INTERVAL_MS = 60 * 60 * 1000;
 
+/**
+ * Node clamps setTimeout delays larger than this to 1ms. A month-away run
+ * (up to 31 days) exceeds it, and the clamped timer then fires immediately,
+ * re-schedules, and spins forever. Cap the wait and let the next tick decide
+ * whether the report is actually due.
+ */
+export const MAX_TIMEOUT_MS = 2_147_483_647;
+
+/** Delay until `at`, clamped to a range Node can actually schedule. */
+export function schedulerDelayMs(at: Date, now: number = Date.now()): number {
+  return Math.min(Math.max(30_000, at.getTime() - now), MAX_TIMEOUT_MS);
+}
+
 export interface MonthEndRunResult {
   sent: boolean;
   skipped: boolean;
@@ -295,7 +308,7 @@ function scheduleNext(at: Date = nextDueAt()): void {
   if (timer) clearTimeout(timer);
   timer = setTimeout(() => {
     void tick('scheduler');
-  }, Math.max(30_000, at.getTime() - Date.now()));
+  }, schedulerDelayMs(at));
   timer.unref?.();
   state = { ...state, timerScheduled: true, nextRunAt: at.toISOString() };
 }

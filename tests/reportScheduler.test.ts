@@ -33,6 +33,8 @@ import {
   MONTH_END_CRON,
   getSchedulerStatus,
   stopReportScheduler,
+  MAX_TIMEOUT_MS,
+  schedulerDelayMs,
 } from '../src/services/scheduler';
 
 /** settings rows served by the mocked pool. */
@@ -78,6 +80,24 @@ const localDue = (year: number, monthIndex: number) => new Date(year, monthIndex
 describe('cron contract', () => {
   it('is the 3rd of the month at 08:00', () => {
     expect(MONTH_END_CRON).toBe('0 8 3 * *');
+  });
+});
+
+describe('schedulerDelayMs', () => {
+  it('caps a month-away run below the 32-bit setTimeout limit', () => {
+    const now = Date.now();
+    const monthAway = new Date(now + 31 * 24 * 60 * 60 * 1000);
+    expect(schedulerDelayMs(monthAway, now)).toBe(MAX_TIMEOUT_MS);
+    expect(MAX_TIMEOUT_MS).toBeLessThan(2 ** 31);
+  });
+
+  it('never schedules below 30 seconds', () => {
+    expect(schedulerDelayMs(new Date(0), Date.now())).toBe(30_000);
+  });
+
+  it('passes a normal delay through unchanged', () => {
+    const now = Date.now();
+    expect(schedulerDelayMs(new Date(now + 3_600_000), now)).toBe(3_600_000);
   });
 });
 
