@@ -85,6 +85,9 @@ export interface Company {
   table_service_enabled?: boolean;
   terms_text?: string | null;
   receipt_footer?: string | null;
+  invoice_prefix?: string | null;
+  quote_prefix?: string | null;
+  invoice_settings?: Record<string, unknown> | null;
 }
 
 export interface InvoiceTemplate {

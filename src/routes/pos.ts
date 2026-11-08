@@ -430,8 +430,12 @@ router.get('/catalog', async (req, res) => {
   const cid = tenantId(req);
   const [companyRes, templatesRes, themesRes] = await Promise.all([
     pool.query(
-      `SELECT id, name, tagline, logo_url, logo_path, currency, tax_pct, business_profile,
-              kds_enabled, table_service_enabled, invoice_template_id, pos_theme_id
+      // Contact + terms fields feed the A4 document sheet's bill-to block and
+      // footer band, so they travel with the catalogue.
+      `SELECT id, name, tagline, address, email, support_phone, website, terms_text,
+              receipt_footer, logo_url, logo_path, currency, tax_pct, business_profile,
+              kds_enabled, table_service_enabled, invoice_template_id, pos_theme_id,
+              invoice_prefix, quote_prefix, invoice_settings
          FROM companies WHERE id = $1`,
       [cid]
     ).catch(() =>

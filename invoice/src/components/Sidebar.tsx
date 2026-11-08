@@ -20,6 +20,7 @@ type IconName =
   | 'wallet'
   | 'ledger'
   | 'settings'
+  | 'gear'
   | 'types'
   | 'chevron'
   | 'pos'
@@ -62,6 +63,12 @@ const ICONS: Record<IconName, ReactNode> = {
       <path d="M4 7h9M17 7h3M4 17h3M11 17h9" />
       <circle cx="15" cy="7" r="2" />
       <circle cx="9" cy="17" r="2" />
+    </>
+  ),
+  gear: (
+    <>
+      <circle cx="12" cy="12" r="3.1" />
+      <path d="M19.4 14.2a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.56V20a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.11-1.56 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.56-1.03H4a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 5.65 7.8a1.7 1.7 0 0 0-.34-1.87l-.06-.06A2 2 0 1 1 8.08 3.04l.06.06a1.7 1.7 0 0 0 1.87.34H10a1.7 1.7 0 0 0 1.03-1.56V2a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87V8a1.7 1.7 0 0 0 1.56 1.03H22a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.56 1.03Z" />
     </>
   ),
   types: (
@@ -401,8 +408,8 @@ export default function Sidebar({
             aria-current={settingsActive ? 'page' : undefined}
             onClick={() => onView('settings')}
           >
-            <span className="nav-icon"><Icon name="settings" /></span>
-            <span className="nav-text">Templates &amp; theme</span>
+            <span className="nav-icon"><Icon name="gear" /></span>
+            <span className="nav-text">Settings &amp; Branding</span>
           </button>
 
           <div className="side-apps">

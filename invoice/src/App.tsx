@@ -19,6 +19,7 @@ import { applyCssVars } from './theme';
 import { OnlinePaymentModal, ReceiptPreview } from './payments';
 import { DocumentSheet, TemplateThumb, type SheetDoc } from './DocumentSheet';
 import Sidebar, { type View } from './components/Sidebar';
+import SettingsPage from './pages/Settings';
 import './document.css';
 
 /* ────────────────────────────── helpers ────────────────────────────── */
@@ -932,9 +933,12 @@ function DocumentDrawer({
 function SettingsPanel({
   catalog,
   onCatalog,
+  designOnly = false,
 }: {
   catalog: Catalog;
   onCatalog: (next: Catalog) => void;
+  /** When embedded in the Settings hub, hide the duplicate brand/tax card. */
+  designOnly?: boolean;
 }) {
   const [templateId, setTemplateId] = useState(Number(catalog.company.invoice_template_id) || 1);
   const [themeId, setThemeId] = useState(Number(catalog.company.pos_theme_id) || 1);
@@ -1009,6 +1013,19 @@ function SettingsPanel({
     }
   };
 
+  // Template picks save immediately so the embedded designer needs no second
+  // save button (the standalone panel still keeps its own Save defaults).
+  const pickTemplate = async (id: number) => {
+    setTemplateId(id);
+    try {
+      const saved = await api.patch<Company>('/api/pos/invoice-settings', { templateId: id });
+      onCatalog({ ...catalog, company: { ...catalog.company, ...saved, invoice_template_id: id } });
+      setNotice({ kind: 'ok', text: 'Document template saved for every new document.' });
+    } catch (err) {
+      setNotice({ kind: 'error', text: errorText(err) });
+    }
+  };
+
   const uploadLogo = (file: File) => {
     setNotice(null);
     if (!/^image\/(png|jpe?g|webp)$/i.test(file.type)) {
@@ -1037,6 +1054,7 @@ function SettingsPanel({
     <div>
       {notice && <div className={`banner ${notice.kind === 'ok' ? 'ok' : 'error'}`}>{notice.text}</div>}
 
+      {!designOnly && (
       <div className="card" style={{ padding: 20, marginBottom: 18 }}>
         <div className="panel-head" style={{ padding: 0, border: 'none', marginBottom: 14 }}>
           <div className="panel-title">Brand & defaults</div>
@@ -1099,6 +1117,7 @@ function SettingsPanel({
           </div>
         </div>
       </div>
+      )}
 
       <div className="card" style={{ padding: 20, marginBottom: 18 }}>
         <div className="panel-title" style={{ marginBottom: 4 }}>PDF templates</div>
@@ -1112,7 +1131,7 @@ function SettingsPanel({
                 key={t.id}
                 type="button"
                 className={`template-card ${templateId === t.id ? 'selected' : ''}`}
-                onClick={() => setTemplateId(t.id)}
+                onClick={() => void pickTemplate(t.id)}
                 title={t.description}
               >
                 <TemplateThumb template={t} />
@@ -1183,12 +1202,26 @@ const AR_BUCKETS: Array<{ key: keyof ArAging['buckets']; label: string; tone?: s
   { key: 'd90plus', label: '90+ days', tone: 'danger' },
 ];
 
+/** The invoice SPA is served by the Express fallback, so `/settings` is a real URL. */
+function viewFromPath(pathname: string): View {
+  const clean = pathname.replace(/\/+$/, '').toLowerCase();
+  if (clean.endsWith('/settings')) return 'settings';
+  if (clean.endsWith('/aging')) return 'aging';
+  return 'documents';
+}
+
+function pathForView(view: View): string {
+  if (view === 'settings') return '/settings';
+  if (view === 'aging') return '/aging';
+  return '/';
+}
+
 export default function App() {
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [loading, setLoading] = useState(true);
   const [authError, setAuthError] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [view, setView] = useState<View>('documents');
+  const [view, setView] = useState<View>(() => viewFromPath(window.location.pathname));
   const [docs, setDocs] = useState<PosDocument[]>([]);
   const [docsLoading, setDocsLoading] = useState(false);
   const [aging, setAging] = useState<ArAging | null>(null);
@@ -1197,6 +1230,21 @@ export default function App() {
   const [query, setQuery] = useState('');
   const [composerOpen, setComposerOpen] = useState(false);
   const [openDocId, setOpenDocId] = useState<string | null>(null);
+
+  const navigate = useCallback((next: View) => {
+    setView(next);
+    const path = pathForView(next);
+    if (window.location.pathname !== path) {
+      window.history.pushState({}, '', path);
+    }
+  }, []);
+
+  useEffect(() => {
+    const onPop = () => setView(viewFromPath(window.location.pathname));
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
+
 
   const types = catalog?.documentTypes.length ? catalog.documentTypes : FALLBACK_TYPES;
   const templates = catalog?.templates ?? [];
@@ -1307,35 +1355,34 @@ export default function App() {
         typeFilter={typeFilter}
         statusFilter={statusFilter}
         types={types}
-        onView={setView}
+        onView={navigate}
         onAllDocuments={() => {
-          setView('documents');
+          navigate('documents');
           setTypeFilter('all');
           setStatusFilter('all');
         }}
         onType={(type) => {
-          setView('documents');
+          navigate('documents');
           setTypeFilter((prev) => (prev === type ? 'all' : type));
         }}
         onStatus={(status) => {
-          setView('documents');
+          navigate('documents');
           setStatusFilter((prev) => (prev === status ? 'all' : status));
         }}
         onNewDocument={() => setComposerOpen(true)}
       />
 
       <main className="main">
+        {view !== 'settings' && (
         <div className="topbar">
           <div>
             <h1 className="page-title">
               {view === 'documents' && 'Documents'}
               {view === 'aging' && 'Accounts receivable'}
-              {view === 'settings' && 'Invoicing setup'}
             </h1>
             <p className="page-sub">
               {view === 'documents' && 'Every quote, invoice, credit note and receipt for this company.'}
               {view === 'aging' && 'Outstanding balances by days overdue, recalculated from due dates.'}
-              {view === 'settings' && 'Branding, the 20 PDF layouts and the palette shared by every module.'}
             </p>
           </div>
           <div className="topbar-actions">
@@ -1353,6 +1400,7 @@ export default function App() {
             </button>
           </div>
         </div>
+        )}
 
         {error && <div className="banner error">{error}</div>}
 
@@ -1507,7 +1555,13 @@ export default function App() {
           </>
         )}
 
-        {view === 'settings' && catalog && <SettingsPanel catalog={catalog} onCatalog={setCatalog} />}
+        {view === 'settings' && catalog && (
+          <SettingsPage
+            catalog={catalog}
+            onCatalog={setCatalog}
+            documentDesign={<SettingsPanel catalog={catalog} onCatalog={setCatalog} designOnly />}
+          />
+        )}
       </main>
 
       {composerOpen && catalog && (
