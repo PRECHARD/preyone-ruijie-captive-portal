@@ -2241,6 +2241,7 @@ CREATE INDEX IF NOT EXISTS idx_payments_user_id ON payments (user_id);
     const ecosystemMigrations = [
       'v3_master_ecosystem.sql',
       'v3_2_ecosystem.sql',
+      'v3_3_invoice_a4_templates.sql',
     ];
     for (const file of ecosystemMigrations) {
       const migrationPath = path.resolve(__dirname, '../../db/migrations', file);

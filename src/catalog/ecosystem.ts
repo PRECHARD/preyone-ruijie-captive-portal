@@ -46,27 +46,34 @@ export const CURRENCIES = [
   { code: 'ZAR', name: 'South African Rand', symbol: 'R' },
 ] as const;
 
+/**
+ * The 20 invoice templates all render the same A4 house sheet ported from the
+ * previous Preyone invoice deployment. A template only changes the gradient,
+ * the wordmark treatment and the row density — never the document structure.
+ *
+ * Template 1 keeps the literal legacy purple gradient and is the default.
+ */
 export const INVOICE_TEMPLATES: InvoiceTemplate[] = [
-  { id: 1, name: 'Classic Business', description: 'Traditional two-column invoice with ruled totals.', layout: 'standard', accentColor: '#0f766e', showLogo: true },
-  { id: 2, name: 'Modern Minimal', description: 'Airy single-column layout, generous whitespace.', layout: 'minimal', accentColor: '#2563eb', showLogo: true },
-  { id: 3, name: 'Corporate Elegant', description: 'Serif headings and a banded subtotal block.', layout: 'standard', accentColor: '#1e293b', showLogo: true },
-  { id: 4, name: 'Compact Receipt', description: 'Thermal-friendly narrow layout for small paper.', layout: 'compact', accentColor: '#334155', showLogo: false },
-  { id: 5, name: 'Bold Header', description: 'Full-bleed coloured masthead with white text.', layout: 'standard', accentColor: '#7c3aed', showLogo: true },
-  { id: 6, name: 'Gradient Accent', description: 'Soft gradient rule under the company header.', layout: 'standard', accentColor: '#db2777', showLogo: true },
-  { id: 7, name: 'Monochrome Pro', description: 'Strict black-and-white, print-ink efficient.', layout: 'standard', accentColor: '#000000', showLogo: true },
-  { id: 8, name: 'Vintage Ledger', description: 'Warm paper tone with double-rule borders.', layout: 'standard', accentColor: '#92400e', showLogo: true },
-  { id: 9, name: 'Neon Digital', description: 'High-contrast dark theme for screen sharing.', layout: 'minimal', accentColor: '#06b6d4', showLogo: true },
-  { id: 10, name: 'Studio Creative', description: 'Asymmetric grid for agencies and studios.', layout: 'standard', accentColor: '#f97316', showLogo: true },
-  { id: 11, name: 'Executive Gold', description: 'Gold accent line, formal executive styling.', layout: 'standard', accentColor: '#b45309', showLogo: true },
-  { id: 12, name: 'Fresh Startup', description: 'Rounded cards and a friendly tone.', layout: 'minimal', accentColor: '#10b981', showLogo: true },
-  { id: 13, name: 'Legal Formal', description: 'Dense, numbered-clause friendly layout.', layout: 'standard', accentColor: '#1e3a8a', showLogo: true },
-  { id: 14, name: 'Hospitality Warm', description: 'Inviting palette for hotels and eateries.', layout: 'standard', accentColor: '#c2410c', showLogo: true },
-  { id: 15, name: 'Retail Bright', description: 'Colourful item grid for shopfront receipts.', layout: 'standard', accentColor: '#e11d48', showLogo: true },
-  { id: 16, name: 'Tech Sleek', description: 'Cool grays and a monospace totals block.', layout: 'standard', accentColor: '#334155', showLogo: true },
-  { id: 17, name: 'Eco Green', description: 'Natural greens with a leaf mark placeholder.', layout: 'standard', accentColor: '#15803d', showLogo: true },
-  { id: 18, name: 'Luxury Black', description: 'Matte black header with foil-gold totals.', layout: 'standard', accentColor: '#111827', showLogo: true },
-  { id: 19, name: 'Friendly Rounded', description: 'Soft corners and pastel section fills.', layout: 'minimal', accentColor: '#8b5cf6', showLogo: true },
-  { id: 20, name: 'Preyone Signature', description: 'House style — brand teal with the Preyone wordmark.', layout: 'standard', accentColor: '#0d9488', showLogo: true },
+  { id: 1, name: 'Preyone Classic', description: 'The original A4 sheet — legacy purple gradient, gradient item table and footer band.', layout: 'standard', accentColor: '#7a0e57', showLogo: true },
+  { id: 2, name: 'Modern Minimal', description: 'Same A4 sheet with flat accent bands and airy spacing.', layout: 'minimal', accentColor: '#2563eb', showLogo: true },
+  { id: 3, name: 'Corporate Elegant', description: 'A4 sheet with a deep navy gradient and a formal totals block.', layout: 'standard', accentColor: '#1e293b', showLogo: true },
+  { id: 4, name: 'Compact Docket', description: 'A4 sheet with tighter rows for long item lists.', layout: 'compact', accentColor: '#334155', showLogo: false },
+  { id: 5, name: 'Bold Masthead', description: 'Full-bleed violet masthead and white table headings.', layout: 'standard', accentColor: '#7c3aed', showLogo: true },
+  { id: 6, name: 'Gradient Accent', description: 'Rose gradient across the masthead, zebra rows and total.', layout: 'standard', accentColor: '#db2777', showLogo: true },
+  { id: 7, name: 'Monochrome Pro', description: 'Strict black-and-white A4 sheet, ink-efficient for bulk print.', layout: 'standard', accentColor: '#000000', showLogo: true },
+  { id: 8, name: 'Vintage Ledger', description: 'Warm umber gradient with ledger-style ruled rows.', layout: 'standard', accentColor: '#92400e', showLogo: true },
+  { id: 9, name: 'Neon Digital', description: 'High-contrast cyan bands for screen-first invoices.', layout: 'minimal', accentColor: '#06b6d4', showLogo: true },
+  { id: 10, name: 'Studio Creative', description: 'Orange gradient A4 proof with a bold grand total.', layout: 'standard', accentColor: '#f97316', showLogo: true },
+  { id: 11, name: 'Executive Gold', description: 'Amber-gold gradient with a formal executive finish.', layout: 'standard', accentColor: '#b45309', showLogo: true },
+  { id: 12, name: 'Fresh Startup', description: 'Green gradient with flat bands and friendly spacing.', layout: 'minimal', accentColor: '#10b981', showLogo: true },
+  { id: 13, name: 'Legal Formal', description: 'Navy A4 sheet tuned for dense, numbered clauses.', layout: 'standard', accentColor: '#1e3a8a', showLogo: true },
+  { id: 14, name: 'Hospitality Warm', description: 'Terracotta gradient for hotels and eateries.', layout: 'standard', accentColor: '#c2410c', showLogo: true },
+  { id: 15, name: 'Retail Bright', description: 'Vivid rose gradient for shopfront invoices.', layout: 'standard', accentColor: '#e11d48', showLogo: true },
+  { id: 16, name: 'Tech Sleek', description: 'Slate gradient with tabular totals for tech resellers.', layout: 'standard', accentColor: '#334155', showLogo: true },
+  { id: 17, name: 'Eco Green', description: 'Forest gradient on the standard A4 sheet.', layout: 'standard', accentColor: '#15803d', showLogo: true },
+  { id: 18, name: 'Luxury Black', description: 'Near-black gradient with restrained gold-leaning accents.', layout: 'standard', accentColor: '#111827', showLogo: true },
+  { id: 19, name: 'Friendly Rounded', description: 'Violet gradient, flat bands and soft spacing.', layout: 'minimal', accentColor: '#8b5cf6', showLogo: true },
+  { id: 20, name: 'Preyone Signature', description: 'House A4 sheet — signature deep purple gradient and footer band.', layout: 'standard', accentColor: '#4a1064', showLogo: true },
 ];
 
 export const POS_THEMES: PosTheme[] = [
