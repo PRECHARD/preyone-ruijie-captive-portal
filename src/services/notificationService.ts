@@ -866,7 +866,7 @@ export async function sendAdminLoginCode(email: string, fullName: string, code: 
               <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
                 <tr>
                   <td style="padding:18px 32px 0;font-family:${sans};font-size:13px;line-height:1.6;color:#64748b" align="center">
-                    This code expires in <strong style="color:#7be0ff;font-weight:600">5 minutes</strong>. It can only be used once.
+                    This code expires in <strong style="color:#7be0ff;font-weight:600">15 minutes</strong>. It can only be used once.
                   </td>
                 </tr>
                 <tr>

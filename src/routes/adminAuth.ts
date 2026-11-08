@@ -45,6 +45,42 @@ const authLimiter = rateLimit({
   message: { error: 'Too many attempts. Try again in 15 minutes.' },
 });
 
+/**
+ * Verifying an emailed code gets its own budget. Sharing `authLimiter` meant a
+ * couple of typos -- or one expired code followed by a fresh sign-in -- burned
+ * the login allowance and locked the user out with "Too many attempts" even
+ * though their code was right. The real brute-force guard is the 5-attempt cap
+ * stored on each challenge row.
+ */
+const verify2faLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many attempts. Try again in 15 minutes.', code: 'RATE_LIMITED' },
+});
+
+/**
+ * Lifetime of an emailed login code. The DB challenge row and the signed
+ * challenge token MUST use the same window: the old code expired in the DB
+ * after 5 minutes while the token lived 10, so a code that arrived a little
+ * late was rejected as "expired" even though the page still showed the form.
+ * 15 minutes covers normal mail delivery plus typing time.
+ */
+export const TWO_FA_TTL_MINUTES = 15;
+
+/** Wall-clock expiry, shared by the DB row and the challenge token. */
+function twoFaExpiresAt(): Date {
+  return new Date(Date.now() + TWO_FA_TTL_MINUTES * 60 * 1000);
+}
+
+/** Mint a challenge token with exactly the same lifetime as the code. */
+function signTwoFaChallenge(adminId: string): string {
+  return jwt.sign({ id: adminId, purpose: '2fa' }, getJwtSecret(), {
+    expiresIn: `${TWO_FA_TTL_MINUTES}m`,
+  });
+}
+
 /** SHA-256 of the 6-digit code, peppered with the JWT secret. Cheap by design:
  *  brute force is bounded by 5 attempts per challenge + the rate limiters. */
 function hashTwoFaCode(code: string): string {
@@ -386,20 +422,26 @@ adminAuthRouter.post('/login', authLimiter, async (req: Request, res: Response) 
   }
 
   // Email OTP step-up: a valid password alone no longer signs the session in.
-  // The challenge lives 5 minutes; the code itself allows 5 wrong attempts.
+  // The challenge lives 15 minutes; the code itself allows 5 wrong attempts.
   if (user.email) {
     const code = newTwoFaCode();
     await pool.query('DELETE FROM admin_2fa_challenges WHERE admin_user_id = $1', [user.id]);
     await pool.query(
       `INSERT INTO admin_2fa_challenges (admin_user_id, code_hash, expires_at)
-       VALUES ($1, $2, NOW() + interval '5 minutes')`,
-      [user.id, hashTwoFaCode(code)]
+       VALUES ($1, $2, NOW() + make_interval(mins => $3))`,
+      [user.id, hashTwoFaCode(code), TWO_FA_TTL_MINUTES]
     );
-    const challengeToken = jwt.sign({ id: user.id, purpose: '2fa' }, getJwtSecret(), { expiresIn: '10m' });
+    const challengeToken = signTwoFaChallenge(user.id);
     await recordAuditLog(user.id, user.full_name, 'login_challenge', 'admin_user', user.id, '2FA code emailed');
     sendAdminLoginCode(user.email, user.full_name, code);
     if (process.env.NODE_ENV !== 'production') console.log(`[2FA] code for ${user.email}: ${code}`);
-    res.json({ requires2fa: true, challengeToken, maskedEmail: maskEmail(user.email) });
+    res.json({
+      requires2fa: true,
+      challengeToken,
+      maskedEmail: maskEmail(user.email),
+      expiresAt: twoFaExpiresAt().toISOString(),
+      expiresInMinutes: TWO_FA_TTL_MINUTES,
+    });
     return;
   }
 
@@ -409,10 +451,10 @@ adminAuthRouter.post('/login', authLimiter, async (req: Request, res: Response) 
 });
 
 // Verify the emailed OTP and complete sign-in.
-adminAuthRouter.post('/verify-2fa', authLimiter, async (req: Request, res: Response) => {
+adminAuthRouter.post('/verify-2fa', verify2faLimiter, async (req: Request, res: Response) => {
   const { challengeToken, code } = req.body as { challengeToken?: string; code?: string };
   if (!challengeToken || !code) {
-    res.status(422).json({ error: 'challengeToken and code are required' });
+    res.status(422).json({ error: 'challengeToken and code are required', code: 'INVALID_REQUEST' });
     return;
   }
 
@@ -420,11 +462,14 @@ adminAuthRouter.post('/verify-2fa', authLimiter, async (req: Request, res: Respo
   try {
     decoded = jwt.verify(challengeToken, getJwtSecret(), { algorithms: ['HS256'] });
   } catch {
-    res.status(401).json({ error: 'Verification code expired. Please sign in again.' });
+    res.status(401).json({
+      error: 'This sign-in session has expired. Please sign in again.',
+      code: 'CHALLENGE_EXPIRED',
+    });
     return;
   }
   if (decoded.purpose !== '2fa') {
-    res.status(401).json({ error: 'Invalid verification challenge' });
+    res.status(401).json({ error: 'Invalid verification challenge', code: 'INVALID_CHALLENGE' });
     return;
   }
 
@@ -436,7 +481,10 @@ adminAuthRouter.post('/verify-2fa', authLimiter, async (req: Request, res: Respo
   );
   const challenge = rows[0];
   if (!challenge) {
-    res.status(401).json({ error: 'Verification code expired. Please sign in again.' });
+    res.status(401).json({
+      error: 'This code has expired. Request a new code or sign in again.',
+      code: 'CODE_EXPIRED',
+    });
     return;
   }
 
@@ -444,11 +492,19 @@ adminAuthRouter.post('/verify-2fa', authLimiter, async (req: Request, res: Respo
     const attempts = (challenge.attempts || 0) + 1;
     if (attempts >= 5) {
       await pool.query('DELETE FROM admin_2fa_challenges WHERE id = $1', [challenge.id]);
-      res.status(401).json({ error: 'Too many incorrect attempts. Please sign in again.' });
+      res.status(401).json({
+        error: 'Too many incorrect attempts. Please sign in again.',
+        code: 'TOO_MANY_ATTEMPTS',
+        attemptsRemaining: 0,
+      });
       return;
     }
     await pool.query('UPDATE admin_2fa_challenges SET attempts = $1 WHERE id = $2', [attempts, challenge.id]);
-    res.status(401).json({ error: `Incorrect code. ${5 - attempts} attempt(s) remaining.` });
+    res.status(401).json({
+      error: `Incorrect code. ${5 - attempts} attempt(s) remaining.`,
+      code: 'INCORRECT_CODE',
+      attemptsRemaining: 5 - attempts,
+    });
     return;
   }
 
@@ -460,7 +516,7 @@ adminAuthRouter.post('/verify-2fa', authLimiter, async (req: Request, res: Respo
   const user = userRows[0];
   if (!user || !user.approved) {
     await pool.query('DELETE FROM admin_2fa_challenges WHERE admin_user_id = $1', [decoded.id]);
-    res.status(401).json({ error: 'Account is no longer active' });
+    res.status(401).json({ error: 'Account is no longer active', code: 'ACCOUNT_INACTIVE' });
     return;
   }
 
@@ -469,11 +525,14 @@ adminAuthRouter.post('/verify-2fa', authLimiter, async (req: Request, res: Respo
   await startAdminSession(req, res, user);
 });
 
-// Issue a fresh OTP for an in-progress challenge (user didn't receive the mail).
+// Issue a fresh OTP for an in-progress challenge (user didn't receive the mail,
+// or the code expired while they were typing it). A new challenge token is
+// returned too, so a resend near the end of the original window does not hand
+// back a token that is about to expire.
 adminAuthRouter.post('/resend-2fa', resendLimiter, async (req: Request, res: Response) => {
   const { challengeToken } = req.body as { challengeToken?: string };
   if (!challengeToken) {
-    res.status(422).json({ error: 'challengeToken is required' });
+    res.status(422).json({ error: 'challengeToken is required', code: 'INVALID_REQUEST' });
     return;
   }
 
@@ -481,11 +540,14 @@ adminAuthRouter.post('/resend-2fa', resendLimiter, async (req: Request, res: Res
   try {
     decoded = jwt.verify(challengeToken, getJwtSecret(), { algorithms: ['HS256'] });
   } catch {
-    res.status(401).json({ error: 'Verification session expired. Please sign in again.' });
+    res.status(401).json({
+      error: 'This sign-in session has expired. Please sign in again.',
+      code: 'CHALLENGE_EXPIRED',
+    });
     return;
   }
   if (decoded.purpose !== '2fa') {
-    res.status(401).json({ error: 'Invalid verification challenge' });
+    res.status(401).json({ error: 'Invalid verification challenge', code: 'INVALID_CHALLENGE' });
     return;
   }
 
@@ -503,12 +565,18 @@ adminAuthRouter.post('/resend-2fa', resendLimiter, async (req: Request, res: Res
     await pool.query('DELETE FROM admin_2fa_challenges WHERE admin_user_id = $1', [user.id]);
     await pool.query(
       `INSERT INTO admin_2fa_challenges (admin_user_id, code_hash, expires_at)
-       VALUES ($1, $2, NOW() + interval '5 minutes')`,
-      [user.id, hashTwoFaCode(code)]
+       VALUES ($1, $2, NOW() + make_interval(mins => $3))`,
+      [user.id, hashTwoFaCode(code), TWO_FA_TTL_MINUTES]
     );
     sendAdminLoginCode(user.email, user.full_name, code);
     if (process.env.NODE_ENV !== 'production') console.log(`[2FA] code for ${user.email}: ${code}`);
-    res.json({ message: 'A new code has been sent.', maskedEmail: maskEmail(user.email) });
+    res.json({
+      message: 'A new code has been sent.',
+      maskedEmail: maskEmail(user.email),
+      challengeToken: signTwoFaChallenge(user.id),
+      expiresAt: twoFaExpiresAt().toISOString(),
+      expiresInMinutes: TWO_FA_TTL_MINUTES,
+    });
   } catch (err) {
     console.error('Resend 2FA error:', err);
     res.json({ message: 'If that sign-in is still in progress, a new code has been sent.' });
