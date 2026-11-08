@@ -287,7 +287,7 @@ export default function Reports({ onNavigate, canPeakHours }: Props = {}) {
 
       {tab === 'revenue' && revenue && (
         <>
-          <div style="display: flex; justify-content: flex-end; margin-bottom: 12px">
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
             <button className="btn-sm" onClick={exportRevenueCsv} disabled={exporting === 'revenue'} title="Download completed transactions as CSV">
               {exporting === 'revenue' ? 'Exporting…' : 'Export Revenue CSV'}
             </button>
