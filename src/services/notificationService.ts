@@ -95,7 +95,7 @@ function emailFooter(): string {
 }
 
 // ── Generic email helper ──────────────────────────────────────────────
-async function sendMail(to: string | string[], subject: string, html: string, fromName?: string, fromEmail?: string, attachments?: Array<{ filename: string; content: Buffer; cid?: string }>): Promise<boolean> {
+async function sendMail(to: string | string[], subject: string, html: string, fromName?: string, fromEmail?: string, attachments?: Array<{ filename: string; content: Buffer; cid?: string }>, headers?: Record<string, string>): Promise<boolean> {
   const t = getTransporter();
   if (!t) {
     console.log('[NOTIFICATION] Email not sent (SMTP not configured). To:', Array.isArray(to) ? to.join(', ') : to);
@@ -104,7 +104,7 @@ async function sendMail(to: string | string[], subject: string, html: string, fr
   const email = fromEmail || process.env.SMTP_FROM || 'support@preyone.com';
   const from = fromName ? `"${fromName}" <${email}>` : email;
   try {
-    const info = await t.sendMail({ from, to, subject, html, attachments });
+    const info = await t.sendMail({ from, to, subject, html, attachments, ...(headers ? { headers } : {}) });
     // Log the provider's id/response so a later bounce can be traced back to
     // the exact message even though SMTP acceptance alone is not delivery.
     console.log(
@@ -939,7 +939,13 @@ export async function sendAdminLoginCode(email: string, fullName: string, code: 
     // Send from a mailbox that actually exists on preyone.com. The previous
     // admin@ -> admin@ self-send tripped Hostinger's own-domain anti-spoof
     // filtering, and info@ (the old fallback) is not a real mailbox.
-    'Preyone', 'support@preyone.com'
+    //
+    // Every code shares one subject, so without a unique reference Gmail folds
+    // successive codes into one conversation and collapses them behind the
+    // three-dot "show trimmed content" control. X-Entity-Ref-ID tells Gmail to
+    // treat each OTP as its own one-off message and render it in full.
+    'Preyone', 'support@preyone.com', undefined,
+    { 'X-Entity-Ref-ID': `otp-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}` }
   );
 }
 
