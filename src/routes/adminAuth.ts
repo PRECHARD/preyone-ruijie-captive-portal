@@ -433,7 +433,17 @@ adminAuthRouter.post('/login', authLimiter, async (req: Request, res: Response) 
     );
     const challengeToken = signTwoFaChallenge(user.id);
     await recordAuditLog(user.id, user.full_name, 'login_challenge', 'admin_user', user.id, '2FA code emailed');
-    sendAdminLoginCode(user.email, user.full_name, code);
+    const emailed = await sendAdminLoginCode(user.email, user.full_name, code);
+    if (!emailed) {
+      // The relay refused (or SMTP is unconfigured). Returning success here
+      // would leave the user on a code screen with no code on the way.
+      res.status(503).json({
+        error:
+          'We could not send your sign-in code right now. Please try again in a moment, or contact support@preyone.com.',
+        code: 'EMAIL_DELIVERY_FAILED',
+      });
+      return;
+    }
     if (process.env.NODE_ENV !== 'production') console.log(`[2FA] code for ${user.email}: ${code}`);
     res.json({
       requires2fa: true,
@@ -568,7 +578,15 @@ adminAuthRouter.post('/resend-2fa', resendLimiter, async (req: Request, res: Res
        VALUES ($1, $2, NOW() + make_interval(mins => $3))`,
       [user.id, hashTwoFaCode(code), TWO_FA_TTL_MINUTES]
     );
-    sendAdminLoginCode(user.email, user.full_name, code);
+    const emailed = await sendAdminLoginCode(user.email, user.full_name, code);
+    if (!emailed) {
+      res.status(503).json({
+        error:
+          'We could not send your sign-in code right now. Please try again in a moment, or contact support@preyone.com.',
+        code: 'EMAIL_DELIVERY_FAILED',
+      });
+      return;
+    }
     if (process.env.NODE_ENV !== 'production') console.log(`[2FA] code for ${user.email}: ${code}`);
     res.json({
       message: 'A new code has been sent.',

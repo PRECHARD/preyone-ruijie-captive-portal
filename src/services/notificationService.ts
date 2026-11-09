@@ -14,6 +14,11 @@ function getTransporter() {
     port: Number(port),
     secure: Number(port) === 465,
     auth: { user, pass },
+    // A stalled relay must never hang a login request. These bounds keep the
+    // awaited 2FA send short enough that the API can answer with a clear error.
+    connectionTimeout: 10_000,
+    greetingTimeout: 10_000,
+    socketTimeout: 20_000,
   });
   return transporter;
 }
@@ -96,11 +101,22 @@ async function sendMail(to: string | string[], subject: string, html: string, fr
     console.log('[NOTIFICATION] Email not sent (SMTP not configured). To:', Array.isArray(to) ? to.join(', ') : to);
     return false;
   }
-  const email = fromEmail || process.env.SMTP_FROM || 'info@preyone.com';
+  const email = fromEmail || process.env.SMTP_FROM || 'support@preyone.com';
   const from = fromName ? `"${fromName}" <${email}>` : email;
   try {
-    await t.sendMail({ from, to, subject, html, attachments });
-    console.log('[NOTIFICATION] Email sent to', Array.isArray(to) ? to.join(', ') : to, '-', subject);
+    const info = await t.sendMail({ from, to, subject, html, attachments });
+    // Log the provider's id/response so a later bounce can be traced back to
+    // the exact message even though SMTP acceptance alone is not delivery.
+    console.log(
+      '[NOTIFICATION] Email sent to',
+      Array.isArray(to) ? to.join(', ') : to,
+      '-',
+      subject,
+      '|',
+      info.messageId || 'no-id',
+      '|',
+      info.response || ''
+    );
     return true;
   } catch (err) {
     console.error('[NOTIFICATION] Email send failed:', err);
@@ -920,7 +936,10 @@ export async function sendAdminLoginCode(email: string, fullName: string, code: 
   </table>
 </body>
 </html>`,
-    'Preyone', 'admin@preyone.com'
+    // Send from a mailbox that actually exists on preyone.com. The previous
+    // admin@ -> admin@ self-send tripped Hostinger's own-domain anti-spoof
+    // filtering, and info@ (the old fallback) is not a real mailbox.
+    'Preyone', 'support@preyone.com'
   );
 }
 
