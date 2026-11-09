@@ -3,6 +3,7 @@ import express from 'express';
 import request from 'supertest';
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
+import { sendAdminLoginCode } from '../src/services/notificationService';
 
 /**
  * 2FA login contract.
@@ -29,7 +30,9 @@ vi.mock('../src/services/notificationService', () => ({
   sendAdminSignupConfirmation: vi.fn(),
   sendAdminSignupNotification: vi.fn(),
   sendPasswordResetEmail: vi.fn(),
-  sendAdminLoginCode: vi.fn(),
+  // The login route now awaits this and refuses to start a challenge when the
+  // code could not be handed to the relay, so default the mock to "sent".
+  sendAdminLoginCode: vi.fn(async () => true),
 }));
 
 vi.mock('../src/middleware/rbac', () => ({ loadPermissions: vi.fn(async () => ({})) }));
@@ -180,5 +183,23 @@ describe('2FA login flow', () => {
     expect(resend.status).toBe(200);
     expect(resend.body.challengeToken).toBeTruthy();
     expect(tokenLifetimeMinutes(resend.body.challengeToken)).toBe(15);
+  });
+
+  it('refuses to issue a challenge when the code email cannot be sent', async () => {
+    serveChallenge(hash('999999'));
+    vi.mocked(sendAdminLoginCode).mockResolvedValueOnce(false);
+    const server = await app();
+
+    const res = await request(server)
+      .post('/api/admin/auth/login')
+      .send({ email: USER.email, password: 'pw' });
+
+    // Showing the code screen with no code on the way would strand the user.
+    expect(res.status).toBe(503);
+    expect(res.body.code).toBe('EMAIL_DELIVERY_FAILED');
+    expect(res.body.challengeToken).toBeUndefined();
+    expect(
+      queryMock.mock.calls.some((c: any[]) => String(c[0]).includes('INSERT INTO admin_2fa_challenges'))
+    ).toBe(true);
   });
 });
