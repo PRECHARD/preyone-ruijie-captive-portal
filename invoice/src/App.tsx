@@ -1167,7 +1167,7 @@ function SettingsPanel({
       <div className="card" style={{ padding: 20 }}>
         <div className="panel-title" style={{ marginBottom: 4 }}>Workspace theme</div>
         <p className="muted small" style={{ marginTop: 0, marginBottom: 14 }}>
-          One choice, every Preyone surface: POS, invoicing and home automation update instantly.
+          One choice, every Preyone surface: POS and invoicing update instantly.
         </p>
         <div className="theme-grid">
           {catalog.themes.map((t: ThemeTokens) => (

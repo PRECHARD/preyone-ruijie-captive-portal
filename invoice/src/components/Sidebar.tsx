@@ -25,7 +25,6 @@ type IconName =
   | 'chevron'
   | 'pos'
   | 'wifi'
-  | 'home'
   | 'external';
 
 const ICONS: Record<IconName, ReactNode> = {
@@ -94,11 +93,6 @@ const ICONS: Record<IconName, ReactNode> = {
       <circle cx="12" cy="19" r="1" fill="currentColor" stroke="none" />
     </>
   ),
-  home: (
-    <>
-      <path d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-5v-6H10v6H5a1 1 0 0 1-1-1Z" />
-    </>
-  ),
   external: (
     <>
       <path d="M14 4h6v6" />
@@ -130,7 +124,6 @@ function Icon({ name, className }: { name: IconName; className?: string }) {
 const CORE_APPS: Array<{ host: string; label: string; icon: IconName }> = [
   { host: 'pos.preyone.com', label: 'POS', icon: 'pos' },
   { host: 'wifi.preyone.com', label: 'WiFi portal', icon: 'wifi' },
-  { host: 'homeautomate.preyone.com', label: 'Home automation', icon: 'home' },
 ];
 
 /**
