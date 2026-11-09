@@ -13,6 +13,7 @@ import {
   type UptimeSummary,
 } from './api';
 import { applyCssVars } from './theme';
+import { LandingPage } from './LandingPage';
 
 /* ────────────────────────────── helpers ────────────────────────────── */
 
@@ -28,6 +29,9 @@ const KIND_ICON: Record<string, string> = {
 };
 
 const OPERATORS = ['>', '>=', '<', '<=', '==', '!='];
+
+/** Why the dashboard could not open: 401 = session, 403 = plan/company. */
+type AuthFailure = { status: number; message: string };
 
 function timeAgo(value?: string | null): string {
   if (!value) return 'never';
@@ -68,7 +72,7 @@ function stateChips(device: IotDevice): Array<{ label: string; value: string }> 
 
 /* ────────────────────────────── login ──────────────────────────────── */
 
-function LoginPanel({ onSignedIn }: { onSignedIn: () => void }) {
+function LoginPanel({ onSignedIn, onBack }: { onSignedIn: () => void; onBack?: () => void }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [code, setCode] = useState('');
@@ -109,7 +113,16 @@ function LoginPanel({ onSignedIn }: { onSignedIn: () => void }) {
   return (
     <div className="auth-wrap">
       <form className="glass auth-card" onSubmit={submit}>
-        <h1>{challenge ? 'Two-factor code' : 'Home Automation'}</h1>
+        {onBack && (
+          <button className="btn ghost login-back" type="button" onClick={onBack}>
+            ← Back to home
+          </button>
+        )}
+        <div className="auth-brand">
+          <span className="ha-brand-mark">⌂</span>
+          Preyone Home
+        </div>
+        <h1>{challenge ? 'Two-factor code' : 'Welcome back'}</h1>
         <p>{challenge ? `Code sent to ${masked || 'your email'}.` : 'Sign in with your Preyone console account.'}</p>
         {error && <div className="banner error">{error}</div>}
         {challenge ? (
@@ -212,7 +225,15 @@ function DeviceCard({
 
 /* ──────────────────────────────── app ──────────────────────────────── */
 
-export default function App() {
+function Dashboard({
+  onHome,
+  onSignOut,
+  onLogin,
+}: {
+  onHome: () => void;
+  onSignOut: () => void;
+  onLogin: () => void;
+}) {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [devices, setDevices] = useState<IotDevice[]>([]);
   const [triggers, setTriggers] = useState<Trigger[]>([]);
@@ -221,7 +242,7 @@ export default function App() {
   const [energySeries, setEnergySeries] = useState<number[]>([]);
   const [connected, setConnected] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [authError, setAuthError] = useState(false);
+  const [authError, setAuthError] = useState<AuthFailure | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -256,10 +277,10 @@ export default function App() {
       const theme = await api.get<ThemeResponse>('/api/pos/theme');
       applyCssVars(theme.css);
       await refreshAll();
-      setAuthError(false);
+      setAuthError(null);
     } catch (err) {
       if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
-        setAuthError(true);
+        setAuthError({ status: err.status, message: err.message });
       } else {
         setError(errorText(err));
       }
@@ -418,7 +439,7 @@ export default function App() {
   const maxEnergy = Math.max(1, ...energySeries);
   const energyCost = (summary?.energy.kwhToday ?? 0) * (summary?.energy.ratePerKwh ?? 0);
 
-  if (authError) return <LoginPanel onSignedIn={() => void boot()} />;
+  if (authError) return <AccessGate failure={authError} onLogin={onLogin} onHome={onHome} />;
 
   return (
     <div className="shell">
@@ -438,8 +459,14 @@ export default function App() {
           <button className="btn ghost" type="button" onClick={() => void refreshAll()}>
             Refresh
           </button>
+          <button className="btn ghost" type="button" onClick={onHome}>
+            ← Home
+          </button>
           <button className="btn accent" type="button" onClick={() => void seedDemo()}>
             Seed demo home
+          </button>
+          <button className="btn ghost" type="button" onClick={onSignOut}>
+            Sign out
           </button>
         </div>
       </header>
@@ -836,5 +863,173 @@ function AddTrigger({
         <button className="btn ghost" type="button" onClick={onCancel}>Cancel</button>
       </div>
     </form>
+  );
+}
+
+/* ── Public routes ─────────────────────────────────────────────────── */
+
+function LoginPage({ onBack, onSignedIn }: { onBack: () => void; onSignedIn: () => void }) {
+  // A wildcard SSO cookie or a stored bearer may already be live; in that case
+  // skip the form and hand straight over to the dashboard.
+  useEffect(() => {
+    let cancelled = false;
+    const token = getToken();
+    const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+    fetch('/api/admin/auth/me', { credentials: 'include', headers })
+      .then((res) => {
+        if (cancelled) return;
+        if (res.ok) onSignedIn();
+        else if (token) localStorage.removeItem('gateway_token');
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return (
+    <div className="login-page">
+      <aside className="login-aside">
+        <a
+          className="ha-brand"
+          href="/"
+          onClick={(e) => {
+            e.preventDefault();
+            onBack();
+          }}
+        >
+          <span className="ha-brand-mark">⌂</span>
+          <span className="ha-brand-text">
+            <strong>Preyone</strong>
+            <small>Home</small>
+          </span>
+        </a>
+        <h2>The intelligent home starts here.</h2>
+        <p>
+          Sign in to manage devices, scenes, energy and your Starlink gateway from one
+          live command centre.
+        </p>
+        <ul>
+          <li><span className="li-check">✓</span> Real-time device control</li>
+          <li><span className="li-check">✓</span> Automation scenes &amp; triggers</li>
+          <li><span className="li-check">✓</span> Energy and gateway telemetry</li>
+          <li><span className="li-check">✓</span> Two-factor protected access</li>
+        </ul>
+        <span className="login-aside-foot">Preyone 360 · Home automation</span>
+      </aside>
+      <div className="login-panel">
+        <LoginPanel onSignedIn={onSignedIn} onBack={onBack} />
+      </div>
+    </div>
+  );
+}
+
+function AccessGate({
+  failure,
+  onLogin,
+  onHome,
+}: {
+  failure: AuthFailure;
+  onLogin: () => void;
+  onHome: () => void;
+}) {
+  const session = failure.status === 401;
+  return (
+    <div className="access-gate">
+      <div className="glass auth-card">
+        <div className="gate-icon">⌂</div>
+        <h1>{session ? 'Your session ended' : 'Home automation is not active'}</h1>
+        <p>
+          {session
+            ? 'Sign in again to pick up where you left off.'
+            : 'This account does not have an active home automation subscription. Subscribe to Preyone 360, then sign in with the account linked to your home.'}
+        </p>
+        {failure.message && <div className="banner error">{failure.message}</div>}
+        <div className="gate-actions">
+          <button className="btn primary" type="button" onClick={onLogin}>
+            {session ? 'Log in again' : 'Log in with another account'}
+          </button>
+          {!session && (
+            <a className="btn ghost" href="https://preyone.com/business-apps">
+              View Preyone 360 plans
+            </a>
+          )}
+          <button className="btn ghost" type="button" onClick={onHome}>
+            Back to home
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+type Route = 'home' | 'login' | 'app';
+
+function routeFromPath(pathname: string): Route {
+  if (pathname === '/login' || pathname.startsWith('/login/')) return 'login';
+  if (
+    pathname === '/app' ||
+    pathname.startsWith('/app/') ||
+    pathname === '/dashboard' ||
+    pathname.startsWith('/dashboard/')
+  ) {
+    return 'app';
+  }
+  return 'home';
+}
+
+export default function App() {
+  const [route, setRoute] = useState<Route>(() => routeFromPath(window.location.pathname));
+
+  useEffect(() => {
+    const onPop = () => setRoute(routeFromPath(window.location.pathname));
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
+
+  const go = useCallback((path: string, replace = false) => {
+    if (window.location.pathname !== path) {
+      if (replace) window.history.replaceState({}, '', path);
+      else window.history.pushState({}, '', path);
+    }
+    setRoute(routeFromPath(path));
+    window.scrollTo({ top: 0, behavior: 'auto' });
+  }, []);
+
+  const signOut = useCallback(async () => {
+    try {
+      await fetch('/api/admin/auth/logout', { method: 'POST', credentials: 'include' });
+    } catch {
+      /* offline — clear the local session anyway */
+    }
+    for (const key of ['gateway_token', 'admin_token']) {
+      localStorage.removeItem(key);
+      sessionStorage.removeItem(key);
+    }
+    go('/', true);
+  }, [go]);
+
+  if (route === 'login') {
+    return <LoginPage onBack={() => go('/')} onSignedIn={() => go('/app', true)} />;
+  }
+
+  if (route === 'app') {
+    return (
+      <Dashboard
+        onHome={() => go('/')}
+        onSignOut={() => void signOut()}
+        onLogin={() => go('/login')}
+      />
+    );
+  }
+
+  return (
+    <LandingPage
+      onLogin={() => go('/login')}
+      onSubscribe={() => {
+        window.location.href = 'https://preyone.com/business-apps';
+      }}
+    />
   );
 }
