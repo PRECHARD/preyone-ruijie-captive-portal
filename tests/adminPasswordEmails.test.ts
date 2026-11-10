@@ -34,8 +34,8 @@ describe('admin password emails', () => {
     expect(message.html).toContain('#0a0d17');
     expect(message.html).toContain('#ff00ff');
     expect(message.html).toContain('Hi <strong style="color:#f8fbff">&lt;Staff&gt;</strong>');
-    expect(message.html).not.toContain('preyone-logo-mainInverse-optimized.png');
-    expect(message.html.match(/preyonelogomainzw-email\.png/g)).toHaveLength(2);
+    expect(message.html).toContain('https://wifi.preyone.com/images/preyone-logo-mainInverse-optimized.png');
+    expect(message.html.match(/preyonelogomainzw-email\.png/g)).toHaveLength(1);
     expect(message.from).toContain('support@preyone.com');
   });
 
@@ -46,8 +46,8 @@ describe('admin password emails', () => {
     expect(message.to).toBe('staff@preyone.com');
     expect(message.subject).toBe('Your Preyone password was changed');
     expect(message.html).toContain('Your Preyone Admin Console password was successfully changed.');
-    expect(message.html).not.toContain('preyone-logo-mainInverse-optimized.png');
-    expect(message.html.match(/preyonelogomainzw-email\.png/g)).toHaveLength(2);
+    expect(message.html).toContain('https://wifi.preyone.com/images/preyone-logo-mainInverse-optimized.png');
+    expect(message.html.match(/preyonelogomainzw-email\.png/g)).toHaveLength(1);
   });
 
   it('sends the portal password-changed alert in the same brand genre', async () => {
@@ -59,7 +59,8 @@ describe('admin password emails', () => {
     expect(message.html).toContain('Your Preyone WiFi account password was successfully changed.');
     expect(message.html).toContain('#6a0dad');
     expect(message.html).toContain('#ff00ff');
-    expect(message.html.match(/preyonelogomainzw-email\.png/g)).toHaveLength(2);
+    expect(message.html).toContain('https://wifi.preyone.com/images/preyone-logo-mainInverse-optimized.png');
+    expect(message.html.match(/preyonelogomainzw-email\.png/g)).toHaveLength(1);
   });
 
   it('gives every email a unique reference so Gmail does not collapse repeated messages', async () => {

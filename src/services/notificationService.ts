@@ -36,7 +36,7 @@ function emailHeader(title: string): string {
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;background:#0a0d17;background-image:linear-gradient(160deg,#0a0d17 0%,#101a33 55%,#0a0d17 100%);border-bottom:1px solid #1c2438">
           <tr>
             <td align="center" style="padding:32px 16px 20px">
-              <img src="${baseUrl}/images/preyonelogomainzw-email.png" width="120" alt="Preyone" style="display:block;width:120px;max-width:100%;height:auto;margin:0 auto 14px;border:0;outline:none;text-decoration:none" />
+              <img src="${baseUrl}/images/preyone-logo-mainInverse-optimized.png" width="160" height="90" alt="Preyone UltraNet WiFi" style="display:block;width:160px;max-width:100%;height:auto;margin:0 auto 14px;border:0;outline:none;text-decoration:none" />
               <h1 style="margin:0 0 16px;color:#f8fbff;font-family:'Montserrat','Segoe UI',Arial,sans-serif;font-size:22px;line-height:1.3;font-weight:700;letter-spacing:0.2px">${title}</h1>
               <table role="presentation" width="180" cellpadding="0" cellspacing="0" border="0" style="width:180px;max-width:100%;margin:0 auto;border-collapse:collapse">
                 <tr>
@@ -551,7 +551,7 @@ export async function sendAdminRejectedNotification(email: string, fullName: str
 export async function sendPasswordResetEmail(email: string, resetToken: string, fullName: string): Promise<boolean> {
   const baseUrl = (process.env.ADMIN_BASE_URL || process.env.BASE_URL || 'https://admin.preyone.com').replace(/\/$/, '');
   const resetUrl = `${baseUrl}/?token=${encodeURIComponent(resetToken)}`;
-  const logo = `${(process.env.BASE_URL || 'https://wifi.preyone.com').replace(/\/$/, '')}/images/preyonelogomainzw-email.png`;
+  const logo = `${(process.env.BASE_URL || 'https://wifi.preyone.com').replace(/\/$/, '')}/images/preyone-logo-mainInverse-optimized.png`;
   const footerMark = `${(process.env.BASE_URL || 'https://wifi.preyone.com').replace(/\/$/, '')}/images/preyonelogomainzw-email.png`;
   const safeName = escapeEmailText(fullName);
   return sendMail(
@@ -563,7 +563,7 @@ export async function sendPasswordResetEmail(email: string, resetToken: string, 
   <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#050505"><tr><td align="center" style="padding:40px 16px">
     <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width:520px;width:100%;background:#0a0d17;border:1px solid #1c2438;border-radius:16px;overflow:hidden">
       <tr><td style="height:3px;background:#6a0dad;background-image:linear-gradient(90deg,#6a0dad,#ff00ff);font-size:1px;line-height:1px">&nbsp;</td></tr>
-      <tr><td align="center" style="padding:34px 32px 0"><img src="${logo}" width="120" alt="Preyone" style="display:block;width:120px;max-width:100%;height:auto;border:0;outline:none;text-decoration:none"></td></tr>
+      <tr><td align="center" style="padding:34px 32px 0"><img src="${logo}" width="150" alt="Preyone" style="display:block;width:150px;max-width:100%;height:auto;border:0;outline:none;text-decoration:none"></td></tr>
       <tr><td align="center" style="padding:24px 32px 0;font-family:'Segoe UI',Arial,sans-serif"><h1 style="margin:0;color:#f8fbff;font-size:24px;line-height:1.3">Reset your password</h1></td></tr>
       <tr><td style="padding:22px 32px 0;font-family:'Segoe UI',Arial,sans-serif;font-size:15px;line-height:1.6;color:#94a3b8"><p style="margin:0 0 10px">Hi <strong style="color:#f8fbff">${safeName}</strong>,</p><p style="margin:0">We received a request to reset your Preyone Admin Console password. Use the secure button below to choose a new password.</p></td></tr>
       <tr><td align="center" style="padding:26px 32px 0"><a href="${resetUrl}" style="display:inline-block;background:#6a0dad;background-image:linear-gradient(135deg,#6a0dad,#ff00ff);color:#ffffff;padding:13px 30px;border-radius:8px;text-decoration:none;font-family:'Segoe UI',Arial,sans-serif;font-size:14px;font-weight:700">Reset Password</a></td></tr>
@@ -582,7 +582,7 @@ export async function sendPasswordResetEmail(email: string, resetToken: string, 
 
 export async function sendAdminPasswordChangedEmail(email: string, fullName: string): Promise<boolean> {
   const baseUrl = (process.env.BASE_URL || 'https://wifi.preyone.com').replace(/\/$/, '');
-  const logo = `${baseUrl}/images/preyonelogomainzw-email.png`;
+  const logo = `${baseUrl}/images/preyone-logo-mainInverse-optimized.png`;
   const footerMark = `${baseUrl}/images/preyonelogomainzw-email.png`;
   const safeName = escapeEmailText(fullName);
   return sendMail(
@@ -594,7 +594,7 @@ export async function sendAdminPasswordChangedEmail(email: string, fullName: str
   <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#050505"><tr><td align="center" style="padding:40px 16px">
     <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width:520px;width:100%;background:#0a0d17;border:1px solid #1c2438;border-radius:16px;overflow:hidden">
       <tr><td style="height:3px;background:#6a0dad;background-image:linear-gradient(90deg,#6a0dad,#ff00ff);font-size:1px;line-height:1px">&nbsp;</td></tr>
-      <tr><td align="center" style="padding:34px 32px 0"><img src="${logo}" width="120" alt="Preyone" style="display:block;width:120px;max-width:100%;height:auto;border:0;outline:none;text-decoration:none"></td></tr>
+      <tr><td align="center" style="padding:34px 32px 0"><img src="${logo}" width="150" alt="Preyone" style="display:block;width:150px;max-width:100%;height:auto;border:0;outline:none;text-decoration:none"></td></tr>
       <tr><td align="center" style="padding:24px 32px 0;font-family:'Segoe UI',Arial,sans-serif"><h1 style="margin:0;color:#f8fbff;font-size:24px;line-height:1.3">Password changed</h1></td></tr>
       <tr><td style="padding:22px 32px 0;font-family:'Segoe UI',Arial,sans-serif;font-size:15px;line-height:1.6;color:#94a3b8"><p style="margin:0 0 10px">Hi <strong style="color:#f8fbff">${safeName}</strong>,</p><p style="margin:0">Your Preyone Admin Console password was successfully changed. All existing console sessions have been signed out.</p></td></tr>
       <tr><td style="padding:20px 32px 0;font-family:'Segoe UI',Arial,sans-serif;font-size:13px;line-height:1.6;color:#64748b">If you made this change, no further action is needed. If you did not, contact support immediately at <a href="mailto:support@preyone.com" style="color:#7be0ff;text-decoration:none">support@preyone.com</a>.</td></tr>
@@ -641,7 +641,8 @@ export async function sendPortalEmailVerification(email: string, token: string, 
 export async function sendPortalForgotPassword(email: string, token: string, fullName: string): Promise<boolean> {
   const baseUrl = (process.env.BASE_URL || 'https://wifi.preyone.com').replace(/\/$/, '');
   const resetUrl = `${baseUrl}/reset-password.html?token=${token}`;
-  const logo = `${baseUrl}/images/preyonelogomainzw-email.png`;
+  const logo = `${baseUrl}/images/preyone-logo-mainInverse-optimized.png`;
+  const footerMark = `${baseUrl}/images/preyonelogomainzw-email.png`;
   const safeName = escapeEmailText(fullName);
   return sendMail(
     email,
@@ -652,14 +653,14 @@ export async function sendPortalForgotPassword(email: string, token: string, ful
   <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#050505"><tr><td align="center" style="padding:40px 16px">
     <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width:520px;width:100%;background:#0a0d17;border:1px solid #1c2438;border-radius:16px;overflow:hidden">
       <tr><td style="height:3px;background:#6a0dad;background-image:linear-gradient(90deg,#6a0dad,#ff00ff);font-size:1px;line-height:1px">&nbsp;</td></tr>
-      <tr><td align="center" style="padding:34px 32px 0"><img src="${logo}" width="120" alt="Preyone" style="display:block;width:120px;max-width:100%;height:auto;border:0;outline:none;text-decoration:none"></td></tr>
+      <tr><td align="center" style="padding:34px 32px 0"><img src="${logo}" width="150" alt="Preyone" style="display:block;width:150px;max-width:100%;height:auto;border:0;outline:none;text-decoration:none"></td></tr>
       <tr><td align="center" style="padding:24px 32px 0;font-family:'Segoe UI',Arial,sans-serif"><h1 style="margin:0;color:#f8fbff;font-size:24px;line-height:1.3">Reset your password</h1></td></tr>
       <tr><td style="padding:22px 32px 0;font-family:'Segoe UI',Arial,sans-serif;font-size:15px;line-height:1.6;color:#94a3b8"><p style="margin:0 0 10px">Hi <strong style="color:#f8fbff">${safeName}</strong>,</p><p style="margin:0">We received a request to reset your Preyone WiFi account password. Use the secure button below to choose a new password.</p></td></tr>
       <tr><td align="center" style="padding:26px 32px 0"><a href="${resetUrl}" style="display:inline-block;background:#6a0dad;background-image:linear-gradient(135deg,#6a0dad,#ff00ff);color:#ffffff;padding:13px 30px;border-radius:8px;text-decoration:none;font-family:'Segoe UI',Arial,sans-serif;font-size:14px;font-weight:700">Reset Password</a></td></tr>
       <tr><td align="center" style="padding:18px 32px 0;font-family:'Segoe UI',Arial,sans-serif;font-size:13px;line-height:1.6;color:#64748b">This link expires in <strong style="color:#7be0ff">1 hour</strong> and can only be used once.</td></tr>
       <tr><td align="center" style="padding:14px 32px 0;font-family:'Segoe UI',Arial,sans-serif;font-size:13px;line-height:1.6;color:#64748b">If you did not request a password reset, you can safely ignore this email.</td></tr>
       <tr><td style="padding:30px 32px 0"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0"><tr><td style="border-top:1px solid #1c2438;font-size:1px;line-height:1px">&nbsp;</td></tr></table></td></tr>
-      <tr><td align="center" style="padding:24px 32px 8px"><img src="${logo}" width="120" alt="Preyone" style="display:block;width:120px;max-width:100%;height:auto;border:0;outline:none;text-decoration:none"></td></tr>
+      <tr><td align="center" style="padding:24px 32px 8px"><img src="${footerMark}" width="120" alt="Preyone" style="display:block;width:120px;max-width:100%;height:auto;border:0;outline:none;text-decoration:none"></td></tr>
       <tr><td align="center" style="padding:14px 32px 0"><a href="https://wa.me/263771327202" style="display:inline-block;background:#6a0dad;color:#fff;padding:11px 26px;border-radius:8px;text-decoration:none;font-family:'Segoe UI',Arial,sans-serif;font-size:13px;font-weight:700">Chat on WhatsApp</a></td></tr>
       <tr><td align="center" style="padding:18px 32px 30px;font-family:'Segoe UI',Arial,sans-serif;font-size:12px;line-height:1.7;color:#64748b"><a href="mailto:support@preyone.com" style="color:#7be0ff;text-decoration:none">support@preyone.com</a><br>&copy; ${new Date().getFullYear()} Preyone Enterprises. All rights reserved.</td></tr>
     </table>
@@ -672,7 +673,8 @@ export async function sendPortalForgotPassword(email: string, token: string, ful
 // ── Portal password changed confirmation ───────────────────────────
 export async function sendPortalPasswordChangedEmail(email: string, fullName: string): Promise<boolean> {
   const baseUrl = (process.env.BASE_URL || 'https://wifi.preyone.com').replace(/\/$/, '');
-  const logo = `${baseUrl}/images/preyonelogomainzw-email.png`;
+  const logo = `${baseUrl}/images/preyone-logo-mainInverse-optimized.png`;
+  const footerMark = `${baseUrl}/images/preyonelogomainzw-email.png`;
   const safeName = escapeEmailText(fullName);
   return sendMail(
     email,
@@ -683,12 +685,12 @@ export async function sendPortalPasswordChangedEmail(email: string, fullName: st
   <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#050505"><tr><td align="center" style="padding:40px 16px">
     <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width:520px;width:100%;background:#0a0d17;border:1px solid #1c2438;border-radius:16px;overflow:hidden">
       <tr><td style="height:3px;background:#6a0dad;background-image:linear-gradient(90deg,#6a0dad,#ff00ff);font-size:1px;line-height:1px">&nbsp;</td></tr>
-      <tr><td align="center" style="padding:34px 32px 0"><img src="${logo}" width="120" alt="Preyone" style="display:block;width:120px;max-width:100%;height:auto;border:0;outline:none;text-decoration:none"></td></tr>
+      <tr><td align="center" style="padding:34px 32px 0"><img src="${logo}" width="150" alt="Preyone" style="display:block;width:150px;max-width:100%;height:auto;border:0;outline:none;text-decoration:none"></td></tr>
       <tr><td align="center" style="padding:24px 32px 0;font-family:'Segoe UI',Arial,sans-serif"><h1 style="margin:0;color:#f8fbff;font-size:24px;line-height:1.3">Password changed</h1></td></tr>
       <tr><td style="padding:22px 32px 0;font-family:'Segoe UI',Arial,sans-serif;font-size:15px;line-height:1.6;color:#94a3b8"><p style="margin:0 0 10px">Hi <strong style="color:#f8fbff">${safeName}</strong>,</p><p style="margin:0">Your Preyone WiFi account password was successfully changed.</p></td></tr>
       <tr><td style="padding:20px 32px 0;font-family:'Segoe UI',Arial,sans-serif;font-size:13px;line-height:1.6;color:#64748b">If you made this change, no further action is needed. If you did not, contact support immediately at <a href="mailto:support@preyone.com" style="color:#7be0ff;text-decoration:none">support@preyone.com</a>.</td></tr>
       <tr><td style="padding:30px 32px 0"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0"><tr><td style="border-top:1px solid #1c2438;font-size:1px;line-height:1px">&nbsp;</td></tr></table></td></tr>
-      <tr><td align="center" style="padding:24px 32px 8px"><img src="${logo}" width="120" alt="Preyone" style="display:block;width:120px;max-width:100%;height:auto;border:0;outline:none;text-decoration:none"></td></tr>
+      <tr><td align="center" style="padding:24px 32px 8px"><img src="${footerMark}" width="120" alt="Preyone" style="display:block;width:120px;max-width:100%;height:auto;border:0;outline:none;text-decoration:none"></td></tr>
       <tr><td align="center" style="padding:14px 32px 0"><a href="https://wa.me/263771327202" style="display:inline-block;background:#6a0dad;color:#fff;padding:11px 26px;border-radius:8px;text-decoration:none;font-family:'Segoe UI',Arial,sans-serif;font-size:13px;font-weight:700">Chat on WhatsApp</a></td></tr>
       <tr><td align="center" style="padding:18px 32px 30px;font-family:'Segoe UI',Arial,sans-serif;font-size:12px;line-height:1.7;color:#64748b"><a href="mailto:support@preyone.com" style="color:#7be0ff;text-decoration:none">support@preyone.com</a><br>&copy; ${new Date().getFullYear()} Preyone Enterprises. All rights reserved.</td></tr>
     </table>
@@ -899,7 +901,7 @@ export async function sendAdminLoginCode(email: string, fullName: string, code: 
   // (ink #050505, panel #0a0d17, brand #6a0dad, magenta #ff00ff, frost
   // #f8fbff). PNG only — Gmail and Outlook do not render WebP.
   const baseUrl = (process.env.BASE_URL || 'https://wifi.preyone.com').replace(/\/$/, '');
-  const logo = `${baseUrl}/images/preyonelogomainzw-email.png`;
+  const logo = `${baseUrl}/images/preyonenoneglow-logo-zoom-800.png`;
   const footerMark = `${baseUrl}/images/preyonelogomainzw-email.png`;
   const sans = "'Segoe UI',-apple-system,BlinkMacSystemFont,Roboto,Arial,sans-serif";
   const mono = "'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace";
@@ -932,7 +934,7 @@ export async function sendAdminLoginCode(email: string, fullName: string, code: 
               <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
                 <tr>
                   <td align="center" style="padding:34px 32px 4px">
-                    <img src="${logo}" width="120" alt="Preyone" style="display:block;width:190px;max-width:100%;height:auto;border:0;outline:none;text-decoration:none">
+                    <img src="${logo}" width="190" alt="Preyone" style="display:block;width:190px;max-width:100%;height:auto;border:0;outline:none;text-decoration:none">
                   </td>
                 </tr>
                 <tr>
@@ -991,7 +993,7 @@ export async function sendAdminLoginCode(email: string, fullName: string, code: 
               <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
                 <tr>
                   <td align="center" style="padding:26px 32px 8px">
-                    <img src="${footerMark}" width="120" alt="Preyone Enterprises" style="display:block;width:150px;max-width:100%;height:auto;border:0;outline:none;text-decoration:none">
+                    <img src="${footerMark}" width="120" alt="Preyone Enterprises" style="display:block;width:120px;max-width:100%;height:auto;border:0;outline:none;text-decoration:none">
                   </td>
                 </tr>
                 <tr>
@@ -1063,7 +1065,7 @@ function handoverEmailHtml(
   const rejected = mode === 'rejected';
   const adminUrl = (process.env.ADMIN_BASE_URL || 'https://admin.preyone.com').replace(/\/$/, '');
   const baseUrl = (process.env.BASE_URL || 'https://wifi.preyone.com').replace(/\/$/, '');
-  const logoUrl = `${baseUrl}/images/preyonelogomainzw-email.png`;
+  const logoUrl = `${baseUrl}/images/preyonenoneglow-logo-zoom-800.png`;
   const statusColor = approved ? '#22e6a8' : rejected ? '#ff4d6d' : '#00ccff';
   const statusBg = approved ? 'rgba(34,230,168,0.12)' : rejected ? 'rgba(255,77,109,0.12)' : 'rgba(0,204,255,0.12)';
   const title = approved ? 'Cash handover approved' : rejected ? 'Cash handover rejected' : 'Cash handover submitted';
@@ -1333,7 +1335,7 @@ function onlineSectionHeader(title: string, note?: string): string {
 function onlinePaymentEmailHtml(data: OnlinePaymentEmailData): string {
   const adminUrl = (process.env.ADMIN_BASE_URL || 'https://admin.preyone.com').replace(/\/$/, '');
   const baseUrl = (process.env.BASE_URL || 'https://wifi.preyone.com').replace(/\/$/, '');
-  const logoUrl = `${baseUrl}/images/preyonelogomainzw-email.png`;
+  const logoUrl = `${baseUrl}/images/preyonenoneglow-logo-zoom-800.png`;
   const amount = Number(data.amount);
   const amountText = emailMoney(amount, data.currency);
   const gatewayFee = data.gatewayFee == null ? null : Number(data.gatewayFee);

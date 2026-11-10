@@ -188,7 +188,7 @@ export function buildMonthEndEmailHtml(summary: MonthEndSummary): string {
     reconciledValue: money(summary.reconciledValue, summary.currency),
     approvedHandoverValue: money(summary.approvedHandoverValue, summary.currency),
     staffRowsHtml: buildStaffRowsHtml(summary),
-    logoUrl: `${baseUrl}/images/preyonelogomainzw-email.png`,
+    logoUrl: `${baseUrl}/images/preyone-logo-mainInverse-optimized.png`,
   });
 }
 
