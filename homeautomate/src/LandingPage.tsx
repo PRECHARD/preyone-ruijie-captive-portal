@@ -170,9 +170,15 @@ export function LandingPage({
 
       <header className="ha-nav">
         <a className="ha-brand" href="/" onClick={(e) => { e.preventDefault(); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>
-          <span className="ha-brand-mark"><Icon name="home" /></span>
+          <img
+            className="ha-logo"
+            src="/images/preyonenoneglow-logo-400.png"
+            alt="Preyone"
+            width={168}
+            height={36}
+            decoding="async"
+          />
           <span className="ha-brand-text">
-            <strong>Preyone</strong>
             <small>Home</small>
           </span>
         </a>
@@ -456,7 +462,9 @@ export function LandingPage({
 
       <footer className="ha-footer">
         <div className="ha-footer-brand">
-          <span className="ha-brand-mark"><Icon name="home" /></span>
+          <span className="ha-brand-mark">
+            <img src="/images/preyone-emblem-mark.png" alt="" width={30} height={35} decoding="async" />
+          </span>
           <div>
             <strong>Preyone Home</strong>
             <small>Intelligent automation for modern Zimbabwean homes.</small>

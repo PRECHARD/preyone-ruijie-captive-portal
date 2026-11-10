@@ -12,7 +12,7 @@ import {
   type Trigger,
   type UptimeSummary,
 } from './api';
-import { applyCssVars } from './theme';
+import { applyPreyoneBrand } from './theme';
 import { LandingPage } from './LandingPage';
 
 /* ────────────────────────────── helpers ────────────────────────────── */
@@ -119,8 +119,15 @@ function LoginPanel({ onSignedIn, onBack }: { onSignedIn: () => void; onBack?: (
           </button>
         )}
         <div className="auth-brand">
-          <span className="ha-brand-mark">⌂</span>
-          Preyone Home
+          <img
+            className="ha-logo ha-logo-sm"
+            src="/images/preyonenoneglow-logo-400.png"
+            alt="Preyone"
+            width={130}
+            height={26}
+            decoding="async"
+          />
+          <span>Home</span>
         </div>
         <h1>{challenge ? 'Two-factor code' : 'Welcome back'}</h1>
         <p>{challenge ? `Code sent to ${masked || 'your email'}.` : 'Sign in with your Preyone console account.'}</p>
@@ -274,8 +281,11 @@ function Dashboard({
     setLoading(true);
     setError(null);
     try {
-      const theme = await api.get<ThemeResponse>('/api/pos/theme');
-      applyCssVars(theme.css);
+      // Auth probe: the portal answers 401/403 for signed-out staff, and that
+      // gates the console. The merchant palette in the payload is ignored —
+      // Preyone Home always wears the Preyone 360 brand.
+      await api.get<ThemeResponse>('/api/pos/theme');
+      applyPreyoneBrand();
       await refreshAll();
       setAuthError(null);
     } catch (err) {
@@ -445,7 +455,9 @@ function Dashboard({
     <div className="shell">
       <header className="top">
         <div className="brand">
-          <div className="brand-mark">⌂</div>
+          <div className="brand-mark">
+            <img src="/images/preyone-emblem-mark.png" alt="" width={36} height={42} decoding="async" />
+          </div>
           <div>
             <h1>Home Automation</h1>
             <p>{summary?.company.name || 'Preyone'} · live device telemetry & Starlink gateway</p>
@@ -899,9 +911,15 @@ function LoginPage({ onBack, onSignedIn }: { onBack: () => void; onSignedIn: () 
             onBack();
           }}
         >
-          <span className="ha-brand-mark">⌂</span>
+          <img
+            className="ha-logo"
+            src="/images/preyonenoneglow-logo-400.png"
+            alt="Preyone"
+            width={168}
+            height={36}
+            decoding="async"
+          />
           <span className="ha-brand-text">
-            <strong>Preyone</strong>
             <small>Home</small>
           </span>
         </a>
@@ -938,7 +956,9 @@ function AccessGate({
   return (
     <div className="access-gate">
       <div className="glass auth-card">
-        <div className="gate-icon">⌂</div>
+        <div className="gate-icon">
+          <img src="/images/preyone-emblem-mark.png" alt="" width={30} height={35} decoding="async" />
+        </div>
         <h1>{session ? 'Your session ended' : 'Home automation is not active'}</h1>
         <p>
           {session
