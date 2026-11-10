@@ -3,7 +3,7 @@ import express from 'express';
 import request from 'supertest';
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
-import { sendAdminLoginCode } from '../src/services/notificationService';
+import { sendAdminLoginCode, sendAdminPasswordChangedEmail } from '../src/services/notificationService';
 
 /**
  * 2FA login contract.
@@ -23,6 +23,10 @@ const queryMock = vi.fn();
 vi.mock('../src/db/pool', () => ({
   pool: {
     query: (...a: any[]) => queryMock(...a),
+    connect: async () => ({
+      query: (...a: any[]) => queryMock(...a),
+      release: vi.fn(),
+    }),
   },
 }));
 
@@ -30,6 +34,7 @@ vi.mock('../src/services/notificationService', () => ({
   sendAdminSignupConfirmation: vi.fn(),
   sendAdminSignupNotification: vi.fn(),
   sendPasswordResetEmail: vi.fn(),
+  sendAdminPasswordChangedEmail: vi.fn(async () => true),
   // The login route now awaits this and refuses to start a challenge when the
   // code could not be handed to the relay, so default the mock to "sent".
   sendAdminLoginCode: vi.fn(async () => true),
@@ -68,7 +73,11 @@ function app() {
 
 // Challenge row served by the mocked pool. `expires_at` is only inspected via
 // the SQL predicate, so a marker is enough.
-function serveChallenge(codeHash: string | null, attempts = 0) {
+function serveChallenge(
+  codeHash: string | null,
+  attempts = 0,
+  createdAt = new Date(Date.now() - 61_000)
+) {
   queryMock.mockImplementation(async (sql: string, params: any[] = []) => {
     if (sql.includes('FROM admin_users WHERE email =')) return { rows: [USER], rowCount: 1 };
     if (sql.includes('FROM admin_users WHERE id =')) return { rows: [USER], rowCount: 1 };
@@ -76,9 +85,12 @@ function serveChallenge(codeHash: string | null, attempts = 0) {
       return { rows: [{ id: 'challenge-1' }], rowCount: 1 };
     }
     if (sql.includes('FROM admin_2fa_challenges')) {
+      const recentQuery = sql.includes('created_at > NOW()');
+      const isRecent = Date.now() - createdAt.getTime() < 60_000;
+      const hasMatch = !!codeHash && (!recentQuery || isRecent);
       return {
-        rows: codeHash ? [{ id: 'challenge-1', code_hash: codeHash, attempts }] : [],
-        rowCount: codeHash ? 1 : 0,
+        rows: hasMatch ? [{ id: 'challenge-1', code_hash: codeHash, attempts, created_at: createdAt }] : [],
+        rowCount: hasMatch ? 1 : 0,
       };
     }
     if (sql.includes('UPDATE admin_users')) {
@@ -118,6 +130,37 @@ describe('2FA login flow', () => {
     );
     expect(String(insert?.[0])).toContain('make_interval(mins => $3)');
     expect(insert?.[1]?.[2]).toBe(15);
+  });
+
+  it('reuses a recent CEO challenge instead of sending another OTP on a repeated login', async () => {
+    serveChallenge(hash('999999'), 0, new Date());
+    const server = await app();
+
+    const res = await request(server)
+      .post('/api/admin/auth/login')
+      .send({ email: USER.email, password: 'pw' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.requires2fa).toBe(true);
+    expect(sendAdminLoginCode).not.toHaveBeenCalled();
+    expect(queryMock.mock.calls.some((c: any[]) => String(c[0]).includes('INSERT INTO admin_2fa_challenges'))).toBe(false);
+    expect(queryMock.mock.calls.some((c: any[]) => String(c[0]).includes('DELETE FROM admin_2fa_challenges'))).toBe(false);
+  });
+
+  it('does not send another OTP when resend is repeated within the cooldown', async () => {
+    serveChallenge(hash('999999'), 0, new Date());
+    const server = await app();
+
+    const res = await request(server)
+      .post('/api/admin/auth/resend-2fa')
+      .send({
+        challengeToken: jwt.sign({ id: USER.id, purpose: '2fa' }, SECRET, { expiresIn: '15m' }),
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.message).toMatch(/sent recently/i);
+    expect(sendAdminLoginCode).not.toHaveBeenCalled();
+    expect(queryMock.mock.calls.some((c: any[]) => String(c[0]).includes('INSERT INTO admin_2fa_challenges'))).toBe(false);
   });
 
   it('accepts the emailed code and returns an authenticated session', async () => {
@@ -201,5 +244,22 @@ describe('2FA login flow', () => {
     expect(
       queryMock.mock.calls.some((c: any[]) => String(c[0]).includes('INSERT INTO admin_2fa_challenges'))
     ).toBe(true);
+  });
+
+  it('notifies the account email after a successful password reset', async () => {
+    queryMock.mockImplementation(async (sql: string) => {
+      if (sql.includes('SELECT id, full_name, email FROM admin_users')) {
+        return { rows: [{ id: USER.id, full_name: USER.full_name, email: USER.email }] };
+      }
+      return { rows: [], rowCount: 1 };
+    });
+    const server = await app();
+
+    const res = await request(server)
+      .post('/api/admin/auth/reset-password')
+      .send({ token: 'valid-reset-token', password: 'new-password' });
+
+    expect(res.status).toBe(200);
+    expect(sendAdminPasswordChangedEmail).toHaveBeenCalledWith(USER.email, USER.full_name);
   });
 });

@@ -8,7 +8,7 @@ import { PoolClient } from 'pg';
 import { pool } from '../db/pool';
 import { buildRuijieSuccessUrl, WISPrSessionConfig } from '../utils/redirect';
 import { transformToWISPrProfile } from '../utils/wisprTransformer';
-import { sendPortalAccountCreated, sendPortalSignupConfirmation, sendPortalEmailVerification, sendPortalForgotPassword } from '../services/notificationService';
+import { sendPortalAccountCreated, sendPortalSignupConfirmation, sendPortalEmailVerification, sendPortalForgotPassword, sendPortalPasswordChangedEmail } from '../services/notificationService';
 import { listDevices, unbindDevice, getDeviceLimit, normalizeMac } from '../services/deviceBinding';
 import { setPreyoneCookie } from '../utils/ssoCookie';
 
@@ -750,7 +750,7 @@ authRouter.post('/reset-password', async (req: Request, res: Response) => {
     }
 
     const { rows } = await pool.query(
-      'SELECT id FROM users WHERE reset_password_token = $1 AND reset_password_expires_at > NOW()',
+      'SELECT id, email, full_name FROM users WHERE reset_password_token = $1 AND reset_password_expires_at > NOW()',
       [token]
     );
     if (rows.length === 0) { res.status(400).json({ error: 'Invalid or expired reset token.' }); return; }
@@ -760,6 +760,10 @@ authRouter.post('/reset-password', async (req: Request, res: Response) => {
       'UPDATE users SET password_hash = $1, reset_password_token = NULL, reset_password_expires_at = NULL WHERE id = $2',
       [passwordHash, rows[0].id]
     );
+
+    if (rows[0].email) {
+      await sendPortalPasswordChangedEmail(rows[0].email, rows[0].full_name || 'there');
+    }
 
     res.json({ message: 'Password reset successful. You can now sign in.' });
   } catch (err) {
@@ -796,7 +800,7 @@ authRouter.post('/change-password', async (req: Request, res: Response) => {
     }
 
     const { rows } = await pool.query(
-      'SELECT password_hash FROM users WHERE id = $1',
+      'SELECT password_hash, email, full_name FROM users WHERE id = $1',
       [payload.id]
     );
     if (rows.length === 0) {
@@ -815,6 +819,10 @@ authRouter.post('/change-password', async (req: Request, res: Response) => {
       'UPDATE users SET password_hash = $1 WHERE id = $2',
       [passwordHash, payload.id]
     );
+
+    if (rows[0].email) {
+      await sendPortalPasswordChangedEmail(rows[0].email, rows[0].full_name || 'there');
+    }
 
     res.json({ message: 'Password changed successfully.' });
   } catch (err) {

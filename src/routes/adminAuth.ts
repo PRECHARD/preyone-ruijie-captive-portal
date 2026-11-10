@@ -12,7 +12,13 @@ import {
   SESSION_LOCKED_CODE,
   SESSION_REVOKED_CODE,
 } from '../middleware/adminAuth';
-import { sendAdminSignupConfirmation, sendAdminSignupNotification, sendPasswordResetEmail, sendAdminLoginCode } from '../services/notificationService';
+import {
+  sendAdminSignupConfirmation,
+  sendAdminSignupNotification,
+  sendPasswordResetEmail,
+  sendAdminLoginCode,
+  sendAdminPasswordChangedEmail,
+} from '../services/notificationService';
 import { setPreyoneCookie, clearPreyoneCookie, resolveAuthToken } from '../utils/ssoCookie';
 import { SESSION_POLICY } from '../sessionPolicy';
 import crypto from 'crypto';
@@ -68,6 +74,7 @@ const verify2faLimiter = rateLimit({
  * 15 minutes covers normal mail delivery plus typing time.
  */
 export const TWO_FA_TTL_MINUTES = 15;
+const TWO_FA_SEND_COOLDOWN_SECONDS = 60;
 
 /** Wall-clock expiry, shared by the DB row and the challenge token. */
 function twoFaExpiresAt(): Date {
@@ -96,6 +103,50 @@ function maskEmail(email: string): string {
 
 function newTwoFaCode(): string {
   return crypto.randomInt(0, 1000000).toString().padStart(6, '0');
+}
+
+/**
+ * Allow only one OTP email per account per minute across login retries,
+ * resends, and all app workers. The account row lock makes the check-and-issue
+ * atomic; a recent challenge is reused rather than sending another message.
+ */
+async function prepareTwoFaChallenge(adminId: string): Promise<{ id: string; code: string | null }> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('SELECT id FROM admin_users WHERE id = $1 FOR UPDATE', [adminId]);
+
+    const { rows: recentChallenges } = await client.query<{ id: string }>(
+      `SELECT id FROM admin_2fa_challenges
+        WHERE admin_user_id = $1
+          AND consumed_at IS NULL
+          AND expires_at > NOW()
+          AND created_at > NOW() - make_interval(secs => $2)
+        ORDER BY created_at DESC
+        LIMIT 1`,
+      [adminId, TWO_FA_SEND_COOLDOWN_SECONDS]
+    );
+    if (recentChallenges.length > 0) {
+      await client.query('COMMIT');
+      return { id: recentChallenges[0].id, code: null };
+    }
+
+    const code = newTwoFaCode();
+    await client.query('DELETE FROM admin_2fa_challenges WHERE admin_user_id = $1', [adminId]);
+    const { rows } = await client.query<{ id: string }>(
+      `INSERT INTO admin_2fa_challenges (admin_user_id, code_hash, expires_at)
+       VALUES ($1, $2, NOW() + make_interval(mins => $3))
+       RETURNING id`,
+      [adminId, hashTwoFaCode(code), TWO_FA_TTL_MINUTES]
+    );
+    await client.query('COMMIT');
+    return { id: rows[0].id, code };
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 /** Sentinel stored in active_sid on logout. No JWT can present it as its `sid`
@@ -424,27 +475,24 @@ adminAuthRouter.post('/login', authLimiter, async (req: Request, res: Response) 
   // Email OTP step-up: a valid password alone no longer signs the session in.
   // The challenge lives 15 minutes; the code itself allows 5 wrong attempts.
   if (user.email) {
-    const code = newTwoFaCode();
-    await pool.query('DELETE FROM admin_2fa_challenges WHERE admin_user_id = $1', [user.id]);
-    await pool.query(
-      `INSERT INTO admin_2fa_challenges (admin_user_id, code_hash, expires_at)
-       VALUES ($1, $2, NOW() + make_interval(mins => $3))`,
-      [user.id, hashTwoFaCode(code), TWO_FA_TTL_MINUTES]
-    );
+    const challenge = await prepareTwoFaChallenge(user.id);
     const challengeToken = signTwoFaChallenge(user.id);
-    await recordAuditLog(user.id, user.full_name, 'login_challenge', 'admin_user', user.id, '2FA code emailed');
-    const emailed = await sendAdminLoginCode(user.email, user.full_name, code);
-    if (!emailed) {
-      // The relay refused (or SMTP is unconfigured). Returning success here
-      // would leave the user on a code screen with no code on the way.
-      res.status(503).json({
-        error:
-          'We could not send your sign-in code right now. Please try again in a moment, or contact support@preyone.com.',
-        code: 'EMAIL_DELIVERY_FAILED',
-      });
-      return;
+    if (challenge.code) {
+      await recordAuditLog(user.id, user.full_name, 'login_challenge', 'admin_user', user.id, '2FA code emailed');
+      const emailed = await sendAdminLoginCode(user.email, user.full_name, challenge.code);
+      if (!emailed) {
+        await pool.query('DELETE FROM admin_2fa_challenges WHERE id = $1', [challenge.id]);
+        // The relay refused (or SMTP is unconfigured). Returning success here
+        // would leave the user on a code screen with no code on the way.
+        res.status(503).json({
+          error:
+            'We could not send your sign-in code right now. Please try again in a moment, or contact support@preyone.com.',
+          code: 'EMAIL_DELIVERY_FAILED',
+        });
+        return;
+      }
+      if (process.env.NODE_ENV !== 'production') console.log(`[2FA] code for ${user.email}: ${challenge.code}`);
     }
-    if (process.env.NODE_ENV !== 'production') console.log(`[2FA] code for ${user.email}: ${code}`);
     res.json({
       requires2fa: true,
       challengeToken,
@@ -571,25 +619,23 @@ adminAuthRouter.post('/resend-2fa', resendLimiter, async (req: Request, res: Res
       res.json({ message: 'If that sign-in is still in progress, a new code has been sent.' });
       return;
     }
-    const code = newTwoFaCode();
-    await pool.query('DELETE FROM admin_2fa_challenges WHERE admin_user_id = $1', [user.id]);
-    await pool.query(
-      `INSERT INTO admin_2fa_challenges (admin_user_id, code_hash, expires_at)
-       VALUES ($1, $2, NOW() + make_interval(mins => $3))`,
-      [user.id, hashTwoFaCode(code), TWO_FA_TTL_MINUTES]
-    );
-    const emailed = await sendAdminLoginCode(user.email, user.full_name, code);
-    if (!emailed) {
-      res.status(503).json({
-        error:
-          'We could not send your sign-in code right now. Please try again in a moment, or contact support@preyone.com.',
-        code: 'EMAIL_DELIVERY_FAILED',
-      });
-      return;
+    const challenge = await prepareTwoFaChallenge(user.id);
+    if (challenge.code) {
+      const emailed = await sendAdminLoginCode(user.email, user.full_name, challenge.code);
+      if (!emailed) {
+        await pool.query('DELETE FROM admin_2fa_challenges WHERE id = $1', [challenge.id]);
+        res.status(503).json({
+          error:
+            'We could not send your sign-in code right now. Please try again in a moment, or contact support@preyone.com.',
+          code: 'EMAIL_DELIVERY_FAILED',
+        });
+        return;
+      }
+      await recordAuditLog(user.id, user.full_name, 'login_challenge', 'admin_user', user.id, '2FA code resent');
+      if (process.env.NODE_ENV !== 'production') console.log(`[2FA] code for ${user.email}: ${challenge.code}`);
     }
-    if (process.env.NODE_ENV !== 'production') console.log(`[2FA] code for ${user.email}: ${code}`);
     res.json({
-      message: 'A new code has been sent.',
+      message: challenge.code ? 'A new code has been sent.' : 'A code was sent recently. Please check your inbox.',
       maskedEmail: maskEmail(user.email),
       challengeToken: signTwoFaChallenge(user.id),
       expiresAt: twoFaExpiresAt().toISOString(),
@@ -911,11 +957,12 @@ adminAuthRouter.post('/reset-password', async (req: Request, res: Response) => {
 
   try {
     const { rows } = await pool.query(
-      `SELECT id FROM admin_users
+      `SELECT id, full_name, email FROM admin_users
        WHERE reset_token = $1 AND reset_token_expires_at > NOW()`,
       [token]
     );
-    if (rows.length === 0) {
+    const admin = rows[0];
+    if (!admin) {
       res.status(400).json({ error: 'Invalid or expired reset token' });
       return;
     }
@@ -923,16 +970,21 @@ adminAuthRouter.post('/reset-password', async (req: Request, res: Response) => {
     const passwordHash = await bcrypt.hash(password, 12);
     await pool.query(
       `UPDATE admin_users SET password_hash = $1, reset_token = NULL, reset_token_expires_at = NULL WHERE id = $2`,
-      [passwordHash, rows[0].id]
+      [passwordHash, admin.id]
     );
 
     // A password reset is the recovery path for a compromised account: drop
     // every device session and poison the mirror so no outstanding token —
     // this browser, another device, an SSO copy — survives it.
-    await pool.query('DELETE FROM admin_user_sessions WHERE admin_user_id = $1', [rows[0].id]);
-    await pool.query('UPDATE admin_users SET active_sid = $1 WHERE id = $2', [REVOKED_SID, rows[0].id]);
+    await pool.query('DELETE FROM admin_user_sessions WHERE admin_user_id = $1', [admin.id]);
+    await pool.query('UPDATE admin_users SET active_sid = $1 WHERE id = $2', [REVOKED_SID, admin.id]);
 
-    await recordAuditLog(rows[0].id, null, 'password_reset', 'admin_user', rows[0].id, 'Password reset via email');
+    await recordAuditLog(admin.id, admin.full_name, 'password_reset', 'admin_user', admin.id, 'Password reset via email');
+
+    const notificationSent = await sendAdminPasswordChangedEmail(admin.email, admin.full_name);
+    if (!notificationSent) {
+      console.error('[admin-auth] password changed, but notification email was not sent', { adminId: admin.id });
+    }
 
     res.json({ message: 'Password has been reset. You can now sign in.' });
   } catch (err) {

@@ -188,7 +188,7 @@ export function buildMonthEndEmailHtml(summary: MonthEndSummary): string {
     reconciledValue: money(summary.reconciledValue, summary.currency),
     approvedHandoverValue: money(summary.approvedHandoverValue, summary.currency),
     staffRowsHtml: buildStaffRowsHtml(summary),
-    logoUrl: `${baseUrl}/images/preyone-logo-mainInverse-optimized.png`,
+    logoUrl: `${baseUrl}/images/preyonelogomainzw-email.png`,
   });
 }
 
@@ -225,7 +225,7 @@ export async function sendMonthEndReportEmail(opts: {
     subject,
     html,
     fromName: 'Preyone UltraNet',
-    fromEmail: 'admin@preyone.com',
+    fromEmail: 'support@preyone.com',
     attachments: [{ filename: attachmentName, content: opts.attachment }],
   });
 

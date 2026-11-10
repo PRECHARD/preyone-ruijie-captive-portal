@@ -1,4 +1,5 @@
 import nodemailer from 'nodemailer';
+import crypto from 'crypto';
 
 let transporter: nodemailer.Transporter | null = null;
 
@@ -28,18 +29,18 @@ function getTransporter() {
 // mobile clients all lay it out identically. The gradient is layered over a
 // solid #0a0f1d so it degrades gracefully where gradients are stripped.
 function emailHeader(title: string): string {
-  const baseUrl = process.env.BASE_URL || 'http://localhost:3000';
-  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;background:#0a0f1d">
+  const baseUrl = process.env.BASE_URL || 'https://wifi.preyone.com';
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;background:#050505">
     <tr>
-      <td align="center" style="padding:0;background:#0a0f1d">
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;background:#0a0f1d;background-image:linear-gradient(160deg,#0a0f1d 0%,#101a33 55%,#0a0f1d 100%);border-bottom:1px solid #1c3a5e">
+      <td align="center" style="padding:0;background:#050505">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;background:#0a0d17;background-image:linear-gradient(160deg,#0a0d17 0%,#101a33 55%,#0a0d17 100%);border-bottom:1px solid #1c2438">
           <tr>
             <td align="center" style="padding:32px 16px 20px">
-              <img src="${baseUrl}/images/preyone-logo-mainInverse-optimized.png" width="160" height="90" alt="Preyone UltraNet WiFi" style="display:block;width:160px;max-width:100%;height:auto;margin:0 auto 14px;border:0;outline:none;text-decoration:none" />
-              <h1 style="margin:0 0 16px;color:#f8fafc;font-family:'Montserrat','Segoe UI',Arial,sans-serif;font-size:22px;line-height:1.3;font-weight:700;letter-spacing:0.2px">${title}</h1>
+              <img src="${baseUrl}/images/preyonelogomainzw-email.png" width="120" alt="Preyone" style="display:block;width:120px;max-width:100%;height:auto;margin:0 auto 14px;border:0;outline:none;text-decoration:none" />
+              <h1 style="margin:0 0 16px;color:#f8fbff;font-family:'Montserrat','Segoe UI',Arial,sans-serif;font-size:22px;line-height:1.3;font-weight:700;letter-spacing:0.2px">${title}</h1>
               <table role="presentation" width="180" cellpadding="0" cellspacing="0" border="0" style="width:180px;max-width:100%;margin:0 auto;border-collapse:collapse">
                 <tr>
-                  <td height="3" style="height:3px;line-height:3px;font-size:0;background:#00ccff;background-image:linear-gradient(90deg,#ff00ff,#00d4ff);border-radius:3px">&nbsp;</td>
+                  <td height="3" style="height:3px;line-height:3px;font-size:0;background:#6a0dad;background-image:linear-gradient(90deg,#6a0dad,#ff00ff);border-radius:3px">&nbsp;</td>
                 </tr>
               </table>
             </td>
@@ -52,39 +53,39 @@ function emailHeader(title: string): string {
 
 // ── Email footer helper with WhatsApp + links ─────────────────────
 function emailFooter(): string {
-  const baseUrl = process.env.BASE_URL || 'http://localhost:3000';
-  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;background:#070b14">
+  const baseUrl = process.env.BASE_URL || 'https://wifi.preyone.com';
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;background:#050505">
     <tr>
-      <td align="center" style="padding:0;background:#070b14">
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;background:#070b14;border-top:1px solid #14213a">
+      <td align="center" style="padding:0;background:#050505">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;background:#0a0d17;border-top:1px solid #1c2438">
           <tr>
             <td align="center" style="padding:28px 16px 22px;font-family:'Montserrat','Segoe UI',Arial,sans-serif">
-              <img src="${baseUrl}/images/preyone-logo-mainInverse-optimized.png" width="120" height="68" alt="Preyone" style="display:block;width:120px;max-width:100%;height:auto;margin:0 auto 16px;border:0;outline:none;text-decoration:none" />
+              <img src="${baseUrl}/images/preyonelogomainzw-email.png" width="120" alt="Preyone" style="display:block;width:120px;max-width:100%;height:auto;margin:0 auto 16px;border:0;outline:none;text-decoration:none" />
               <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 auto 16px;border-collapse:separate">
                 <tr>
-                  <td align="center" style="border-radius:50px;background:#25D366;background-image:linear-gradient(135deg,#25D366,#128C7E)">
+                  <td align="center" style="border-radius:50px;background:#6a0dad;background-image:linear-gradient(135deg,#6a0dad,#ff00ff)">
                     <a href="https://wa.me/263771327202" style="display:inline-block;padding:10px 28px;color:#ffffff;font-size:13px;font-weight:700;line-height:1.2;text-decoration:none;border-radius:50px">Chat on WhatsApp</a>
                   </td>
                 </tr>
               </table>
               <p style="margin:0 0 12px;font-size:13px;line-height:1.7;color:#94a3b8">
-                <a href="mailto:support@preyone.com" style="color:#71ff2f;text-decoration:none;font-weight:600">support@preyone.com</a>
+                <a href="mailto:support@preyone.com" style="color:#7be0ff;text-decoration:none;font-weight:600">support@preyone.com</a>
                 <span style="color:#334155;margin:0 8px">|</span>
-                <a href="tel:+263771327202" style="color:#13d8ff;text-decoration:none;font-weight:600">+263 771 327 202</a>
+                <a href="tel:+263771327202" style="color:#7be0ff;text-decoration:none;font-weight:600">+263 771 327 202</a>
               </p>
-              <p style="margin:0 0 14px;font-size:12px;line-height:1.8;color:#475569">
-                <a href="${baseUrl}/terms.html" style="color:#13d8ff;text-decoration:none;margin:0 8px;font-weight:500">Terms of Service</a>
+              <p style="margin:0 0 14px;font-size:12px;line-height:1.8;color:#64748b">
+                <a href="${baseUrl}/terms.html" style="color:#7be0ff;text-decoration:none;margin:0 8px;font-weight:500">Terms of Service</a>
                 <span style="color:#334155">&bull;</span>
-                <a href="https://www.preyone.com" style="color:#71ff2f;text-decoration:none;margin:0 8px;font-weight:500">Main Website</a>
+                <a href="https://www.preyone.com" style="color:#7be0ff;text-decoration:none;margin:0 8px;font-weight:500">Main Website</a>
                 <span style="color:#334155">&bull;</span>
-                <a href="${baseUrl}" style="color:#8b4dff;text-decoration:none;margin:0 8px;font-weight:500">WiFi Portal</a>
+                <a href="${baseUrl}" style="color:#7be0ff;text-decoration:none;margin:0 8px;font-weight:500">WiFi Portal</a>
               </p>
               <table role="presentation" width="300" cellpadding="0" cellspacing="0" border="0" style="width:300px;max-width:100%;margin:0 auto 14px;border-collapse:collapse">
                 <tr>
-                  <td height="2" style="height:2px;line-height:2px;font-size:0;background:#13d8ff;background-image:linear-gradient(90deg,#71ff2f,#13d8ff,#8b4dff);border-radius:2px">&nbsp;</td>
+                  <td height="2" style="height:2px;line-height:2px;font-size:0;background:#6a0dad;background-image:linear-gradient(90deg,#6a0dad,#ff00ff);border-radius:2px">&nbsp;</td>
                 </tr>
               </table>
-              <p style="margin:0;font-size:11px;line-height:1.6;color:#475569">&copy; ${new Date().getFullYear()} Preyone Enterprises. All rights reserved.</p>
+              <p style="margin:0;font-size:11px;line-height:1.6;color:#64748b">&copy; ${new Date().getFullYear()} Preyone Enterprises. All rights reserved.</p>
               <p style="margin:6px 0 0;font-size:10px;line-height:1.6;color:#334155;font-style:italic;letter-spacing:0.3px">Innovating with IT Excellence, Driven by Faith, Growing Beyond Boundaries.</p>
             </td>
           </tr>
@@ -104,7 +105,17 @@ async function sendMail(to: string | string[], subject: string, html: string, fr
   const email = fromEmail || process.env.SMTP_FROM || 'support@preyone.com';
   const from = fromName ? `"${fromName}" <${email}>` : email;
   try {
-    const info = await t.sendMail({ from, to, subject, html, attachments, ...(headers ? { headers } : {}) });
+    const info = await t.sendMail({
+      from,
+      to,
+      subject,
+      html,
+      attachments,
+      headers: {
+        'X-Entity-Ref-ID': `preyone-${crypto.randomUUID()}`,
+        ...headers,
+      },
+    });
     // Log the provider's id/response so a later bounce can be traced back to
     // the exact message even though SMTP acceptance alone is not delivery.
     console.log(
@@ -146,7 +157,7 @@ export async function sendTransactionalEmail(opts: {
     opts.subject,
     opts.html,
     opts.fromName ?? 'Preyone UltraNet',
-    opts.fromEmail ?? 'admin@preyone.com',
+    opts.fromEmail ?? 'support@preyone.com',
     opts.attachments
   );
 }
@@ -161,17 +172,17 @@ export function buildEmailShell(title: string, bodyHtml: string): string {
   <meta name="color-scheme" content="dark light" />
   <title>${title}</title>
 </head>
-<body style="margin:0;padding:0;width:100%;background:#0a0f1d;font-family:'Montserrat','Segoe UI',Arial,sans-serif;color:#e2e8f0">
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;background:#0a0f1d">
+<body style="margin:0;padding:0;width:100%;background:#050505;font-family:'Montserrat','Segoe UI',Arial,sans-serif;color:#f8fbff">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;background:#050505">
     <tr>
-      <td align="center" style="padding:0;background:#0a0f1d">
+      <td align="center" style="padding:0;background:#050505">
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:680px;margin:0 auto;border-collapse:collapse">
           <tr><td style="padding:0">${emailHeader(title)}</td></tr>
           <tr>
-            <td style="padding:8px 16px 32px;background:#0a0f1d">
-              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:640px;margin:0 auto;border-collapse:separate;background:#0f172a;border:1px solid #1e3a5f;border-radius:16px">
+            <td style="padding:8px 16px 32px;background:#050505">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:640px;margin:0 auto;border-collapse:separate;background:#0a0d17;border:1px solid #1c2438;border-radius:16px">
                 <tr>
-                  <td style="padding:28px 22px;background:#0f172a;border-radius:16px;box-shadow:0 0 28px rgba(0,204,255,0.12),0 18px 48px rgba(0,0,0,0.45)">
+                  <td style="padding:28px 22px;background:#0a0d17;border-radius:16px;box-shadow:0 0 28px rgba(106,13,173,0.22),0 18px 48px rgba(0,0,0,0.45)">
                     ${bodyHtml}
                   </td>
                 </tr>
@@ -204,14 +215,14 @@ export async function sendAdminSignupConfirmation(
       email,
       `🎉 Welcome to Preyone — ${role} Account Activated`,
       buildAdminWelcomeHtml(fullName, email, role, 'activated', verifyUrl),
-      'Preyone', 'admin@preyone.com'
+      'Preyone', 'support@preyone.com'
     );
   }
   return sendMail(
     email,
     `⏳ Your Preyone Staff Account — Pending Approval`,
     buildAdminWelcomeHtml(fullName, email, role, 'pending', verifyUrl),
-    'Preyone', 'admin@preyone.com'
+    'Preyone', 'support@preyone.com'
   );
 }
 
@@ -417,7 +428,7 @@ export async function sendAdminApprovedNotification(email: string, fullName: str
   <div style="padding:20px 32px 0">
     <div style="padding:16px;background:rgba(139,77,255,0.05);border-radius:8px;border:1px solid rgba(139,77,255,0.1)">
       <p style="margin:0 0 8px;font-size:13px;color:#8b4dff;font-weight:600">Need a hand in the meantime?</p>
-      <p style="margin:0;font-size:13px;color:#94a3b8;line-height:1.5">If you have any immediate questions or feel there's been a delay, feel free to reach out to our support desk at <a href="mailto:admin@preyone.com" style="color:#71ff2f;text-decoration:underline">admin@preyone.com</a>.</p>
+      <p style="margin:0;font-size:13px;color:#94a3b8;line-height:1.5">If you have any immediate questions or feel there's been a delay, feel free to reach out to our support desk at <a href="mailto:support@preyone.com" style="color:#71ff2f;text-decoration:underline">support@preyone.com</a>.</p>
     </div>
   </div>
 
@@ -431,7 +442,7 @@ export async function sendAdminApprovedNotification(email: string, fullName: str
 
   ${emailFooter()}
 </div>`,
-    'Preyone', 'admin@preyone.com'
+    'Preyone', 'support@preyone.com'
   );
 }
 
@@ -470,7 +481,7 @@ export async function sendAdminSignupNotification(
     </div>
   </div>`;
   for (const email of adminEmails) {
-    await sendMail(email, 'New Staff Signup — Pending Approval', html, 'Preyone', 'admin@preyone.com');
+    await sendMail(email, 'New Staff Signup — Pending Approval', html, 'Preyone', 'support@preyone.com');
   }
   return true;
 }
@@ -518,7 +529,7 @@ export async function sendAdminRejectedNotification(email: string, fullName: str
   <div style="padding:20px 32px 0">
     <div style="padding:16px;background:rgba(139,77,255,0.05);border-radius:8px;border:1px solid rgba(139,77,255,0.1)">
       <p style="margin:0 0 8px;font-size:13px;color:#8b4dff;font-weight:600">Need more information?</p>
-      <p style="margin:0;font-size:13px;color:#94a3b8;line-height:1.5">Please contact our support desk at <a href="mailto:admin@preyone.com" style="color:#71ff2f;text-decoration:underline">admin@preyone.com</a> if you have any questions.</p>
+      <p style="margin:0;font-size:13px;color:#94a3b8;line-height:1.5">Please contact our support desk at <a href="mailto:support@preyone.com" style="color:#71ff2f;text-decoration:underline">support@preyone.com</a> if you have any questions.</p>
     </div>
   </div>
 
@@ -532,31 +543,69 @@ export async function sendAdminRejectedNotification(email: string, fullName: str
 
   ${emailFooter()}
 </div>`,
-    'Preyone', 'admin@preyone.com'
+    'Preyone', 'support@preyone.com'
   );
 }
 
 // ── Password reset email ───────────────────────────────────────────────
 export async function sendPasswordResetEmail(email: string, resetToken: string, fullName: string): Promise<boolean> {
-  const baseUrl = process.env.ADMIN_BASE_URL || process.env.BASE_URL || 'https://admin.preyone.com';
-  const resetUrl = `${baseUrl}/?token=${resetToken}`;
+  const baseUrl = (process.env.ADMIN_BASE_URL || process.env.BASE_URL || 'https://admin.preyone.com').replace(/\/$/, '');
+  const resetUrl = `${baseUrl}/?token=${encodeURIComponent(resetToken)}`;
+  const logo = `${(process.env.BASE_URL || 'https://wifi.preyone.com').replace(/\/$/, '')}/images/preyonelogomainzw-email.png`;
+  const footerMark = `${(process.env.BASE_URL || 'https://wifi.preyone.com').replace(/\/$/, '')}/images/preyonelogomainzw-email.png`;
+  const safeName = escapeEmailText(fullName);
   return sendMail(
     email,
     'Reset Your Preyone Admin Password',
-    `<div style="font-family:'Segoe UI',Arial,sans-serif;max-width:560px;margin:32px auto;background:#0a0f1d;border-radius:16px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.12),0 0 40px rgba(113,255,47,0.08)">
-      ${emailHeader('Password Reset')}
-      <div style="padding:24px 32px;text-align:center">
-        <div style="width:64px;height:64px;border-radius:50%;background:linear-gradient(135deg,rgba(113,255,47,0.12),rgba(19,216,255,0.12));display:flex;align-items:center;justify-content:center;margin:0 auto 16px;box-shadow:0 0 20px rgba(113,255,47,0.12)">
-          <span style="font-size:28px">🔒</span>
-        </div>
-        <p style="margin:0 0 12px;font-size:15px;color:#cbd5e1;line-height:1.6">Hi <strong style="color:#ffffff">${fullName}</strong>,</p>
-        <p style="margin:0 0 20px;font-size:15px;color:#cbd5e1;line-height:1.6">We received a request to reset your admin password. Click the button below to set a new one. This link expires in <strong style="color:#71ff2f">1 hour</strong>.</p>
-        <a href="${resetUrl}" style="display:inline-block;background:linear-gradient(135deg,#71ff2f,#13d8ff);color:#0a0a0a;padding:14px 36px;border-radius:8px;text-decoration:none;font-weight:700;font-size:14px;box-shadow:0 4px 20px rgba(113,255,47,0.3)">Reset Password</a>
-        <p style="margin:16px 0 0;font-size:13px;color:#64748b">If you didn't request this, you can safely ignore this email.</p>
-        ${emailFooter()}
-      </div>
-    </div>`,
-    'Preyone', 'admin@preyone.com'
+    `<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark"><meta name="supported-color-schemes" content="dark"><title>Reset Your Preyone Password</title></head>
+<body style="margin:0;padding:0;background:#050505;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#050505"><tr><td align="center" style="padding:40px 16px">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width:520px;width:100%;background:#0a0d17;border:1px solid #1c2438;border-radius:16px;overflow:hidden">
+      <tr><td style="height:3px;background:#6a0dad;background-image:linear-gradient(90deg,#6a0dad,#ff00ff);font-size:1px;line-height:1px">&nbsp;</td></tr>
+      <tr><td align="center" style="padding:34px 32px 0"><img src="${logo}" width="120" alt="Preyone" style="display:block;width:120px;max-width:100%;height:auto;border:0;outline:none;text-decoration:none"></td></tr>
+      <tr><td align="center" style="padding:24px 32px 0;font-family:'Segoe UI',Arial,sans-serif"><h1 style="margin:0;color:#f8fbff;font-size:24px;line-height:1.3">Reset your password</h1></td></tr>
+      <tr><td style="padding:22px 32px 0;font-family:'Segoe UI',Arial,sans-serif;font-size:15px;line-height:1.6;color:#94a3b8"><p style="margin:0 0 10px">Hi <strong style="color:#f8fbff">${safeName}</strong>,</p><p style="margin:0">We received a request to reset your Preyone Admin Console password. Use the secure button below to choose a new password.</p></td></tr>
+      <tr><td align="center" style="padding:26px 32px 0"><a href="${resetUrl}" style="display:inline-block;background:#6a0dad;background-image:linear-gradient(135deg,#6a0dad,#ff00ff);color:#ffffff;padding:13px 30px;border-radius:8px;text-decoration:none;font-family:'Segoe UI',Arial,sans-serif;font-size:14px;font-weight:700">Reset Password</a></td></tr>
+      <tr><td align="center" style="padding:18px 32px 0;font-family:'Segoe UI',Arial,sans-serif;font-size:13px;line-height:1.6;color:#64748b">This link expires in <strong style="color:#7be0ff">1 hour</strong> and can only be used once.</td></tr>
+      <tr><td align="center" style="padding:14px 32px 0;font-family:'Segoe UI',Arial,sans-serif;font-size:13px;line-height:1.6;color:#64748b">If you did not request a password reset, you can safely ignore this email.</td></tr>
+      <tr><td style="padding:30px 32px 0"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0"><tr><td style="border-top:1px solid #1c2438;font-size:1px;line-height:1px">&nbsp;</td></tr></table></td></tr>
+      <tr><td align="center" style="padding:24px 32px 8px"><img src="${footerMark}" width="120" alt="Preyone" style="display:block;width:120px;max-width:100%;height:auto;border:0;outline:none;text-decoration:none"></td></tr>
+      <tr><td align="center" style="padding:14px 32px 0"><a href="https://wa.me/263771327202" style="display:inline-block;background:#6a0dad;color:#fff;padding:11px 26px;border-radius:8px;text-decoration:none;font-family:'Segoe UI',Arial,sans-serif;font-size:13px;font-weight:700">Chat on WhatsApp</a></td></tr>
+      <tr><td align="center" style="padding:18px 32px 30px;font-family:'Segoe UI',Arial,sans-serif;font-size:12px;line-height:1.7;color:#64748b"><a href="mailto:support@preyone.com" style="color:#7be0ff;text-decoration:none">support@preyone.com</a><br>&copy; ${new Date().getFullYear()} Preyone Enterprises. All rights reserved.</td></tr>
+    </table>
+  </td></tr></table>
+</body></html>`,
+    'Preyone', 'support@preyone.com'
+  );
+}
+
+export async function sendAdminPasswordChangedEmail(email: string, fullName: string): Promise<boolean> {
+  const baseUrl = (process.env.BASE_URL || 'https://wifi.preyone.com').replace(/\/$/, '');
+  const logo = `${baseUrl}/images/preyonelogomainzw-email.png`;
+  const footerMark = `${baseUrl}/images/preyonelogomainzw-email.png`;
+  const safeName = escapeEmailText(fullName);
+  return sendMail(
+    email,
+    'Your Preyone password was changed',
+    `<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark"><meta name="supported-color-schemes" content="dark"><title>Password changed</title></head>
+<body style="margin:0;padding:0;background:#050505;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#050505"><tr><td align="center" style="padding:40px 16px">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width:520px;width:100%;background:#0a0d17;border:1px solid #1c2438;border-radius:16px;overflow:hidden">
+      <tr><td style="height:3px;background:#6a0dad;background-image:linear-gradient(90deg,#6a0dad,#ff00ff);font-size:1px;line-height:1px">&nbsp;</td></tr>
+      <tr><td align="center" style="padding:34px 32px 0"><img src="${logo}" width="120" alt="Preyone" style="display:block;width:120px;max-width:100%;height:auto;border:0;outline:none;text-decoration:none"></td></tr>
+      <tr><td align="center" style="padding:24px 32px 0;font-family:'Segoe UI',Arial,sans-serif"><h1 style="margin:0;color:#f8fbff;font-size:24px;line-height:1.3">Password changed</h1></td></tr>
+      <tr><td style="padding:22px 32px 0;font-family:'Segoe UI',Arial,sans-serif;font-size:15px;line-height:1.6;color:#94a3b8"><p style="margin:0 0 10px">Hi <strong style="color:#f8fbff">${safeName}</strong>,</p><p style="margin:0">Your Preyone Admin Console password was successfully changed. All existing console sessions have been signed out.</p></td></tr>
+      <tr><td style="padding:20px 32px 0;font-family:'Segoe UI',Arial,sans-serif;font-size:13px;line-height:1.6;color:#64748b">If you made this change, no further action is needed. If you did not, contact support immediately at <a href="mailto:support@preyone.com" style="color:#7be0ff;text-decoration:none">support@preyone.com</a>.</td></tr>
+      <tr><td style="padding:30px 32px 0"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0"><tr><td style="border-top:1px solid #1c2438;font-size:1px;line-height:1px">&nbsp;</td></tr></table></td></tr>
+      <tr><td align="center" style="padding:24px 32px 8px"><img src="${footerMark}" width="120" alt="Preyone" style="display:block;width:120px;max-width:100%;height:auto;border:0;outline:none;text-decoration:none"></td></tr>
+      <tr><td align="center" style="padding:14px 32px 0"><a href="https://wa.me/263771327202" style="display:inline-block;background:#6a0dad;color:#fff;padding:11px 26px;border-radius:8px;text-decoration:none;font-family:'Segoe UI',Arial,sans-serif;font-size:13px;font-weight:700">Chat on WhatsApp</a></td></tr>
+      <tr><td align="center" style="padding:18px 32px 30px;font-family:'Segoe UI',Arial,sans-serif;font-size:12px;line-height:1.7;color:#64748b"><a href="mailto:support@preyone.com" style="color:#7be0ff;text-decoration:none">support@preyone.com</a><br>&copy; ${new Date().getFullYear()} Preyone Enterprises. All rights reserved.</td></tr>
+    </table>
+  </td></tr></table>
+</body></html>`,
+    'Preyone', 'support@preyone.com'
   );
 }
 
@@ -590,25 +639,62 @@ export async function sendPortalEmailVerification(email: string, token: string, 
 
 // ── Portal forgot password ───────────────────────────────────────────
 export async function sendPortalForgotPassword(email: string, token: string, fullName: string): Promise<boolean> {
-  const baseUrl = process.env.BASE_URL || 'http://localhost:3000';
+  const baseUrl = (process.env.BASE_URL || 'https://wifi.preyone.com').replace(/\/$/, '');
   const resetUrl = `${baseUrl}/reset-password.html?token=${token}`;
+  const logo = `${baseUrl}/images/preyonelogomainzw-email.png`;
+  const safeName = escapeEmailText(fullName);
   return sendMail(
     email,
-    'Reset Your Password — Preyone WiFi',
-    `<div style="font-family:'Segoe UI',Arial,sans-serif;max-width:560px;margin:32px auto;background:#0a0f1d;border-radius:16px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.12),0 0 40px rgba(113,255,47,0.08)">
-      ${emailHeader('Reset Your Password')}
-      <div style="padding:24px 32px;text-align:center">
-        <div style="width:64px;height:64px;border-radius:50%;background:linear-gradient(135deg,rgba(113,255,47,0.12),rgba(19,216,255,0.12));display:flex;align-items:center;justify-content:center;margin:0 auto 16px;box-shadow:0 0 20px rgba(113,255,47,0.12)">
-          <span style="font-size:28px">🔑</span>
-        </div>
-        <p style="margin:0 0 12px;font-size:15px;color:#cbd5e1;line-height:1.6">Hi <strong style="color:#ffffff">${fullName}</strong>,</p>
-        <p style="margin:0 0 20px;font-size:15px;color:#cbd5e1;line-height:1.6">We received a request to reset your Preyone WiFi account password. Click the button below to set a new one. This link expires in <strong style="color:#71ff2f">1 hour</strong>.</p>
-        <a href="${resetUrl}" style="display:inline-block;background:linear-gradient(135deg,#71ff2f,#13d8ff);color:#0a0a0a;padding:14px 36px;border-radius:8px;text-decoration:none;font-weight:700;font-size:14px;box-shadow:0 4px 20px rgba(113,255,47,0.3)">Reset Password</a>
-        <p style="margin:16px 0 0;font-size:13px;color:#64748b">If you didn't request this, you can safely ignore this email.</p>
-        ${emailFooter()}
-      </div>
-    </div>`,
-    'Preyone UltraNet WiFi'
+    'Reset Your Preyone WiFi Password',
+    `<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark"><meta name="supported-color-schemes" content="dark"><title>Reset Your Preyone WiFi Password</title></head>
+<body style="margin:0;padding:0;background:#050505;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#050505"><tr><td align="center" style="padding:40px 16px">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width:520px;width:100%;background:#0a0d17;border:1px solid #1c2438;border-radius:16px;overflow:hidden">
+      <tr><td style="height:3px;background:#6a0dad;background-image:linear-gradient(90deg,#6a0dad,#ff00ff);font-size:1px;line-height:1px">&nbsp;</td></tr>
+      <tr><td align="center" style="padding:34px 32px 0"><img src="${logo}" width="120" alt="Preyone" style="display:block;width:120px;max-width:100%;height:auto;border:0;outline:none;text-decoration:none"></td></tr>
+      <tr><td align="center" style="padding:24px 32px 0;font-family:'Segoe UI',Arial,sans-serif"><h1 style="margin:0;color:#f8fbff;font-size:24px;line-height:1.3">Reset your password</h1></td></tr>
+      <tr><td style="padding:22px 32px 0;font-family:'Segoe UI',Arial,sans-serif;font-size:15px;line-height:1.6;color:#94a3b8"><p style="margin:0 0 10px">Hi <strong style="color:#f8fbff">${safeName}</strong>,</p><p style="margin:0">We received a request to reset your Preyone WiFi account password. Use the secure button below to choose a new password.</p></td></tr>
+      <tr><td align="center" style="padding:26px 32px 0"><a href="${resetUrl}" style="display:inline-block;background:#6a0dad;background-image:linear-gradient(135deg,#6a0dad,#ff00ff);color:#ffffff;padding:13px 30px;border-radius:8px;text-decoration:none;font-family:'Segoe UI',Arial,sans-serif;font-size:14px;font-weight:700">Reset Password</a></td></tr>
+      <tr><td align="center" style="padding:18px 32px 0;font-family:'Segoe UI',Arial,sans-serif;font-size:13px;line-height:1.6;color:#64748b">This link expires in <strong style="color:#7be0ff">1 hour</strong> and can only be used once.</td></tr>
+      <tr><td align="center" style="padding:14px 32px 0;font-family:'Segoe UI',Arial,sans-serif;font-size:13px;line-height:1.6;color:#64748b">If you did not request a password reset, you can safely ignore this email.</td></tr>
+      <tr><td style="padding:30px 32px 0"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0"><tr><td style="border-top:1px solid #1c2438;font-size:1px;line-height:1px">&nbsp;</td></tr></table></td></tr>
+      <tr><td align="center" style="padding:24px 32px 8px"><img src="${logo}" width="120" alt="Preyone" style="display:block;width:120px;max-width:100%;height:auto;border:0;outline:none;text-decoration:none"></td></tr>
+      <tr><td align="center" style="padding:14px 32px 0"><a href="https://wa.me/263771327202" style="display:inline-block;background:#6a0dad;color:#fff;padding:11px 26px;border-radius:8px;text-decoration:none;font-family:'Segoe UI',Arial,sans-serif;font-size:13px;font-weight:700">Chat on WhatsApp</a></td></tr>
+      <tr><td align="center" style="padding:18px 32px 30px;font-family:'Segoe UI',Arial,sans-serif;font-size:12px;line-height:1.7;color:#64748b"><a href="mailto:support@preyone.com" style="color:#7be0ff;text-decoration:none">support@preyone.com</a><br>&copy; ${new Date().getFullYear()} Preyone Enterprises. All rights reserved.</td></tr>
+    </table>
+  </td></tr></table>
+</body></html>`,
+    'Preyone UltraNet WiFi', 'support@preyone.com'
+  );
+}
+
+// ── Portal password changed confirmation ───────────────────────────
+export async function sendPortalPasswordChangedEmail(email: string, fullName: string): Promise<boolean> {
+  const baseUrl = (process.env.BASE_URL || 'https://wifi.preyone.com').replace(/\/$/, '');
+  const logo = `${baseUrl}/images/preyonelogomainzw-email.png`;
+  const safeName = escapeEmailText(fullName);
+  return sendMail(
+    email,
+    'Your Preyone WiFi password was changed',
+    `<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark"><meta name="supported-color-schemes" content="dark"><title>Password changed</title></head>
+<body style="margin:0;padding:0;background:#050505;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#050505"><tr><td align="center" style="padding:40px 16px">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width:520px;width:100%;background:#0a0d17;border:1px solid #1c2438;border-radius:16px;overflow:hidden">
+      <tr><td style="height:3px;background:#6a0dad;background-image:linear-gradient(90deg,#6a0dad,#ff00ff);font-size:1px;line-height:1px">&nbsp;</td></tr>
+      <tr><td align="center" style="padding:34px 32px 0"><img src="${logo}" width="120" alt="Preyone" style="display:block;width:120px;max-width:100%;height:auto;border:0;outline:none;text-decoration:none"></td></tr>
+      <tr><td align="center" style="padding:24px 32px 0;font-family:'Segoe UI',Arial,sans-serif"><h1 style="margin:0;color:#f8fbff;font-size:24px;line-height:1.3">Password changed</h1></td></tr>
+      <tr><td style="padding:22px 32px 0;font-family:'Segoe UI',Arial,sans-serif;font-size:15px;line-height:1.6;color:#94a3b8"><p style="margin:0 0 10px">Hi <strong style="color:#f8fbff">${safeName}</strong>,</p><p style="margin:0">Your Preyone WiFi account password was successfully changed.</p></td></tr>
+      <tr><td style="padding:20px 32px 0;font-family:'Segoe UI',Arial,sans-serif;font-size:13px;line-height:1.6;color:#64748b">If you made this change, no further action is needed. If you did not, contact support immediately at <a href="mailto:support@preyone.com" style="color:#7be0ff;text-decoration:none">support@preyone.com</a>.</td></tr>
+      <tr><td style="padding:30px 32px 0"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0"><tr><td style="border-top:1px solid #1c2438;font-size:1px;line-height:1px">&nbsp;</td></tr></table></td></tr>
+      <tr><td align="center" style="padding:24px 32px 8px"><img src="${logo}" width="120" alt="Preyone" style="display:block;width:120px;max-width:100%;height:auto;border:0;outline:none;text-decoration:none"></td></tr>
+      <tr><td align="center" style="padding:14px 32px 0"><a href="https://wa.me/263771327202" style="display:inline-block;background:#6a0dad;color:#fff;padding:11px 26px;border-radius:8px;text-decoration:none;font-family:'Segoe UI',Arial,sans-serif;font-size:13px;font-weight:700">Chat on WhatsApp</a></td></tr>
+      <tr><td align="center" style="padding:18px 32px 30px;font-family:'Segoe UI',Arial,sans-serif;font-size:12px;line-height:1.7;color:#64748b"><a href="mailto:support@preyone.com" style="color:#7be0ff;text-decoration:none">support@preyone.com</a><br>&copy; ${new Date().getFullYear()} Preyone Enterprises. All rights reserved.</td></tr>
+    </table>
+  </td></tr></table>
+</body></html>`,
+    'Preyone UltraNet WiFi', 'support@preyone.com'
   );
 }
 
@@ -812,8 +898,8 @@ export async function sendAdminLoginCode(email: string, fullName: string, code: 
   // them, so this OTP mail carries its own markup in the preyone.com palette
   // (ink #050505, panel #0a0d17, brand #6a0dad, magenta #ff00ff, frost
   // #f8fbff). PNG only — Gmail and Outlook do not render WebP.
-  const baseUrl = (process.env.BASE_URL || 'http://localhost:3000').replace(/\/$/, '');
-  const logo = `${baseUrl}/images/preyonenoneglow-logo-zoom-800.png`;
+  const baseUrl = (process.env.BASE_URL || 'https://wifi.preyone.com').replace(/\/$/, '');
+  const logo = `${baseUrl}/images/preyonelogomainzw-email.png`;
   const footerMark = `${baseUrl}/images/preyonelogomainzw-email.png`;
   const sans = "'Segoe UI',-apple-system,BlinkMacSystemFont,Roboto,Arial,sans-serif";
   const mono = "'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace";
@@ -846,7 +932,7 @@ export async function sendAdminLoginCode(email: string, fullName: string, code: 
               <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
                 <tr>
                   <td align="center" style="padding:34px 32px 4px">
-                    <img src="${logo}" width="190" alt="Preyone" style="display:block;width:190px;max-width:100%;height:auto;border:0;outline:none;text-decoration:none">
+                    <img src="${logo}" width="120" alt="Preyone" style="display:block;width:190px;max-width:100%;height:auto;border:0;outline:none;text-decoration:none">
                   </td>
                 </tr>
                 <tr>
@@ -905,7 +991,7 @@ export async function sendAdminLoginCode(email: string, fullName: string, code: 
               <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
                 <tr>
                   <td align="center" style="padding:26px 32px 8px">
-                    <img src="${footerMark}" width="150" alt="Preyone Enterprises" style="display:block;width:150px;max-width:100%;height:auto;border:0;outline:none;text-decoration:none">
+                    <img src="${footerMark}" width="120" alt="Preyone Enterprises" style="display:block;width:150px;max-width:100%;height:auto;border:0;outline:none;text-decoration:none">
                   </td>
                 </tr>
                 <tr>
@@ -977,7 +1063,7 @@ function handoverEmailHtml(
   const rejected = mode === 'rejected';
   const adminUrl = (process.env.ADMIN_BASE_URL || 'https://admin.preyone.com').replace(/\/$/, '');
   const baseUrl = (process.env.BASE_URL || 'https://wifi.preyone.com').replace(/\/$/, '');
-  const logoUrl = `${baseUrl}/images/preyonenoneglow-logo-zoom-800.png`;
+  const logoUrl = `${baseUrl}/images/preyonelogomainzw-email.png`;
   const statusColor = approved ? '#22e6a8' : rejected ? '#ff4d6d' : '#00ccff';
   const statusBg = approved ? 'rgba(34,230,168,0.12)' : rejected ? 'rgba(255,77,109,0.12)' : 'rgba(0,204,255,0.12)';
   const title = approved ? 'Cash handover approved' : rejected ? 'Cash handover rejected' : 'Cash handover submitted';
@@ -1099,7 +1185,7 @@ export async function sendCashHandoverSubmittedEmail(
   const subject = `Cash handover awaiting approval - ${staff} - $${Number(data.amount || 0).toFixed(2)}`;
   const html = handoverEmailHtml(data, 'submitted');
   const results = await Promise.all(
-    to.map((email) => sendMail(email, subject, html, 'Preyone', 'admin@preyone.com'))
+    to.map((email) => sendMail(email, subject, html, 'Preyone', 'support@preyone.com'))
   );
   return results.some(Boolean);
 }
@@ -1115,7 +1201,7 @@ export async function sendCashHandoverDecisionEmail(
   const subject = `Cash handover ${decision} - ${staff} - $${Number(data.amount || 0).toFixed(2)}`;
   const html = handoverEmailHtml(data, decision);
   const results = await Promise.all(
-    to.map((email) => sendMail(email, subject, html, 'Preyone', 'admin@preyone.com'))
+    to.map((email) => sendMail(email, subject, html, 'Preyone', 'support@preyone.com'))
   );
   return results.some(Boolean);
 }
@@ -1247,7 +1333,7 @@ function onlineSectionHeader(title: string, note?: string): string {
 function onlinePaymentEmailHtml(data: OnlinePaymentEmailData): string {
   const adminUrl = (process.env.ADMIN_BASE_URL || 'https://admin.preyone.com').replace(/\/$/, '');
   const baseUrl = (process.env.BASE_URL || 'https://wifi.preyone.com').replace(/\/$/, '');
-  const logoUrl = `${baseUrl}/images/preyonenoneglow-logo-zoom-800.png`;
+  const logoUrl = `${baseUrl}/images/preyonelogomainzw-email.png`;
   const amount = Number(data.amount);
   const amountText = emailMoney(amount, data.currency);
   const gatewayFee = data.gatewayFee == null ? null : Number(data.gatewayFee);
@@ -1448,7 +1534,7 @@ export async function sendOnlinePaymentReceiptEmail(
   const subject = `Payment received - ${amount} - ${packageName} - ${data.voucherCode}`;
   const html = onlinePaymentEmailHtml(data);
   const results = await Promise.all(
-    to.map((email) => sendMail(email, subject, html, 'Preyone', 'admin@preyone.com'))
+    to.map((email) => sendMail(email, subject, html, 'Preyone', 'support@preyone.com'))
   );
   return results.some(Boolean);
 }
