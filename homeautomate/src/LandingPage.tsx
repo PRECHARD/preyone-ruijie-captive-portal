@@ -1,4 +1,6 @@
-import type { ReactNode } from 'react';
+import { Icon, type IconName } from './icons';
+import { MarketingNav } from './MarketingNav';
+import { SiteFooter } from './SiteFooter';
 
 /**
  * Public landing page for homeautomate.preyone.com.
@@ -7,103 +9,6 @@ import type { ReactNode } from 'react';
  * calls run here, so the page renders for logged-out visitors and search
  * crawlers. "Log in" hands off to the SPA's /login route.
  */
-
-type IconName =
-  | 'bolt'
-  | 'shield'
-  | 'climate'
-  | 'camera'
-  | 'energy'
-  | 'satellite'
-  | 'spark'
-  | 'arrow'
-  | 'check'
-  | 'lock'
-  | 'wifi'
-  | 'key'
-  | 'home';
-
-const ICON_PATHS: Record<IconName, ReactNode> = {
-  bolt: <path d="M13 2 4.5 13.5H11l-1 8.5L19.5 10H13Z" />,
-  shield: (
-    <>
-      <path d="M12 3 5 6v6c0 4.4 3 7.6 7 9 4-1.4 7-4.6 7-9V6Z" />
-      <path d="m9 12 2 2 4-4" />
-    </>
-  ),
-  climate: (
-    <>
-      <path d="M10 13.6V5a2 2 0 1 1 4 0v8.6a4.5 4.5 0 1 1-4 0Z" />
-      <path d="M12 8v7" />
-    </>
-  ),
-  camera: (
-    <>
-      <rect x="3" y="6.5" width="13" height="11" rx="2" />
-      <path d="m16 10 5-3v10l-5-3" />
-    </>
-  ),
-  energy: (
-    <>
-      <path d="M4 19V9M10 19V5M16 19v-7M22 19V3" />
-    </>
-  ),
-  satellite: (
-    <>
-      <path d="M5 13a8 8 0 0 0 6 6M2 10a12 12 0 0 0 9 9" />
-      <path d="m13 5 6 6-2.5 2.5L19 19l-2 2-5.5-2.5L9 16Z" />
-    </>
-  ),
-  spark: (
-    <>
-      <path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M18.4 5.6l-2.8 2.8M8.4 15.6l-2.8 2.8" />
-      <circle cx="12" cy="12" r="3" />
-    </>
-  ),
-  arrow: <path d="M4 12h15m-5.5-5.5L19 12l-5.5 5.5" />,
-  check: <path d="m5 12.5 4.5 4.5L19 6.5" />,
-  lock: (
-    <>
-      <rect x="4.5" y="10" width="15" height="11" rx="2" />
-      <path d="M8 10V7a4 4 0 0 1 8 0v3" />
-    </>
-  ),
-  wifi: (
-    <>
-      <path d="M3.5 9a13 13 0 0 1 17 0" />
-      <path d="M6.8 12.5a8.4 8.4 0 0 1 10.4 0" />
-      <path d="M10 16a4 4 0 0 1 4 0" />
-      <circle cx="12" cy="19" r="1" fill="currentColor" stroke="none" />
-    </>
-  ),
-  key: (
-    <>
-      <circle cx="8" cy="8" r="4" />
-      <path d="m11 11 9 9M17 17l2-2M14 14l2-2" />
-    </>
-  ),
-  home: (
-    <>
-      <path d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-5v-6H10v6H5a1 1 0 0 1-1-1Z" />
-    </>
-  ),
-};
-
-function Icon({ name }: { name: IconName }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.6}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-    >
-      {ICON_PATHS[name]}
-    </svg>
-  );
-}
 
 const FEATURES: Array<{ icon: IconName; title: string; body: string; tag: string }> = [
   {
@@ -154,12 +59,14 @@ const SCENES = [
 export function LandingPage({
   onLogin,
   onSubscribe,
+  onNavigate,
 }: {
   onLogin: () => void;
   onSubscribe: () => void;
+  onNavigate: (path: string) => void;
 }) {
   return (
-    <div className="ha-landing">
+    <div className="ha-landing ha-landing--nav">
       <div className="ha-aurora" aria-hidden>
         <span className="ha-grid" />
         <span className="ha-orb ha-orb-a" />
@@ -168,36 +75,7 @@ export function LandingPage({
         <span className="ha-scan" />
       </div>
 
-      <header className="ha-nav">
-        <a className="ha-brand" href="/" onClick={(e) => { e.preventDefault(); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>
-          <img
-            className="ha-logo"
-            src="/images/preyonenoneglow-logo-400.png"
-            alt="Preyone"
-            width={168}
-            height={36}
-            decoding="async"
-          />
-          <span className="ha-brand-text">
-            <small>Home</small>
-          </span>
-        </a>
-        <nav className="ha-nav-links" aria-label="Sections">
-          <a href="#platform">Platform</a>
-          <a href="#scenes">Scenes</a>
-          <a href="#security">Security</a>
-          <a href="#how">How it works</a>
-        </nav>
-        <div className="ha-nav-actions">
-          <a className="ha-text-link" href="https://preyone.com">Preyone.com</a>
-          <button className="ha-btn ha-btn-ghost" type="button" onClick={onLogin}>
-            Log in
-          </button>
-          <button className="ha-btn ha-btn-primary" type="button" onClick={onSubscribe}>
-            Get started
-          </button>
-        </div>
-      </header>
+      <MarketingNav currentPath="/" onNavigate={onNavigate} onLogin={onLogin} />
 
       <main>
         <section className="ha-hero">
@@ -460,27 +338,7 @@ export function LandingPage({
         </section>
       </main>
 
-      <footer className="ha-footer">
-        <div className="ha-footer-brand">
-          <span className="ha-brand-mark">
-            <img src="/images/preyone-emblem-mark.png" alt="" width={30} height={35} decoding="async" />
-          </span>
-          <div>
-            <strong>Preyone Home</strong>
-            <small>Intelligent automation for modern Zimbabwean homes.</small>
-          </div>
-        </div>
-        <div className="ha-footer-links">
-          <a href="#platform">Platform</a>
-          <a href="#security">Security</a>
-          <a href="https://preyone.com/business-apps">Preyone 360</a>
-          <a href="https://preyone.com">preyone.com</a>
-        </div>
-        <div className="ha-footer-meta">
-          <span>© {new Date().getFullYear()} Preyone</span>
-          <span className="ha-footer-status"><span /> All systems operational</span>
-        </div>
-      </footer>
+      <SiteFooter onNavigate={onNavigate} />
     </div>
   );
 }

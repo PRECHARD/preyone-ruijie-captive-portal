@@ -14,6 +14,9 @@ import {
 } from './api';
 import { applyPreyoneBrand } from './theme';
 import { LandingPage } from './LandingPage';
+import { MarketingPage } from './MarketingPage';
+import { ContactPage } from './ContactPage';
+import { isMarketingPath } from './marketing';
 
 /* ────────────────────────────── helpers ────────────────────────────── */
 
@@ -984,36 +987,64 @@ function AccessGate({
   );
 }
 
-type Route = 'home' | 'login' | 'app';
+type Route = 'home' | 'login' | 'app' | 'marketing' | 'contact';
+
+function normalizePath(pathname: string): string {
+  const path = pathname.replace(/\/+$/, '');
+  return path === '' ? '/' : path;
+}
 
 function routeFromPath(pathname: string): Route {
-  if (pathname === '/login' || pathname.startsWith('/login/')) return 'login';
+  const path = normalizePath(pathname);
+  if (path === '/login' || path.startsWith('/login/')) return 'login';
   if (
-    pathname === '/app' ||
-    pathname.startsWith('/app/') ||
-    pathname === '/dashboard' ||
-    pathname.startsWith('/dashboard/')
+    path === '/app' ||
+    path.startsWith('/app/') ||
+    path === '/dashboard' ||
+    path.startsWith('/dashboard/')
   ) {
     return 'app';
   }
+  if (path === '/contact') return 'contact';
+  if (isMarketingPath(path)) return 'marketing';
   return 'home';
 }
 
 export default function App() {
-  const [route, setRoute] = useState<Route>(() => routeFromPath(window.location.pathname));
+  const [location, setLocation] = useState(() => ({
+    route: routeFromPath(window.location.pathname),
+    path: normalizePath(window.location.pathname),
+  }));
+  const { route, path } = location;
 
   useEffect(() => {
-    const onPop = () => setRoute(routeFromPath(window.location.pathname));
+    const onPop = () => {
+      setLocation({
+        route: routeFromPath(window.location.pathname),
+        path: normalizePath(window.location.pathname),
+      });
+    };
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
   }, []);
 
-  const go = useCallback((path: string, replace = false) => {
-    if (window.location.pathname !== path) {
-      if (replace) window.history.replaceState({}, '', path);
-      else window.history.pushState({}, '', path);
+  useEffect(() => {
+    if (route === 'home') {
+      document.title = 'Preyone Home — Intelligent Home Automation';
+    } else if (route === 'login') {
+      document.title = 'Sign in · Preyone Home';
+    } else if (route === 'app') {
+      document.title = 'Command centre · Preyone Home';
     }
-    setRoute(routeFromPath(path));
+  }, [route, path]);
+
+  const go = useCallback((target: string, replace = false) => {
+    const nextPath = normalizePath(target);
+    if (window.location.pathname !== target) {
+      if (replace) window.history.replaceState({}, '', target);
+      else window.history.pushState({}, '', target);
+    }
+    setLocation({ route: routeFromPath(nextPath), path: nextPath });
     window.scrollTo({ top: 0, behavior: 'auto' });
   }, []);
 
@@ -1044,12 +1075,21 @@ export default function App() {
     );
   }
 
+  if (route === 'marketing') {
+    return <MarketingPage path={path} onNavigate={go} onLogin={() => go('/login')} />;
+  }
+
+  if (route === 'contact') {
+    return <ContactPage onNavigate={go} onLogin={() => go('/login')} />;
+  }
+
   return (
     <LandingPage
       onLogin={() => go('/login')}
       onSubscribe={() => {
         window.location.href = 'https://preyone.com/business-apps';
       }}
+      onNavigate={go}
     />
   );
 }

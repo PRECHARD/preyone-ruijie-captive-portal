@@ -24,6 +24,7 @@ import { transitWebRouter } from './routes/transitWeb';
 import { systemAdminRouter } from './routes/systemAdmin';
 import { starlinkRouter } from './routes/starlink';
 import { homeAutomateRouter } from './routes/homeautomate';
+import { marketingRouter } from './routes/marketing';
 import { ruijieRouter } from './routes/ruijie';
 import { currencyRouter } from './routes/currency';
 import { usageRouter } from './routes/usage';
@@ -422,6 +423,10 @@ app.use('/api/starlink', starlinkRouter);
 // and the StarLink uptime feed. The live push channel is the WebSocket upgrade
 // handler attached to the HTTP server below (/api/homeautomate/stream).
 app.use('/api/homeautomate', homeAutomateRouter);
+// Public marketing copy for the Home Automation SPA pages (/platform, /scenes,
+// /solutions/*, /how-it-works, /contact). Read-only static JSON; mounted with an
+// exact path list so it cannot shadow any other /api route.
+app.use('/api', marketingRouter);
 // Ruijie Cloud maint-API proxy — admin-auth guarded inside the router.
 // Mounted under /api/ so the subdomain middleware (line ~169) is bypassed and
 // it cannot collide with gatewayRouter's /api/radius + /api/gateway paths.
