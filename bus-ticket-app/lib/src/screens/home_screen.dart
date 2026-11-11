@@ -552,30 +552,91 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF2EEE6),
+      backgroundColor: kSurfaceNeutral,
       body: SafeArea(
         child: Column(
           children: [
             _header(),
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              child: SegmentedButton<TicketType>(
-                segments: const [
-                  ButtonSegment(
-                    value: TicketType.busFare,
-                    label: Text('BUS FARE'),
-                    icon: Icon(Icons.directions_bus),
+              padding: const EdgeInsets.fromLTRB(12, 2, 12, 6),
+              child: Container(
+                padding: const EdgeInsets.all(4),
+                decoration: BoxDecoration(
+                  color: kSurfaceCard,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: kSurfaceBorder),
+                  boxShadow: const [
+                    BoxShadow(
+                      color: Color(0x0A0F172A),
+                      blurRadius: 10,
+                      offset: Offset(0, 3),
+                    ),
+                  ],
+                ),
+                child: SegmentedButton<TicketType>(
+                  segments: const [
+                    ButtonSegment(
+                      value: TicketType.busFare,
+                      label: Text('BUS FARE'),
+                      icon: Icon(Icons.directions_bus),
+                    ),
+                    ButtonSegment(
+                      value: TicketType.luggage,
+                      label: Text('LUGGAGE'),
+                      icon: Icon(Icons.luggage),
+                    ),
+                  ],
+                  selected: {_type},
+                  onSelectionChanged: (s) => setState(() => _type = s.first),
+                  // The tick would shift the label sideways on every tap; the
+                  // emerald wash + border already carry the selected state.
+                  showSelectedIcon: false,
+                  style: ButtonStyle(
+                    visualDensity: VisualDensity.compact,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    textStyle: WidgetStateProperty.all(
+                      const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.4,
+                      ),
+                    ),
+                    backgroundColor: WidgetStateProperty.resolveWith((states) =>
+                        states.contains(WidgetState.selected)
+                            ? kEmeraldWash
+                            : kSurfaceCard),
+                    foregroundColor: WidgetStateProperty.resolveWith((states) =>
+                        states.contains(WidgetState.selected)
+                            ? kEmeraldDeep
+                            : const Color(0xFF475569)),
+                    iconColor: WidgetStateProperty.resolveWith((states) =>
+                        states.contains(WidgetState.selected)
+                            ? kEmeraldDeep
+                            : const Color(0xFF64748B)),
+                    // Hover/press feedback stays inside the emerald family, and
+                    // only ever tints the segment under the pointer.
+                    overlayColor: WidgetStateProperty.resolveWith((states) {
+                      if (states.contains(WidgetState.pressed)) {
+                        return kEmeraldDeep.withValues(alpha: 0.12);
+                      }
+                      if (states.contains(WidgetState.hovered)) {
+                        return kEmeraldDeep.withValues(alpha: 0.07);
+                      }
+                      if (states.contains(WidgetState.focused)) {
+                        return kEmeraldDeep.withValues(alpha: 0.10);
+                      }
+                      return null;
+                    }),
+                    side: WidgetStateProperty.resolveWith((states) =>
+                        states.contains(WidgetState.selected)
+                            ? const BorderSide(color: kEmeraldDeep, width: 1.5)
+                            : const BorderSide(color: kSurfaceBorder)),
+                    shape: WidgetStateProperty.all(
+                      RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
                   ),
-                  ButtonSegment(
-                    value: TicketType.luggage,
-                    label: Text('LUGGAGE'),
-                    icon: Icon(Icons.luggage),
-                  ),
-                ],
-                selected: {_type},
-                onSelectionChanged: (s) => setState(() => _type = s.first),
-                style: const ButtonStyle(
-                  visualDensity: VisualDensity.compact,
                 ),
               ),
             ),
@@ -642,6 +703,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _tripDetailsCard() {
     return Card(
       elevation: 2,
+      color: kSurfaceCard,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
       child: Padding(
         padding: const EdgeInsets.all(12),
@@ -1301,6 +1363,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _itemsSection() {
     return Card(
       elevation: 2,
+      color: kSurfaceCard,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 6),
@@ -1815,46 +1878,54 @@ final promoCtrl = TextEditingController();
                         // that locks two fields, and a switch communicates that
                         // persistent state better than a tick that reads as a
                         // one-off assertion.
-                        Row(
-                          children: [
-                            Switch(
-                              value: noName,
-                              activeThumbColor: kEmeraldJade,
-                              activeTrackColor: kEmeraldJade,
-                              inactiveThumbColor:
-                                  Theme.of(ctx).colorScheme.onSurfaceVariant,
-                              inactiveTrackColor:
-                                  Theme.of(ctx).colorScheme.surfaceContainerHighest,
-                              onChanged: (v) => setSheet(() {
-                                noName = v;
-                                // Switching on means "record no name". Anything
-                                // half-typed in the name box is discarded so the
-                                // saved sale and the field agree; switching off
-                                // unlocks both boxes for a real identity.
-                                if (noName) {
-                                  _customerNameController.clear();
-                                  // The cached name must be dropped too, or a
-                                  // name left over from the previous passenger
-                                  // would be handed to the luggage form for a
-                                  // sale that deliberately records no name. The
-                                  // cached phone is deliberately KEPT: a walk-in
-                                  // can still be reachable on a number, and the
-                                  // phone box keeps its value.
-                                  _draftPassengerName = '';
-                                }
-                                // Note the absence of any reset here. The toggle
-                                // is only ever changed by this handler, so it
-                                // cannot switch itself off when the sheet
-                                // rebuilds for payment method, promo or cash
-                                // tendered.
-                              }),
-                            ),
-                            const SizedBox(width: 4),
-                            const Expanded(
-                              child: Text('No name available (walk-in)',
-                                  style: TextStyle(fontSize: 13)),
-                            ),
-                          ],
+                        //
+                        // The row itself stays neutral in both states — only the
+                        // switch thumb lights up — so "walk-in" never looks like
+                        // a selected row competing with the fields above it.
+                        Container(
+                          padding: const EdgeInsets.fromLTRB(8, 4, 12, 4),
+                          decoration: BoxDecoration(
+                            color: noName ? kSurfaceCard : const Color(0xFFF8FAFC),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: kSurfaceBorder),
+                          ),
+                          child: Row(
+                            children: [
+                              WalkInSwitch(
+                                value: noName,
+                                semanticLabel:
+                                    'No name available (walk-in)',
+                                onChanged: (v) => setSheet(() {
+                                  noName = v;
+                                  // Switching on means "record no name". Anything
+                                  // half-typed in the name box is discarded so the
+                                  // saved sale and the field agree; switching off
+                                  // unlocks both boxes for a real identity.
+                                  if (noName) {
+                                    _customerNameController.clear();
+                                    // The cached name must be dropped too, or a
+                                    // name left over from the previous passenger
+                                    // would be handed to the luggage form for a
+                                    // sale that deliberately records no name. The
+                                    // cached phone is deliberately KEPT: a walk-in
+                                    // can still be reachable on a number, and the
+                                    // phone box keeps its value.
+                                    _draftPassengerName = '';
+                                  }
+                                  // Note the absence of any reset here. The
+                                  // toggle is only ever changed by this handler,
+                                  // so it cannot switch itself off when the sheet
+                                  // rebuilds for payment method, promo or cash
+                                  // tendered.
+                                }),
+                              ),
+                              const SizedBox(width: 10),
+                              const Expanded(
+                                child: Text('No name available (walk-in)',
+                                    style: TextStyle(fontSize: 13)),
+                              ),
+                            ],
+                          ),
                         ),
                       ],
                       const SizedBox(height: 8),

@@ -168,7 +168,30 @@ List<String> wrap(String text, int width) {
 
 /// Font B (down-emphasized `ESC M 1`) prints ~42 columns on 58mm stock versus
 /// 32 for Font A. Cap used by [_fitCenteredLine] before falling back.
-const int _fontBCols = 42;
+const int _fontBCols = EscPos.paperColsB;
+
+/// The only item line a luggage slip ever prints. The operator's typed
+/// description ("2 boxes of maize") stays in the sale record for reporting but
+/// never reaches the paper — a luggage receipt states the item TYPE only.
+const String kLuggageItemLabel = 'LUGGAGE ONLY';
+
+/// True when a sale / ticket type denotes luggage. Stored values are
+/// `busFare` / `luggage` while display strings read `BUS TICKET` /
+/// `LUGGAGE TICKET`, so the match is on the substring, not equality.
+bool isLuggageType(String ticketType) =>
+    up(ticketType).contains('LUGGAGE');
+
+/// Column budget for a [PreviewLine], from its own font/size flags — 32 for
+/// Font A, 42 for Font B, halved under double-width.
+int lineColumnBudget(PreviewLine l) =>
+    EscPos.columnsFor(small: l.small, big: l.big);
+
+/// The text that actually lands on the 58mm paper for [l]: hard-clipped to its
+/// column budget so an over-long row can never wrap into the next line or run
+/// off the paper edge. The byte writer uses this, so it is also the exact text
+/// the layout tests assert on.
+String printedLineText(PreviewLine l) =>
+    EscPos.clip(l.text, lineColumnBudget(l));
 
 /// Builds a single printed line that always fits the physical 58mm width.
 /// Text of up to 32 columns uses Font A; longer text switches to the smaller
@@ -274,7 +297,7 @@ String _firstNonEmpty(List<Sale> sales, String Function(Sale) pick) {
 /// "<receiptNo>|<tripNo>|<totalCent>" and luggage tickets "LUG|<receiptNo>|
 /// <totalCent>" — deterministic so a scan can look the sale up by receipt.
 String barcodeDataFor(TicketData d) {
-  final isLuggage = up(d.ticketType) == 'LUGGAGE TICKET';
+  final isLuggage = isLuggageType(d.ticketType);
   return isLuggage
       ? 'LUG|${d.receiptNo}|${d.total}'
       : '${d.receiptNo}|${d.tripNo}|${d.total}';
@@ -382,8 +405,10 @@ List<PreviewLine> buildTicketLines(TicketData d) {
       }
     }
   }
-  // Passenger — label/value rows across the full 32 columns.
-  final pax = d.customerName.trim().isEmpty ? '-' : up(d.customerName.trim());
+  // Passenger — label/value rows across the full 32 columns. A blank name (a
+  // deliberate walk-in) displays as "N/A" rather than a dash or empty space, so
+  // a missing name can never read as a rendering fault.
+  final pax = up(displayPassengerName(d.customerName));
   // The label is "Passenger:", not "Passenger Name:", and that is what buys the
   // name room: formatRow lays the pair across 32 columns with at least one
   // separating space, so the 15-character label left only 16 for the value and
@@ -397,12 +422,16 @@ List<PreviewLine> buildTicketLines(TicketData d) {
   // Divider.
   lines.add(PreviewLine(EscPos.divider(), center: true));
   // Items / allowed luggage — printed for both ticket types, one row per item
-  // with the quantity (pcs) beside the line total.
-  if (d.items.isNotEmpty) {
+  // with the quantity (pcs) beside the line total. Luggage is the exception:
+  // the slip states the item type only (LUGGAGE ONLY) and omits both the typed
+  // description and the quantity/amount breakdown.
+  if (isLuggageType(d.ticketType)) {
+    lines.add(PreviewLine(formatRow('ITEM:', kLuggageItemLabel)));
+  } else if (d.items.isNotEmpty) {
     for (final i in d.items) {
-      lines.add(PreviewLine(formatRow('ITEM:', clipText(up(i.name), 27))));
-      lines.add(PreviewLine(
-          formatRow('QTY: ${i.qty} pcs', fmtMoney(i.total, d.currency))));
+      lines.add(PreviewLine(formatRow('ITEM:', clipText(up(i.name), 26))));
+      lines.add(PreviewLine(formatRow(
+          'QTY: ${i.qty} pcs', clipText(fmtMoney(i.total, d.currency), 18))));
     }
   }
   // Total fare — prominent centered line.
@@ -484,6 +513,23 @@ List<PreviewLine> buildReportLines({
       center: true));
   lines.add(PreviewLine(EscPos.divider()));
 
+  // The two figures a supervisor checks first — money taken and tickets
+  // issued — print in the report HEADER, directly under the date, each on its
+  // own labelled 32-column row. The old centered "Tickets: N   TOTAL  X" line
+  // at the bottom silently clipped the revenue once the amount grew.
+  final total = sales.fold<int>(0, (sum, s) => sum + s.total);
+  final luggageCount = sales.where((s) => isLuggageType(s.ticketType)).length;
+  lines.add(PreviewLine(
+      formatRow('TOTAL REVENUE:', clipText(fmtMoney(total, currency), 17)),
+      bold: true));
+  lines.add(PreviewLine(
+      formatRow('TOTAL TICKETS SOLD:', '${sales.length}'),
+      bold: true));
+  if (luggageCount > 0) {
+    lines.add(PreviewLine(formatRow('of which luggage:', '$luggageCount')));
+  }
+  lines.add(PreviewLine(EscPos.divider()));
+
   if (sales.isEmpty) {
     lines.add(PreviewLine(EscPos.center('No sales'), center: true));
   }
@@ -491,17 +537,25 @@ List<PreviewLine> buildReportLines({
     final time = s.createdAt != null
         ? '${two(s.createdAt!.hour)}:${two(s.createdAt!.minute)}'
         : '';
-    final summary = s.items
-        .map((i) => i.qty > 1 ? '${i.name} x${i.qty}' : i.name)
-        .join(', ');
-    final detail = '${s.receiptNo}  $time  $summary  ${fmtMoney(s.total, '')}';
-    lines.add(PreviewLine(EscPos.center(detail), center: true));
+    final luggage = isLuggageType(s.ticketType);
+    final summary = luggage
+        ? kLuggageItemLabel
+        : s.items.isEmpty
+            ? 'TICKET'
+            : s.items
+                .map((i) => i.qty > 1 ? '${i.name} x${i.qty}' : i.name)
+                .join(', ');
+    // Two clean rows per sale instead of one centered blob: receipt + time +
+    // amount on the first (left/right across the full width), what was sold on
+    // the second in the smaller font. Both halves are clipped to their share of
+    // the 32 columns so a large amount can never push the row past the paper.
+    final amount = clipText(fmtMoney(s.total, currency), 20);
+    final head = clipText(
+        '${s.receiptNo} $time'.trim(), EscPos.paperCols - amount.length - 1);
+    lines.add(PreviewLine(formatRow(head, amount)));
+    lines.add(
+        PreviewLine(clipText(up(summary), EscPos.paperColsB), small: true));
   }
-  lines.add(PreviewLine(EscPos.divider()));
-  final total = sales.fold(0, (sum, s) => sum + s.total);
-  final totalLine =
-      'Tickets: ${sales.length}   TOTAL  ${fmtMoney(total, currency)}';
-  lines.add(PreviewLine(EscPos.center(totalLine), center: true, bold: true));
   lines.add(PreviewLine(EscPos.divider()));
   lines.add(PreviewLine(EscPos.center('Powered By $kPlatformProvider'),
       center: true, bold: true));
@@ -553,7 +607,9 @@ List<int> _toBytes(List<PreviewLine> lines) {
     b.addAll(EscPos.bold(l.bold));
     if (l.small) b.addAll(EscPos.fontB(true));
     if (l.big) b.addAll(EscPos.doubleSize(true, true));
-    b.addAll(EscPos.text('${l.text}\n'));
+    // Backstop for the 58 mm budget: whatever the layout produced, a single
+    // line can never carry more columns than the selected font/size allows.
+    b.addAll(EscPos.text('${printedLineText(l)}\n'));
     if (l.big) b.addAll(EscPos.doubleSize(false, false));
     if (l.small) b.addAll(EscPos.fontB(false));
     b.addAll(EscPos.bold(false));
@@ -660,7 +716,7 @@ List<PreviewLine> buildTripManifestLines({
   }
   for (final s in sorted) {
     final seat = s.seatNumber.isEmpty ? '--' : s.seatNumber;
-    final name = s.customerName.isEmpty ? '-' : up(s.customerName);
+    final name = up(displayPassengerName(s.customerName));
     final fare = fmtMoney(s.total, currency);
     final payment = _manifestPayShort(s.paymentMethod);
     final phone = s.customerMobile.isEmpty ? '-' : s.customerMobile;
@@ -671,8 +727,10 @@ List<PreviewLine> buildTripManifestLines({
         EscPos.left('#${s.receiptNo} $payment', width: 18) +
             EscPos.right(phone, width: 14),
         small: true));
-    if (s.ticketType == 'luggage') {
-      lines.add(PreviewLine(EscPos.left('* LUGGAGE TICKET *'), small: true));
+    if (isLuggageType(s.ticketType)) {
+      lines.add(PreviewLine(
+          EscPos.left('* $kLuggageItemLabel *', width: _fontBCols),
+          small: true));
     }
   }
   lines.add(PreviewLine(EscPos.divider()));

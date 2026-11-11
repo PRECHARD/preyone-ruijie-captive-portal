@@ -70,7 +70,8 @@ void main() {
     expect(find.text('TOTAL FARE'), findsOneWidget);
     expect(find.text('PAYMENT METHOD'), findsOneWidget);
     expect(find.text('CASH'), findsWidgets);
-    expect(find.text('-'), findsOneWidget);
+    expect(find.text('N/A'), findsOneWidget,
+        reason: 'a blank passenger name previews as N/A, never a dash');
     expect(find.text('Powered by'), findsOneWidget);
     expect(find.byType(BarcodeWidget), findsNWidgets(2));
   });
@@ -92,7 +93,8 @@ void main() {
     );
     expect(find.text('BUS TICKET'), findsOneWidget);
     expect(find.text('TOTAL FARE'), findsOneWidget);
-    expect(find.text('-'), findsOneWidget);
+    expect(find.text('N/A'), findsOneWidget,
+        reason: 'a blank passenger name previews as N/A, never a dash');
     expect(find.byType(BarcodeWidget), findsNWidgets(2));
   });
 
@@ -108,6 +110,27 @@ void main() {
       ),
     );
     expect(find.text('LUGGAGE TICKET'), findsOneWidget);
-    expect(find.text('Trunk box'), findsOneWidget);
+    expect(find.text('LUGGAGE ONLY'), findsOneWidget,
+        reason: 'a luggage slip states the item TYPE only');
+    expect(find.text('Trunk box'), findsNothing,
+        reason: 'the typed description never shows on a luggage slip');
+    expect(find.textContaining('pcs'), findsNothing,
+        reason: 'no quantity / amount breakdown on a luggage slip');
+  });
+
+  testWidgets('luggage slip prints LUGGAGE ONLY without a typed item',
+      (tester) async {
+    // A luggage ticket with no items at all still states its item type.
+    await _pump(
+      tester,
+      _data(
+        ticketType: 'LUGGAGE TICKET',
+        items: null,
+        total: 1500,
+        tendered: 1500,
+        seatNumber: '',
+      ),
+    );
+    expect(find.text('LUGGAGE ONLY'), findsOneWidget);
   });
 }

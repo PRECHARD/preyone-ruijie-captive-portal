@@ -374,7 +374,7 @@ void main() {
         reason: 'cash alone is not enough: the name is still required');
 
     // The control must be a toggle switch, not a checkbox.
-    final walkIn = find.byType(Switch);
+    final walkIn = find.byType(WalkInSwitch);
     expect(find.byType(Checkbox), findsNothing,
         reason: 'the walk-in control is specified as a toggle switch');
     expect(walkIn, findsOneWidget);
@@ -390,9 +390,18 @@ void main() {
         lessThan(72),
         reason: 'and directly beneath it, not pushed far down the sheet');
 
-    // Active state wears the app's signature emerald green.
-    expect(tester.widget<Switch>(walkIn).activeThumbColor, kEmeraldJade);
-    expect(tester.widget<Switch>(walkIn).activeTrackColor, kEmeraldJade);
+    // The accent lives on the thumb only: no ancestor row may fill with solid
+    // emerald when the toggle is on, or "walk-in" reads as a selected row.
+    final rowPaints = tester
+        .widgetList<Container>(
+            find.ancestor(of: walkIn, matching: find.byType(Container)))
+        .map((c) => c.decoration)
+        .whereType<BoxDecoration>()
+        .map((d) => d.color);
+    expect(rowPaints, isNot(contains(kEmeraldJade)),
+        reason: 'the walk-in row must stay neutral, not fill with emerald');
+    expect(rowPaints, isNot(contains(kEmeraldDeep)),
+        reason: 'the walk-in row must stay neutral, not fill with emerald');
 
     // Toggle it on. Both boxes must lock and the button must come alive.
     await tester.tap(walkIn);
@@ -414,7 +423,7 @@ void main() {
     // a promo all rebuild the sheet.
     await tester.tap(find.text('EcoCash'));
     await settle(tester);
-    expect(tester.widget<Switch>(walkIn).value, isTrue,
+    expect(tester.widget<WalkInSwitch>(walkIn).value, isTrue,
         reason: 'switching payment method must not drop the walk-in toggle');
     expect(tester.widget<TextField>(nameBox).readOnly, isTrue);
     expect(tester.widget<TextField>(phoneBox).readOnly, isTrue);
@@ -426,7 +435,7 @@ void main() {
     await tester.tap(find.text('Apply'));
     await settle(tester);
 
-    expect(tester.widget<Switch>(walkIn).value, isTrue,
+    expect(tester.widget<WalkInSwitch>(walkIn).value, isTrue,
         reason: 'applying a promo must not drop the walk-in toggle');
     expect(tester.widget<TextField>(nameBox).readOnly, isTrue);
     expect(tester.widget<TextField>(phoneBox).readOnly, isTrue);
@@ -436,7 +445,7 @@ void main() {
     // Switching it back off is the ONLY thing that may unlock the boxes.
     await tester.tap(walkIn);
     await settle(tester);
-    expect(tester.widget<Switch>(walkIn).value, isFalse);
+    expect(tester.widget<WalkInSwitch>(walkIn).value, isFalse);
     expect(tester.widget<TextField>(nameBox).readOnly, isFalse,
         reason: 'switching off must unlock the box for a real name');
     expect(tester.widget<TextField>(phoneBox).readOnly, isFalse,
@@ -613,7 +622,7 @@ void main() {
     await tester.tap(sell);
     await settle(tester);
 
-    final walkIn = find.byType(Switch);
+    final walkIn = find.byType(WalkInSwitch);
     final nameBox = find.widgetWithText(TextField, 'Customer name & surname');
     final phoneBox = find.widgetWithText(TextField, 'Phone number');
 
@@ -621,7 +630,7 @@ void main() {
     await settle(tester);
     await tester.tap(walkIn);
     await settle(tester);
-    expect(tester.widget<Switch>(walkIn).value, isTrue);
+    expect(tester.widget<WalkInSwitch>(walkIn).value, isTrue);
 
     // Focus each text field in turn. Each tap is what opens the keyboard on a
     // real device, and therefore what used to reset the toggle.
@@ -639,7 +648,7 @@ void main() {
       addTearDown(tester.view.reset);
       await settle(tester);
 
-      expect(tester.widget<Switch>(walkIn).value, isTrue,
+      expect(tester.widget<WalkInSwitch>(walkIn).value, isTrue,
           reason: 'tapping $label must not switch the walk-in toggle off');
       expect(tester.widget<TextField>(nameBox).readOnly, isTrue,
           reason: 'the name box must stay locked after touching $label');
@@ -649,7 +658,7 @@ void main() {
       // Closing the keyboard is the other half of the same round trip.
       tester.view.viewInsets = FakeViewPadding.zero;
       await settle(tester);
-      expect(tester.widget<Switch>(walkIn).value, isTrue,
+      expect(tester.widget<WalkInSwitch>(walkIn).value, isTrue,
           reason: 'dismissing the keyboard must not drop the walk-in toggle');
     }
 
@@ -700,14 +709,14 @@ void main() {
       await tester.tap(sell);
       await settle(tester);
 
-      final walkIn = find.byType(Switch);
-      expect(tester.widget<Switch>(walkIn).value, isFalse,
+      final walkIn = find.byType(WalkInSwitch);
+      expect(tester.widget<WalkInSwitch>(walkIn).value, isFalse,
           reason: 'pass ${pass + 1} must open with the toggle already off');
       await tester.ensureVisible(walkIn);
       await settle(tester);
       await tester.tap(walkIn);
       await settle(tester);
-      expect(tester.widget<Switch>(walkIn).value, isTrue);
+      expect(tester.widget<WalkInSwitch>(walkIn).value, isTrue);
 
       // Close the sheet without selling.
       final cancel = find.widgetWithText(TextButton, 'Cancel');

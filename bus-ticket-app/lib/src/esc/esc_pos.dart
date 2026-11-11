@@ -4,7 +4,18 @@ import 'dart:typed_data';
 class EscPos {
   EscPos._();
 
+  /// The physical stock every layout in this app targets: a 58 mm thermal roll.
+  /// 58 mm at 96 dpi is 225 px, which is the width the HTML/preview surfaces
+  /// must cap themselves at so the on-screen slip is 1:1 with the paper.
+  static const int paperWidthMm = 58;
+  static const int paperWidthPx = 225;
+
+  /// Printable columns on 58 mm stock at 203 dpi, Font A (the default font).
   static const int paperCols = 32;
+
+  /// Printable columns for Font B (down-emphasized `ESC M 1`) — the same 58 mm
+  /// of paper, just more, smaller characters per row.
+  static const int paperColsB = 42;
 
   static Uint8List init() => Uint8List.fromList(const [0x1B, 0x40]);
 
@@ -96,6 +107,13 @@ class EscPos {
   }
 
   static String divider([String ch = '-']) => ch * paperCols;
+
+  /// Columns available for one printed row, given the font/size the line uses.
+  /// Font B ([small]) yields 42 columns; double-size (`GS !` with the width bit
+  /// set, [big]) halves whatever the font allows because each glyph takes two
+  /// columns. This is the single source of truth for the 58 mm line budget.
+  static int columnsFor({bool small = false, bool big = false}) =>
+      (small ? paperColsB : paperCols) ~/ (big ? 2 : 1);
 
   static String clip(String s, int width) =>
       s.length <= width ? s : s.substring(0, width);

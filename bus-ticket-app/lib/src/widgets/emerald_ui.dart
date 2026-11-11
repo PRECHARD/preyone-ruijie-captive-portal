@@ -18,6 +18,17 @@ const Color kEmeraldLight = Color(0xFF00E676);
 const Color kEmeraldDeep = Color(0xFF00A859);
 const Color kEmeraldInk = Color(0xFF053A2A);
 
+/// Flat neutral surfaces for the field screens: a cool off-white page, crisp
+/// white cards, and a hairline border that still reads in direct sunlight.
+const Color kSurfaceNeutral = Color(0xFFF4F6F2);
+const Color kSurfaceCard = Color(0xFFFFFFFF);
+const Color kSurfaceBorder = Color(0xFFE2E8F0);
+
+/// Soft emerald wash behind the selected segment of a tab or segmented button.
+/// Deliberately lighter than [kEmeraldDeep] so the accent border, not the fill,
+/// carries the selection.
+const Color kEmeraldWash = Color(0xFFECFDF3);
+
 /// The canonical "glowing emerald" gradient: jade -> light emerald -> deeper
 /// green, angled so the highlight lands on the leading edge.
 const LinearGradient kEmeraldGradient = LinearGradient(
@@ -511,6 +522,112 @@ class _EmeraldAuroraState extends State<EmeraldAurora>
         );
       },
       child: widget.child,
+    );
+  }
+}
+
+/// A compact walk-in switch whose *thumb* carries the accent.
+///
+/// The stock Material [Switch] floods its whole track with the active colour,
+/// which on a dense passenger sheet reads as "this row is selected" rather than
+/// "this one option is on". Here the track stays neutral in both states and only
+/// the thumb lights up: white fill, a 2 px emerald ring and a soft 8 px bloom —
+/// the Flutter equivalent of `border-2 border-[#00A859]
+/// shadow-[0_0_8px_rgba(0,168,89,0.6)]`.
+///
+/// Purely presentational: [onChanged] receives the inverted value, so this is a
+/// drop-in replacement for `Switch(value: ..., onChanged: ...)` and owns no
+/// state of its own.
+class WalkInSwitch extends StatelessWidget {
+  const WalkInSwitch({
+    super.key,
+    required this.value,
+    this.onChanged,
+    this.semanticLabel,
+  });
+
+  final bool value;
+  final ValueChanged<bool>? onChanged;
+  final String? semanticLabel;
+
+  static const double _trackWidth = 52;
+  static const double _trackHeight = 30;
+  static const double _thumb = 22;
+  static const Duration _motion = Duration(milliseconds: 180);
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = onChanged != null;
+    void toggle() => onChanged?.call(!value);
+
+    return Semantics(
+      container: true,
+      toggled: value,
+      enabled: enabled,
+      label: semanticLabel,
+      onTap: enabled ? toggle : null,
+      child: MouseRegion(
+        cursor: enabled ? SystemMouseCursors.click : MouseCursor.defer,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: enabled ? toggle : null,
+          child: SizedBox(
+            width: _trackWidth,
+            height: 40,
+            child: Center(
+              child: AnimatedContainer(
+                duration: _motion,
+                curve: Curves.easeOutCubic,
+                width: _trackWidth,
+                height: _trackHeight,
+                padding: const EdgeInsets.all(4),
+                decoration: BoxDecoration(
+                  color: value ? kSurfaceCard : const Color(0xFFF1F5F9),
+                  borderRadius: BorderRadius.circular(_trackHeight / 2),
+                  border: Border.all(
+                    color: value
+                        ? kEmeraldDeep.withValues(alpha: 0.35)
+                        : kSurfaceBorder,
+                    width: 1.2,
+                  ),
+                ),
+                child: AnimatedAlign(
+                  duration: _motion,
+                  curve: Curves.easeOutCubic,
+                  alignment:
+                      value ? Alignment.centerRight : Alignment.centerLeft,
+                  child: AnimatedContainer(
+                    duration: _motion,
+                    curve: Curves.easeOutCubic,
+                    width: _thumb,
+                    height: _thumb,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: kSurfaceCard,
+                      border: Border.all(
+                        color: value ? kEmeraldDeep : const Color(0xFFCBD5E1),
+                        width: value ? 2 : 1.5,
+                      ),
+                      boxShadow: value
+                          ? const [
+                              // rgba(0,168,89,0.6) — the emerald bloom.
+                              BoxShadow(color: Color(0x9900A859), blurRadius: 8),
+                            ]
+                          : const [
+                              BoxShadow(
+                                color: Color(0x140F172A),
+                                blurRadius: 3,
+                                offset: Offset(0, 1),
+                              ),
+                            ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

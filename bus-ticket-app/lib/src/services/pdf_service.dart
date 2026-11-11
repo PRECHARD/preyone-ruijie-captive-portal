@@ -4,10 +4,19 @@ import 'package:printing/printing.dart';
 
 import '../models.dart';
 import '../receipt.dart';
+import '../esc/esc_pos.dart';
 
 class PdfService {
   PdfService._();
   static final PdfService instance = PdfService._();
+
+  /// The shared PDF is the same 58mm slip the printer produces, so the page is
+  /// the roll width ([EscPos.paperWidthMm]) and the only inset is the ~1mm the
+  /// thermal head cannot reach at each edge. No outer page margin beyond that —
+  /// a wider page or a fatter margin is what clipped the ticket in the old
+  /// 80mm export.
+  static const pw.EdgeInsets _paperMargin =
+      pw.EdgeInsets.symmetric(horizontal: 1 * PdfPageFormat.mm, vertical: 2 * PdfPageFormat.mm);
 
   static pw.Font _normal() => pw.Font.helvetica();
   static pw.Font _bold() => pw.Font.helveticaBold();
@@ -17,8 +26,9 @@ class PdfService {
     final doc = pw.Document();
     final hMm = (lines.length * 5.5 + 10).clamp(50, 800).toDouble();
     doc.addPage(pw.Page(
-      pageFormat: PdfPageFormat(80 * PdfPageFormat.mm, hMm * PdfPageFormat.mm),
-      margin: const pw.EdgeInsets.symmetric(horizontal: 2, vertical: 4),
+      pageFormat:
+          PdfPageFormat(EscPos.paperWidthMm * PdfPageFormat.mm, hMm * PdfPageFormat.mm),
+      margin: _paperMargin,
       build: (ctx) => pw.Column(
         crossAxisAlignment: pw.CrossAxisAlignment.center,
         mainAxisSize: pw.MainAxisSize.min,
@@ -64,8 +74,9 @@ class PdfService {
     final doc = pw.Document();
     final hMm = (lines.length * 5.5 + 10).clamp(50, 1200).toDouble();
     doc.addPage(pw.Page(
-      pageFormat: PdfPageFormat(80 * PdfPageFormat.mm, hMm * PdfPageFormat.mm),
-      margin: const pw.EdgeInsets.symmetric(horizontal: 2, vertical: 4),
+      pageFormat:
+          PdfPageFormat(EscPos.paperWidthMm * PdfPageFormat.mm, hMm * PdfPageFormat.mm),
+      margin: _paperMargin,
       build: (ctx) => pw.Column(
         crossAxisAlignment: pw.CrossAxisAlignment.center,
         mainAxisSize: pw.MainAxisSize.min,

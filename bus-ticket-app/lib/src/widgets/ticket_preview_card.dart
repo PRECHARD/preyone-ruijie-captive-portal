@@ -102,7 +102,7 @@ class TicketPreviewCard extends StatelessWidget {
                   const SizedBox(height: 14),
                   _divider(),
                   const SizedBox(height: 14),
-                  if (hasItems) ...[
+                  if (hasItems || isLuggageType(data.ticketType)) ...[
                     _fareSection(),
                     const SizedBox(height: 10),
                   ],
@@ -480,8 +480,9 @@ class TicketPreviewCard extends StatelessWidget {
   }
 
   Widget _customerSection() {
-    final name =
-        data.customerName.trim().isEmpty ? '-' : up(data.customerName.trim());
+    // A blank walk-in name renders as "N/A" in the on-screen preview too, so it
+    // matches the printed ticket row for row.
+    final name = up(displayPassengerName(data.customerName));
     return Column(
       children: [
         _staffRow('PASSENGER', name, ''),
@@ -492,6 +493,29 @@ class TicketPreviewCard extends StatelessWidget {
   }
 
   Widget _fareSection() {
+    // A luggage slip states the item TYPE only. The typed description ("Trunk
+    // box") and the quantity/amount breakdown stay in the sale record but are
+    // never shown here, because they never print on the 58mm paper either.
+    if (isLuggageType(data.ticketType)) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 4),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                kLuggageItemLabel,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w500,
+                  color: _ink,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
     return Column(
       children: [
         for (final i in data.items)

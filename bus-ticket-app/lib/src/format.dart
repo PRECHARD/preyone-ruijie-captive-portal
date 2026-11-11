@@ -24,6 +24,22 @@ String two(int n) => n.toString().padLeft(2, '0');
 /// registrations, vehicle details). Empty and null-safe.
 String up(String? value) => value == null ? '' : value.trim().toUpperCase();
 
+/// What a ticket shows when there is no passenger name to show.
+const String kNoPassengerName = 'N/A';
+
+/// Display value for a passenger name.
+///
+/// Returns [kNoPassengerName] when the name is empty, null, or the sale was
+/// explicitly recorded as a walk-in; otherwise the trimmed name as stored. The
+/// rule is deliberately display-only — nothing here rewrites the stored value,
+/// so sync, exports and the server keep the true (blank) name, and a walk-in
+/// never turns into a fabricated passenger called "N/A" on the way upstream.
+String displayPassengerName(String? name, {bool isWalkIn = false}) {
+  final value = name?.trim() ?? '';
+  if (isWalkIn || value.isEmpty) return kNoPassengerName;
+  return value;
+}
+
 /// Printable label for a payment method. Only 'cash' and 'ecocash' are
 /// offered by the app; anything stored historically ('one_money', 'mobile',
 /// …) still renders legibly so old receipts keep meaning.

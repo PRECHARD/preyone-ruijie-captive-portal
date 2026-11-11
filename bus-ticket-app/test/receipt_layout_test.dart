@@ -2,6 +2,8 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:bus_ticket_app/src/models.dart';
 import 'package:bus_ticket_app/src/receipt.dart';
+import 'package:bus_ticket_app/src/format.dart';
+import 'package:bus_ticket_app/src/esc/esc_pos.dart';
 
 TicketData _ticket({
   String companyName = 'Mupota Bus Service',
@@ -328,6 +330,39 @@ void main() {
         reason: 'the luggage statement ends intact with no dropped words');
   });
 
+  test('luggage ticket prints LUGGAGE ONLY, never the typed description', () {
+    final luggage = _ticket(
+      ticketType: 'LUGGAGE TICKET',
+      note: kLuggageNote,
+      items: [
+        SaleItem(name: '2 boxes of maize', price: 2000, qty: 2, total: 4000),
+      ],
+    );
+    final lines = buildTicketLines(luggage);
+    final texts = lines.map((l) => l.text.trim()).toList();
+    expect(texts, contains(formatRow('ITEM:', kLuggageItemLabel)),
+        reason: 'the item row states the type only');
+    expect(texts.any((t) => t.contains('MAIZE')), isFalse,
+        reason: 'the operator-typed luggage description never prints');
+    expect(texts.any((t) => t.startsWith('QTY:')), isFalse,
+        reason: 'no quantity / amount breakdown on a luggage slip');
+    // The slip still carries the fare and the payment breakdown.
+    expect(texts.any((t) => t.startsWith('TOTAL FARE')), isTrue);
+    final ascii = String.fromCharCodes(
+        buildTicket(luggage).where((b) => b >= 32 && b < 127));
+    expect(ascii, contains(kLuggageItemLabel));
+    expect(ascii, isNot(contains('MAIZE')));
+  });
+
+  test('bus ticket items keep their description and breakdown', () {
+    final lines = buildTicketLines(_ticket(items: [
+      SaleItem(name: 'Adult fare', price: 500, qty: 2, total: 1000),
+    ]));
+    final texts = lines.map((l) => l.text.trim()).toList();
+    expect(texts, contains(formatRow('ITEM:', 'ADULT FARE')));
+    expect(texts, contains(formatRow('QTY: 2 pcs', 'USD 10.00')));
+  });
+
   test('buildTicket no longer emits a QR code for the thermal printout', () {
     final bytes = buildTicket(_ticket());
     expect(listContains(bytes, [0x31, 0x41, 0x32]), isFalse,
@@ -392,17 +427,21 @@ void main() {
     String driverPhone = '',
     String conductor1 = '',
     String conductorPhone = '',
+    int total = 500,
+    List<SaleItem> items = const [],
+    String ticketType = 'busFare',
   }) =>
       Sale(
         receiptNo: receiptNo,
-        items: const [],
-        total: 500,
-        cash: 500,
+        items: items,
+        total: total,
+        cash: total,
         change: 0,
         driver: driver,
         driverPhone: driverPhone,
         conductor1: conductor1,
         conductorPhone: conductorPhone,
+        ticketType: ticketType,
         createdAt: DateTime(2026, 9, 22, 9, 0),
       );
 
@@ -435,6 +474,70 @@ void main() {
         startedAt: DateTime(2026, 9, 22, 5, 30),
         closedAt: DateTime(2026, 9, 22, 18, 0),
       );
+
+  group('58mm column budget', () {
+    test('no ticket or manifest row exceeds its column budget', () {
+      final longTicket = _ticket(
+        companyName: 'Mupota Bus Services Harare Zimbabwe',
+        customerName: 'A very long passenger name indeed yes',
+        items: [
+          SaleItem(
+              name: 'A very long item description that used to overflow',
+              price: 500,
+              qty: 2,
+              total: 1000),
+        ],
+      );
+      final luggage = _ticket(
+        ticketType: 'LUGGAGE TICKET',
+        note: kLuggageNote,
+        items: [
+          SaleItem(name: 'Assorted goods', price: 2000, qty: 1, total: 2000),
+        ],
+      );
+      final manifest = buildTripManifestLines(
+        companyName: 'Mupota Bus Services Harare Zimbabwe',
+        currency: 'USD',
+        trip: mkTrip(),
+        tickets: [mkSale(), mkSale(ticketType: 'luggage')],
+      );
+      final eod = buildReportLines(
+        companyName: 'Mupota Bus Services Harare Zimbabwe',
+        currency: 'USD',
+        from: DateTime(2026, 9, 22),
+        to: DateTime(2026, 9, 22, 23, 59),
+        sales: [
+          mkSale(total: 123456789),
+          mkSale(
+            receiptNo: 'L-0002',
+            total: 500,
+            ticketType: 'luggage',
+            items: [SaleItem(name: 'Assorted goods', price: 500, qty: 1, total: 500)],
+          ),
+        ],
+      );
+      for (final l in [
+        ...buildTicketLines(longTicket),
+        ...buildTicketLines(luggage),
+        ...manifest,
+        ...eod,
+      ]) {
+        expect(l.text.length, lessThanOrEqualTo(lineColumnBudget(l)),
+            reason: '"${l.text}" (${l.text.length} cols) overflows the '
+                '${lineColumnBudget(l)}-column 58mm budget');
+      }
+    });
+
+    test('a 58mm receipt is 32 Font A columns / 42 Font B columns', () {
+      expect(EscPos.paperWidthMm, 58);
+      expect(EscPos.paperWidthPx, 225);
+      expect(EscPos.columnsFor(), 32);
+      expect(EscPos.columnsFor(small: true), 42);
+      expect(EscPos.columnsFor(big: true), 16,
+          reason: 'a double-width company name halves the budget');
+      expect(EscPos.columnsFor(small: true, big: true), 21);
+    });
+  });
 
   group('trip manifest header', () {
     test(
@@ -545,7 +648,7 @@ void main() {
   });
 
   group('trip manifest rows', () {
-    test('walk-in rows print a world-standard dash, not WALK-IN PASSENGER', () {
+    test('walk-in rows print N/A, never a dash or WALK-IN PASSENGER', () {
       final lines = buildTripManifestLines(
         companyName: 'Mupota Bus',
         currency: 'USD',
@@ -557,8 +660,8 @@ void main() {
       expect(texts.any((t) => t.contains('WALK-IN')), isFalse,
           reason: 'the manifest must not fabricate a WALK-IN PASSENGER name');
       final seatRow = texts.firstWhere((t) => t.startsWith('S--'));
-      expect(seatRow, contains('-'),
-          reason: 'an unnamed passenger prints a dash as the name');
+      expect(seatRow, contains('N/A'),
+          reason: 'an unnamed passenger prints N/A as the name');
       expect(seatRow, contains('USD 5.00'),
           reason: 'the fare stays on the passenger row');
       final tktRow = texts.firstWhere((t) => t.startsWith('#R-0001'));
@@ -605,7 +708,7 @@ void main() {
         'cash': 500,
       });
       expect(sale.customerName, '',
-          reason: 'no name must stay empty so manifests print the dash');
+          reason: 'no name must stay empty; displays fall back to N/A');
       final named = Sale.fromJson(const {
         'receipt_no': 'R-0100',
         'customer_name': 'Tapiwa Moyo',
@@ -679,6 +782,101 @@ void main() {
       expect(conductorIdx, greaterThan(driverIdx));
       expect(texts, contains('+263784111111'));
       expect(texts.indexOf('END OF DAY REPORT'), greaterThan(conductorIdx));
+    });
+
+    test('header prints TOTAL REVENUE and TOTAL TICKETS SOLD under the date',
+        () {
+      final lines = buildReportLines(
+        companyName: 'Mupota Bus',
+        currency: 'USD',
+        from: DateTime(2026, 9, 22),
+        to: DateTime(2026, 9, 22, 23, 59),
+        sales: [mkSale(), mkSale(receiptNo: 'R-0002', total: 1500)],
+      );
+      final texts = lines.map((l) => l.text.trim()).toList();
+      final dateIdx = texts.indexOf('2026-09-22');
+      final revenueIdx =
+          texts.indexWhere((t) => t.startsWith('TOTAL REVENUE:'));
+      final soldIdx =
+          texts.indexWhere((t) => t.startsWith('TOTAL TICKETS SOLD:'));
+      expect(dateIdx, greaterThanOrEqualTo(0));
+      expect(revenueIdx, greaterThan(dateIdx),
+          reason: 'total revenue belongs in the report header');
+      expect(soldIdx, greaterThan(revenueIdx),
+          reason: 'tickets sold prints directly under the revenue');
+      expect(texts[revenueIdx], formatRow('TOTAL REVENUE:', 'USD 20.00'));
+      expect(texts[soldIdx], formatRow('TOTAL TICKETS SOLD:', '2'));
+      // The totals precede every per-sale row.
+      final firstSaleIdx = texts.indexWhere((t) => t.startsWith('R-0001'));
+      expect(firstSaleIdx, greaterThan(soldIdx));
+      // The old clipped "Tickets: N   TOTAL  X" line is gone.
+      expect(texts.any((t) => t.startsWith('Tickets:')), isFalse);
+    });
+
+    test('each sale prints on two clean rows: amount, then item', () {
+      final lines = buildReportLines(
+        companyName: 'Mupota Bus',
+        currency: 'USD',
+        from: DateTime(2026, 9, 22),
+        to: DateTime(2026, 9, 22, 23, 59),
+        sales: [
+          mkSale(
+            receiptNo: 'R-0007',
+            total: 1000,
+            items: [
+              SaleItem(name: 'Adult fare', price: 500, qty: 2, total: 1000),
+            ],
+          ),
+        ],
+      );
+      final texts = lines.map((l) => l.text.trim()).toList();
+      expect(texts, contains(formatRow('R-0007 09:00', 'USD 10.00')),
+          reason: 'receipt + time + amount on one 32-column row');
+      expect(texts, contains('ADULT FARE X2'));
+      final itemIdx = texts.indexOf('ADULT FARE X2');
+      expect(lines[itemIdx].small, isTrue,
+          reason: 'the item row uses Font B so long names still fit');
+    });
+
+    test('luggage sales report LUGGAGE ONLY, never the typed description', () {
+      final lines = buildReportLines(
+        companyName: 'Mupota Bus',
+        currency: 'USD',
+        from: DateTime(2026, 9, 22),
+        to: DateTime(2026, 9, 22, 23, 59),
+        sales: [
+          mkSale(),
+          mkSale(
+            receiptNo: 'L-0002',
+            total: 2000,
+            ticketType: 'luggage',
+            items: [
+              SaleItem(name: '2 boxes of maize', price: 2000, qty: 1, total: 2000),
+            ],
+          ),
+        ],
+      );
+      final texts = lines.map((l) => l.text.trim()).toList();
+      expect(texts, contains('LUGGAGE ONLY'));
+      expect(texts.any((t) => t.contains('MAIZE')), isFalse,
+          reason: 'the typed luggage content never prints on the report');
+      expect(texts, contains(formatRow('of which luggage:', '1')),
+          reason: 'the report separates luggage slips from passenger tickets');
+    });
+  });
+
+  group('trip manifest luggage marker', () {
+    test('a luggage sale is marked * LUGGAGE ONLY *', () {
+      final lines = buildTripManifestLines(
+        companyName: 'Mupota Bus',
+        currency: 'USD',
+        trip: mkTrip(),
+        tickets: [mkSale(), mkSale(receiptNo: 'L-0002', ticketType: 'luggage')],
+      );
+      final texts = lines.map((l) => l.text.trim()).toList();
+      expect(texts, contains('* $kLuggageItemLabel *'));
+      expect(texts.where((t) => t.contains('LUGGAGE')).length, 1,
+          reason: 'exactly one marker row per luggage ticket');
     });
   });
 
