@@ -6,7 +6,7 @@
   position: relative;
   min-height: 100vh;
   overflow: hidden;
-  background: #0d0119;
+  background: #070a18;
   isolation: isolate;
 }
 
@@ -16,13 +16,14 @@
   inset: 0;
   z-index: -3;
   background:
-    radial-gradient(1250px 820px at 4% -18%, rgba(126, 34, 226, 0.82), transparent 60%),
-    radial-gradient(980px 700px at 97% -8%, rgba(168, 32, 255, 0.5), transparent 62%),
-    radial-gradient(1180px 880px at 48% 112%, rgba(88, 28, 235, 0.78), transparent 66%),
-    linear-gradient(180deg, #170533 0%, #100223 46%, #1b0538 100%);
+    radial-gradient(1250px 820px at 2% -20%, rgba(88, 48, 172, 0.55), transparent 62%),
+    radial-gradient(1000px 720px at 98% -6%, rgba(74, 58, 190, 0.36), transparent 64%),
+    radial-gradient(700px 520px at 68% 6%, rgba(120, 60, 200, 0.2), transparent 66%),
+    radial-gradient(1180px 900px at 50% 116%, rgba(28, 56, 150, 0.6), transparent 68%),
+    linear-gradient(180deg, #0b0e26 0%, #070b1c 45%, #0a0f28 100%);
 }
 
-/* A restrained scarlet wash so the dense purple never reads as flat. */
+/* A restrained scarlet wash so the navy-purple never reads as flat. */
 .ha-landing::after {
   content: '';
   position: fixed;
@@ -30,8 +31,8 @@
   z-index: -3;
   pointer-events: none;
   background:
-    radial-gradient(640px 430px at 86% 16%, rgba(255, 34, 58, 0.16), transparent 70%),
-    radial-gradient(540px 390px at 4% 66%, rgba(226, 18, 44, 0.12), transparent 72%);
+    radial-gradient(640px 430px at 86% 16%, rgba(255, 34, 58, 0.13), transparent 70%),
+    radial-gradient(540px 390px at 4% 66%, rgba(226, 18, 44, 0.09), transparent 72%);
 }
 
 /* Scarlet hairline is drawn by the fixed navbar's own rail. */
@@ -103,8 +104,8 @@
 
 /* Public pages sit under the fixed header. */
 .ha-landing--nav {
-  padding-top: 84px;
-  scroll-padding-top: 100px;
+  padding-top: 96px;
+  scroll-padding-top: 112px;
 }
 
 .ha-eyebrow {
@@ -198,7 +199,7 @@
   position: fixed;
   inset: 0 0 auto;
   z-index: 60;
-  background: linear-gradient(180deg, rgba(10, 6, 18, 0.78), rgba(10, 6, 18, 0.18));
+  background: linear-gradient(180deg, rgba(7, 11, 26, 0.82), rgba(7, 11, 26, 0.2));
   border-bottom: 1px solid rgba(176, 38, 255, 0);
   transition:
     background 0.28s ease,
@@ -215,13 +216,13 @@
   opacity: 0.6;
 }
 .ha-nav.is-scrolled {
-  background: rgba(8, 5, 16, 0.68);
+  background: rgba(6, 10, 24, 0.72);
   border-bottom-color: rgba(0, 240, 255, 0.16);
   backdrop-filter: blur(24px) saturate(150%);
   -webkit-backdrop-filter: blur(24px) saturate(150%);
   box-shadow:
     0 20px 54px rgba(0, 0, 0, 0.5),
-    0 0 34px rgba(124, 58, 237, 0.14);
+    0 0 34px rgba(124, 58, 237, 0.12);
 }
 .ha-nav-rail {
   position: absolute;
@@ -292,7 +293,7 @@
   inset: -20px -26px;
   z-index: -1;
   border-radius: 40px;
-  background: radial-gradient(58% 90% at 24% 50%, rgba(176, 38, 255, 0.34), transparent 70%);
+  background: radial-gradient(58% 90% at 24% 50%, rgba(118, 146, 255, 0.26), transparent 70%);
   filter: blur(12px);
   opacity: 0.7;
   pointer-events: none;
@@ -305,19 +306,20 @@
   filter: brightness(1.18) drop-shadow(0 0 16px rgba(176, 38, 255, 0.55)) drop-shadow(0 0 34px rgba(0, 240, 255, 0.24));
 }
 .ha-brand--nav .ha-logo {
-  height: 56px;
-  max-width: 272px;
+  height: 68px;
+  max-width: 330px;
+  filter: brightness(0) invert(1) drop-shadow(0 0 18px rgba(255, 255, 255, 0.2));
   transition: height 0.24s ease, filter 0.24s ease;
 }
 .ha-nav.is-scrolled .ha-brand--nav .ha-logo {
-  height: 48px;
-  filter: brightness(1.24) drop-shadow(0 0 14px rgba(176, 38, 255, 0.6)) drop-shadow(0 0 28px rgba(0, 240, 255, 0.3));
+  height: 60px;
+  filter: brightness(0) invert(1) drop-shadow(0 0 16px rgba(255, 255, 255, 0.24));
 }
 .ha-brand-divider {
   width: 1px;
-  height: 38px;
-  background: linear-gradient(180deg, transparent, rgba(0, 240, 255, 0.5), transparent);
-  box-shadow: 0 0 10px rgba(0, 240, 255, 0.3);
+  height: 42px;
+  background: linear-gradient(180deg, transparent, rgba(255, 255, 255, 0.55), transparent);
+  box-shadow: 0 0 10px rgba(255, 255, 255, 0.22);
 }
 .ha-brand-stack {
   display: flex;
@@ -1472,9 +1474,9 @@ a.ha-contact-channel:hover {
 /* ── Responsive ───────────────────────────────────────────────────── */
 
 @media (max-width: 1360px) {
-  .ha-brand--nav { gap: 10px; }
-  .ha-brand--nav .ha-logo { height: 50px; max-width: 240px; }
-  .ha-nav.is-scrolled .ha-brand--nav .ha-logo { height: 44px; }
+  .ha-brand--nav { gap: 12px; }
+  .ha-brand--nav .ha-logo { height: 60px; max-width: 290px; }
+  .ha-nav.is-scrolled .ha-brand--nav .ha-logo { height: 52px; }
   .ha-brand-stack strong { font-size: 13px; letter-spacing: 0.12em; }
   .ha-brand-kicker { font-size: 8px; letter-spacing: 0.24em; }
   .ha-nav-links { font-size: 10px; letter-spacing: 0.1em; }
@@ -1521,7 +1523,7 @@ a.ha-contact-channel:hover {
   .ha-landing--nav { padding-top: 72px; }
   .ha-brand--nav { gap: 0; }
   .ha-brand--nav .ha-logo,
-  .ha-nav.is-scrolled .ha-brand--nav .ha-logo { height: 44px; max-width: 210px; }
+  .ha-nav.is-scrolled .ha-brand--nav .ha-logo { height: 48px; max-width: 230px; }
   .ha-brand-divider,
   .ha-brand-stack { display: none; }
   .ha-nav-login { display: none; }
@@ -1563,7 +1565,7 @@ a.ha-contact-channel:hover {
   .ha-btn-lg { width: 100%; }
   .ha-nav-actions .ha-btn-primary { display: none; }
   .ha-brand--nav .ha-logo,
-  .ha-nav.is-scrolled .ha-brand--nav .ha-logo { height: 38px; max-width: 180px; }
+  .ha-nav.is-scrolled .ha-brand--nav .ha-logo { height: 42px; max-width: 200px; }
   .ha-nav-inner { width: calc(100% - 24px); }
   .ha-page-hero-copy h1 { letter-spacing: -1.6px; }
   .ha-page-visual { min-height: 240px; }
