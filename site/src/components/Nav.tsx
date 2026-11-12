@@ -74,7 +74,7 @@ function DesktopMenuItem({
   const external = link.external || isExternalHref(link.to)
   const fullLoad = external || link.to.startsWith('/starlink')
   const hasMenu = Boolean(link.menu?.length)
-  const triggerClass = `highlight-line flex items-center gap-1 whitespace-nowrap text-[10.5px] font-bold uppercase tracking-[0.12em] transition-colors hover:text-fuchsia-300 ${
+  const triggerClass = `highlight-line whitespace-nowrap text-[10.5px] font-bold uppercase tracking-[0.12em] transition-colors hover:text-fuchsia-300 ${
     fullLoad || open ? 'text-cyan-300' : 'text-slate-300'
   }`
 
@@ -102,10 +102,34 @@ function DesktopMenuItem({
 
   const panelWidth = link.menu?.length && link.key === 'nav.apps' ? 'w-[680px]' : 'w-72'
   const grouped = Boolean(link.menu?.some((group) => group.title))
+  const chevronClass = `flex h-5 w-4 items-center justify-center rounded transition-colors hover:text-fuchsia-300 ${
+    fullLoad || open ? 'text-cyan-300' : 'text-slate-400'
+  }`
+
+  // The label navigates to the section/page; the chevron only toggles the panel.
+  const label = external ? (
+    <a
+      href={link.to}
+      target="_blank"
+      rel="noopener noreferrer"
+      className={triggerClass}
+      onClick={onClose}
+    >
+      {t(link.key)}
+    </a>
+  ) : fullLoad ? (
+    <a href={link.to} className={triggerClass} onClick={onClose}>
+      {t(link.key)}
+    </a>
+  ) : (
+    <Link to={link.to} className={triggerClass} onClick={onClose}>
+      {t(link.key)}
+    </Link>
+  )
 
   return (
     <div
-      className="relative"
+      className="relative flex items-center gap-1"
       onMouseEnter={() => {
         if (canHover()) onOpen()
       }}
@@ -113,15 +137,17 @@ function DesktopMenuItem({
         if (canHover()) onClose()
       }}
     >
+      {label}
+
       <button
         type="button"
-        className={triggerClass}
+        className={chevronClass}
+        aria-label={`${t(link.key)} menu`}
         aria-haspopup="true"
         aria-expanded={open}
         aria-controls={`nav-menu-${link.key}`}
         onClick={onToggle}
       >
-        {t(link.key)}
         <ChevronDown
           size={12}
           className={`transition-transform duration-200 ${open ? 'rotate-180' : ''}`}
@@ -176,8 +202,9 @@ function DesktopMenuItem({
   )
 }
 
-function MobileMenuItem({ link }: { link: NavLink }) {
+function MobileMenuItem({ link, onNavigate }: { link: NavLink; onNavigate: () => void }) {
   const { t } = useI18n()
+  const [expanded, setExpanded] = useState(false)
   const external = link.external || isExternalHref(link.to)
   const fullLoad = external || link.to.startsWith('/starlink')
   const itemClass =
@@ -185,73 +212,99 @@ function MobileMenuItem({ link }: { link: NavLink }) {
 
   if (link.menu?.length) {
     return (
-      <details className="nav-mobile-details">
-        <summary
-          className={`${itemClass} cursor-pointer text-slate-200 hover:bg-white/5 hover:text-white`}
-        >
-          {t(link.key)}
-          <ChevronDown size={15} className="nav-mobile-chevron transition-transform duration-200" />
-        </summary>
-        <div className="mb-1 mt-1 grid gap-0.5 border-l border-white/10 pl-2">
-          {link.menu.map((group, groupIndex) => (
-            <div key={group.title ?? groupIndex} className="min-w-0">
-              {group.title ? (
-                <p className="px-3 pb-1 pt-2 text-[9px] font-bold uppercase tracking-[0.18em] text-cyan-300/80">
-                  {group.title}
-                </p>
-              ) : null}
-              {group.items.map((item) => {
-                const itemExternal = item.external || isExternalHref(item.href)
-                const itemFullLoad = itemExternal || item.href.startsWith('/starlink')
-                const inner = (
-                  <>
-                    <span className="block text-[12.5px] font-semibold text-slate-200">
-                      {item.label}
-                    </span>
-                    {item.desc ? (
-                      <span className="mt-0.5 block text-[11px] text-slate-500">{item.desc}</span>
-                    ) : null}
-                  </>
-                )
-
-                if (itemExternal) {
-                  return (
-                    <a
-                      key={`${item.href}-${item.label}`}
-                      href={item.href}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="block rounded-lg px-3 py-2 transition-colors hover:bg-white/5"
-                    >
-                      {inner}
-                    </a>
-                  )
-                }
-                if (itemFullLoad) {
-                  return (
-                    <a
-                      key={`${item.href}-${item.label}`}
-                      href={item.href}
-                      className="block rounded-lg px-3 py-2 transition-colors hover:bg-white/5"
-                    >
-                      {inner}
-                    </a>
-                  )
-                }
-                return (
-                  <Link
-                    key={`${item.href}-${item.label}`}
-                    to={item.href}
-                    className="block rounded-lg px-3 py-2 transition-colors hover:bg-white/5"
-                  >
-                    {inner}
-                  </Link>
-                )
-              })}
-            </div>
-          ))}
+      <div className="nav-mobile-details">
+        <div className="flex items-center gap-1">
+          <Link
+            to={link.to}
+            onClick={onNavigate}
+            className={`${itemClass} flex-1 text-slate-200 hover:bg-white/5 hover:text-white`}
+          >
+            {t(link.key)}
+          </Link>
+          <button
+            type="button"
+            onClick={() => setExpanded((v) => !v)}
+            aria-expanded={expanded}
+            aria-controls={`mobile-menu-${link.key}`}
+            aria-label={`${t(link.key)} menu`}
+            className="flex h-10 w-10 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-white/5 hover:text-white"
+          >
+            <ChevronDown
+              size={15}
+              className={`nav-mobile-chevron transition-transform duration-200 ${
+                expanded ? 'rotate-180' : ''
+              }`}
+            />
+          </button>
         </div>
-      </details>
+        {expanded ? (
+          <div
+            id={`mobile-menu-${link.key}`}
+            className="mb-1 mt-1 grid gap-0.5 border-l border-white/10 pl-2"
+          >
+            {link.menu.map((group, groupIndex) => (
+              <div key={group.title ?? groupIndex} className="min-w-0">
+                {group.title ? (
+                  <p className="px-3 pb-1 pt-2 text-[9px] font-bold uppercase tracking-[0.18em] text-cyan-300/80">
+                    {group.title}
+                  </p>
+                ) : null}
+                {group.items.map((item) => {
+                  const itemExternal = item.external || isExternalHref(item.href)
+                  const itemFullLoad = itemExternal || item.href.startsWith('/starlink')
+                  const inner = (
+                    <>
+                      <span className="block text-[12.5px] font-semibold text-slate-200">
+                        {item.label}
+                      </span>
+                      {item.desc ? (
+                        <span className="mt-0.5 block text-[11px] text-slate-500">{item.desc}</span>
+                      ) : null}
+                    </>
+                  )
+
+                  if (itemExternal) {
+                    return (
+                      <a
+                        key={`${item.href}-${item.label}`}
+                        href={item.href}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={onNavigate}
+                        className="block rounded-lg px-3 py-2 transition-colors hover:bg-white/5"
+                      >
+                        {inner}
+                      </a>
+                    )
+                  }
+                  if (itemFullLoad) {
+                    return (
+                      <a
+                        key={`${item.href}-${item.label}`}
+                        href={item.href}
+                        onClick={onNavigate}
+                        className="block rounded-lg px-3 py-2 transition-colors hover:bg-white/5"
+                      >
+                        {inner}
+                      </a>
+                    )
+                  }
+                  return (
+                    <Link
+                      key={`${item.href}-${item.label}`}
+                      to={item.href}
+                      onClick={onNavigate}
+                      className="block rounded-lg px-3 py-2 transition-colors hover:bg-white/5"
+                    >
+                      {inner}
+                    </Link>
+                  )
+                })}
+              </div>
+            ))}
+          </div>
+        ) : null}
+      </div>
     )
   }
 
@@ -261,6 +314,7 @@ function MobileMenuItem({ link }: { link: NavLink }) {
         href={link.to}
         target="_blank"
         rel="noopener noreferrer"
+        onClick={onNavigate}
         className={`${itemClass} text-cyan-300 hover:bg-cyan-400/10 hover:text-cyan-200`}
       >
         {link.label}
@@ -273,6 +327,7 @@ function MobileMenuItem({ link }: { link: NavLink }) {
     return (
       <a
         href={link.to}
+        onClick={onNavigate}
         className={`${itemClass} text-cyan-300 hover:bg-cyan-400/10 hover:text-cyan-200`}
       >
         {link.label}
@@ -283,6 +338,7 @@ function MobileMenuItem({ link }: { link: NavLink }) {
   return (
     <Link
       to={link.to}
+      onClick={onNavigate}
       className={`${itemClass} text-slate-200 hover:bg-fuchsia-400/10 hover:text-fuchsia-300`}
     >
       {link.label}
@@ -388,7 +444,11 @@ export function Nav() {
           >
             <nav className="container-site flex flex-col gap-1 py-4" aria-label="Mobile">
               {NAV_LINKS.map((link) => (
-                <MobileMenuItem key={link.key} link={link} />
+                <MobileMenuItem
+                  key={link.key}
+                  link={link}
+                  onNavigate={() => setOpen(false)}
+                />
               ))}
               <div className="mt-3 flex items-center justify-between px-3">
                 <LanguageSwitcher />
