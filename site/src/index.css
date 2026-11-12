@@ -106,7 +106,32 @@
   }
 }
 
+@keyframes navDropIn {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nav-glass-panel {
+    animation: none;
+  }
+}
+
 @layer components {
+  /* Mobile menu needs to hide page content behind it, not just tint it. */
+  .nav-mobile-panel {
+    background: rgba(9, 11, 26, 0.97);
+    border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+    -webkit-backdrop-filter: blur(22px) saturate(1.6);
+    backdrop-filter: blur(22px) saturate(1.6);
+    box-shadow: 0 24px 60px rgba(5, 6, 15, 0.6);
+  }
   .container-site {
     @apply mx-auto w-full max-w-7xl px-5 sm:px-8 lg:px-10;
   }
@@ -123,6 +148,42 @@
     backdrop-filter: blur(22px) saturate(1.6);
     -webkit-backdrop-filter: blur(22px) saturate(1.6);
     border: 1px solid rgba(148, 163, 184, 0.16);
+  }
+
+  /* Frosted dropdown, matched to the wifi.preyone.com payment modal. */
+  .nav-glass-panel {
+    background: rgba(18, 18, 24, 0.75);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 18px;
+    -webkit-backdrop-filter: blur(12px) saturate(1.35);
+    backdrop-filter: blur(12px) saturate(1.35);
+    box-shadow:
+      0 24px 70px rgba(0, 0, 0, 0.55),
+      inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    animation: navDropIn 180ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .nav-menu-item {
+    display: block;
+    border-radius: 12px;
+    padding: 9px 12px;
+    transition: background-color 0.18s ease, color 0.18s ease;
+  }
+
+  .nav-menu-item:hover {
+    background: rgba(255, 255, 255, 0.06);
+  }
+
+  .nav-mobile-details > summary {
+    list-style: none;
+  }
+
+  .nav-mobile-details > summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .nav-mobile-details[open] .nav-mobile-chevron {
+    transform: rotate(180deg);
   }
 
   .text-gradient {

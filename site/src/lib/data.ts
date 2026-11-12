@@ -18,19 +18,94 @@ import {
 } from 'lucide-react'
 
 /* ── Navigation ─────────────────────────────────────────── */
-export type NavLink = { label: string; to: string; key: string }
+export type NavMenuLink = {
+  label: string
+  desc?: string
+  href: string
+  external?: boolean
+}
+
+export type NavMenuGroup = { title?: string; items: NavMenuLink[] }
+
+export type NavLink = {
+  label: string
+  to: string
+  key: string
+  external?: boolean
+  menu?: NavMenuGroup[]
+}
+
+export const STARLINK_MENU: NavMenuGroup[] = [
+  {
+    items: [
+      { label: 'Starlink Internet', desc: 'Kits, plans & installation', href: '/#starlink' },
+      { label: 'Starlink Portal', desc: 'Manage your Starlink service', href: '/starlink/portal' },
+    ],
+  },
+]
+
+export const APP_MENU: NavMenuGroup[] = [
+  {
+    title: 'Networks & Connectivity',
+    items: [
+      {
+        label: 'Preyone UltraNet Wi-Fi',
+        desc: 'Captive portal & hotspot',
+        href: 'https://wifi.preyone.com',
+        external: true,
+      },
+      { label: 'Cloud Hosting / DNS', desc: 'Domains, hosting & DNS', href: '/services' },
+    ],
+  },
+  {
+    title: 'Business & Commerce',
+    items: [
+      {
+        label: 'Preyone POS',
+        desc: 'Point of sale & stock control',
+        href: 'https://pos.preyone.com',
+        external: true,
+      },
+      {
+        label: 'Invoice & Quote System',
+        desc: 'Invoices, quotes & AR aging',
+        href: 'https://invoice.preyone.com',
+        external: true,
+      },
+      {
+        label: 'Business Billing & Payments',
+        desc: 'Subscriptions & payment records',
+        href: 'https://admin.preyone.com',
+        external: true,
+      },
+    ],
+  },
+  {
+    title: 'Logistics & Fleet',
+    items: [
+      {
+        label: 'Preyone Transit',
+        desc: 'Fleet logging & management',
+        href: '/business-apps/transit360',
+      },
+    ],
+  },
+]
 
 export const NAV_LINKS: NavLink[] = [
   { label: 'Home', to: '/', key: 'nav.home' },
-  { label: 'Starlink', to: '/#starlink', key: 'nav.starlink' },
-  { label: 'Starlink Portal', to: '/starlink/portal', key: 'nav.portal' },
+  { label: 'Starlink', to: '/#starlink', key: 'nav.starlink', menu: STARLINK_MENU },
   { label: 'Hardware', to: '/#hardware', key: 'nav.hardware' },
   { label: 'Services', to: '/services', key: 'nav.services' },
-  { label: 'Business Apps', to: '/business-apps', key: 'nav.apps' },
-  { label: 'Home Automate', to: 'https://homeautomate.preyone.com', key: 'nav.homeAutomate' },
+  { label: 'Business Apps', to: '/business-apps', key: 'nav.apps', menu: APP_MENU },
+  {
+    label: 'Home Automate',
+    to: 'https://homeautomate.preyone.com',
+    key: 'nav.homeAutomate',
+    external: true,
+  },
   { label: 'Portfolio', to: '/portfolio', key: 'nav.portfolio' },
   { label: 'Pay Invoice', to: '/payment', key: 'nav.pay' },
-  { label: 'Contact', to: '/#contact', key: 'nav.contact' },
 ]
 
 /* ── Stats ──────────────────────────────────────────────── */
