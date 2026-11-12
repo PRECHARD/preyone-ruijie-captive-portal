@@ -39,7 +39,12 @@ export const STARLINK_MENU: NavMenuGroup[] = [
   {
     items: [
       { label: 'Starlink Internet', desc: 'Kits, plans & installation', href: '/#starlink' },
-      { label: 'Starlink Portal', desc: 'Manage your Starlink service', href: '/starlink/portal' },
+      {
+        label: 'Starlink Portal',
+        desc: 'Manage your Starlink service',
+        href: 'https://starlink.preyone.com/',
+        external: true,
+      },
     ],
   },
 ]
