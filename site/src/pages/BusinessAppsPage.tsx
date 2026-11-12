@@ -1,9 +1,11 @@
-import { ArrowRight, CheckCircle2, ExternalLink, Sparkles } from 'lucide-react'
+import { ArrowRight, CheckCircle2, Download, Sparkles } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { CountUp } from '../components/CountUp'
 import { Reveal } from '../components/Reveal'
 import { SectionHeading } from '../components/SectionHeading'
+import { TrustBand } from '../components/TrustBand'
 import { usePageMeta } from '../hooks/usePageMeta'
+import { useI18n } from '../lib/i18n'
 import {
   LEAD_TO_CASH,
   LOCAL_FEATURES,
@@ -58,41 +60,35 @@ function ProductCard({ product, index }: { product: SuiteProduct; index: number 
           ))}
         </ul>
 
-        {live ? (
-          product.external ? (
-            <a
-              href={product.href}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="mt-6 inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-widest text-cyan-300 transition-colors hover:text-white"
-            >
-              Open app
-              <ExternalLink size={13} />
-            </a>
-          ) : (
-            <Link
-              to={product.href}
-              className="mt-6 inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-widest text-cyan-300 transition-colors hover:text-white"
-            >
-              Talk to us
-              <ArrowRight size={14} />
-            </Link>
-          )
-        ) : (
+        <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
           <Link
-            to="/#contact"
-            className="mt-6 inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-widest text-slate-400 transition-colors hover:text-white"
+            to={`/business-apps/${product.slug}`}
+            className={`inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-widest transition-colors hover:text-white ${
+              live ? 'text-cyan-300' : 'text-slate-400'
+            }`}
           >
-            Register interest
+            Learn more
             <ArrowRight size={14} />
           </Link>
-        )}
+          {product.download ? (
+            <a
+              href={product.download.href}
+              download={product.download.filename}
+              className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-widest text-fuchsia-300 transition-colors hover:text-white"
+            >
+              <Download size={13} />
+              Download app
+            </a>
+          ) : null}
+        </div>
       </article>
     </Reveal>
   )
 }
 
 export function BusinessAppsPage() {
+  const { t } = useI18n()
+
   usePageMeta(
     'Preyone 360 — One suite for every part of your business',
     'Preyone 360 brings POS, invoicing, Wi-Fi, transit, home automation and a multi-tenant console together — priced per app, one login, built for Zimbabwe.',
@@ -103,21 +99,21 @@ export function BusinessAppsPage() {
       <section className="relative pt-44 pb-8">
         <div className="container-site">
           <SectionHeading
-            label="Preyone 360"
-            title="One suite. Every part of your business."
-            desc="Start with the app you need. Add POS, invoicing, Wi-Fi, transit, home automation and more — one login, one shared record, priced app by app."
+            label={t('suite.label')}
+            title={t('suite.title')}
+            desc={t('suite.desc')}
           />
           <Reveal delay={0.1}>
             <div className="flex flex-col items-center justify-center gap-3 sm:flex-row">
               <Link to="/#contact" className="btn-primary px-7 py-3.5 text-sm uppercase tracking-wide">
-                Book a 20-minute demo
+                {t('cta.demo')}
                 <ArrowRight size={16} />
               </Link>
               <a
                 href="#apps"
                 className="glass inline-flex items-center gap-2 rounded-xl px-7 py-3.5 text-sm font-bold uppercase tracking-wide text-slate-200 transition-colors hover:text-white"
               >
-                Explore the apps
+                {t('cta.explore')}
                 <Sparkles size={15} />
               </a>
             </div>
@@ -270,26 +266,10 @@ export function BusinessAppsPage() {
         </div>
       </section>
 
-      <section className="relative py-20">
-        <div className="container-site">
-          <Reveal delay={0.1}>
-            <div className="glass glow-cyan mx-auto flex max-w-4xl flex-col items-center justify-between gap-6 rounded-3xl px-8 py-10 text-center sm:flex-row sm:text-left">
-              <div>
-                <h3 className="font-display text-3xl tracking-wide text-white sm:text-4xl">
-                  Outgrown your current setup?
-                </h3>
-                <p className="mt-1 text-sm text-slate-400">
-                  Bring your data, keep your workflows, and go live without a long implementation.
-                </p>
-              </div>
-              <Link to="/#contact" className="btn-primary shrink-0 px-7 py-3.5 text-sm uppercase tracking-wide">
-                Talk to our team
-                <ArrowRight size={16} />
-              </Link>
-            </div>
-          </Reveal>
-        </div>
-      </section>
+      <TrustBand
+        title="Outgrown your current setup?"
+        desc="Bring your data, keep your workflows, and go live without a long implementation."
+      />
     </>
   )
 }

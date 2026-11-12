@@ -77,6 +77,11 @@ export function Footer() {
       </div>
 
       <div className="footer-bottom">
+        <div className="mb-6 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-[11px] font-bold uppercase tracking-widest text-slate-400">
+          <Link to="/business-apps" className="transition-colors hover:text-white">Business Apps</Link>
+          <Link to="/pricing" className="transition-colors hover:text-white">Pricing</Link>
+          <Link to="/partners" className="transition-colors hover:text-white">Partners</Link>
+        </div>
         <div className="legal-row">
           <p>&copy; {new Date().getFullYear()} Preyone Enterprises. All Rights Reserved.</p>
           <div className="payment-badges">

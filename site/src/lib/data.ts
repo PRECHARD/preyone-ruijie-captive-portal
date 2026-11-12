@@ -18,18 +18,19 @@ import {
 } from 'lucide-react'
 
 /* ── Navigation ─────────────────────────────────────────── */
-export type NavLink = { label: string; to: string }
+export type NavLink = { label: string; to: string; key: string }
 
 export const NAV_LINKS: NavLink[] = [
-  { label: 'Home', to: '/' },
-  { label: 'Starlink', to: '/#starlink' },
-  { label: 'Starlink Portal', to: '/starlink/portal' },
-  { label: 'Hardware', to: '/#hardware' },
-  { label: 'Services', to: '/services' },
-  { label: 'Business Apps', to: '/business-apps' },
-  { label: 'Portfolio', to: '/portfolio' },
-  { label: 'Pay Invoice', to: '/payment' },
-  { label: 'Contact', to: '/#contact' },
+  { label: 'Home', to: '/', key: 'nav.home' },
+  { label: 'Starlink', to: '/#starlink', key: 'nav.starlink' },
+  { label: 'Starlink Portal', to: '/starlink/portal', key: 'nav.portal' },
+  { label: 'Hardware', to: '/#hardware', key: 'nav.hardware' },
+  { label: 'Services', to: '/services', key: 'nav.services' },
+  { label: 'Business Apps', to: '/business-apps', key: 'nav.apps' },
+  { label: 'Home Automate', to: 'https://homeautomate.preyone.com', key: 'nav.homeAutomate' },
+  { label: 'Portfolio', to: '/portfolio', key: 'nav.portfolio' },
+  { label: 'Pay Invoice', to: '/payment', key: 'nav.pay' },
+  { label: 'Contact', to: '/#contact', key: 'nav.contact' },
 ]
 
 /* ── Stats ──────────────────────────────────────────────── */
