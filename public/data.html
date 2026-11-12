@@ -255,6 +255,15 @@
 </head>
 
 <body class="portal-body">
+  <style>#bootLoading{animation:boot-failsafe .4s ease 8s forwards}@keyframes boot-failsafe{to{opacity:0;visibility:hidden;pointer-events:none}}</style>
+  <div class="body-loading" id="bootLoading" role="status" aria-live="polite">
+    <div class="loading-spinner">
+      <div class="loading-spinner-inner">
+        <img src="/images/faviconloading-80.png" alt="Preyone" width="72" height="72" decoding="async" fetchpriority="high" />
+      </div>
+    </div>
+    <div class="loading-text">Loading data usage…</div>
+  </div>
   <svg aria-hidden="true" style="position:absolute;width:0;height:0">
     <defs>
       <linearGradient id="ring-grad" x1="0%" y1="0%" x2="100%" y2="100%">
@@ -1137,6 +1146,7 @@
       for (var i = 0; i < els.length; i += 1) els[i].textContent = year;
     })();
   </script>
+  <script>(function(){var e=document.getElementById('bootLoading');if(!e)return;var h=function(){e.classList.add('is-hidden')};if(document.readyState==='complete')h();else window.addEventListener('load',h);setTimeout(h,8e3)})();</script>
 </body>
 
 </html>

@@ -14,6 +14,15 @@
   <link rel="stylesheet" href="/css/portal.css?v=52" />
 </head>
 <body class="portal-body">
+  <style>#bootLoading{animation:boot-failsafe .4s ease 8s forwards}@keyframes boot-failsafe{to{opacity:0;visibility:hidden;pointer-events:none}}</style>
+  <div class="body-loading" id="bootLoading" role="status" aria-live="polite">
+    <div class="loading-spinner">
+      <div class="loading-spinner-inner">
+        <img src="/images/faviconloading-80.png" alt="Preyone" width="72" height="72" decoding="async" fetchpriority="high" />
+      </div>
+    </div>
+    <div class="loading-text">Verifying email…</div>
+  </div>
   <header class="portal-header">
     <div class="brand-banner">
       <picture class="brand-logo-picture">
@@ -239,5 +248,6 @@
       for (var i = 0; i < els.length; i += 1) els[i].textContent = year;
     })();
   </script>
+  <script>(function(){var e=document.getElementById('bootLoading');if(!e)return;var h=function(){e.classList.add('is-hidden')};if(document.readyState==='complete')h();else window.addEventListener('load',h);setTimeout(h,8e3)})();</script>
 </body>
 </html>

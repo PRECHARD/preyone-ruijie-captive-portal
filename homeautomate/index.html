@@ -21,9 +21,30 @@
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="Preyone Home" />
     <title>Preyone Home — Intelligent Home Automation</title>
+    <style>
+      /* Boot loader — Preyone Home (violet/cyan theme). */
+      #boot-loader{--bl-bg:#0a0612;--bl-ring:#b026ff,#7c3aed,#2d5bff,#00d4ff,#b026ff;--bl-text:#c084fc,#b026ff,#00d4ff;--bl-glow-1:rgba(176,38,255,.32);--bl-glow-2:rgba(0,212,255,.20);--bl-font:'Inter','Segoe UI',system-ui,-apple-system,sans-serif;position:fixed;inset:0;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:clamp(20px,5vh,40px);background:var(--bl-bg,#0a0612);transition:opacity .4s ease,visibility .4s ease}
+      #root:not(:empty)~#boot-loader,#boot-loader.is-hidden{opacity:0;visibility:hidden;pointer-events:none}
+      .boot-spinner{width:clamp(80px,20vw,160px);height:clamp(80px,20vw,160px);border-radius:50%;position:relative;display:flex;align-items:center;justify-content:center;background:conic-gradient(from 0deg,var(--bl-ring));animation:boot-spin 1.4s cubic-bezier(.45,.05,.55,.95) infinite;box-shadow:0 0 clamp(20px,5vw,60px) var(--bl-glow-1),0 0 clamp(40px,8vw,100px) var(--bl-glow-2)}
+      .boot-spinner-inner{width:clamp(60px,15vw,128px);height:clamp(60px,15vw,128px);border-radius:50%;background:var(--bl-bg,#0a0612);display:flex;align-items:center;justify-content:center;position:absolute}
+      .boot-spinner-inner img{width:clamp(32px,8vw,72px);height:clamp(32px,8vw,72px);display:block;animation:boot-pulse 1.5s ease-in-out infinite}
+      .boot-text{font-family:var(--bl-font,'Inter',system-ui,sans-serif);font-size:clamp(11px,2.5vw,16px);font-weight:600;letter-spacing:.2em;text-transform:uppercase;text-align:center;padding:0 1.5rem;background:linear-gradient(90deg,var(--bl-text));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent;animation:boot-pulse-text 1.5s ease-in-out infinite}
+      @keyframes boot-spin{to{transform:rotate(360deg)}}
+      @keyframes boot-pulse{0%,100%{opacity:.6}50%{opacity:1}}
+      @keyframes boot-pulse-text{0%,100%{opacity:.6}50%{opacity:1}}
+      @media (prefers-reduced-motion:reduce){.boot-spinner{animation-duration:3s}.boot-spinner-inner img,.boot-text{animation:none}}
+    </style>
   </head>
   <body>
     <div id="root"></div>
+    <div id="boot-loader" role="status" aria-live="polite" aria-label="Loading Preyone Home">
+      <div class="boot-spinner">
+        <div class="boot-spinner-inner">
+          <img src="/boot-mark.png" alt="Preyone" width="72" height="72" decoding="async" fetchpriority="high" />
+        </div>
+      </div>
+      <div class="boot-text">Loading Preyone Home…</div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
