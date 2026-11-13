@@ -1,0 +1,35 @@
+appId: com.preyone.desktop
+productName: Preyone
+copyright: Copyright © Preyone Enterprises
+directories:
+  output: release
+  buildResources: resources
+files:
+  - dist/**
+  - package.json
+asar: true
+forceCodeSigning: false
+publish:
+  provider: github
+  owner: PRECHARD
+  repo: preyone-ruijie-captive-portal
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: resources/icon.png
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  shortcutName: Preyone
+mac:
+  category: public.app-category.business
+  icon: resources/icon.png
+  target:
+    - target: dmg
+      arch:
+        - x64
+        - arm64
+dmg:
+  title: Preyone
