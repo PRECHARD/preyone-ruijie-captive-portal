@@ -26,6 +26,7 @@ import { DocumentSheet, TemplateThumb, type SheetDoc } from './DocumentSheet';
 import Sidebar, { type View } from './components/Sidebar';
 import SettingsPage from './pages/Settings';
 import AccountingPage from './pages/Accounting';
+import UpgradeModal from './components/UpgradeModal';
 import './document.css';
 
 /* ────────────────────────────── helpers ────────────────────────────── */
@@ -1478,6 +1479,7 @@ export default function App() {
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [loading, setLoading] = useState(true);
   const [authError, setAuthError] = useState(false);
+  const [planBlocked, setPlanBlocked] = useState<string | null>(null);
   const [locked, setLocked] = useState(false);
   const [authNotice, setAuthNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -1513,6 +1515,13 @@ export default function App() {
     setLoading(true);
     setError(null);
     try {
+      const me = await api.get<{ subscribed_modules?: string[]; plan_name?: string | null }>('/api/admin/auth/me');
+      if (!(me.subscribed_modules ?? []).includes('invoice')) {
+        setPlanBlocked(me.plan_name || 'your plan');
+        setLoading(false);
+        return;
+      }
+      setPlanBlocked(null);
       // The catalog is the workspace itself; the palette is cosmetic. A theme
       // 500 (or a slow theme read) must never keep a signed-in user out of the
       // ledger — that is what turned a reserved-word bug into "Failed to fetch".
@@ -1646,6 +1655,16 @@ export default function App() {
           void boot();
         }}
       />
+    );
+  }
+
+  if (planBlocked) {
+    return (
+      <div className="app-shell" style={{ display: 'block', padding: 32 }}>
+        <h1>Invoice is not on your plan</h1>
+        <p>{planBlocked} does not include Invoice. Upgrade to PreBiz or higher to create invoices and quotations.</p>
+        <UpgradeModal onClose={() => undefined} onUpgraded={() => { setPlanBlocked(null); void boot(); }} />
+      </div>
     );
   }
 

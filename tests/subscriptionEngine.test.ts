@@ -34,9 +34,18 @@ const session = vi.hoisted(() => ({ companyId: 'company-1' }));
 
 vi.mock('../src/middleware/company', () => ({
   requireCompany: (req: { company?: unknown }, _res: unknown, next: () => void) => {
-    req.company = { id: session.companyId, name: 'Test Co', modules: ['pos'] };
+    req.company = {
+      id: session.companyId,
+      name: 'Test Co',
+      modules: ['pos', 'invoice'],
+      plan_type: 'growth_20',
+      plan_name: 'PrePro',
+      subscription_status: 'active',
+      subscription_expires_at: null,
+    };
     next();
   },
+  moduleAccess: () => (_req: unknown, _res: unknown, next: () => void) => next(),
 }));
 
 vi.mock('../src/services/notificationService', async (importOriginal) => {

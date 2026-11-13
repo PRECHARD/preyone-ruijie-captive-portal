@@ -1857,6 +1857,19 @@ const SQL = `
       console.warn(`Skipped ecosystem upgrade: ${v3UpgradePath} not found.`);
     }
 
+    // v3.2 workspace columns and v3.3 A4 templates. Both are idempotent.
+    // v3.3 contains its own BEGIN/COMMIT and runs as one script.
+    const v32Path = path.resolve(__dirname, '../../db/migrations/v3_2_ecosystem.sql');
+    if (fs.existsSync(v32Path)) {
+      await client.query(fs.readFileSync(v32Path, 'utf8'));
+      console.log('Applied db/migrations/v3_2_ecosystem.sql.');
+    }
+    const v33Path = path.resolve(__dirname, '../../db/migrations/v3_3_invoice_a4_templates.sql');
+    if (fs.existsSync(v33Path)) {
+      await client.query(fs.readFileSync(v33Path, 'utf8'));
+      console.log('Applied db/migrations/v3_3_invoice_a4_templates.sql.');
+    }
+
     // Enterprise accounting ledger + stock_applied idempotency flag.
     const v4AccountingPath = path.resolve(__dirname, '../../db/migrations/v4_accounting_ledger.sql');
     if (fs.existsSync(v4AccountingPath)) {
@@ -1873,6 +1886,18 @@ const SQL = `
       console.log('Applied db/migrations/v5_subscription_invoicing_15.sql (invoicing_15 tier).');
     } else {
       console.warn(`Skipped subscription tier upgrade: ${v5SubPath} not found.`);
+    }
+
+    // Canonical PreBiz id (pos_invoice_15). Renames any invoicing_15 rows first,
+    // then installs subscriptions, the device cap, and the electron device type.
+    // Runs after v5 so a database that already applied the older $15 check
+    // is rewritten instead of rejected.
+    const v4PlanPath = path.resolve(__dirname, '../../db/migrations/v4_plan_entitlements.sql');
+    if (fs.existsSync(v4PlanPath)) {
+      await client.query(fs.readFileSync(v4PlanPath, 'utf8'));
+      console.log('Applied db/migrations/v4_plan_entitlements.sql (PreBiz entitlements).');
+    } else {
+      console.warn(`Skipped plan entitlements: ${v4PlanPath} not found.`);
     }
 
     console.log('Migration complete. Packages + transit + RBAC seeded.');

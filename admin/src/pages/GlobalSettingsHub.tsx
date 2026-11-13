@@ -268,7 +268,7 @@ export default function GlobalSettingsHub() {
               <div className="auth-field">
                 <label>Plan</label>
                 <div className="hint">
-                  {plan?.plan_type ?? '—'} · {plan?.subscription_status ?? 'unknown'}
+                  {catalogue?.planTiers.find((t) => t.id === plan?.plan_type)?.name ?? plan?.plan_type ?? '—'} · {plan?.subscription_status ?? 'unknown'}
                   {plan?.max_devices ? ` · up to ${plan.max_devices >= 9999 ? 'unlimited' : plan.max_devices} device(s)` : ''}
                 </div>
                 <button className="btn-secondary" onClick={() => setShowUpgrade(true)}>Upgrade my plan</button>
@@ -608,6 +608,7 @@ function UpgradeModal({ tiers, currentPlan, onClose, onUpgraded }: {
                 <span className="gsh-tier-name">{t.name}</span>
                 <span className="gsh-tier-price">${t.price}<small>/mo</small></span>
                 <span className="gsh-tier-devices">{t.devices >= 9999 ? 'Unlimited devices' : `${t.devices} device(s)`}</span>
+                {t.tagline ? <span className="hint">{t.tagline}</span> : null}
               </button>
             ))}
           </div>

@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import rateLimit from 'express-rate-limit';
 import { pool } from '../db/pool';
+import { loadCompany } from '../middleware/company';
 import { loadPermissions } from '../middleware/rbac';
 import {
   requireAdminAuth,
@@ -1043,11 +1044,10 @@ adminAuthRouter.get('/me', async (req: Request, res: Response) => {
       const { rows: companyRows } = await pool.query('SELECT id FROM companies ORDER BY created_at LIMIT 1');
       tenantId = companyRows[0]?.id ?? null;
     }
-    const { rows: moduleRows } = await pool.query(
-      `SELECT module FROM subscriptions WHERE company_id = $1 AND status = 'active' ORDER BY module`,
-      [companyId ?? tenantId]
-    );
-    const subscribed_modules = moduleRows.map((r) => r.module);
+    const entitlement = tenantId ? await loadCompany(tenantId, req) : null;
+    const subscribed_modules = entitlement?.modules ?? [];
+    const plan_type = entitlement?.plan_type ?? null;
+    const plan_name = entitlement?.plan_name ?? null;
 
     // The admin console gates navigation on this array, so it must be the SAME
 // effective set requireAdminAuth builds (role_permissions + user_permissions
@@ -1074,6 +1074,8 @@ res.json({
   ...publicUser,
   tenant_id: tenantId,
   subscribed_modules,
+  plan_type,
+  plan_name,
   permissions,
   session: sessionState,
   sessionPolicy: SESSION_POLICY,

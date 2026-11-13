@@ -1,11 +1,17 @@
 import { Request, Response, NextFunction } from 'express';
 import { pool } from '../db/pool';
+import { modulesForPlan, planNameFor } from '../plans/entitlements';
 
 export interface CompanyContext {
   id: string;
   name: string;
   modules: string[];
+  plan_type: string | null;
+  plan_name: string | null;
+  /** User-facing plan name (PreTill, PreBiz, …). Kept for older callers. */
   plan_tier?: string | null;
+  subscription_status: string | null;
+  subscription_expires_at: string | Date | null;
 }
 
 declare global {
@@ -17,14 +23,17 @@ declare global {
 }
 
 export async function loadCompany(companyId: string | null | undefined, req: Request): Promise<CompanyContext | null> {
-  let query = `SELECT c.id, c.name,
-            (SELECT MAX(s.plan_tier) FROM subscriptions s WHERE s.company_id = c.id) AS plan_tier,
+  // POS and Invoice come from companies.plan_type. Any other active module
+  // (WiFi) is still read from subscriptions so the launcher can show it.
+  let query = `SELECT c.id, c.name, c.plan_type, c.subscription_status, c.subscription_expires_at,
             COALESCE(
               (SELECT json_agg(s.module ORDER BY s.module)
                  FROM subscriptions s
-                WHERE s.company_id = c.id AND s.status = 'active'),
+                WHERE s.company_id = c.id
+                  AND s.status = 'active'
+                  AND s.module NOT IN ('pos', 'invoice')),
               '[]'::json
-            ) AS modules
+            ) AS extra_modules
        FROM companies c`;
   let id = companyId;
   if (!id) {
@@ -33,9 +42,28 @@ export async function loadCompany(companyId: string | null | undefined, req: Req
   } else {
     query += ` WHERE c.id = $1`;
   }
-  const { rows } = await pool.query<{ id: string; name: string; modules: string[]; plan_tier: string | null }>(query, id ? [id] : []);
+  const { rows } = await pool.query<{
+    id: string;
+    name: string;
+    plan_type: string | null;
+    subscription_status: string | null;
+    subscription_expires_at: string | Date | null;
+    extra_modules: string[] | null;
+  }>(query, id ? [id] : []);
   if (rows.length === 0) return null;
-  req.company = { id: rows[0].id, name: rows[0].name, modules: rows[0].modules ?? [], plan_tier: rows[0].plan_tier ?? null };
+  const row = rows[0];
+  const extras = Array.isArray(row.extra_modules) ? row.extra_modules : [];
+  const planName = planNameFor(row.plan_type);
+  req.company = {
+    id: row.id,
+    name: row.name,
+    plan_type: row.plan_type ?? null,
+    plan_name: planName,
+    plan_tier: planName,
+    subscription_status: row.subscription_status ?? null,
+    subscription_expires_at: row.subscription_expires_at ?? null,
+    modules: [...modulesForPlan(row.plan_type), ...extras.filter((m) => m !== 'pos' && m !== 'invoice')],
+  };
   return req.company;
 }
 
@@ -97,7 +125,13 @@ export function moduleAccess(...modules: string[]) {
       return;
     }
     if (!company.modules.some((m: string) => modules.includes(m))) {
-      res.status(403).json({ error: `Required module not enabled: ${modules.join(' or ')}` });
+      const label = modules.includes('invoice') ? 'Invoice' : modules.includes('pos') ? 'POS' : modules.join(' or ');
+      res.status(403).json({
+        error: `${label} is not on your plan.`,
+        code: 'PLAN_MODULE_DISABLED',
+        module: modules[0] ?? null,
+        plan_name: company.plan_name ?? null,
+      });
       return;
     }
     next();
