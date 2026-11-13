@@ -158,7 +158,7 @@ export default function Accounting() {
     <div className="acct-page">
       <div className="acct-header">
         <div>
-          <h1 className="acct-title">Accounting &amp; Finance</h1>
+          <h1 className="acct-title">Accounting &amp; Financing</h1>
           <p className="acct-desc">Enterprise ledger · 3rd-to-3rd revenue cycle · Pesepay rails</p>
         </div>
         <div className="acct-actions">
