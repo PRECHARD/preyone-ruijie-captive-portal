@@ -98,8 +98,13 @@ export default function ReceiptModal({
   };
 
   const printReceipt = () => {
-    // Native Android APK bridges thermal printing through window.AndroidPOS.
-    const bridge = (window as { AndroidPOS?: { printReceipt?: (json: string) => void } }).AndroidPOS;
+    const bridges = window as {
+      PreyoneDesktop?: { printReceipt?: (json: string) => void };
+      AndroidPOS?: { printReceipt?: (json: string) => void };
+    };
+    const bridge = bridges.PreyoneDesktop?.printReceipt
+      ? bridges.PreyoneDesktop
+      : bridges.AndroidPOS;
     if (bridge?.printReceipt) {
       try {
         bridge.printReceipt(JSON.stringify(result));
