@@ -205,8 +205,10 @@ describe('Subscription checkout routes', () => {
     expect(res.status).toBe(200);
     expect(res.body.current.plan_type).toBe('standard_10');
     expect(res.body.current.max_devices).toBe(1);
-    expect(res.body.tiers).toHaveLength(3);
-    expect(res.body.tiers.map((t: any) => t.price)).toEqual([10, 20, 30]);
-    expect(res.body.tiers.map((t: any) => t.id)).toEqual(['standard_10', 'growth_20', 'unlimited_30']);
+    expect(res.body.tiers).toHaveLength(4);
+    expect(res.body.tiers.map((t: any) => t.price)).toEqual([10, 15, 20, 30]);
+    expect(res.body.tiers.map((t: any) => t.id)).toEqual(['standard_10', 'pos_invoice_15', 'growth_20', 'unlimited_30']);
+    expect(res.body.tiers.map((t: any) => t.name)).toEqual(['PreTill', 'PreBiz', 'PrePro', 'PreUnlimited']);
+    expect(res.body.current.plan_name).toBe('PreTill');
   });
 });

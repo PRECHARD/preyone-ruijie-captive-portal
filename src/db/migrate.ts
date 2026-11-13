@@ -1255,14 +1255,13 @@ const SQL = `
   CREATE INDEX IF NOT EXISTS idx_site_invoices_account  ON site_invoices (lower(account_ref));
   CREATE INDEX IF NOT EXISTS idx_site_invoices_email    ON site_invoices (lower(email));
 
-  -- POS devices & endpoints (desktop / phone / tablet)
-  -- World-class auto-registration: device_uuid (hardware ID) + device_public_key
-  -- (Ed25519, Preyone Transit technology) + 64-char device_token for API auth.
-  -- Quota: 1 phone + 1 tablet + 1 desktop per company (enforced in code).
+  -- POS devices & endpoints (desktop / phone / tablet / electron)
+  -- Device cap is companies.max_devices (the paid plan), enforced in
+  -- src/middleware/subscriptionGuard.ts. electron is a desktop shell.
   CREATE TABLE IF NOT EXISTS pos_devices (
     id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     device_id          TEXT UNIQUE NOT NULL,
-    device_type        TEXT NOT NULL DEFAULT 'tablet' CHECK (device_type IN ('desktop', 'web', 'android', 'phone', 'tablet')),
+    device_type        TEXT NOT NULL DEFAULT 'tablet' CHECK (device_type IN ('desktop', 'web', 'android', 'phone', 'tablet', 'electron')),
     device_uuid        TEXT,
     device_public_key  TEXT,
     device_token       TEXT UNIQUE,
@@ -1824,6 +1823,17 @@ const SQL = `
       console.log('Applied db/migrations/v3_master_ecosystem.sql (profiles + templates + themes).');
     } else {
       console.warn(`Skipped ecosystem upgrade: ${v3UpgradePath} not found.`);
+    }
+
+    // Plan entitlements: PreTill / PreBiz / PrePro / PreUnlimited, subscriptions
+    // table, and the electron device type. Runs after v2 and v3 so the trigger
+    // replacement is the one that knows about the $15 plan.
+    const v4UpgradePath = path.resolve(__dirname, '../../db/migrations/v4_plan_entitlements.sql');
+    if (fs.existsSync(v4UpgradePath)) {
+      await client.query(fs.readFileSync(v4UpgradePath, 'utf8'));
+      console.log('Applied db/migrations/v4_plan_entitlements.sql (plan modules + PreBiz).');
+    } else {
+      console.warn(`Skipped plan entitlements: ${v4UpgradePath} not found.`);
     }
 
     console.log('Migration complete. Packages + transit + RBAC seeded.');

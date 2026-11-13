@@ -633,9 +633,10 @@ function formatExpiryDate(value: Date | string): string {
 const SUBSCRIPTION_PLANS_HTML = `
     <div style="margin:20px 0 4px;padding:16px;background:#111827;border:1px solid #1f2937;border-radius:12px">
       <p style="margin:0 0 10px;font-size:13px;color:#94a3b8;font-weight:600;text-transform:uppercase;letter-spacing:1px">Current plans</p>
-      <p style="margin:0 0 6px;font-size:14px;color:#e2e8f0"><strong style="color:#ffffff">Standard</strong> &mdash; $10/month &bull; 1 device</p>
-      <p style="margin:0 0 6px;font-size:14px;color:#e2e8f0"><strong style="color:#ffffff">Growth</strong> &mdash; $20/month &bull; 6 devices</p>
-      <p style="margin:0;font-size:14px;color:#e2e8f0"><strong style="color:#ffffff">Unlimited</strong> &mdash; $30/month &bull; unlimited devices</p>
+      <p style="margin:0 0 6px;font-size:14px;color:#e2e8f0"><strong style="color:#ffffff">PreTill</strong> &mdash; $10/month &bull; POS only &bull; 1 device</p>
+      <p style="margin:0 0 6px;font-size:14px;color:#e2e8f0"><strong style="color:#ffffff">PreBiz</strong> &mdash; $15/month &bull; POS and Invoice &bull; 3 devices</p>
+      <p style="margin:0 0 6px;font-size:14px;color:#e2e8f0"><strong style="color:#ffffff">PrePro</strong> &mdash; $20/month &bull; POS and Invoice &bull; 6 devices</p>
+      <p style="margin:0;font-size:14px;color:#e2e8f0"><strong style="color:#ffffff">PreUnlimited</strong> &mdash; $30/month &bull; POS and Invoice &bull; unlimited devices</p>
     </div>`;
 
 // 3-day warning: the subscription is still valid, everything keeps running.
@@ -656,7 +657,7 @@ export async function sendSubscriptionExpiryWarningEmail(
       <div style="padding:24px 32px;text-align:center">
         <p style="margin:0 0 12px;font-size:15px;color:#cbd5e1;line-height:1.6">Hi <strong style="color:#ffffff">${safeName}</strong>,</p>
         <p style="margin:0 0 16px;font-size:15px;color:#cbd5e1;line-height:1.6">Your Preyone subscription expires on <strong style="color:#ffcc00">${formatted}</strong> &mdash; that is ${dayLabel} from now.</p>
-        <p style="margin:0 0 16px;font-size:15px;color:#cbd5e1;line-height:1.6">Renew before then to keep your POS, invoices and device registrations running without interruption. Once the subscription lapses, the account is suspended and no new devices can be registered.</p>
+        <p style="margin:0 0 16px;font-size:15px;color:#cbd5e1;line-height:1.6">Renew before then to keep your POS, invoices and device registrations running without interruption. Once the subscription lapses, new sales and new invoices are blocked until you renew.</p>
         ${SUBSCRIPTION_PLANS_HTML}
         ${emailFooter()}
       </div>
@@ -681,7 +682,7 @@ export async function sendSubscriptionExpiryUrgentEmail(
       <div style="padding:24px 32px;text-align:center">
         <p style="margin:0 0 12px;font-size:15px;color:#cbd5e1;line-height:1.6">Hi <strong style="color:#ffffff">${safeName}</strong>,</p>
         <p style="margin:0 0 16px;font-size:16px;color:#ffffff;line-height:1.6"><strong style="color:#ff6b6b">Your Preyone subscription expires tomorrow</strong>, on <strong style="color:#ffcc00">${formatted}</strong>.</p>
-        <p style="margin:0 0 16px;font-size:15px;color:#cbd5e1;line-height:1.6">Renew today to avoid suspension: your account will be suspended automatically when the subscription lapses, devices will stop registering and staff will lose access until it is renewed.</p>
+        <p style="margin:0 0 16px;font-size:15px;color:#cbd5e1;line-height:1.6">Renew today. When the subscription lapses, new sales and new invoices stop until the plan is renewed.</p>
         ${SUBSCRIPTION_PLANS_HTML}
         ${emailFooter()}
       </div>
