@@ -59,6 +59,14 @@ export const SESSION_REVOKED_CODE = 'SESSION_REVOKED';
 
 interface DecodedAdminToken extends AdminUser {
   sid?: string;
+  purpose?: string;
+  type?: string;
+}
+
+/** A sign-in session has no purpose or type. Challenge and payment tokens do. */
+export function isAdminSessionPayload(payload: { purpose?: unknown; type?: unknown } | null | undefined): boolean {
+  if (!payload || typeof payload !== 'object') return false;
+  return payload.purpose == null && payload.type == null;
 }
 
 type SessionVerdict =
@@ -224,6 +232,11 @@ async function runAuth(req: Request, res: Response, next: NextFunction, allowLoc
       return;
     }
     throw err;
+  }
+
+  if (!isAdminSessionPayload(decoded)) {
+    res.status(401).json({ error: 'Invalid or expired token' });
+    return;
   }
 
   const { verdict, session, role, companyId, portalCompanyId } = await resolveSessionState(decoded);

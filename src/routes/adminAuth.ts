@@ -8,6 +8,7 @@ import { loadPermissions } from '../middleware/rbac';
 import {
   requireAdminAuth,
   requireAdminAuthAllowLocked,
+  isAdminSessionPayload,
   INACTIVITY_TIMEOUT_SEC,
   SESSION_EXPIRED_CODE,
   SESSION_LOCKED_CODE,
@@ -926,8 +927,8 @@ adminAuthRouter.post('/logout', async (req: Request, res: Response) => {
   try {
     const token = resolveAuthToken(req);
     if (token) {
-      const decoded = jwt.verify(token, getJwtSecret()) as any;
-      if (decoded?.id) {
+      const decoded = jwt.verify(token, getJwtSecret()) as { id?: string; sid?: string; purpose?: string; type?: string };
+      if (decoded?.id && isAdminSessionPayload(decoded)) {
         if (decoded.sid) {
           await pool.query('DELETE FROM admin_user_sessions WHERE sid = $1 AND admin_user_id = $2', [decoded.sid, decoded.id]);
         }
@@ -962,7 +963,11 @@ adminAuthRouter.get('/me', async (req: Request, res: Response) => {
   }
 
   try {
-    const decoded = jwt.verify(token, getJwtSecret()) as any;
+    const decoded = jwt.verify(token, getJwtSecret()) as { id?: string; sid?: string; purpose?: string; type?: string };
+    if (!isAdminSessionPayload(decoded)) {
+      res.status(401).json({ error: 'Invalid or expired token' });
+      return;
+    }
     const { rows } = await pool.query(
       `SELECT u.id, u.full_name, u.email, u.phone, u.role, u.company_id, u.portal_company_id, u.created_at,
               u.email_verified, u.approved, u.last_activity, u.auth_time, u.active_sid, u.two_factor_enabled,

@@ -61,6 +61,20 @@ describe('requireAdminAuth middleware', () => {
     expect(pool.query).not.toHaveBeenCalled();
   });
 
+  it('rejects a 2FA challenge token as an admin session', async () => {
+    for (const purpose of ['2fa', '2fa-enable']) {
+      const token = jwt.sign({ id: 'user-1', purpose }, SECRET, { expiresIn: '15m' });
+      const req = makeReq(token);
+      const res = makeRes();
+      const next = vi.fn();
+      await requireAdminAuth(req, res as any, next);
+      expect(res.status).toHaveBeenCalledWith(401);
+      expect(res.json).toHaveBeenCalledWith({ error: 'Invalid or expired token' });
+      expect(next).not.toHaveBeenCalled();
+    }
+    expect(pool.query).not.toHaveBeenCalled();
+  });
+
   it('rejects requests without a Bearer token', async () => {
     const req = makeReq();
     const res = makeRes();
