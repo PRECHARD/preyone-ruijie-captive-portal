@@ -63,5 +63,7 @@ export const ruijieApi = createClient('/api/ruijie');
 export const currencyApi = createClient('/api/currency');
 /** Subscription plans & Pesepay checkout (admin auth required). */
 export const subscriptionApi = createClient('/api/subscription');
+/** Enterprise accounting ledger (admin auth + company scoped). */
+export const accountingApi = createClient('/api/accounting');
 
 export { getToken, setToken, clearToken };

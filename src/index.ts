@@ -24,6 +24,7 @@ import { systemAdminRouter } from './routes/systemAdmin';
 import { starlinkRouter } from './routes/starlink';
 import { ruijieRouter } from './routes/ruijie';
 import { currencyRouter } from './routes/currency';
+import { accountingRouter } from './routes/accounting';
 import { ensureStarlinkSchema } from './db/starlink';
 import { errorHandler } from './middleware/errorHandler';
 import { maintenanceCheck } from './middleware/maintenanceMode';
@@ -309,6 +310,21 @@ app.use((req, res, next) => {
     return res.status(503).send('POS build not found. Run `cd pos && npm run build`.');
   }
 
+  // invoice.preyone.com → Invoice Accounting & Finance SPA (monorepo build).
+  // The legacy office invoice engine may still run on :4000 behind nginx; this
+  // host path serves the finance module when invoice/dist is present.
+  if (host === 'invoice.preyone.com' || host === 'invoices.preyone.com') {
+    const invoiceDist = path.join(__dirname, '..', 'invoice', 'dist');
+    if (fs.existsSync(invoiceDist)) {
+      delete req.headers['range'];
+      delete req.headers['if-range'];
+      return express.static(invoiceDist)(req, res, () => {
+        res.sendFile(path.join(invoiceDist, 'index.html'));
+      });
+    }
+    return res.status(503).send('Invoice build not found. Run `cd invoice && npm run build`.');
+  }
+
   // app.preyone.com → enterprise gateway (single-login module launcher)
   if (host === 'app.preyone.com') {
     const appDist = path.join(__dirname, '..', 'app', 'dist');
@@ -350,6 +366,7 @@ app.use('/api/subscription', subscriptionRouter);
 app.use('/api/site', siteInvoicesRouter);
 app.use('/api/transit', transitRouter);
 app.use('/api/pos', posRouter);
+app.use('/api/accounting', accountingRouter);
 app.use('/api/starlink', starlinkRouter);
 // Ruijie Cloud maint-API proxy — admin-auth guarded inside the router.
 // Mounted under /api/ so the subdomain middleware (line ~169) is bypassed and

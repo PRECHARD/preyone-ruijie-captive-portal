@@ -8,6 +8,7 @@ import { requireAdminAuth, requireRole } from '../middleware/adminAuth';
 import { requireCompany } from '../middleware/company';
 import { requireDeviceAuth } from '../middleware/deviceAuth';
 import { enforceSubscriptionGuard } from '../middleware/subscriptionGuard';
+import { markStockApplied, syncSaleToLedgerAndStock } from '../db/accounting';
 
 /**
  * Preyone POS module — additive only.
@@ -1019,11 +1020,31 @@ router.post('/checkout', async (req, res) => {
       const method = PAYMENT_METHODS.includes(str(p?.method))
         ? str(p.method)
         : 'cash';
-      await client.query(
+      const payIns = await client.query(
         `INSERT INTO pos_document_payments (document_id, amount, method, reference, recorded_by, shift_id)
-         VALUES ($1,$2,$3,$4,$5,$6)`,
+         VALUES ($1,$2,$3,$4,$5,$6)
+         RETURNING id`,
         [doc.id, amount, method, str(p?.reference) || null, me.id, shiftId]
       );
+      // Checkout already decremented stock above — mark applied and post GL.
+      await syncSaleToLedgerAndStock(client, {
+        companyId: tenantId(req),
+        documentId: doc.id,
+        paymentId: Number(payIns.rows[0].id),
+        amount,
+        method,
+        docType,
+        docNumber,
+        reference: str(p?.reference) || null,
+        taxPct,
+        alreadyDecrementedStock: true,
+      });
+    }
+
+    // Quotations / unpaid invoices with no payment still need the stock flag
+    // set so a later Pesepay settle does not double-decrement.
+    if (rawPayments.length === 0 || lines.some((l) => l.productId)) {
+      await markStockApplied(client, doc.id);
     }
 
     await client.query('COMMIT');
@@ -1084,9 +1105,10 @@ router.post('/documents/:id/payments', async (req, res) => {
       );
       shiftId = open.rows.length > 0 ? open.rows[0].id : shiftId;
     }
-    await client.query(
+    const payIns = await client.query(
       `INSERT INTO pos_document_payments (document_id, amount, method, reference, recorded_by, shift_id)
-       VALUES ($1,$2,$3,$4,$5,$6)`,
+       VALUES ($1,$2,$3,$4,$5,$6)
+       RETURNING id`,
       [doc.id, amount, method, reference, me.id, shiftId]
     );
     const sums = await client.query(
@@ -1100,6 +1122,18 @@ router.post('/documents/:id/payments', async (req, res) => {
         WHERE id = $1 AND company_id = $2 RETURNING *`,
       [doc.id, tenantId(req), paid, newStatus]
     );
+    await syncSaleToLedgerAndStock(client, {
+      companyId: tenantId(req),
+      documentId: doc.id,
+      paymentId: Number(payIns.rows[0].id),
+      amount,
+      method,
+      docType: doc.doc_type,
+      docNumber: doc.doc_number,
+      reference,
+      taxPct: num(doc.tax_pct),
+      currency: doc.currency,
+    });
     await client.query('COMMIT');
     res.json({ ...updated.rows[0], balanceDue: round2(Math.max(num(updated.rows[0].total) - paid, 0)) });
   } catch (e) {

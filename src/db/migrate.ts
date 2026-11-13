@@ -1826,6 +1826,15 @@ const SQL = `
       console.warn(`Skipped ecosystem upgrade: ${v3UpgradePath} not found.`);
     }
 
+    // Enterprise accounting ledger + stock_applied idempotency flag.
+    const v4AccountingPath = path.resolve(__dirname, '../../db/migrations/v4_accounting_ledger.sql');
+    if (fs.existsSync(v4AccountingPath)) {
+      await client.query(fs.readFileSync(v4AccountingPath, 'utf8'));
+      console.log('Applied db/migrations/v4_accounting_ledger.sql (accounting ledger).');
+    } else {
+      console.warn(`Skipped accounting upgrade: ${v4AccountingPath} not found.`);
+    }
+
     console.log('Migration complete. Packages + transit + RBAC seeded.');
   } finally {
     client.release();

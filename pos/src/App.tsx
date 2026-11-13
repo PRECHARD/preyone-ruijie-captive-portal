@@ -7,6 +7,7 @@ import XReportModal from './components/XReportModal';
 import StockManager from './components/StockManager';
 import HistoryView from './components/HistoryView';
 import SettingsView from './components/SettingsView';
+import AccountingView from './components/AccountingView';
 import CloudSyncIndicator from './components/CloudSyncIndicator';
 
 export interface Toast {
@@ -20,7 +21,7 @@ export default function App() {
   const [shiftTotals, setShiftTotals] = useState<MethodTotal[]>([]);
   const [shiftLoading, setShiftLoading] = useState(true);
   const [showX, setShowX] = useState(false);
-  const [view, setView] = useState<'home' | 'stock' | 'settings'>('home');
+  const [view, setView] = useState<'home' | 'stock' | 'settings' | 'accounting'>('home');
   const [homeTab, setHomeTab] = useState<'register' | 'documents'>('register');
   const [switching, setSwitching] = useState(false);
   const [toast, setToast] = useState<Toast | null>(null);
@@ -90,6 +91,9 @@ export default function App() {
             {user.role !== 'Cashier' && (
               <button className={`chip ${view === 'stock' ? 'ok' : ''}`} onClick={() => setView('stock')}>STOCK</button>
             )}
+            <button className={`chip ${view === 'accounting' ? 'ok' : ''}`} onClick={() => setView('accounting')}>
+              FINANCE
+            </button>
             <button className={`chip ${view === 'settings' ? 'ok' : ''}`} onClick={() => setView('settings')}>
               SETTINGS
             </button>
@@ -108,6 +112,8 @@ export default function App() {
 
           {view === 'settings' ? (
             <SettingsView user={user} notify={notify} onApiError={sessionExpired} />
+          ) : view === 'accounting' ? (
+            <AccountingView user={user} notify={notify} onApiError={sessionExpired} />
           ) : shiftLoading ? (
             <div className="empty-note">Checking till…</div>
           ) : !shift ? (
