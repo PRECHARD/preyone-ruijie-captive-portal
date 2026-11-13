@@ -132,9 +132,28 @@ function escapeXml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
 }
 
+const IMAGE_MIME: Record<string, string> = {
+  '.avif': 'image/avif',
+  '.webp': 'image/webp',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.ico': 'image/x-icon',
+  '.bmp': 'image/bmp',
+  '.tif': 'image/tiff',
+  '.tiff': 'image/tiff',
+};
+
 const optimizedImageStaticOptions = {
   setHeaders: (res: express.Response, filePath: string) => {
-    if (/\.(png|jpe?g|gif|webp|avif|ico|svg|bmp|tiff?)$/i.test(filePath)) {
+    const ext = path.extname(filePath).toLowerCase();
+    const type = IMAGE_MIME[ext];
+    if (type) {
+      // Express's bundled mime table predates .avif/.webp in some installs; be
+      // explicit so `nosniff` browsers still decode modern formats.
+      res.setHeader('Content-Type', type);
       res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
     }
   },
@@ -214,22 +233,35 @@ app.get('/wispr', (_req, res) => {
 // ── Shared brand assets ───────────────────────────────────────
 // Company logos, invoice marks and email artwork all live in
 // `public/images` and are referenced as `/images/<file>` from every SPA. Only
-// the captive portal + main site ever mounted `public`, so on invoice / POS /
-// home-automate a missing `/images` mount fell through to that host's SPA
+// the captive portal + main site ever mounted a static tree, so on invoice /
+// POS / home-automate a missing `/images` mount fell through to that host's SPA
 // fallback and answered `200 text/html` — the browser then rendered a broken
 // image (and the Settings preview looked empty). Serve the real files from
 // every host, and answer a real 404 (never index.html) when one is absent.
-app.use(
-  '/images',
-  express.static(path.join(__dirname, '..', 'public', 'images'), {
-    dotfiles: 'ignore',
-    fallthrough: true,
-    ...optimizedImageStaticOptions,
-  }),
-  (_req, res) => {
-    res.status(404).type('text/plain').send('Image not found');
-  }
-);
+//
+// Each SPA also ships its own design artwork in `<app>/dist/images`, so the
+// roots are layered in order: company uploads first, then the bundles' own
+// images. `express.static` calls `next()` on a miss, so the next root gets a
+// turn and the traversal/range/mime handling stays stock.
+const imageRoots = [
+  path.join(__dirname, '..', 'public', 'images'),
+  path.join(__dirname, '..', 'admin', 'dist', 'images'),
+  path.join(__dirname, '..', 'site', 'dist', 'images'),
+  path.join(__dirname, '..', 'homeautomate', 'dist', 'images'),
+];
+for (const root of imageRoots) {
+  app.use(
+    '/images',
+    express.static(root, {
+      dotfiles: 'ignore',
+      index: false,
+      ...optimizedImageStaticOptions,
+    })
+  );
+}
+app.use('/images', (_req, res) => {
+  res.status(404).type('text/plain').send('Image not found');
+});
 
 // ── Subdomain-based routing ──
 app.use((req, res, next) => {
