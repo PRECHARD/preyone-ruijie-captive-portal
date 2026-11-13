@@ -13,9 +13,7 @@ describe('stock_applied backfill', () => {
     expect(sql).not.toMatch(/SET stock_applied = TRUE[\s\S]*?WHERE stock_applied = FALSE\s+AND EXISTS/);
   });
 
-  it('clears the flag on unpaid office documents that have no payments', () => {
-    expect(sql).toMatch(/SET stock_applied = FALSE/);
-    expect(sql).toMatch(/d\.channel = 'office'/);
-    expect(sql).toMatch(/pos_document_payments/);
+  it('does not clear office flags, because office checkout already moved stock', () => {
+    expect(sql).not.toMatch(/SET stock_applied = FALSE/);
   });
 });
