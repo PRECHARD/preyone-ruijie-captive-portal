@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Connected — Preyone UltraNet Wi‑Fi</title>
+  <link rel="icon" type="image/png" href="/favicon/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="/favicon/favicon.svg" />
+  <link rel="shortcut icon" href="/favicon/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/favicon/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-title" content="Preyone" />
+  <link rel="manifest" href="/favicon/site.webmanifest" />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Montserrat:wght@500;700&family=Satisfy&display=swap"
+    rel="stylesheet">
+  <link rel="stylesheet" href="/css/portal.css" />
+</head>
+
+<body class="portal-body">
+  <div class="body-loading hidden" id="bodyLoading">
+    <div class="loading-spinner">
+      <div class="loading-spinner-inner">
+        <img src="/images/faviconloading.svg" alt="Preyone" />
+      </div>
+    </div>
+    <div class="loading-text">Connecting to Preyone...</div>
+  </div>
+  <svg aria-hidden="true" style="position:absolute;width:0;height:0">
+    <defs>
+      <linearGradient id="ring-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#71ff2f" />
+        <stop offset="50%" stop-color="#13d8ff" />
+        <stop offset="100%" stop-color="#367cff" />
+      </linearGradient>
+    </defs>
+  </svg>
+
+  <!-- Sticky Header -->
+  <header class="portal-header">
+    <div class="brand-banner">
+      <img src="/images/preyonenoneglow-logo-zoom.png" alt="Preyone" class="brand-logo-img" width="400" />
+    </div>
+    <div class="brand-eyebrow">
+      <span class="brand-signature">Fadaya nePreyone UltraNet Wifi</span>
+    </div>
+  </header>
+
+  <main class="portal-shell">
+    
+    <!-- Success Header -->
+    <div class="card card--success">
+      <div class="success-glow"></div>
+      <div class="brand">
+        <div class="success-icon-wrapper">
+          <svg class="wifi-icon--success" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+            <polyline points="20 6 9 17 4 12" />
+          </svg>
+        </div>
+        <h1 class="bebas-font">PAYMENT CONFIRMED</h1>
+        <p class="subtitle cursive-font">Your Preyone UltraNet WiFi session is now active.</p>
+      </div>
+    </div>
+
+    <!-- Voucher Code & Card -->
+    <div class="voucher-section">
+      <div id="voucher-code-display" class="voucher-code-block" style="display:none">
+        <div class="voucher-code-hero">
+          <span class="voucher-code-hero-label">YOUR VOUCHER PIN</span>
+          <div class="voucher-code-hero-box">
+            <span id="voucher-code-text" class="voucher-code-hero-text"></span>
+            <button id="copyVoucherBtn" class="voucher-copy-hero-btn" title="Copy to clipboard">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
+              </svg>
+              <span id="copyLabel">Copy PIN</span>
+            </button>
+          </div>
+          <p class="voucher-code-hint">Enter this PIN on the login page to connect immediately</p>
+        </div>
+      </div>
+      <div id="voucher-card-container" class="voucher-card-wrapper"></div>
+      <div class="voucher-actions">
+        <button id="downloadVoucherBtn" class="btn-primary" style="display:none">DOWNLOAD VOUCHER</button>
+      </div>
+    </div>
+
+    <!-- Session Details -->
+    <div class="card card--success">
+      <!-- Ring Timer -->
+      <div class="ring-timer-wrapper">
+        <svg class="ring-timer-svg" viewBox="0 0 160 160">
+          <circle class="ring-bg" cx="80" cy="80" r="68" />
+          <circle class="ring-fg" id="ring-fg" cx="80" cy="80" r="68"
+            stroke-dasharray="427.26" stroke-dashoffset="0" />
+        </svg>
+        <div class="ring-timer-center">
+          <span class="ring-label">TIME LEFT</span>
+          <span class="ring-value" id="timer-display">--:--:--</span>
+        </div>
+      </div>
+
+      <!-- Data Usage -->
+      <div class="data-usage-section" id="data-usage-section">
+        <div class="data-usage-header">
+          <span class="data-usage-label">DATA USAGE</span>
+          <span class="data-usage-numbers" id="data-usage-numbers">— / —</span>
+        </div>
+        <div class="data-bar-track">
+          <div class="data-bar-fill" id="data-bar-fill" style="width:0%"></div>
+        </div>
+        <div class="data-usage-footer">
+          <span id="data-usage-pct">0%</span>
+          <span id="data-usage-remaining">— remaining</span>
+        </div>
+      </div>
+
+      <div class="status-grid">
+        <div class="status-item">
+          <span class="label">STATUS</span>
+          <span class="value value--active">● ACTIVE</span>
+        </div>
+        <div class="status-item">
+          <span class="label">SESSION REMAINING</span>
+          <span class="value value--timer" id="timer-display-text">--:--:--</span>
+        </div>
+        <div class="status-item">
+          <span class="label">NETWORK</span>
+          <span class="value">Preyone UltraNet Wi-Fi</span>
+        </div>
+      </div>
+
+      <div class="session-details" id="session-details">
+        <div class="detail-row">
+          <span class="detail-label">Speed</span>
+          <span class="detail-value" id="detail-speed">—</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">Data Allowance</span>
+          <span class="detail-value" id="detail-data">—</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">Session Started</span>
+          <span class="detail-value" id="detail-started">—</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">Expires</span>
+          <span class="detail-value" id="detail-expires">—</span>
+        </div>
+      </div>
+
+      <div class="action-group">
+        <a href="http://www.preyone.com" class="btn-primary" id="startBrowsingBtn">START BROWSING</a>
+        <a id="manageAccountLink" href="/login" class="btn-secondary" target="_blank" rel="noopener">MANAGE ACCOUNT</a>
+        <button type="button" class="btn-secondary" id="successSignUpBtn">SIGN UP</button>
+      </div>
+    </div>
+
+    <section class="signup-section hidden" id="signup-section">
+      <div class="section-heading">
+        <div>
+          <p class="section-eyebrow">Create your Preyone account</p>
+          <h2>Sign Up</h2>
+        </div>
+        <div class="section-note">Register to buy packages, manage your account, and track your sessions.</div>
+      </div>
+      <div class="signup-card">
+        <form id="signup-form" novalidate>
+          <div class="field">
+            <label for="fullName">Full Name</label>
+            <input id="fullName" name="fullName" type="text" autocomplete="name" placeholder="Your full name" required />
+            <span class="field-error" id="err-fullName"></span>
+          </div>
+          <div class="field">
+            <label for="phone">Phone Number</label>
+            <input id="phone" name="phone" type="tel" autocomplete="tel" placeholder="+263 771 327 202" required />
+            <span class="field-error" id="err-phone"></span>
+          </div>
+          <div class="field">
+            <label for="email">Email</label>
+            <input id="email" name="email" type="email" autocomplete="email" placeholder="you@example.com" required />
+            <span class="field-error" id="err-email"></span>
+          </div>
+          <div class="field">
+            <label for="suPassword">Set Password <span class="optional">(for future sign-ins)</span></label>
+            <input id="suPassword" name="password" type="password" autocomplete="new-password" placeholder="8+ chars, upper, lower, number &amp; special" minlength="8" />
+            <span class="field-error" id="err-suPassword"></span>
+          </div>
+          <div class="field">
+            <label for="suPasswordConfirm">Confirm Password</label>
+            <input id="suPasswordConfirm" name="passwordConfirm" type="password" autocomplete="new-password" placeholder="Re-enter password" />
+            <span class="field-error" id="err-suPasswordConfirm"></span>
+          </div>
+          <div class="field field--checkbox">
+            <label class="checkbox-label">
+              <input id="acceptedTos" name="acceptedTos" type="checkbox" required />
+              <span>I agree to the <a href="/terms.html" target="_blank" rel="noopener">Terms of Service</a>.</span>
+            </label>
+            <span class="field-error" id="err-acceptedTos"></span>
+          </div>
+          <div id="signup-form-error" class="field-error hidden"></div>
+          <button type="submit" id="signup-submit-btn">
+            <span id="signup-btn-text">Create Account</span>
+            <span id="signup-btn-spinner" class="spinner hidden" aria-hidden="true"></span>
+          </button>
+        </form>
+      </div>
+    </section>
+
+    <!-- Signup Success Message -->
+    <section class="signup-section hidden" id="register-success-section">
+      <div class="section-heading">
+        <div>
+          <p class="section-eyebrow">Account Created</p>
+          <h2>Welcome to Preyone!</h2>
+        </div>
+      </div>
+      <div class="signup-card">
+        <div style="text-align:center;padding:2rem 1rem">
+          <svg viewBox="0 0 24 24" width="64" height="64" fill="none" stroke="#16a34a" stroke-width="2" style="margin-bottom:1rem">
+            <circle cx="12" cy="12" r="11"/>
+            <polyline points="7,12 10,15 17,9"/>
+          </svg>
+          <h3 style="font-size:1.25rem;margin:0 0 0.75rem">Your sign up has been successful!</h3>
+          <p style="color:#aaa;margin:0 0 0.5rem">Thank you for signing up for Preyone UltraNet WiFi.</p>
+          <p style="color:#aaa;margin:0 0 1.5rem">A verification email has been sent to:</p>
+          <p style="font-size:1.1rem;font-weight:600;color:#71ff2f;margin:0 0 1.5rem;word-break:break-all" id="registered-email"></p>
+          <div style="background:rgba(22,163,74,0.1);border:1px solid rgba(22,163,74,0.3);border-radius:8px;padding:1rem;margin-bottom:1.5rem;text-align:left">
+            <p style="margin:0 0 0.5rem;color:#ccc;font-size:0.9rem"><strong>Next steps:</strong></p>
+            <ol style="margin:0;padding-left:1.25rem;color:#ccc;font-size:0.9rem">
+              <li style="margin-bottom:0.25rem">Check your email inbox (and spam folder)</li>
+              <li style="margin-bottom:0.25rem">Click the <strong style="color:#71ff2f">Verify Email</strong> button in the email</li>
+              <li style="margin-bottom:0.25rem">Return here and click Sign In to manage your account</li>
+            </ol>
+          </div>
+          <a href="/login" class="btn-primary" style="display:inline-block;text-decoration:none">Sign In to Your Account</a>
+        </div>
+      </div>
+    </section>
+    
+  </main>
+
+<footer class="portal-footer main-footer">
+  <div class="footer-grid">
+    <!-- Brand Column -->
+    <div class="footer-col brand-col">
+      <img src="/images/preyone-logo-mainInverse.png" alt="Preyone" class="footer-brand-mark" />
+      <p class="footer-tagline">High-speed satellite connectivity across Zimbabwe. Powered by Starlink Business
+        Priority
+        infrastructure.</p>
+
+      <!-- Social Media Suite -->
+      <div class="social-links">
+        <a href="https://wa.me/263771327202" class="social-icon whatsapp" title="WhatsApp" target="_blank"
+          rel="noopener">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+            <path
+              d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L0 24l6.335-1.662c1.72.938 3.659 1.434 5.631 1.434h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z" />
+          </svg>
+        </a>
+        <a href="https://www.facebook.com/preyoneenterprise?mibextid=wwXIfr&rdid=h1ANqYJ9tbA3XB5O&share_url=https%3A%2F%2Fwww.facebook.com%2Fshare%2F1HsJc5tsSr%2F%3Fmibextid%3DwwXIfr#"
+          class="social-icon facebook" title="Facebook" target="_blank" rel="noopener"><svg viewBox="0 0 24 24"
+            width="20" height="20" fill="currentColor">
+            <path
+              d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
+          </svg></a>
+        <a href="https://www.instagram.com/preyoneenterprise?igsh=dW55cXVwdTV0YXY%3D&utm_source=qr"
+          class="social-icon instagram" title="Instagram" target="_blank" rel="noopener"><svg viewBox="0 0 24 24"
+            width="20" height="20" fill="currentColor">
+            <path
+              d="M12 0C8.74 0 8.333.015 7.053.072 5.775.132 4.905.333 4.14.63c-.789.306-1.459.717-2.126 1.384S.935 3.35.63 4.14C.333 4.905.131 5.775.072 7.053.012 8.333 0 8.74 0 12s.015 3.667.072 4.947c.06 1.277.261 2.148.558 2.913.306.788.717 1.459 1.384 2.126.667.666 1.336 1.079 2.126 1.384.766.296 1.636.499 2.913.558C8.333 23.988 8.74 24 12 24s3.667-.015 4.947-.072c1.277-.06 2.148-.262 2.913-.558.788-.306 1.459-.718 2.126-1.384.666-.667 1.079-1.335 1.384-2.126.296-.765.499-1.636.558-2.913.06-1.28.072-1.687.072-4.947s-.015-3.667-.072-4.947c-.06-1.277-.262-2.149-.558-2.913-.306-.789-.718-1.459-1.384-2.126C21.319 1.347 20.651.935 19.86.63c-.765-.297-1.636-.499-2.913-.558C15.667.012 15.26 0 12 0zm0 2.16c3.203 0 3.585.016 4.85.071 1.17.055 1.805.249 2.227.415.562.217.96.477 1.382.896.419.42.679.819.896 1.381.164.422.36 1.057.413 2.227.057 1.266.07 1.646.07 4.85s-.015 3.585-.074 4.85c-.061 1.17-.256 1.805-.421 2.227-.224.562-.479.96-.899 1.382-.419.419-.824.679-1.38.896-.42.164-1.065.36-2.235.413-1.274.057-1.649.07-4.859.07-3.211 0-3.586-.015-4.859-.074-1.171-.061-1.816-.256-2.237-.421-.569-.224-.96-.479-1.382-.899-.419-.419-.679-.824-.896-1.38-.164-.42-.359-1.065-.413-2.235-.057-1.274-.07-1.649-.07-4.859 0-3.211.015-3.586.074-4.859.061-1.171.256-1.816.421-2.237.224-.569.479-.96.899-1.382.419-.419.824-.679 1.38-.896.42-.164 1.065-.359 2.235-.413 1.274-.057 1.649-.07 4.859-.07zM12 5.838a6.162 6.162 0 100 12.324 6.162 6.162 0 000-12.324zM12 16a4 4 0 110-8 4 4 0 010 8zm6.406-11.845a1.44 1.44 0 100 2.881 1.44 1.44 0 000-2.881z" />
+          </svg></a>
+        <a href="https://x.com/preyonetech" class="social-icon x" title="X (Twitter)" target="_blank"
+          rel="noopener"><svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+            <path
+              d="M18.901 1.153h3.68l-8.04 9.19L24 22.846h-7.406l-5.8-7.584-6.638 7.584H.474l8.6-9.83L0 1.154h7.594l5.243 6.932 6.064-6.932zm-1.292 19.494h2.039L6.486 3.24H4.298l13.311 17.407z" />
+          </svg></a>
+        <a href="https://youtube.com/@preyonenterprises?si=i885xoltq6D4bW7m" class="social-icon youtube" title="YouTube"
+          target="_blank" rel="noopener"><svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+            <path
+              d="M23.498 6.186a3.016 3.016 0 00-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 00.502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 002.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 002.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" />
+          </svg></a>
+      </div>
+    </div>
+
+    <!-- Contact Column -->
+    <div class="footer-col">
+      <h3>GET IN TOUCH</h3>
+      <ul class="footer-links">
+        <li><a href="tel:+263771327202"><svg class="icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg> +263 771 327 202</a></li>
+        <li><a href="mailto:support@preyone.com"><svg class="icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> support@preyone.com</a></li>
+        <li><svg class="icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg> Harare, Zimbabwe</li>
+      </ul>
+    </div>
+
+    <!-- Quick Links Column -->
+    <div class="footer-col">
+      <h3>QUICK LINKS</h3>
+      <ul class="footer-links">
+        <li><a href="https://www.preyone.com" target="_blank">Main Website</a></li>
+        <li><a href="/terms.html">Terms of Service</a></li>
+        <li><a href="#packages-heading">View Packages</a></li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="footer-bottom">
+    <div class="legal-row">
+      <p>&copy; <span id="current-year"></span> Preyone Enterprises. All Rights Reserved.</p>
+      <div class="payment-badges">
+        <span>Payment Verified:</span>
+        <span class="ecocash-badge">Eco<span class="ecocash-red">Cash</span></span>
+      </div>
+    </div>
+  </div>
+</footer>
+
+  <script src="/js/portal.js"></script>
+  <script src="/js/voucher-card.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', function () {
+      var params = new URLSearchParams(location.search);
+      var code = (params.get('voucher') || '').toLowerCase();
+      var sessionToken = params.get('token');
+      var dataLimitGb = params.get('dataLimit') ? parseFloat(params.get('dataLimit')) : null;
+      var isUncapped = params.get('uncapped') === 'true';
+
+      // ── Render Voucher Card ──
+      if (code) {
+        var data = {
+          code: code,
+          package_tier: params.get('pkg') || 'Prepaid',
+          price_amount: null,
+          duration_min: parseInt(params.get('dur')) || 60,
+          data_limit_gb: dataLimitGb,
+          is_uncapped: isUncapped,
+          bandwidth_mbps_up: parseInt(params.get('bwUp')) || 0,
+          bandwidth_mbps_down: parseInt(params.get('bwDown')) || 0,
+        };
+
+        renderVoucherToContainer('voucher-card-container', data);
+
+        // ── Voucher code text + copy ──
+        var voucherCodeDisplay = document.getElementById('voucher-code-display');
+        var voucherCodeText = document.getElementById('voucher-code-text');
+        var copyVoucherBtn = document.getElementById('copyVoucherBtn');
+        var copyLabel = document.getElementById('copyLabel');
+        voucherCodeText.textContent = code;
+        voucherCodeDisplay.style.display = '';
+
+        copyVoucherBtn.addEventListener('click', function () {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(code).then(function () {
+              copyLabel.textContent = 'Copied!';
+              setTimeout(function () { copyLabel.textContent = 'Copy'; }, 2000);
+            });
+          } else {
+            // Fallback
+            var ta = document.createElement('textarea');
+            ta.value = code;
+            ta.style.position = 'fixed';
+            ta.style.left = '-9999px';
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand('copy');
+            document.body.removeChild(ta);
+            copyLabel.textContent = 'Copied!';
+            setTimeout(function () { copyLabel.textContent = 'Copy'; }, 2000);
+          }
+        });
+
+        var dlBtn = document.getElementById('downloadVoucherBtn');
+        dlBtn.style.display = 'inline-flex';
+        dlBtn.addEventListener('click', function () {
+          downloadVoucherPNG(data);
+        });
+      }
+
+      // ── Helpers ──
+      function formatBytes(bytes) {
+        if (bytes == null) return '—';
+        if (bytes < 1024) return bytes + ' B';
+        if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+        if (bytes < 1073741824) return (bytes / 1048576).toFixed(2) + ' MB';
+        return (bytes / 1073741824).toFixed(2) + ' GB';
+      }
+
+      function formatDuration(ms) {
+        if (ms <= 0) return '00:00:00';
+        var totalSec = Math.floor(ms / 1000);
+        var h = Math.floor(totalSec / 3600);
+        var m = Math.floor((totalSec % 3600) / 60);
+        var s = totalSec % 60;
+        return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+      }
+
+      // ── Ring Timer SVG circumference ──
+      var RING_CIRCUMFERENCE = 2 * Math.PI * 68; // r=68 → 427.26
+
+      function updateRing(pct) {
+        var ring = document.getElementById('ring-fg');
+        if (!ring) return;
+        var offset = RING_CIRCUMFERENCE * (1 - Math.min(pct, 1));
+        ring.style.strokeDashoffset = offset;
+      }
+
+      // ── Timer & Data Polling ──
+      var timerEl = document.getElementById('timer-display');
+      var timerTextEl = document.getElementById('timer-display-text');
+      var expiresAt = params.get('expires');
+      var endTime = expiresAt ? new Date(expiresAt).getTime() : null;
+      var totalDuration = parseInt(params.get('dur')) * 60 * 1000 || 1;
+
+      function updateTimer() {
+        if (!endTime) {
+          if (timerEl) timerEl.textContent = 'UNLIMITED';
+          if (timerTextEl) timerTextEl.textContent = 'UNLIMITED';
+          return;
+        }
+        var now = Date.now();
+        var diff = endTime - now;
+        var elapsed = totalDuration - diff;
+        var pct = Math.min(Math.max(elapsed / totalDuration, 0), 1);
+        var str = formatDuration(diff);
+
+        if (timerEl) timerEl.textContent = str;
+        if (timerTextEl) timerTextEl.textContent = str;
+        updateRing(1 - pct);
+
+        if (diff <= 0) {
+          if (timerEl) timerEl.textContent = '00:00:00';
+          if (timerTextEl) timerTextEl.textContent = '00:00:00';
+          updateRing(1);
+        }
+      }
+
+      updateTimer();
+      setInterval(updateTimer, 1000);
+
+      // ── Fill session details from URL (fallback) ──
+      var detailSpeed = document.getElementById('detail-speed');
+      var detailData = document.getElementById('detail-data');
+      var detailExpires = document.getElementById('detail-expires');
+
+      var bwUp = params.get('bwUp');
+      var bwDown = params.get('bwDown');
+      if (detailSpeed) detailSpeed.textContent = bwUp && bwDown ? bwUp + ' Mbps \u2191 / ' + bwDown + ' Mbps \u2193' : '\u2014';
+      if (detailData) detailData.textContent = isUncapped ? 'Unlimited' : (dataLimitGb ? dataLimitGb + ' GB' : '\u2014');
+      if (detailExpires && endTime) detailExpires.textContent = new Date(endTime).toLocaleString([], { hour12: false, dateStyle: 'medium', timeStyle: 'medium' });
+
+      // ── Live Status Polling ──
+      var dataUsageSection = document.getElementById('data-usage-section');
+      var dataUsageNumbers = document.getElementById('data-usage-numbers');
+      var dataBarFill = document.getElementById('data-bar-fill');
+      var dataUsagePct = document.getElementById('data-usage-pct');
+      var dataUsageRemaining = document.getElementById('data-usage-remaining');
+      var detailStarted = document.getElementById('detail-started');
+
+      function pollStatus() {
+        if (!sessionToken) return;
+        fetch('/api/auth/status?token=' + encodeURIComponent(sessionToken))
+          .then(function (r) { return r.json(); })
+          .then(function (json) {
+            if (!json.active) return;
+
+            // Update expires from server
+            if (json.expiresAt) {
+              endTime = new Date(json.expiresAt).getTime();
+              if (detailExpires) detailExpires.textContent = new Date(endTime).toLocaleString([], { hour12: false, dateStyle: 'medium', timeStyle: 'medium' });
+            }
+
+            // Data usage
+            var used = json.bytesUsed;
+            var total = json.bytesTotal;
+            var limitGb = json.dataLimitGb;
+
+            if (used != null && dataUsageNumbers) {
+              var usedStr = formatBytes(used);
+              var totalStr = json.isUncapped ? 'Unlimited' : (total != null ? formatBytes(total) : (limitGb ? limitGb + ' GB' : '—'));
+              dataUsageNumbers.textContent = usedStr + ' / ' + totalStr;
+
+              if (dataBarFill && total != null && total > 0) {
+                var pct = Math.min((used / total) * 100, 100);
+                dataBarFill.style.width = pct + '%';
+                if (dataUsagePct) dataUsagePct.textContent = pct.toFixed(1) + '%';
+                if (dataUsageRemaining) dataUsageRemaining.textContent = formatBytes(Math.max(total - used, 0)) + ' remaining';
+              }
+            }
+
+            // Session started (estimate from voucher info)
+            if (json.voucherCode && detailStarted) {
+              detailStarted.textContent = 'Just now';
+            }
+          })
+          .catch(function () { /* silent */ });
+      }
+
+      // Initial poll + every 10 seconds
+      pollStatus();
+      setInterval(pollStatus, 10000);
+
+      // ── Gateway Authorization Trigger ──
+      // POST to the gateway's ext_login to authorize the user's MAC.
+      // Uses hidden <form> + <iframe> instead of fetch() to bypass CSP entirely.
+      var loginUrl = params.get('loginUrl');
+      var origUrl = params.get('origUrl');
+      var cliMacRaw = params.get('mac') || params.get('client_mac');
+      var cliMacClean = cliMacRaw ? cliMacRaw.replace(/[:-]/g, '').toUpperCase() : null;
+      var nasMacRaw = params.get('nas_mac');
+      var nasIp = params.get('nasip') || params.get('nas_ip');
+      var ssid = params.get('ssid');
+      var voucherCode = params.get('voucher');
+      var gwAuthAttempts = 0;
+      var GW_MAX_RETRIES = 3;
+      var gwIframe = null;
+      var gwForm = null;
+      function buildAuthFields() {
+        var raw = cliMacRaw || '';
+        var clean = cliMacClean || '';
+        var code = voucherCode || raw;
+        return [
+          { name: 'client_mac', value: raw },
+          { name: 'mac', value: clean },
+          { name: 'url', value: origUrl || '' },
+          { name: 'redirect', value: origUrl || '' },
+          { name: 'nas_ip', value: nasIp || '' },
+          { name: 'nas_mac', value: nasMacRaw || '' },
+          { name: 'ssid', value: ssid || '' },
+          { name: 'username', value: code },
+          { name: 'password', value: code }
+        ];
+      }
+      function postToGateway(url) {
+        if (!url) return;
+        // Remove previous iframe+form if any
+        if (gwIframe) { gwIframe.remove(); gwIframe = null; }
+        if (gwForm) { gwForm.remove(); gwForm = null; }
+        gwIframe = document.createElement('iframe');
+        gwIframe.name = 'gw_auth_' + Date.now();
+        gwIframe.style.display = 'none';
+        document.body.appendChild(gwIframe);
+        gwForm = document.createElement('form');
+        gwForm.method = 'POST';
+        gwForm.action = url;
+        gwForm.target = gwIframe.name;
+        gwForm.style.display = 'none';
+        var fields = buildAuthFields();
+        for (var i = 0; i < fields.length; i++) {
+          var inp = document.createElement('input');
+          inp.type = 'hidden';
+          inp.name = fields[i].name;
+          inp.value = fields[i].value;
+          gwForm.appendChild(inp);
+        }
+        document.body.appendChild(gwForm);
+        gwForm.submit();
+      }
+      function authGateway() {
+        if (!loginUrl || gwAuthAttempts >= GW_MAX_RETRIES) return;
+        gwAuthAttempts++;
+        postToGateway(loginUrl);
+        if (gwAuthAttempts < GW_MAX_RETRIES) {
+          setTimeout(authGateway, gwAuthAttempts * 3000);
+        }
+      }
+      if (loginUrl) {
+        var gwRedirectTimer = setTimeout(authGateway, 2000);
+      }
+      var startBtn = document.getElementById('startBrowsingBtn');
+      if (startBtn) {
+        startBtn.addEventListener('click', function () {
+          clearTimeout(gwRedirectTimer);
+          gwAuthAttempts = GW_MAX_RETRIES;
+          postToGateway(loginUrl);
+          var browseUrl = origUrl || 'http://preyone.com';
+          if (!/^https?:\/\//i.test(browseUrl)) browseUrl = 'http://' + browseUrl;
+          setTimeout(function () { location.href = browseUrl; }, 600);
+        });
+      }
+    });
+  </script>
+</body>
+
+</html>

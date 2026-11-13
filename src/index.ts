@@ -25,6 +25,14 @@ import { starlinkRouter } from './routes/starlink';
 import { ruijieRouter } from './routes/ruijie';
 import { currencyRouter } from './routes/currency';
 import { accountingRouter } from './routes/accounting';
+import { portalRouter } from './routes/portal';
+import { alertsRouter } from './routes/alerts';
+import { voucherAnalyticsRouter } from './routes/voucherAnalytics';
+import { reportsRouter } from './routes/reports';
+import { startVoucherMonitor } from './services/voucherMonitorService';
+import { startVoucherPoolWorker } from './services/voucherPool';
+import { startRuijieVoucherStatusWorker } from './services/ruijieVoucherStatusSync';
+import { startReportScheduler } from './services/scheduler';
 import { ensureStarlinkSchema } from './db/starlink';
 import { errorHandler } from './middleware/errorHandler';
 import { maintenanceCheck } from './middleware/maintenanceMode';
@@ -368,6 +376,10 @@ app.use('/api/site', siteInvoicesRouter);
 app.use('/api/transit', transitRouter);
 app.use('/api/pos', posRouter);
 app.use('/api/accounting', accountingRouter);
+app.use('/api/portal', portalRouter);
+app.use('/api/alerts', alertsRouter);
+app.use('/api/admin/voucher-analytics', voucherAnalyticsRouter);
+app.use('/api/admin/reports', reportsRouter);
 app.use('/api/starlink', starlinkRouter);
 // Ruijie Cloud maint-API proxy — admin-auth guarded inside the router.
 // Mounted under /api/ so the subdomain middleware (line ~169) is bypassed and
@@ -464,6 +476,14 @@ app.listen(PORT, () => {
     console.error('Ruijie accounting polling failed to start:', err);
   }
 
+  // Mirrors Ruijie Cloud lifecycle onto local vouchers so the Vouchers tab
+  // shows the same lifecycle for online-paid and staff-issued codes.
+  try {
+    startRuijieVoucherStatusWorker();
+  } catch (err) {
+    console.error('Ruijie voucher status sync failed to start:', err);
+  }
+
   if (process.env.ENABLE_SESSION_CLEANUP !== 'false') {
     const intervalMinutes = Number(process.env.SESSION_CLEANUP_INTERVAL_MIN ?? 15);
     scheduleSessionCleanup(intervalMinutes);
@@ -486,7 +506,10 @@ app.listen(PORT, () => {
   // 3-tier subscription dunning: 3-day warning, 1-day urgent notice and
   // suspension on expiry, every day at midnight.
   if (process.env.ENABLE_SUBSCRIPTION_CRON !== 'false') {
-    scheduleSubscriptionCron();
+      startVoucherMonitor();
+  startVoucherPoolWorker();
+  startReportScheduler();
+  scheduleSubscriptionCron();
     console.log('Subscription dunning scheduled daily at midnight.');
   }
 });

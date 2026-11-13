@@ -26,7 +26,7 @@ ALTER TABLE companies ADD COLUMN IF NOT EXISTS reminder_1day_sent      BOOLEAN N
 -- ── 2. CHECK constraints (idempotent: skip when already present) ───────────
 DO $$ BEGIN
   ALTER TABLE companies ADD CONSTRAINT companies_plan_type_check
-    CHECK (plan_type IN ('standard_10', 'growth_20', 'unlimited_30'));
+    CHECK (plan_type IN ('standard_10', 'invoicing_15', 'growth_20', 'unlimited_30'));
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 DO $$ BEGIN
@@ -68,9 +68,10 @@ ALTER TABLE companies ALTER COLUMN subscription_status     SET NOT NULL;
 CREATE OR REPLACE FUNCTION update_company_device_limit() RETURNS TRIGGER AS $$
 BEGIN
   NEW.max_devices := CASE NEW.plan_type
-    WHEN 'standard_10'  THEN 1
-    WHEN 'growth_20'    THEN 6
-    WHEN 'unlimited_30' THEN 9999
+    WHEN 'standard_10'   THEN 1
+    WHEN 'invoicing_15'  THEN 3
+    WHEN 'growth_20'     THEN 6
+    WHEN 'unlimited_30'  THEN 9999
     ELSE COALESCE(NEW.max_devices, 1)
   END;
   RETURN NEW;

@@ -7,6 +7,8 @@ import {
   type ReactNode,
 } from 'react';
 import { api, getToken, type Catalog, type Company } from '../api';
+import UpgradeModal from '../components/UpgradeModal';
+import { mergePlanTiers } from '../plans';
 import '../settings.css';
 
 /**
@@ -18,7 +20,7 @@ import '../settings.css';
  * this surface reads as the control room, not another invoice list.
  */
 
-type TabKey = 'company' | 'numbering' | 'tax' | 'payments' | 'team';
+type TabKey = 'company' | 'numbering' | 'tax' | 'payments' | 'billing' | 'team';
 type RoleKey = 'CEO' | 'Staff' | 'Cashier';
 type SettingsIconName =
   | 'building'
@@ -28,7 +30,8 @@ type SettingsIconName =
   | 'team'
   | 'gear'
   | 'lock'
-  | 'info';
+  | 'info'
+  | 'spark';
 
 interface NumberingRule {
   prefix: string;
@@ -74,6 +77,7 @@ const TABS: Array<{ key: TabKey; label: string; icon: SettingsIconName; caption:
   { key: 'numbering', label: 'Document Prefixes', icon: 'hash', caption: 'Prefixes and next document numbers' },
   { key: 'tax', label: 'Taxes & Currency', icon: 'percent', caption: 'Ledger currency and VAT defaults' },
   { key: 'payments', label: 'Payment Rails', icon: 'card', caption: 'Pesepay, mobile money and auto-ledger' },
+  { key: 'billing', label: 'Upgrade & Billing', icon: 'spark', caption: 'POS / invoicing subscription tiers' },
   { key: 'team', label: 'Team & Roles', icon: 'team', caption: 'Permissions for CEO, Staff and Cashier' },
 ];
 
@@ -126,6 +130,13 @@ const SETTINGS_ICONS: Record<SettingsIconName, ReactNode> = {
       <circle cx="12" cy="12" r="9" />
       <path d="M12 11v5" />
       <path d="M12 8h.01" />
+    </>
+  ),
+  spark: (
+    <>
+      <path d="M12 3v4M12 17v4M3 12h4M17 12h4" />
+      <path d="m6.5 6.5 2.5 2.5M15 15l2.5 2.5M17.5 6.5 15 9M9 15l-2.5 2.5" />
+      <circle cx="12" cy="12" r="2.4" />
     </>
   ),
 };
@@ -297,6 +308,14 @@ export default function SettingsPage({
 
   const [tab, setTab] = useState<TabKey>(initialTab);
   const [role, setRole] = useState<string | null>(null);
+  const [showUpgrade, setShowUpgrade] = useState(false);
+  const [billing, setBilling] = useState<{
+    plan_type: string;
+    max_devices: number;
+    subscription_status: string;
+    subscription_expires_at: string | null;
+  } | null>(null);
+  const [billingErr, setBillingErr] = useState('');
 
   const [legalName, setLegalName] = useState(company.name ?? '');
   const [address, setAddress] = useState(company.address ?? '');
@@ -375,6 +394,32 @@ export default function SettingsPage({
       alive = false;
     };
   }, [tab, team, isManager]);
+
+  useEffect(() => {
+    if (tab !== 'billing') return;
+    let alive = true;
+    api
+      .get<{
+        current: {
+          plan_type: string;
+          max_devices: number;
+          subscription_status: string;
+          subscription_expires_at: string | null;
+        } | null;
+        tiers: Array<{ id: string; name: string; price: number; devices: number; tagline: string }>;
+      }>('/api/subscription/plans')
+      .then((res) => {
+        if (!alive) return;
+        setBilling(res.current);
+        setBillingErr('');
+      })
+      .catch((err) => {
+        if (alive) setBillingErr(errorText(err));
+      });
+    return () => {
+      alive = false;
+    };
+  }, [tab, showUpgrade]);
 
   const taxValue = Number(taxPct) || 0;
   const sampleSubtotal = 1000;
@@ -1003,6 +1048,68 @@ export default function SettingsPage({
         </section>
       )}
 
+      {tab === 'billing' && (
+        <section
+          className="settings-panel"
+          id="settings-panel-billing"
+          role="tabpanel"
+          aria-labelledby="settings-tab-billing"
+        >
+          <header className="settings-section-head">
+            <span className="settings-eyebrow">05 · Subscription</span>
+            <h3>Upgrade &amp; billing</h3>
+            <p>$10 POS Only · $15 / $20 POS + Invoicing · $30 Unlimited — Pesepay checkout.</p>
+          </header>
+
+          {billingErr && <div className="banner error">{billingErr}</div>}
+
+          <div className="settings-billing-card">
+            <div>
+              <div className="settings-billing-name">
+                {billing
+                  ? mergePlanTiers().find((t) => t.id === billing.plan_type)?.name ?? billing.plan_type
+                  : '—'}
+              </div>
+              <div className="settings-billing-meta">
+                <span>{billing?.subscription_status ?? 'unknown'}</span>
+                <span>
+                  {billing
+                    ? billing.max_devices >= 9999
+                      ? 'Unlimited devices'
+                      : `Up to ${billing.max_devices} devices`
+                    : '—'}
+                </span>
+                <span>
+                  Renews{' '}
+                  {billing?.subscription_expires_at
+                    ? new Date(billing.subscription_expires_at).toLocaleDateString()
+                    : '—'}
+                </span>
+              </div>
+            </div>
+            <button className="btn primary" type="button" onClick={() => setShowUpgrade(true)}>
+              Upgrade my plan
+            </button>
+          </div>
+
+          <div className="tier-grid static">
+            {mergePlanTiers().map((t) => (
+              <div key={t.id} className="tier-card">
+                <span className="tier-name">{t.name}</span>
+                <span className="tier-price">
+                  ${t.price}
+                  <small>/mo</small>
+                </span>
+                <span className="tier-devices">
+                  {t.devices >= 9999 ? 'Unlimited devices' : `Up to ${t.devices} devices`}
+                </span>
+                <span className="tier-tag">{t.tagline}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
       {tab === 'team' && (
         <section
           className="settings-panel"
@@ -1011,7 +1118,7 @@ export default function SettingsPage({
           aria-labelledby="settings-tab-team"
         >
           <header className="settings-section-head">
-            <span className="settings-eyebrow">05 · Access</span>
+            <span className="settings-eyebrow">06 · Access</span>
             <h3>Team &amp; roles</h3>
             <p>Capabilities are mapped to the three active invoice roles: CEO, Staff and Cashier.</p>
           </header>
@@ -1114,30 +1221,42 @@ export default function SettingsPage({
         </section>
       )}
 
-      <div className="settings-savebar">
-        <div className="settings-savebar-copy">
-          <strong>{busy ? 'Saving configuration…' : 'Changes apply to new documents'}</strong>
-          <span>
-            {role !== null && !isManager
-              ? 'Saving requires a CEO or Manager account.'
-              : 'Existing issued documents keep their original numbering and tax.'}
-          </span>
+      {tab !== 'billing' && (
+        <div className="settings-savebar">
+          <div className="settings-savebar-copy">
+            <strong>{busy ? 'Saving configuration…' : 'Changes apply to new documents'}</strong>
+            <span>
+              {role !== null && !isManager
+                ? 'Saving requires a CEO or Manager account.'
+                : 'Existing issued documents keep their original numbering and tax.'}
+            </span>
+          </div>
+          <div className="settings-savebar-actions">
+            <button className="btn ghost" type="button" onClick={reset} disabled={busy}>
+              Reset
+            </button>
+            <button
+              className="btn primary"
+              type="button"
+              onClick={() => void save()}
+              disabled={busy || (role !== null && !isManager)}
+            >
+              {busy && <span className="spinner" aria-hidden />}
+              {busy ? 'Saving…' : 'Save changes'}
+            </button>
+          </div>
         </div>
-        <div className="settings-savebar-actions">
-          <button className="btn ghost" type="button" onClick={reset} disabled={busy}>
-            Reset
-          </button>
-          <button
-            className="btn primary"
-            type="button"
-            onClick={() => void save()}
-            disabled={busy || (role !== null && !isManager)}
-          >
-            {busy && <span className="spinner" aria-hidden />}
-            {busy ? 'Saving…' : 'Save changes'}
-          </button>
-        </div>
-      </div>
+      )}
+
+      {showUpgrade && (
+        <UpgradeModal
+          onClose={() => setShowUpgrade(false)}
+          onUpgraded={() => {
+            setShowUpgrade(false);
+            setNotice({ kind: 'ok', text: 'Plan upgraded — billing will refresh shortly.' });
+          }}
+        />
+      )}
     </div>
   );
 }

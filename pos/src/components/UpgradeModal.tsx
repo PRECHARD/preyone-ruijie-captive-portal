@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import QRCode from 'qrcode';
 import { api, type CheckoutSession, type SubscriptionPlans } from '../api';
+import { mergePlanTiers } from '../plans';
 
 // Same enabled rails as the till's CheckoutModal (verified against
 // /v1/payment-methods/for-currency). `phone` marks rails that prompt the payer
@@ -32,6 +33,8 @@ export default function UpgradeModal({
   const [notified, setNotified] = useState(false);
   const pollRef = useRef<number | null>(null);
 
+  const tiers = mergePlanTiers(plans?.tiers);
+
   useEffect(() => {
     let alive = true;
     api
@@ -39,10 +42,11 @@ export default function UpgradeModal({
       .then((p) => {
         if (!alive) return;
         setPlans(p);
-        if (p.current && p.tiers.some((t) => t.id === p.current!.plan_type)) {
-          // Default the picker to the next tier up from the current one.
-          const idx = p.tiers.findIndex((t) => t.id === p.current!.plan_type);
-          setTier(p.tiers[Math.min(idx + 1, p.tiers.length - 1)].id);
+        const merged = mergePlanTiers(p.tiers);
+        if (p.current && merged.some((t) => t.id === p.current!.plan_type)) {
+          const idx = merged.findIndex((t) => t.id === p.current!.plan_type);
+          const next = merged.slice(idx + 1).find((t) => t.checkoutReady) ?? merged[merged.length - 1];
+          setTier(next.id);
         }
       })
       .catch((e) => alive && setLoadErr(e instanceof Error ? e.message : 'Could not load plans'));
@@ -51,8 +55,6 @@ export default function UpgradeModal({
     };
   }, []);
 
-  // While the hosted checkout is open, watch the company plan so the till
-  // flips the moment the Pesepay webhook applies the upgrade.
   useEffect(() => {
     if (!session) return;
     const started = Date.now();
@@ -72,7 +74,9 @@ export default function UpgradeModal({
             onUpgraded(session.tier);
           }
         })
-        .catch(() => { /* transient */ });
+        .catch(() => {
+          /* transient */
+        });
     }, 8_000);
     return () => {
       if (pollRef.current) window.clearInterval(pollRef.current);
@@ -80,7 +84,14 @@ export default function UpgradeModal({
     };
   }, [session, notified, onUpgraded]);
 
+  const selected = tiers.find((t) => t.id === tier);
+  const canCheckout = Boolean(selected?.checkoutReady);
+
   const start = async () => {
+    if (!canCheckout) {
+      setError('This tier is not available for checkout yet. Choose another plan or contact support.');
+      return;
+    }
     setBusy(true);
     setError('');
     try {
@@ -118,10 +129,13 @@ export default function UpgradeModal({
         {!session ? (
           <>
             <div className="tier-grid">
-              {(plans?.tiers ?? []).map((t) => (
+              {tiers.map((t) => (
                 <button
                   key={t.id}
-                  className={`tier-card${tier === t.id ? ' on' : ''}${currentType === t.id ? ' current' : ''}`}
+                  type="button"
+                  className={`tier-card${tier === t.id ? ' on' : ''}${currentType === t.id ? ' current' : ''}${
+                    !t.checkoutReady ? ' soon' : ''
+                  }`}
                   onClick={() => setTier(t.id)}
                 >
                   <span className="tier-name">{t.name}</span>
@@ -130,21 +144,21 @@ export default function UpgradeModal({
                     <small>/mo</small>
                   </span>
                   <span className="tier-devices">
-                    {t.devices >= 9999 ? 'Unlimited devices' : `${t.devices} device${t.devices === 1 ? '' : 's'}`}
+                    {t.devices >= 9999 ? 'Unlimited devices' : `Up to ${t.devices} device${t.devices === 1 ? '' : 's'}`}
                   </span>
                   <span className="tier-tag">{t.tagline}</span>
                   {currentType === t.id && <span className="tier-badge">CURRENT</span>}
+                  {!t.checkoutReady && <span className="tier-badge soon-badge">SOON</span>}
                 </button>
               ))}
             </div>
-            {plans && plans.tiers.length === 0 && <div className="empty-note">No plans available.</div>}
 
             <div className="upgrade-fields">
               <label className="field-label">
                 Pay with
                 <div className="method-tabs">
                   {RAILS.map((r) => (
-                    <button key={r.key} className={rail === r.key ? 'on' : ''} onClick={() => setRail(r.key)}>
+                    <button key={r.key} type="button" className={rail === r.key ? 'on' : ''} onClick={() => setRail(r.key)}>
                       {r.label}
                     </button>
                   ))}
@@ -154,7 +168,7 @@ export default function UpgradeModal({
                 Currency
                 <div className="method-tabs">
                   {(['USD', 'ZiG'] as const).map((c) => (
-                    <button key={c} className={currency === c ? 'on' : ''} onClick={() => setCurrency(c)}>
+                    <button key={c} type="button" className={currency === c ? 'on' : ''} onClick={() => setCurrency(c)}>
                       {c}
                     </button>
                   ))}
@@ -173,10 +187,12 @@ export default function UpgradeModal({
             </div>
 
             {error && <div className="err-msg">{error}</div>}
-            <button className="primary-btn" disabled={busy || !plans} onClick={start}>
-              {busy ? 'Starting checkout…' : 'Pay with Pesepay'}
+            <button className="primary-btn" disabled={busy || !plans || !canCheckout} onClick={start}>
+              {busy ? 'Starting checkout…' : canCheckout ? 'Pay with Pesepay' : 'Tier coming soon'}
             </button>
-            <button className="secondary-btn" onClick={onClose}>Cancel</button>
+            <button className="secondary-btn" type="button" onClick={onClose}>
+              Cancel
+            </button>
           </>
         ) : (
           <>
@@ -191,15 +207,19 @@ export default function UpgradeModal({
               <div className="qr-wrap">
                 <img src={qr} alt="Pesepay checkout QR" />
                 <p className="hint">
-                  Scan with your phone to pay on Pesepay, or open the checkout below.
-                  This till watches for confirmation automatically.
+                  Scan with your phone to pay on Pesepay, or open the checkout below. This till watches for confirmation
+                  automatically.
                 </p>
               </div>
             )}
             {session.instructions && <p className="hint">{session.instructions}</p>}
             <div className="hint">Reference: {session.reference}</div>
-            <button className="primary-btn" onClick={openGateway}>Open payment page</button>
-            <button className="secondary-btn" onClick={onClose}>Close</button>
+            <button className="primary-btn" type="button" onClick={openGateway}>
+              Open payment page
+            </button>
+            <button className="secondary-btn" type="button" onClick={onClose}>
+              Close
+            </button>
           </>
         )}
       </div>

@@ -219,6 +219,34 @@ const SQL = `
      SET auth_time = COALESCE(last_activity, created_at, NOW())
    WHERE auth_time IS NULL;
 
+  -- Optional email OTP for invoice/POS staff (self-serve). Admin console login
+  -- always challenges regardless of this flag.
+  ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS two_factor_enabled BOOLEAN NOT NULL DEFAULT FALSE;
+
+  -- Per-device session rows (JWT "sid" claim). Revocation = DELETE the row.
+  CREATE TABLE IF NOT EXISTS admin_user_sessions (
+    sid           TEXT PRIMARY KEY,
+    admin_user_id UUID NOT NULL REFERENCES admin_users(id) ON DELETE CASCADE,
+    auth_time     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_activity TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_ip    TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_admin_user_sessions_user
+    ON admin_user_sessions (admin_user_id, last_activity DESC);
+
+  -- Adopt the single live pre-upgrade session so running this migration never
+  -- signs anybody out. All other pre-upgrade tokens were already dead under
+  -- the old one-session-per-account rule.
+  INSERT INTO admin_user_sessions (sid, admin_user_id, auth_time, last_activity)
+  SELECT active_sid, id,
+         COALESCE(auth_time, NOW()),
+         COALESCE(last_activity, NOW())
+    FROM admin_users
+   WHERE active_sid IS NOT NULL
+     AND active_sid <> '__revoked__'
+   ON CONFLICT (sid) DO NOTHING;
+
   -- Email OTP challenge for admin console 2FA (login step-up verification).
   CREATE TABLE IF NOT EXISTS admin_2fa_challenges (
     id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1793,10 +1821,13 @@ const SQL = `
     await client.query(`
       ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS holder_name TEXT;
       ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS holder_phone TEXT;
+      ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ;
       ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS ruijie_sync_status TEXT;
       ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS ruijie_voucher_id TEXT;
       ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS data_consumed_mb NUMERIC(12,2);
       ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS last_accounting_sync TIMESTAMPTZ;
+      ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS ruijie_active_clients INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS ruijie_max_clients INTEGER;
       CREATE INDEX IF NOT EXISTS idx_vouchers_ruijie_sync_status
         ON vouchers (ruijie_sync_status) WHERE ruijie_sync_status IS NOT NULL;
     `);
@@ -1833,6 +1864,15 @@ const SQL = `
       console.log('Applied db/migrations/v4_accounting_ledger.sql (accounting ledger).');
     } else {
       console.warn(`Skipped accounting upgrade: ${v4AccountingPath} not found.`);
+    }
+
+    // Add invoicing_15 ($15 / 3 devices) to plan_type CHECK + device-limit trigger.
+    const v5SubPath = path.resolve(__dirname, '../../db/migrations/v5_subscription_invoicing_15.sql');
+    if (fs.existsSync(v5SubPath)) {
+      await client.query(fs.readFileSync(v5SubPath, 'utf8'));
+      console.log('Applied db/migrations/v5_subscription_invoicing_15.sql (invoicing_15 tier).');
+    } else {
+      console.warn(`Skipped subscription tier upgrade: ${v5SubPath} not found.`);
     }
 
     console.log('Migration complete. Packages + transit + RBAC seeded.');

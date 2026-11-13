@@ -161,3 +161,16 @@ export function splitRailBuckets(
 }
 
 export { round2 as roundMoney };
+
+/** UltraNet WiFi monthly trading cycle (3rd→3rd). Additive to accounting helpers above. */
+export const REVENUE_CYCLE_START_DAY = 3;
+const CYCLE_SHIFT_DAYS = REVENUE_CYCLE_START_DAY - 1;
+export function revenueCycleStartSql(nowExpr = 'NOW()'): string {
+  return `(date_trunc('month', ${nowExpr} - INTERVAL '${CYCLE_SHIFT_DAYS} days') + INTERVAL '${CYCLE_SHIFT_DAYS} days')`;
+}
+export function revenueCycleEndSql(nowExpr = 'NOW()'): string {
+  return `(${revenueCycleStartSql(nowExpr)} + INTERVAL '1 month')`;
+}
+export function revenueCycleMonthSql(nowExpr = 'NOW()'): string {
+  return `date_trunc('month', ${revenueCycleStartSql(nowExpr)})`;
+}
