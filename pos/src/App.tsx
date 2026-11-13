@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { api, auth, ApiError, type StaffUser, type MethodTotal, type Shift } from './api';
+import { api, auth, ApiError, SESSION_EVENT, type SessionSignal, type StaffUser, type MethodTotal, type Shift } from './api';
 import PinLogin from './components/PinLogin';
 import ShiftGate from './components/ShiftGate';
 import Terminal from './components/Terminal';
@@ -46,6 +46,30 @@ export default function App() {
     window.setTimeout(() => setToast(null), 2600);
   }, []);
 
+  // The shared admin session can lock (423) or expire (401) while the till is
+  // open. api.ts emits this the moment it happens; returning to PinLogin is the
+  // only safe state — the PIN re-issues a session without an email round-trip.
+  useEffect(() => {
+    const onSession = (event: Event) => {
+      const state = (event as CustomEvent<SessionSignal>).detail;
+      auth.clear();
+      setUser(null);
+      setShift(null);
+      setShiftTotals([]);
+      setShowX(false);
+      setSwitching(false);
+      setView('home');
+      notify(
+        state === 'locked'
+          ? 'Till locked after inactivity — enter your PIN to continue'
+          : 'Session expired — sign in again',
+        'error'
+      );
+    };
+    window.addEventListener(SESSION_EVENT, onSession);
+    return () => window.removeEventListener(SESSION_EVENT, onSession);
+  }, [notify]);
+
   useEffect(() => {
     const sale = live.sale;
     if (!sale) return;
@@ -64,9 +88,13 @@ export default function App() {
       const data = await api.currentShift();
       setShift(data ? data.shift : null);
       setShiftTotals(data ? data.totalsByMethod : []);
-    } catch {
-      setShift(null);
-      setShiftTotals([]);
+    } catch (err) {
+      // A revoked/locked session must return to the PIN screen. Swallowing the
+      // error here used to leave a dead till on the "open a shift" gate.
+      if (!(err instanceof ApiError && (err.status === 401 || err.status === 423))) {
+        setShift(null);
+        setShiftTotals([]);
+      }
     } finally {
       setShiftLoading(false);
     }

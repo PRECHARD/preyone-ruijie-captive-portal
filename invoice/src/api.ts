@@ -20,18 +20,57 @@ export function getToken(): string | null {
   return localStorage.getItem('gateway_token') || localStorage.getItem('admin_token');
 }
 
+/** Drop only the local bearer, keeping any other workspace state intact. */
+export function clearToken(): void {
+  try {
+    localStorage.removeItem('gateway_token');
+    localStorage.removeItem('admin_token');
+  } catch {
+    /* private mode: the wildcard cookie is still the source of truth */
+  }
+}
+
+/**
+ * App-level auth signals. The client emits these when the shared admin session
+ * changes underneath the SPA, so a locked or revoked session can never leave the
+ * workspace on a half-rendered screen (which is what a 423 used to do).
+ */
+export const SESSION_EVENT = 'preyone:session';
+export type SessionSignal = 'locked' | 'expired';
+
+function signalSession(state: SessionSignal): void {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent<SessionSignal>(SESSION_EVENT, { detail: state }));
+  }
+}
+
 export async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const base: Record<string, string> = { 'Content-Type': 'application/json' };
+  const override = (opts.headers as Record<string, string> | undefined) ?? {};
   const token = getToken();
-  if (token) headers.Authorization = `Bearer ${token}`;
-  const res = await fetch(path, { credentials: 'include', ...opts, headers: { ...headers, ...(opts.headers as Record<string, string> | undefined) } });
+  const headers = { ...base, ...(token ? { Authorization: `Bearer ${token}` } : {}), ...override };
+
+  let res = await fetch(path, { credentials: 'include', ...opts, headers });
+
+  // A stale bearer token must never shadow a fresh wildcard cookie. That
+  // combination is common: sign in on admin.preyone.com, then open the invoice
+  // tab where an older `gateway_token` is still in localStorage. The cookie is
+  // valid, so retry once without the bearer and keep the working credential.
+  const authEndpoint = path.startsWith('/api/admin/auth/');
+  if (res.status === 401 && token && !authEndpoint && !override.Authorization) {
+    const retry = await fetch(path, { credentials: 'include', ...opts, headers: { ...base, ...override } });
+    if (retry.ok) {
+      clearToken();
+      res = retry;
+    }
+  }
+
   if (!res.ok) {
-    const data = await res.json().catch(() => ({}));
-    throw new ApiError(
-      (data as { error?: string }).error || `Request failed (${res.status})`,
-      res.status,
-      (data as { code?: string }).code
-    );
+    const data = (await res.json().catch(() => ({}))) as { error?: string; code?: string };
+    const code = data.code;
+    if (res.status === 423 && code === 'SESSION_LOCKED') signalSession('locked');
+    else if (res.status === 401 && code !== 'UNLOCK_FAILED') signalSession('expired');
+    throw new ApiError(data.error || `Request failed (${res.status})`, res.status, code);
   }
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;

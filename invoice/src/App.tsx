@@ -1,9 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import {
   ApiError,
+  SESSION_EVENT,
   api,
+  clearToken,
   download,
+  getToken,
+  type SessionSignal,
   type ArAging,
   type Catalog,
   type Company,
@@ -82,9 +86,216 @@ function StatusBadge({ status }: { status: string }) {
   return <span className={`badge ${key}`}>{status}</span>;
 }
 
-/* ────────────────────────────── login ──────────────────────────────── */
+/* ────────────────────────────── auth ────────────────────────────────── */
 
-function LoginPanel({ onSignedIn }: { onSignedIn: () => void }) {
+const AUTH_POINTS = [
+  {
+    title: 'Issue in seconds',
+    body: 'Quotes, tax invoices, credit notes and receipts from one numbered ledger.',
+  },
+  {
+    title: 'Get paid faster',
+    body: 'Pesepay checkout, part-payments and a live accounts-receivable view.',
+  },
+  {
+    title: 'Built for teams',
+    body: 'Role-aware access shared with the Preyone console and point of sale.',
+  },
+];
+
+function AuthFrame({
+  kicker,
+  title,
+  subtitle,
+  children,
+}: {
+  kicker: string;
+  title: string;
+  subtitle: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="auth-shell">
+      <aside className="auth-hero">
+        <div className="auth-hero-brand">
+          <span className="auth-mark" aria-hidden>P</span>
+          <div>
+            <strong>Preyone</strong>
+            <span>Invoicing &amp; finance</span>
+          </div>
+        </div>
+
+        <div className="auth-hero-copy">
+          <span className="auth-eyebrow">Business workspace</span>
+          <h2>Every quote, invoice and payment — in one calm, auditable ledger.</h2>
+          <ul className="auth-points">
+            {AUTH_POINTS.map((point) => (
+              <li key={point.title}>
+                <span className="auth-point-dot" aria-hidden />
+                <div>
+                  <strong>{point.title}</strong>
+                  <span>{point.body}</span>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        <div className="auth-hero-foot">
+          <span className="auth-secure"><i aria-hidden /> Secure session</span>
+          <span>preyone.com</span>
+        </div>
+      </aside>
+
+      <main className="auth-panel">
+        <section className="card auth-card" aria-live="polite">
+          <div className="auth-kicker">{kicker}</div>
+          <h1>{title}</h1>
+          <p>{subtitle}</p>
+          {children}
+        </section>
+        <p className="auth-legal">
+          Protected by Preyone single sign-on · Need help?{' '}
+          <a href="mailto:support@preyone.com">support@preyone.com</a>
+        </p>
+      </main>
+    </div>
+  );
+}
+
+/** Visible password field with an accessible reveal toggle. */
+function PasswordField({
+  label,
+  value,
+  onChange,
+  autoComplete,
+  autoFocus,
+  children,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  autoComplete: string;
+  autoFocus?: boolean;
+  children?: ReactNode;
+}) {
+  const [visible, setVisible] = useState(false);
+  return (
+    <label className="field">
+      <span>{label}</span>
+      <span className="input-affix">
+        <input
+          className="input"
+          type={visible ? 'text' : 'password'}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          autoComplete={autoComplete}
+          autoFocus={autoFocus}
+          required
+        />
+        <button
+          className="input-affix-btn"
+          type="button"
+          onClick={() => setVisible((v) => !v)}
+          aria-label={visible ? 'Hide password' : 'Show password'}
+          tabIndex={-1}
+        >
+          {visible ? 'Hide' : 'Show'}
+        </button>
+      </span>
+      {children}
+    </label>
+  );
+}
+
+function UnlockPanel({
+  onUnlocked,
+  onSignIn,
+}: {
+  onUnlocked: () => void;
+  onSignIn: (message?: string) => void;
+}) {
+  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!password) {
+      setError('Enter your password to unlock this workspace.');
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await api.post('/api/admin/auth/unlock', { password });
+      onUnlocked();
+    } catch (err) {
+      if (err instanceof ApiError && err.code !== 'UNLOCK_FAILED') {
+        // The 10-hour absolute cap has passed, or the session was revoked:
+        // there is nothing left to unlock, so send the user to sign-in.
+        onSignIn(err.message);
+        return;
+      }
+      setError(errorText(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const switchAccount = async () => {
+    setSigningOut(true);
+    try {
+      const token = getToken();
+      await fetch('/api/admin/auth/logout', {
+        method: 'POST',
+        credentials: 'include',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+    } catch {
+      /* local token is still cleared below */
+    } finally {
+      clearToken();
+      onSignIn('Sign in with the account you want to use.');
+      setSigningOut(false);
+    }
+  };
+
+  return (
+    <AuthFrame
+      kicker="Session locked"
+      title="Unlock your workspace"
+      subtitle="You were away for a while, so the invoice workspace locked itself. Enter your password — no new email code is needed."
+    >
+      <form className="auth-form" onSubmit={submit}>
+        <span className="auth-state-chip">
+          <i aria-hidden /> Inactivity lock · session preserved
+        </span>
+        {error && <div className="banner error">{error}</div>}
+        <PasswordField
+          label="Password"
+          value={password}
+          onChange={setPassword}
+          autoComplete="current-password"
+          autoFocus
+        />
+        <button className="btn primary" disabled={busy || signingOut} type="submit">
+          {busy && <span className="spinner" aria-hidden />}
+          {busy ? 'Unlocking…' : 'Unlock workspace'}
+        </button>
+        <div className="auth-actions">
+          <button className="btn ghost" type="button" onClick={switchAccount} disabled={busy || signingOut}>
+            {signingOut && <span className="spinner" aria-hidden />}
+            {signingOut ? 'Signing out…' : 'Use another account'}
+          </button>
+        </div>
+      </form>
+    </AuthFrame>
+  );
+}
+
+function LoginPanel({ onSignedIn, initialNotice }: { onSignedIn: () => void; initialNotice?: string | null }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [code, setCode] = useState('');
@@ -94,8 +305,10 @@ function LoginPanel({ onSignedIn }: { onSignedIn: () => void }) {
   const [busy, setBusy] = useState(false);
   const [resending, setResending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(initialNotice ?? null);
   const [expired, setExpired] = useState(false);
+  const [notVerified, setNotVerified] = useState(false);
+  const [verifying, setVerifying] = useState(false);
 
   const resetToSignIn = (message?: string) => {
     setChallenge(null);
@@ -103,6 +316,7 @@ function LoginPanel({ onSignedIn }: { onSignedIn: () => void }) {
     setMasked('');
     setExpiresAt(null);
     setExpired(false);
+    setNotVerified(false);
     setNotice(null);
     setError(message ?? null);
   };
@@ -116,6 +330,7 @@ function LoginPanel({ onSignedIn }: { onSignedIn: () => void }) {
     setBusy(true);
     setError(null);
     setNotice(null);
+    setNotVerified(false);
     try {
       const path = challenge ? '/api/admin/auth/verify-2fa' : '/api/admin/auth/login';
       const body = challenge ? { challengeToken: challenge, code } : { email, password };
@@ -134,6 +349,7 @@ function LoginPanel({ onSignedIn }: { onSignedIn: () => void }) {
           return;
         }
         if (data.code === 'CODE_EXPIRED') setExpired(true);
+        if (data.code === 'EMAIL_NOT_VERIFIED') setNotVerified(true);
         throw new Error(data.error || 'Sign-in failed');
       }
       if (data.requires2fa) {
@@ -151,6 +367,27 @@ function LoginPanel({ onSignedIn }: { onSignedIn: () => void }) {
       setError(errorText(err));
     } finally {
       setBusy(false);
+    }
+  };
+
+  const resendVerification = async () => {
+    setVerifying(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const res = await fetch('/api/admin/auth/resend-verification', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Could not send the verification email');
+      setNotice(data.message || 'Check your inbox for a new verification link.');
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setVerifying(false);
     }
   };
 
@@ -194,25 +431,34 @@ function LoginPanel({ onSignedIn }: { onSignedIn: () => void }) {
     : null;
 
   return (
-    <div className="auth-wrap">
-      <form className="card auth-card" onSubmit={submit}>
-        <h1>{challenge ? 'Two-factor code' : 'Sign in to Invoicing'}</h1>
-        <p>
-          {challenge
-            ? `Enter the code sent to ${masked || 'your email'}.`
-            : 'Your Preyone session is shared across every workspace.'}
-        </p>
+    <AuthFrame
+      kicker={challenge ? 'Identity check' : 'Finance workspace'}
+      title={challenge ? 'Two-factor code' : 'Sign in to Invoicing'}
+      subtitle={
+        challenge
+          ? `Enter the 6-digit code sent to ${masked || 'your email'}.`
+          : 'One Preyone account unlocks invoicing, POS, admin and every business app.'
+      }
+    >
+      <form className="auth-form" onSubmit={submit} noValidate>
         {notice && <div className="banner ok">{notice}</div>}
         {error && <div className="banner error">{error}</div>}
         {challenge && expired && !error && (
           <div className="banner error">That code has expired. Request a new one.</div>
         )}
+        {notVerified && !challenge && (
+          <button className="btn ghost auth-inline-action" type="button" onClick={resendVerification} disabled={verifying}>
+            {verifying && <span className="spinner" aria-hidden />}
+            {verifying ? 'Sending link…' : 'Resend verification email'}
+          </button>
+        )}
+
         {challenge ? (
           <>
             <label className="field">
               <span>6-digit code</span>
               <input
-                className="input"
+                className="input input-otp"
                 value={code}
                 onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
                 inputMode="numeric"
@@ -231,7 +477,7 @@ function LoginPanel({ onSignedIn }: { onSignedIn: () => void }) {
             )}
             <button className="btn primary" disabled={busy || resending} type="submit">
               {busy && <span className="spinner" aria-hidden />}
-              {busy ? 'Please wait…' : 'Verify'}
+              {busy ? 'Please wait…' : 'Verify and continue'}
             </button>
             <div className="auth-actions">
               <button className="btn ghost" type="button" onClick={resend} disabled={busy || resending}>
@@ -244,42 +490,37 @@ function LoginPanel({ onSignedIn }: { onSignedIn: () => void }) {
                 onClick={() => resetToSignIn()}
                 disabled={busy || resending}
               >
-                Use a different account
+                Use another account
               </button>
             </div>
           </>
         ) : (
           <>
             <label className="field">
-              <span>Email</span>
+              <span>Work email</span>
               <input
                 className="input"
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 autoComplete="username"
+                placeholder="you@company.com"
+                autoFocus
                 required
               />
             </label>
-            <label className="field">
-              <span>Password</span>
-              <input
-                className="input"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                autoComplete="current-password"
-                required
-              />
-            </label>
+            <PasswordField label="Password" value={password} onChange={setPassword} autoComplete="current-password" />
             <button className="btn primary" disabled={busy} type="submit">
               {busy && <span className="spinner" aria-hidden />}
-              {busy ? 'Please wait…' : 'Sign in'}
+              {busy ? 'Signing in…' : 'Continue'}
             </button>
+            <p className="auth-foot-hint">
+              We&apos;ll email a one-time code to confirm it&apos;s you. No password is ever stored in the browser.
+            </p>
           </>
         )}
       </form>
-    </div>
+    </AuthFrame>
   );
 }
 
@@ -1220,6 +1461,8 @@ export default function App() {
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [loading, setLoading] = useState(true);
   const [authError, setAuthError] = useState(false);
+  const [locked, setLocked] = useState(false);
+  const [authNotice, setAuthNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [view, setView] = useState<View>(() => viewFromPath(window.location.pathname));
   const [docs, setDocs] = useState<PosDocument[]>([]);
@@ -1260,12 +1503,25 @@ export default function App() {
       setCatalog(cat);
       applyCssVars(theme.css);
       setAuthError(false);
+      setLocked(false);
+      setAuthNotice(null);
     } catch (err) {
-      if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
-        setAuthError(true);
-      } else {
-        setError(errorText(err));
+      if (err instanceof ApiError) {
+        if (err.status === 423) {
+          // State A: the shared session is inactivity-locked. The password
+          // unlock screen keeps the 2FA-free session (no new email code).
+          setLocked(true);
+          return;
+        }
+        if (err.status === 401 || err.status === 403) {
+          // A bearer that no longer works must not shadow the next sign-in.
+          clearToken();
+          setAuthNotice(err.status === 401 ? err.message : null);
+          setAuthError(true);
+          return;
+        }
       }
+      setError(errorText(err));
     } finally {
       setLoading(false);
     }
@@ -1299,6 +1555,27 @@ export default function App() {
     void boot();
   }, [boot]);
 
+  // Any 401/423 raised by a nested call (documents, payments, theme edits) is
+  // promoted to a first-class auth state instead of a red banner over stale
+  // data — the workspace can never look "signed in" while the API refuses it.
+  useEffect(() => {
+    const onSession = (event: Event) => {
+      const state = (event as CustomEvent<SessionSignal>).detail;
+      if (state === 'locked') {
+        setLocked(true);
+        setAuthError(false);
+        return;
+      }
+      clearToken();
+      setCatalog(null);
+      setLocked(false);
+      setAuthNotice('Your session ended. Sign in to pick up where you left off.');
+      setAuthError(true);
+    };
+    window.addEventListener(SESSION_EVENT, onSession);
+    return () => window.removeEventListener(SESSION_EVENT, onSession);
+  }, []);
+
   useEffect(() => {
     if (!catalog) return;
     void loadDocs();
@@ -1317,10 +1594,38 @@ export default function App() {
   const totals = useMemo(() => {
     const outstanding = docs.reduce((sum, d) => sum + Math.max(0, Number(d.total) - Number(d.amount_paid)), 0);
     const paid = docs.reduce((sum, d) => sum + Number(d.amount_paid), 0);
-    return { outstanding, paid, count: docs.length };
+    const billed = paid + outstanding;
+    return { outstanding, paid, count: docs.length, collectionRate: billed > 0 ? Math.round((paid / billed) * 100) : 0 };
   }, [docs]);
 
-  if (authError) return <LoginPanel onSignedIn={() => void boot()} />;
+  if (locked) {
+    return (
+      <UnlockPanel
+        onUnlocked={() => {
+          setLocked(false);
+          void boot();
+        }}
+        onSignIn={(message) => {
+          clearToken();
+          setLocked(false);
+          setAuthNotice(message ?? null);
+          setAuthError(true);
+        }}
+      />
+    );
+  }
+
+  if (authError) {
+    return (
+      <LoginPanel
+        initialNotice={authNotice}
+        onSignedIn={() => {
+          setAuthNotice(null);
+          void boot();
+        }}
+      />
+    );
+  }
 
   if (loading) {
     return (
@@ -1419,7 +1724,12 @@ export default function App() {
             <div className="stat">
               <div className="stat-label">Collected</div>
               <div className="stat-value">{money(totals.paid, catalog?.company.currency)}</div>
-              <div className="stat-foot">payments applied</div>
+              <div className="stat-meter" aria-hidden>
+                <i style={{ width: `${totals.collectionRate}%` }} />
+              </div>
+              <div className="stat-foot">
+                {totals.collectionRate}% of billed · payments applied
+              </div>
             </div>
             <div className="stat">
               <div className="stat-label">AR over 60 days</div>
@@ -1485,7 +1795,19 @@ export default function App() {
                   </thead>
                   <tbody>
                     {docs.map((d) => (
-                      <tr key={d.id} onClick={() => setOpenDocId(d.id)}>
+                      <tr
+                        key={d.id}
+                        tabIndex={0}
+                        role="button"
+                        aria-label={`Open ${d.doc_number}`}
+                        onClick={() => setOpenDocId(d.id)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            setOpenDocId(d.id);
+                          }
+                        }}
+                      >
                         <td className="mono">{d.doc_number}</td>
                         <td>{typeLabel(types, d.doc_type)}</td>
                         <td>{d.customer_name || 'Walk-in'}</td>
@@ -1538,7 +1860,19 @@ export default function App() {
                     </thead>
                     <tbody>
                       {aging.detail.map((d) => (
-                        <tr key={d.id} onClick={() => setOpenDocId(d.id)}>
+                        <tr
+                          key={d.id}
+                          tabIndex={0}
+                          role="button"
+                          aria-label={`Open ${d.doc_number}`}
+                          onClick={() => setOpenDocId(d.id)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              setOpenDocId(d.id);
+                            }
+                          }}
+                        >
                           <td className="mono">{d.doc_number}</td>
                           <td>{d.customer_name || 'Walk-in'}</td>
                           <td>{dateLabel(d.due_date || d.issue_date)}</td>

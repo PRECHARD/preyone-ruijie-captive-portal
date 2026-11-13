@@ -170,14 +170,34 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Emitted when the shared admin session behind the till stops being usable.
+ * `locked` (HTTP 423) keeps the account but needs a fresh PIN sign-in; `expired`
+ * (HTTP 401) means the token is gone. App returns to PinLogin either way instead
+ * of leaving the cashier on a screen where every action silently fails.
+ */
+export const SESSION_EVENT = 'preyone:pos-session';
+export type SessionSignal = 'locked' | 'expired';
+
+function signalSession(state: SessionSignal): void {
+  auth.clear();
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent<SessionSignal>(SESSION_EVENT, { detail: state }));
+  }
+}
+
 async function req<T>(path: string, opts: RequestInit = {}): Promise<T> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   const token = auth.token();
   if (token) headers.Authorization = `Bearer ${token}`;
   const res = await fetch(`/api/pos${path}`, { credentials: 'include', ...opts, headers });
   if (res.status === 401) {
-    auth.clear();
+    signalSession('expired');
     throw new ApiError('Session expired — sign in again', 401);
+  }
+  if (res.status === 423) {
+    signalSession('locked');
+    throw new ApiError('Session locked after inactivity — sign in again', 423);
   }
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
@@ -194,8 +214,12 @@ async function root<T>(path: string, opts: RequestInit = {}): Promise<T> {
   if (token) headers.Authorization = `Bearer ${token}`;
   const res = await fetch(`/api${path}`, { credentials: 'include', ...opts, headers });
   if (res.status === 401) {
-    auth.clear();
+    signalSession('expired');
     throw new ApiError('Session expired — sign in again', 401);
+  }
+  if (res.status === 423) {
+    signalSession('locked');
+    throw new ApiError('Session locked after inactivity — sign in again', 423);
   }
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
