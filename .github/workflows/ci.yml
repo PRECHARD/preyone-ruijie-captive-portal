@@ -12,7 +12,8 @@ jobs:
 
     strategy:
       matrix:
-        node-version: [18, 20]
+        # jsdom 29 requires Node ^20.19. Node 18 crashes vitest while loading it.
+        node-version: [20]
 
     steps:
       - uses: actions/checkout@v4
