@@ -579,6 +579,11 @@ router.post('/documents', async (req, res) => {
 
 // Mark a document as sent (quote/invoice handed to the customer). Idempotent.
 router.post('/documents/:id/send', async (req, res) => {
+  const blocked = invoiceBlock(req.company!);
+  if (blocked) {
+    res.status(403).json(blocked);
+    return;
+  }
   const cid = tenantId(req);
   const { rows } = await pool.query(
     `UPDATE pos_documents

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { jsPDF } from 'jspdf';
 import { accountingApi, getToken } from '../api/client';
 import { FiDownload, FiRefreshCw, FiTrendingUp, FiDollarSign, FiPercent, FiInbox } from 'react-icons/fi';
 import './Accounting.css';
@@ -129,9 +130,14 @@ export default function Accounting() {
   };
 
   const exportPdf = () => {
+    const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(16);
+    doc.text('Preyone Accounting Report', 14, 20);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(11);
     const lines = [
-      'Preyone Accounting Report',
-      `Period: ${from || 'start'} → ${to || 'now'}`,
+      `Period: ${from || 'start'} to ${to || 'now'}`,
       '',
       `Gross Revenue: ${money(overview?.totalGrossRevenue)}`,
       `Net Sales: ${money(overview?.netSales)}`,
@@ -145,11 +151,16 @@ export default function Accounting() {
       `Expenses: ${money(pnl?.expenses)}`,
       `Operating Profit: ${money(pnl?.operatingProfit)}`,
     ];
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([lines.join('\n')], { type: 'text/plain' }));
-    a.download = `preyone-pnl-${new Date().toISOString().slice(0, 10)}.txt`;
-    a.click();
-    URL.revokeObjectURL(a.href);
+    let y = 32;
+    for (const line of lines) {
+      if (!line) {
+        y += 4;
+        continue;
+      }
+      doc.text(line, 14, y);
+      y += 7;
+    }
+    doc.save(`preyone-pnl-${new Date().toISOString().slice(0, 10)}.pdf`);
   };
 
   const cashier = overview?.role === 'Cashier';

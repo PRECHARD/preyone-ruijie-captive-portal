@@ -173,6 +173,27 @@ describe('POS sale and invoice entitlement', () => {
     expect(suspended.body.code).toBe('SUBSCRIPTION_SUSPENDED');
   });
 
+  it('refuses to send an office document on PreTill or after the subscription lapses', async () => {
+    const pretill = await request(app()).post('/api/pos/documents/doc-1/send').send({});
+    expect(pretill.status).toBe(403);
+    expect(pretill.body.code).toBe('PLAN_MODULE_DISABLED');
+    expect(pool.query).not.toHaveBeenCalled();
+
+    usePlan('pos_invoice_15');
+    session.company.subscription_status = 'suspended';
+    const lapsed = await request(app()).post('/api/pos/documents/doc-1/send').send({});
+    expect(lapsed.status).toBe(403);
+    expect(lapsed.body.code).toBe('SUBSCRIPTION_SUSPENDED');
+  });
+
+  it('sends an office document when Invoice is on the plan', async () => {
+    usePlan('pos_invoice_15');
+    (pool.query as any).mockResolvedValue({ rows: [{ id: 'doc-1', status: 'unpaid' }] });
+    const res = await request(app()).post('/api/pos/documents/doc-1/send').send({});
+    expect(res.status).toBe(200);
+    expect(res.body.id).toBe('doc-1');
+  });
+
   it('hides POS data routes when the plan does not include POS', async () => {
     session.company.modules = [];
     const res = await request(app()).get('/api/pos/products');
