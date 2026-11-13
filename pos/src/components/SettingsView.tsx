@@ -9,6 +9,7 @@ import {
   type SubscriptionPlans,
 } from '../api';
 import UpgradeModal from './UpgradeModal';
+import { mergePlanTiers } from '../plans';
 
 const fmtDate = (t: string | null): string =>
   !t || Number.isNaN(Date.parse(t))
@@ -121,7 +122,8 @@ export default function SettingsView({
   };
 
   const current = plans?.current ?? null;
-  const tierMeta = current ? plans?.tiers.find((t) => t.id === current.plan_type) : null;
+  const displayTiers = mergePlanTiers(plans?.tiers);
+  const tierMeta = current ? displayTiers.find((t) => t.id === current.plan_type) : null;
   const planName = tierMeta?.name ?? current?.plan_type ?? '—';
   const statusClass =
     current?.subscription_status === 'active'

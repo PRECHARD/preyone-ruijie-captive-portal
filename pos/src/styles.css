@@ -33,6 +33,15 @@
   --ok: #1c7a37;
   --warn: #a05e03;
   --danger: #b3261e;
+  /* Settings & Branding fallbacks (overwritten by /api/pos/theme) */
+  --pos-primary: #059669;
+  --pos-accent: #d97706;
+  --pos-bg: #0f172a;
+  --pos-text: #f8fafc;
+  --pos-text-muted: #94a3b8;
+  --pos-surface: #1e293b;
+  --pos-border: #334155;
+  --pos-glow: rgba(5, 150, 105, 0.35);
   --grad-brand: linear-gradient(
     100deg,
     #14002e 0%,
@@ -75,10 +84,50 @@ input, select {
   padding: 0.5rem 0.65rem;
   font-size: 0.95rem;
   background: #fff;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
 }
 input:focus, select:focus, button:focus-visible {
-  outline: 2px solid var(--violet);
-  outline-offset: 1px;
+  outline: none;
+  border-color: color-mix(in srgb, var(--pos-primary) 70%, transparent);
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--pos-primary) 18%, transparent),
+    0 0 18px color-mix(in srgb, var(--pos-accent, #d97706) 12%, transparent);
+}
+
+/* Glass selects — kill native triangles / ugly outlines */
+.select,
+select.select,
+.acct-filters select,
+.field-label select {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background-color: rgba(15, 23, 42, 0.9);
+  color: #e2e8f0;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 10px;
+  padding: 0.5rem 2.1rem 0.5rem 0.75rem;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5 6 6.5l5-5' fill='none' stroke='%2394a3b8' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 11px 7px;
+  cursor: pointer;
+}
+.select:focus,
+select.select:focus,
+.acct-filters select:focus,
+.field-label select:focus {
+  outline: none;
+  border-color: #34d399;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5 6 6.5l5-5' fill='none' stroke='%2334d399' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  box-shadow:
+    0 0 0 3px rgba(52, 211, 153, 0.22),
+    0 0 22px rgba(217, 119, 6, 0.16);
+}
+.select option,
+select.select option {
+  background: #0f172a;
+  color: #e2e8f0;
 }
 
 /* ── Shell ─────────────────────────────────────────── */
@@ -355,33 +404,115 @@ input:focus, select:focus, button:focus-visible {
 }
 .secondary-btn { width: 100%; margin-top: 0.5rem; padding: 0.7rem; font-weight: 600; }
 
-/* PIN pad */
+/* PIN pad — glassmorphic login */
+.pin-login-screen {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background:
+    radial-gradient(900px 520px at 12% -10%, rgba(5, 150, 105, 0.22), transparent 60%),
+    radial-gradient(800px 480px at 92% 0%, rgba(217, 119, 6, 0.18), transparent 55%),
+    linear-gradient(160deg, #070b14 0%, #0f172a 48%, #111827 100%);
+}
+.pin-login-glass {
+  width: min(400px, 100%);
+  text-align: center;
+  padding: 1.6rem 1.5rem 1.8rem;
+  border-radius: 22px;
+  background: linear-gradient(160deg, rgba(15, 23, 42, 0.82), rgba(30, 41, 59, 0.72));
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  box-shadow:
+    0 24px 60px rgba(0, 0, 0, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  animation: pin-glass-in 0.55s cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes pin-glass-in {
+  from { opacity: 0; transform: translateY(14px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+.pin-status-row {
+  display: flex; gap: 0.5rem; justify-content: center; flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+.pin-status {
+  display: inline-flex; align-items: center; gap: 0.35rem;
+  font-size: 0.68rem; letter-spacing: 0.08em; text-transform: uppercase;
+  color: #94a3b8;
+  padding: 0.28rem 0.65rem;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  background: rgba(15, 23, 42, 0.55);
+}
+.pin-status.ok { color: #6ee7b7; border-color: rgba(52, 211, 153, 0.35); }
+.pin-status.warn { color: #fbbf24; border-color: rgba(251, 191, 36, 0.35); }
+.pin-status-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 0 0 currentColor;
+  animation: pin-pulse 1.8s ease-out infinite;
+}
+@keyframes pin-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.45); }
+  70% { box-shadow: 0 0 0 8px rgba(52, 211, 153, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0); }
+}
 .pin-dots { display: flex; gap: 0.55rem; justify-content: center; margin: 1rem 0 1.3rem; }
 .pin-dot {
   width: 14px; height: 14px; border-radius: 50%;
-  border: 2px solid var(--navy-800); background: transparent;
+  border: 2px solid rgba(148, 163, 184, 0.55); background: transparent;
+  transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
 }
-.pin-dot.filled { background: var(--navy-800); }
+.pin-dot.filled {
+  background: #34d399;
+  border-color: #34d399;
+  box-shadow: 0 0 12px rgba(52, 211, 153, 0.45);
+}
 .pin-pad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.55rem; max-width: 280px; margin: 0 auto; }
 .pin-pad button {
   font-size: 1.35rem; font-weight: 600; padding: 0.85rem 0;
   border-radius: 12px;
+  background: rgba(15, 23, 42, 0.72);
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  color: #e2e8f0;
+}
+.pin-pad button:hover:not(:disabled) {
+  border-color: rgba(52, 211, 153, 0.45);
+  box-shadow: 0 0 16px rgba(52, 211, 153, 0.12);
+}
+.pin-pad button.pin-ok {
+  background: linear-gradient(120deg, #059669, #d97706);
+  border: none;
+  color: #fff;
 }
 .pin-login-wrap { max-width: 360px; margin: 8vh auto 0; text-align: center; }
-.pin-logo { height: 52px; margin-bottom: 0.4rem; }
-.pin-sub { color: var(--muted); font-size: 0.8rem; letter-spacing: 0.18em; margin-bottom: 1.4rem; }
+.pin-logo { height: 52px; margin-bottom: 0.35rem; filter: drop-shadow(0 8px 18px rgba(5, 150, 105, 0.25)); }
+.pin-brand {
+  font-weight: 800; letter-spacing: 0.28em; font-size: 0.95rem; color: #f8fafc;
+}
+.pin-sub { color: #94a3b8; font-size: 0.72rem; letter-spacing: 0.22em; margin: 0.35rem 0 1.2rem; }
 
 /* Till operator picker */
-.pin-hint { color: var(--muted); font-size: 0.9rem; margin-bottom: 0.8rem; }
+.pin-hint { color: #94a3b8; font-size: 0.85rem; margin-bottom: 0.8rem; }
 .op-list { display: flex; flex-direction: column; gap: 0.5rem; max-height: 46vh; overflow-y: auto; }
 .op-btn {
-  font-size: 1.05rem; font-weight: 600; padding: 0.8rem 1rem;
+  display: flex; justify-content: space-between; align-items: center; gap: 0.5rem;
+  font-size: 1.02rem; font-weight: 600; padding: 0.8rem 1rem;
   border-radius: 12px; text-align: left;
+  background: rgba(15, 23, 42, 0.65);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  color: #e2e8f0;
 }
+.op-btn:hover { border-color: rgba(52, 211, 153, 0.45); }
+.op-role { font-size: 0.68rem; letter-spacing: 0.08em; text-transform: uppercase; color: #94a3b8; }
 .op-selected {
-  font-size: 1.1rem; font-weight: 700; padding: 0.75rem 1rem;
+  font-size: 1.05rem; font-weight: 700; padding: 0.75rem 1rem;
   border-radius: 12px; width: 100%; margin-bottom: 0.5rem;
-  background: var(--navy-800); color: #fff;
+  background: linear-gradient(120deg, rgba(5, 150, 105, 0.85), rgba(217, 119, 6, 0.75));
+  border: none; color: #fff;
 }
 .op-change { font-size: 0.75rem; font-weight: 400; opacity: 0.7; }
 
@@ -585,6 +716,48 @@ input:focus, select:focus, button:focus-visible {
   font-size: 0.55rem; font-weight: 800; letter-spacing: 0.1em;
   background: var(--navy-800); color: #fff; padding: 0.1rem 0.45rem; border-radius: 999px;
 }
+.tier-card.soon { opacity: 0.78; }
+.tier-badge.soon-badge { background: #a05e03; }
+
+/* Accounting / Finance */
+.acct-view { padding: 1rem 1.1rem 2rem; max-width: 1100px; margin: 0 auto; }
+.acct-view-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 14px; }
+.acct-view-title { margin: 0; font-size: 1.15rem; }
+.acct-head-actions { display: flex; align-items: center; gap: 0.5rem; }
+.live-pill {
+  display: inline-flex; align-items: center; gap: 0.35rem;
+  font-size: 0.68rem; letter-spacing: 0.08em; text-transform: uppercase;
+  padding: 0.28rem 0.65rem; border-radius: 999px;
+  border: 1px solid rgba(160, 94, 3, 0.35); color: var(--warn); background: rgba(160, 94, 3, 0.08);
+}
+.live-pill.on { border-color: rgba(28, 122, 55, 0.35); color: var(--ok); background: rgba(28, 122, 55, 0.08); }
+.live-pill i {
+  width: 7px; height: 7px; border-radius: 50%; background: currentColor;
+  animation: pin-pulse 1.8s ease-out infinite;
+}
+.acct-kpi-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.acct-kpi-card {
+  background: linear-gradient(145deg, #0f172a, #1e293b);
+  color: #e2e8f0;
+  border-radius: 14px;
+  padding: 12px 14px;
+  display: flex; flex-direction: column; gap: 6px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+}
+.acct-kpi-card span { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em; color: #94a3b8; }
+.acct-kpi-card strong { font-size: 1.2rem; }
+.acct-kpi-card.emerald { border-color: rgba(5, 150, 105, 0.5); }
+.acct-kpi-card.amber { border-color: rgba(217, 119, 6, 0.5); }
+.acct-panel {
+  margin-top: 12px;
+  background: #fff;
+  border: 1px solid var(--line-soft);
+  border-radius: 14px;
+  padding: 12px 14px;
+}
+.acct-filters { margin-bottom: 0.75rem; max-width: 220px; }
+.acct-mini-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+.acct-mini-table th, .acct-mini-table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line-soft); }
 
 .upgrade-fields .method-tabs { margin-top: 0.15rem; margin-bottom: 0.5rem; }
 .checkout-summary {
@@ -628,3 +801,16 @@ input:focus, select:focus, button:focus-visible {
 
 /* Modal tweaks (switch-cashier reuses the PIN picker) */
 .modal-card .pin-login-wrap { margin: 0 auto; }
+.modal-card .pin-login-screen {
+  min-height: 0;
+  padding: 0;
+  background: transparent;
+}
+.modal-card .pin-login-glass {
+  width: 100%;
+  box-shadow: none;
+  padding: 0.4rem 0 0;
+  border: none;
+  background: transparent;
+  backdrop-filter: none;
+}

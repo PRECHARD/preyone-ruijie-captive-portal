@@ -1838,6 +1838,15 @@ const SQL = `
       console.warn(`Skipped accounting upgrade: ${v4AccountingPath} not found.`);
     }
 
+    // Add invoicing_15 ($15 / 3 devices) to plan_type CHECK + device-limit trigger.
+    const v5SubPath = path.resolve(__dirname, '../../db/migrations/v5_subscription_invoicing_15.sql');
+    if (fs.existsSync(v5SubPath)) {
+      await client.query(fs.readFileSync(v5SubPath, 'utf8'));
+      console.log('Applied db/migrations/v5_subscription_invoicing_15.sql (invoicing_15 tier).');
+    } else {
+      console.warn(`Skipped subscription tier upgrade: ${v5SubPath} not found.`);
+    }
+
     console.log('Migration complete. Packages + transit + RBAC seeded.');
   } finally {
     client.release();
