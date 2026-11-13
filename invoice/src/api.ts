@@ -96,7 +96,17 @@ export async function request<T>(path: string, opts: RequestInit = {}): Promise<
     throw new ApiError(data.error || `Request failed (${res.status})`, res.status, code);
   }
   if (res.status === 204) return undefined as T;
-  return (await res.json()) as T;
+  // Guard against SPA/HTML fallbacks masquerading as success (DOCTYPE parse
+  // failures used to surface as "Unexpected token '<'" on the boot screen).
+  const ctype = res.headers.get('content-type') || '';
+  if (ctype.includes('text/html')) {
+    throw new ApiError('API returned HTML instead of JSON. The invoice API route is missing or misrouted.', res.status, 'HTML_INSTEAD_OF_JSON');
+  }
+  try {
+    return (await res.json()) as T;
+  } catch {
+    throw new ApiError('API returned a non-JSON body. Retry, or check invoice API routing.', res.status, 'INVALID_JSON');
+  }
 }
 
 export const api = {

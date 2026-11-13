@@ -393,8 +393,15 @@ app.get('/connect', (_req, res) => {
   res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
 });
 
-// Fallback for unmatched routes
-app.get('*', (_req, res) => {
+// Fallback for unmatched routes.
+// API misses must stay JSON: serving portal index.html here is exactly how
+// invoice.preyone.com showed "Unexpected token '<' ... <!DOCTYPE" when a
+// signed-in boot hit a missing /api/pos/* handler (SPA parsed HTML as JSON).
+app.get('*', (req, res) => {
+  if (req.path.startsWith('/api/') || req.path === '/api') {
+    res.status(404).json({ error: 'Not found' });
+    return;
+  }
   res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
 });
 
