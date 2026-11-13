@@ -55,7 +55,7 @@ function emailFooter(): string {
 }
 
 // ── Generic email helper ──────────────────────────────────────────────
-async function sendMail(to: string, subject: string, html: string, fromName?: string, fromEmail?: string, attachments?: Array<{ filename: string; content: Buffer; cid: string }>): Promise<boolean> {
+async function sendMail(to: string, subject: string, html: string, fromName?: string, fromEmail?: string, attachments?: Array<{ filename: string; content: Buffer; cid?: string }>): Promise<boolean> {
   const t = getTransporter();
   if (!t) {
     console.log('[NOTIFICATION] Email not sent (SMTP not configured). To:', to);
@@ -824,4 +824,63 @@ export async function sendAdminLoginCode(email: string, fullName: string, code: 
 </html>`,
     'Preyone', 'admin@preyone.com'
   );
+}
+
+
+export async function sendTransactionalEmail(opts: {
+  to: string | string[];
+  subject: string;
+  html: string;
+  fromName?: string;
+  fromEmail?: string;
+  attachments?: Array<{ filename: string; content: Buffer; cid?: string }>;
+}): Promise<boolean> {
+  const recipients = (Array.isArray(opts.to) ? opts.to : [opts.to])
+    .map((value) => String(value || '').trim())
+    .filter(Boolean);
+  if (recipients.length === 0) return false;
+  const results = await Promise.all(recipients.map((recipient) => sendMail(
+    recipient,
+    opts.subject,
+    opts.html,
+    opts.fromName ?? 'Preyone UltraNet',
+    opts.fromEmail ?? 'support@preyone.com',
+    opts.attachments
+  )));
+  return results.every(Boolean);
+}
+
+export function buildEmailShell(title: string, bodyHtml: string): string {
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="dark light" />
+  <title>${title}</title>
+</head>
+<body style="margin:0;padding:0;width:100%;background:#050505;font-family:'Montserrat','Segoe UI',Arial,sans-serif;color:#f8fbff">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;background:#050505">
+    <tr>
+      <td align="center" style="padding:0;background:#050505">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:680px;margin:0 auto;border-collapse:collapse">
+          <tr><td style="padding:0">${emailHeader(title)}</td></tr>
+          <tr>
+            <td style="padding:8px 16px 32px;background:#050505">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:640px;margin:0 auto;border-collapse:separate;background:#0a0d17;border:1px solid #1c2438;border-radius:16px">
+                <tr>
+                  <td style="padding:28px 22px;background:#0a0d17;border-radius:16px;box-shadow:0 0 28px rgba(106,13,173,0.22),0 18px 48px rgba(0,0,0,0.45)">
+                    ${bodyHtml}
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr><td style="padding:0">${emailFooter()}</td></tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
 }

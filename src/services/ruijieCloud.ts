@@ -1,4 +1,14 @@
 import axios from 'axios';
+import { attachRuijieQuotaGuard } from './ruijieRateLimiter';
+import {
+  RuijieApiError,
+  RATE_LIMIT_CODE,
+  isRateLimitError,
+} from './ruijieErrors';
+
+// Re-exported so every existing `from '../services/ruijieCloud'` import of the
+// error vocabulary keeps working unchanged.
+export { RuijieApiError, RATE_LIMIT_CODE, isRateLimitError };
 
 // Derived from axios.create() rather than importing the named `AxiosInstance`
 // type: under this project's commonjs/node10 resolution the named export
@@ -9,8 +19,21 @@ type AxiosInstance = ReturnType<typeof axios.create>;
 const RUIJIE_BASE_URL = 'https://cloud.ruijienetworks.com';
 const ACCESS_TOKEN_URL = '/service/api/oauth20/client/access_token';
 const USERGROUP_LIST_URL = '/service/api/intl/usergroup/list';
+// Package ΓåÆ Ruijie User Group auto-provisioning. The path mirrors the Ruijie
+// Cloud console's own user-group config screen and is overridable so a tenant
+// whose API surface differs can be pointed at the right endpoint without a
+// code change. The caller (ruijieUserGroups.ts) always degrades to the local
+// cache when this route rejects or throttles.
+const USERGROUP_CONFIG_URL =
+  process.env.RUIJIE_USERGROUP_CONFIG_PATH || '/service/api/intl/usergroup/config_group_userManagement_menu';
 const VOUCHER_CREATE_URL = '/service/api/open/auth/voucher/create';
 const VOUCHER_GET_LIST_URL = '/service/api/open/auth/voucher/getList';
+// Post-redemption MAC authorisation ("unblock this device now"). Best-effort
+// only: the gateway still authorises through ext_login/RADIUS, so a tenant that
+// does not expose this route (or is out of quota) must never fail a redemption.
+// Overridable so a different API surface needs no code change.
+const CLIENT_AUTHORIZE_URL =
+  process.env.RUIJIE_AUTHORIZE_PATH || '/service/api/open/auth/authorize';
 
 const TOKEN_TTL_MS = 50 * 60 * 1000;
 
@@ -21,19 +44,40 @@ const AUTH_ERROR_CODES = [4010, 4011, 4013];
 // code=3 alone is too generic to force-refresh on, so also require the message.
 const AUTH_ERROR_MESSAGE = /login timeout/i;
 
-export class RuijieApiError extends Error {
-  readonly code: string | number;
-  readonly status: number = 502;
-  constructor(code: string | number, message: string) {
-    super(message);
-    this.name = 'RuijieApiError';
-    this.code = code;
-  }
-}
-
 function isAuthError(err: unknown): err is RuijieApiError {
   if (!(err instanceof RuijieApiError)) return false;
   return AUTH_ERROR_CODES.includes(Number(err.code)) || AUTH_ERROR_MESSAGE.test(err.message);
+}
+
+// Writes (voucher minting) are user-initiated, so they are retried briefly
+// before giving up: the quota window often frees within a couple of seconds.
+const CREATE_RATE_LIMIT_RETRY_MS = [1200, 3500];
+
+async function withRateLimitRetry<T>(fn: () => Promise<T>): Promise<T> {
+  let attempt = 0;
+  for (;;) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (!isRateLimitError(err) || attempt >= CREATE_RATE_LIMIT_RETRY_MS.length) throw err;
+      const delay = CREATE_RATE_LIMIT_RETRY_MS[attempt] + Math.floor(Math.random() * 300);
+      attempt += 1;
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
+}
+
+// Reads (roster pulls) are cached upstream (see ruijieRoster.ts). Once Ruijie
+// says "Too many requests" the whole worker stops reading for a cooldown, so
+// background sweeps cannot keep the quota pinned at zero.
+const READ_COOLDOWN_MS = (() => {
+  const parsed = Number(process.env.RUIJIE_READ_COOLDOWN_MS ?? 60_000);
+  return Number.isFinite(parsed) && parsed >= 5_000 ? parsed : 60_000;
+})();
+let readCooldownUntil = 0;
+
+export function ruijieReadCooldownMsRemaining(): number {
+  return Math.max(0, readCooldownUntil - Date.now());
 }
 
 export interface RuijieUserGroup {
@@ -57,12 +101,38 @@ export interface RuijieVoucher {
   userGroupId?: string;
   status?: string;
   comment?: string;
+  // ΓöÇΓöÇ Accounting (verified live 2026-10-15) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+  // quota/usedQuota are MEGABYTES (quota: 5120 == 5 GB preLite_Daily),
+  // usedTime is minutes of accumulated login time, loginTime is epoch-ms of
+  // the most recent login, currentClients is how many devices are on the
+  // voucher right now, disableStatus is 0 while the voucher is usable.
+  // These are keyed by the voucher CODE itself ΓÇö the gateway enforces the
+  // bundle against exactly these counters.
+  quotaMb?: number;
+  usedQuotaMb?: number;
+  usedTimeMin?: number;
+  usedCount?: number;
+  timePeriodMin?: number;
+  loginTime?: number;
+  firstUseTime?: number;
+  currentClients?: number;
+  maxClients?: number;
+  onlineStatus?: boolean | number | string;
+  packageName?: string;
+  disableStatus?: number;
+}
+
+function toNum(v: unknown): number | undefined {
+  if (v == null || v === '') return undefined;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : undefined;
 }
 
 let cachedToken: { accessToken: string; expiresAt: number } | null = null;
 
 export function resetRuijieCloudCache(): void {
   cachedToken = null;
+  readCooldownUntil = 0;
 }
 
 export function isRuijieCloudConfigured(): boolean {
@@ -84,11 +154,13 @@ function getConfig() {
 }
 
 function client(): AxiosInstance {
-  return axios.create({
+  // Every outbound call (token exchange included) is metered by the cluster-wide
+  // quota guard before it leaves the process ΓÇö see ruijieRateLimiter.ts.
+  return attachRuijieQuotaGuard(axios.create({
     baseURL: getConfig().baseUrl,
     timeout: 15000,
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-  });
+  }));
 }
 
 function failIfNotZero(payload: unknown, context: string): asserts payload is { [k: string]: any } {
@@ -102,7 +174,7 @@ function failIfNotZero(payload: unknown, context: string): asserts payload is { 
 // Ruijie returns expiryTime either as a numeric epoch-ms string (getList) or as a
 // "YYYY-MM-DD HH:mm:ss" string (create). Normalize both to epoch-ms; return
 // undefined for anything unparseable so callers store NULL instead of NaN
-// (ruijie_expiry is a BIGINT column — inserting NaN would error).
+// (ruijie_expiry is a BIGINT column ΓÇö inserting NaN would error).
 function parseExpiry(value: unknown): number | undefined {
   if (value == null) return undefined;
   if (typeof value === 'number') return Number.isFinite(value) ? value : undefined;
@@ -180,23 +252,84 @@ export async function getRuijieUserGroups(): Promise<RuijieUserGroup[]> {
   });
 }
 
+export interface RuijieUserGroupPolicy {
+  /** User group name shown in the Ruijie Cloud console. */
+  name: string;
+  comment?: string;
+  timePeriodMin?: number | null;
+  /** Megabytes; 0/null means unlimited. */
+  quotaMb?: number | null;
+  noOfDevice?: number | null;
+  rateLimitKbpsUp?: number | null;
+  rateLimitKbpsDown?: number | null;
+}
+
+export interface UpsertedRuijieUserGroup {
+  id?: string;
+  policy: RuijieUserGroupPolicy;
+}
+
+/**
+ * Create or update the Ruijie Cloud User Group that backs a package.
+ *
+ * Ruijie keys user groups by the group name inside the tenant, so the call is
+ * an upsert: sending the same `name` with a new policy updates the existing
+ * group instead of creating a duplicate. The returned id is cached by the
+ * caller; when Ruijie omits it the local row keeps its previous value.
+ */
+export async function upsertRuijieUserGroup(
+  policy: RuijieUserGroupPolicy
+): Promise<UpsertedRuijieUserGroup> {
+  if (!policy.name) throw new RuijieApiError('config', 'Ruijie user group needs a name');
+  return withTokenRefresh(async (accessToken) => {
+    const cfg = getConfig();
+    const res = await client().post(
+      `${USERGROUP_CONFIG_URL}/${cfg.groupId}?access_token=${encodeURIComponent(accessToken)}`,
+      {
+        groupId: cfg.groupId,
+        name: policy.name,
+        comment: (policy.comment || policy.name).slice(0, 50),
+        timePeriod: policy.timePeriodMin ?? null,
+        quota: policy.quotaMb ?? 0,
+        noOfDevice: policy.noOfDevice ?? 1,
+        upRateLimit: policy.rateLimitKbpsUp ?? 0,
+        downloadRateLimit: policy.rateLimitKbpsDown ?? 0,
+        bindMac: 0,
+      },
+      { headers: { 'Content-Type': 'application/json' } }
+    );
+    failIfNotZero(
+      res.data,
+      `usergroup/config_group_userManagement_menu (groupId=${cfg.groupId}) -> HTTP ${res.status}`
+    );
+    const data = (res.data as { [k: string]: any })?.data ?? {};
+    const id = data.id ?? data.userGroupId ?? data.groupId;
+    return { id: id != null ? String(id) : undefined, policy };
+  });
+}
+
 export interface CreateRuijieVoucherInput {
   profile: string;
   userGroupId: string;
   comment?: string;
+  /** Per-request timeout. The default axios client timeout is 15s. */
+  timeoutMs?: number;
 }
 
 export async function createRuijieVoucher(input: CreateRuijieVoucherInput): Promise<RuijieVoucher> {
   if (!input.profile || !input.userGroupId) {
     throw new RuijieApiError('config', `No Ruijie profile mapping for package`);
   }
-  return withTokenRefresh(async (accessToken) => {
+  return withRateLimitRetry(() => withTokenRefresh(async (accessToken) => {
     const cfg = getConfig();
     const comment = (input.comment || '').slice(0, 50);
     const res = await client().post(
       `${VOUCHER_CREATE_URL}/${cfg.groupId}?access_token=${encodeURIComponent(accessToken)}`,
       { quantity: 1, profile: input.profile, userGroupId: input.userGroupId, comment },
-      { headers: { 'Content-Type': 'application/json' } }
+      {
+        headers: { 'Content-Type': 'application/json' },
+        ...(input.timeoutMs != null ? { timeout: input.timeoutMs } : {}),
+      }
     );
     failIfNotZero(res.data, `voucher/create (groupId=${cfg.groupId}) -> HTTP ${res.status}`);
     const vd = resolveVoucherData(res.data);
@@ -215,6 +348,54 @@ export async function createRuijieVoucher(input: CreateRuijieVoucherInput): Prom
       userGroupId: entry?.userGroupId != null ? String(entry.userGroupId) : input.userGroupId,
       comment,
     };
+  }));
+}
+
+export interface AuthorizeRuijieClientInput {
+  /** Client (station) MAC the gateway is holding in its captive state. */
+  macAddress: string;
+  /** The PIN that paid for this session, when known. */
+  voucherCode?: string;
+  /** Defaults to the configured tenant group id. */
+  userGroupId?: string;
+  /** Per-request timeout. Defaults to 5s; this call is never on a blocking path. */
+  timeoutMs?: number;
+}
+
+export interface AuthorizedRuijieClient {
+  macAddress: string;
+  code: number;
+}
+
+/**
+ * Ask Ruijie Cloud to authorise a client MAC straight after a local redemption.
+ *
+ * Deliberately NOT retried: the caller (`ruijieAuthorize.ts`) is a fire-and-forget
+ * hook after the response, and the gateway's own ext_login/RADIUS path is what
+ * actually grants access. Retrying here would burn the tenant's small quota for
+ * no customer-visible benefit.
+ */
+export async function authorizeRuijieClient(
+  input: AuthorizeRuijieClientInput
+): Promise<AuthorizedRuijieClient> {
+  const macAddress = String(input.macAddress || '').trim();
+  if (!macAddress) throw new RuijieApiError('config', 'No client MAC to authorize');
+  return withTokenRefresh(async (accessToken) => {
+    const cfg = getConfig();
+    const res = await client().post(
+      `${CLIENT_AUTHORIZE_URL}/${cfg.groupId}?access_token=${encodeURIComponent(accessToken)}`,
+      {
+        mac: macAddress,
+        userGroupId: input.userGroupId || cfg.groupId,
+        ...(input.voucherCode ? { voucherCode: input.voucherCode } : {}),
+      },
+      {
+        headers: { 'Content-Type': 'application/json' },
+        timeout: input.timeoutMs ?? 5_000,
+      }
+    );
+    failIfNotZero(res.data, `auth/authorize (groupId=${cfg.groupId}) -> HTTP ${res.status}`);
+    return { macAddress, code: 0 };
   });
 }
 
@@ -227,23 +408,67 @@ export interface GetRuijieVouchersInput {
 export async function getRuijieVouchers(input: GetRuijieVouchersInput = {}): Promise<RuijieVoucher[]> {
   const start = input.start ?? 0;
   const pageSize = input.pageSize ?? 20;
-  return withTokenRefresh(async (accessToken) => {
-    const cfg = getConfig();
-    const res = await client().get(
-      `${VOUCHER_GET_LIST_URL}/${cfg.groupId}?access_token=${encodeURIComponent(accessToken)}&start=${start}&pageSize=${pageSize}`
+  if (readCooldownUntil > Date.now()) {
+    const left = Math.ceil((readCooldownUntil - Date.now()) / 1000);
+    throw new RuijieApiError(
+      RATE_LIMIT_CODE,
+      `voucher/getList skipped: cooling down after "Too many requests" (${left}s left)`
     );
-    failIfNotZero(res.data, `voucher/getList (groupId=${cfg.groupId}) -> HTTP ${res.status}`);
-    const vd = resolveVoucherData(res.data);
-    const list = vd?.list ?? vd?.voucherList ?? [];
-    if (!Array.isArray(list)) throw new RuijieApiError('bad_shape', 'Ruijie voucher getList returned no array');
-    return list.map((v: any) => ({
-      codeNo: String(v.codeNo ?? v.voucherCode ?? ''),
-      voucherCode: v.voucherCode != null ? String(v.voucherCode) : v.codeNo != null ? String(v.codeNo) : undefined,
-      expiryTime: parseExpiry(v.expiryTime),
-      profile: v.profile != null ? String(v.profile) : undefined,
-      userGroupId: v.userGroupId != null ? String(v.userGroupId) : undefined,
-      status: v.status != null ? String(v.status) : undefined,
-      comment: v.comment != null ? String(v.comment) : undefined,
-    }));
-  });
+  }
+  try {
+    return await withTokenRefresh(async (accessToken) => {
+      const cfg = getConfig();
+      const res = await client().get(
+        `${VOUCHER_GET_LIST_URL}/${cfg.groupId}?access_token=${encodeURIComponent(accessToken)}&start=${start}&pageSize=${pageSize}`
+      );
+      failIfNotZero(res.data, `voucher/getList (groupId=${cfg.groupId}) -> HTTP ${res.status}`);
+      const vd = resolveVoucherData(res.data);
+      const list = vd?.list ?? vd?.voucherList ?? [];
+      if (!Array.isArray(list)) throw new RuijieApiError('bad_shape', 'Ruijie voucher getList returned no array');
+      return list.map((v: any) => ({
+        codeNo: String(v.codeNo ?? v.voucherCode ?? ''),
+        voucherCode: v.voucherCode != null ? String(v.voucherCode) : v.codeNo != null ? String(v.codeNo) : undefined,
+        expiryTime: parseExpiry(v.expiryTime ?? v.expireTime ?? v.expire_time),
+        profile: v.profile != null ? String(v.profile) : undefined,
+        userGroupId: v.userGroupId != null ? String(v.userGroupId) : undefined,
+        status: v.status != null ? String(v.status) : undefined,
+        comment: v.comment != null ? String(v.comment) : undefined,
+        quotaMb: toNum(v.quota ?? v.quotaMb),
+        usedQuotaMb: toNum(v.usedQuota ?? v.usedQuotaMb),
+        usedTimeMin: toNum(v.usedTime ?? v.usedTimeMin),
+        usedCount: toNum(v.usedCount ?? v.used_count),
+        timePeriodMin: toNum(v.timePeriod ?? v.timePeriodMin),
+        loginTime: toNum(v.loginTime ?? v.login_time),
+        firstUseTime: parseExpiry(v.firstUseTime ?? v.first_use_time ?? v.firstLoginTime),
+        currentClients: toNum(v.currentClients ?? v.current_clients),
+        maxClients: toNum(v.maxClients),
+        onlineStatus: v.onlineStatus ?? v.online_status,
+        packageName: v.packageName != null ? String(v.packageName) : undefined,
+        disableStatus: toNum(v.disableStatus ?? v.disable_status),
+      }));
+    });
+  } catch (err) {
+    if (isRateLimitError(err)) readCooldownUntil = Date.now() + READ_COOLDOWN_MS;
+    throw err;
+  }
+}
+
+/**
+ * Every voucher in the tenant group: pages getList until a short page
+ * (pageSize=100 accepted live; the envelope carries `total`). The current
+ * roster (108 vouchers) costs 2 requests ΓÇö callers should cache, see
+ * usage.ts ruijieVoucherByCode().
+ */
+export async function getAllRuijieVouchers(
+  opts: { pageSize?: number; maxPages?: number } = {}
+): Promise<RuijieVoucher[]> {
+  const pageSize = Math.max(1, opts.pageSize ?? 100);
+  const maxPages = opts.maxPages ?? 50;
+  const out: RuijieVoucher[] = [];
+  for (let page = 0; page < maxPages; page++) {
+    const batch = await getRuijieVouchers({ start: page * pageSize, pageSize });
+    out.push(...batch);
+    if (batch.length < pageSize) break;
+  }
+  return out;
 }

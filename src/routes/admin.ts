@@ -28,6 +28,7 @@ import {
   getRecentActivity,
 } from '../db/sales';
 import { RuijieApiError } from '../services/ruijieCloud';
+import { loadRevenueTarget, parseRevenueTarget, saveRevenueTarget } from '../services/revenueTarget';
 import ExcelJS from 'exceljs';
 import path from 'path';
 import fs from 'fs';
@@ -101,6 +102,119 @@ adminRouter.get('/access-log', async (req: Request, res: Response) => {
   const { rows } = await pool.query(query, params);
   res.json(rows);
 });
+
+const ACCESS_LOG_EVENTS = ['login', 'radius_accept', 'radius_reject', 'radius_stop'] as const;
+
+// Paginated event stream for the Access Logs page. Kept separate from the
+// legacy /access-log array endpoint so existing consumers and tests are
+// untouched. Filters run in SQL so totals cover the whole range, not just the
+// current page; `summary` deliberately ignores the event chip so the chip
+// counts stay stable while one event type is selected.
+adminRouter.get('/access-logs', async (req: Request, res: Response) => {
+  const event = typeof req.query.event === 'string' ? req.query.event : 'all';
+  const range = typeof req.query.range === 'string' ? req.query.range : '7d';
+  const q = typeof req.query.q === 'string' ? req.query.q.trim().slice(0, 120) : '';
+  const parsedSize = parseInt(String(req.query.pageSize ?? ''), 10);
+  const pageSize = Number.isFinite(parsedSize) ? Math.min(Math.max(parsedSize, 1), 200) : 50;
+  const parsedPage = parseInt(String(req.query.page ?? ''), 10);
+  const page = Number.isFinite(parsedPage) ? Math.max(parsedPage, 1) : 1;
+
+  const buildFilters = (includeEvent: boolean) => {
+    const params: any[] = [];
+    const clauses: string[] = [];
+
+    const scope = scopeVoucherCondition(req, params);
+    if (scope) clauses.push(scope);
+
+    if (range === 'today') {
+      clauses.push(`al.created_at >= date_trunc('day', NOW())`);
+    } else if (range === '7d' || range === '30d') {
+      params.push(range === '7d' ? 7 : 30);
+      clauses.push(`al.created_at >= NOW() - ($${params.length}::int * INTERVAL '1 day')`);
+    }
+
+    if (q) {
+      params.push(`%${q}%`);
+      const i = params.length;
+      clauses.push(`(
+        u.full_name ILIKE $${i} OR al.mac_address ILIKE $${i} OR
+        al.ip_address::text ILIKE $${i} OR al.detail ILIKE $${i} OR
+        al.event ILIKE $${i} OR al.request_url ILIKE $${i} OR
+        al.request_method ILIKE $${i} OR al.http_status::text ILIKE $${i}
+      )`);
+    }
+
+    if (includeEvent && event !== 'all') {
+      if (event === 'other') {
+        clauses.push(`al.event NOT IN (${ACCESS_LOG_EVENTS.map((_, i) => `$${params.length + i + 1}`).join(', ')})`);
+        params.push(...ACCESS_LOG_EVENTS);
+      } else if ((ACCESS_LOG_EVENTS as readonly string[]).includes(event)) {
+        params.push(event);
+        clauses.push(`al.event = $${params.length}`);
+      }
+    }
+
+    return { clauses, params };
+  };
+
+  const from = `
+    FROM access_log al
+    LEFT JOIN users u ON u.id = al.user_id
+    LEFT JOIN vouchers v ON UPPER(u.voucher_code) = UPPER(v.code)
+  `;
+  const whereSql = (clauses: string[]) => clauses.length ? ` WHERE ${clauses.join(' AND ')}` : '';
+
+  const pageFilters = buildFilters(true);
+  const summaryFilters = buildFilters(false);
+  const pageWhere = whereSql(pageFilters.clauses);
+  const summaryWhere = whereSql(summaryFilters.clauses);
+
+  const [countRes, summaryRes] = await Promise.all([
+    pool.query(`SELECT count(*)::int AS n ${from} ${pageWhere}`, pageFilters.params),
+    pool.query(
+      `SELECT COUNT(*)::int AS total,
+              COUNT(*) FILTER (WHERE al.event = 'radius_accept')::int AS accepts,
+              COUNT(*) FILTER (WHERE al.event = 'radius_reject')::int AS rejects,
+              COUNT(*) FILTER (WHERE al.event = 'radius_stop')::int AS stops,
+              COUNT(*) FILTER (WHERE al.event = 'login')::int AS sign_ins,
+              (COUNT(DISTINCT regexp_replace(upper(al.mac_address), '[^0-9A-F]', '', 'g'))
+                FILTER (WHERE al.mac_address IS NOT NULL))::int AS devices
+         ${from} ${summaryWhere}`,
+      summaryFilters.params
+    ),
+  ]);
+  const total: number = countRes.rows[0]?.n ?? 0;
+
+  const limitIdx = pageFilters.params.length + 1;
+  const offsetIdx = pageFilters.params.length + 2;
+  const { rows } = await pool.query(
+    `SELECT al.id, al.event, al.mac_address, al.ip_address, al.detail,
+            al.request_url, al.http_status, al.request_method, al.created_at,
+            u.full_name
+       ${from} ${pageWhere}
+      ORDER BY al.created_at DESC, al.id DESC
+      LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
+    [...pageFilters.params, pageSize, (page - 1) * pageSize]
+  );
+
+  const s = summaryRes.rows[0] ?? {};
+  res.json({
+    rows,
+    total,
+    page,
+    pageSize,
+    summary: {
+      total: Number(s.total ?? 0),
+      accepts: Number(s.accepts ?? 0),
+      rejects: Number(s.rejects ?? 0),
+      stops: Number(s.stops ?? 0),
+      signIns: Number(s.sign_ins ?? 0),
+      devices: Number(s.devices ?? 0),
+    },
+  });
+});
+
+
 
 adminRouter.get('/packages', async (_req: Request, res: Response) => {
   const { rows } = await pool.query(
@@ -578,6 +692,42 @@ adminRouter.get('/my-sales', async (req: Request, res: Response) => {
   const totalSales = rows.length;
   res.json({ sales: rows, totalAmount, totalSales });
 });
+
+
+// ── Monthly revenue target (canonical) ──
+//
+// GET  /api/admin/revenue-target  → any authenticated admin (progress widgets)
+// POST /api/admin/revenue-target  → COMPANY_ADMIN (CEO / Manager) only
+// PUT  /api/admin/revenue-target  → alias of POST, so both verbs work
+//
+// Stored additively in `settings`; `/api/admin/reports/revenue-target` keeps
+// working as an alias and shares the same service helpers.
+
+adminRouter.get('/revenue-target', async (_req: Request, res: Response) => {
+  res.json(await loadRevenueTarget());
+});
+
+const saveRevenueTargetHandler = async (req: Request, res: Response) => {
+  const parsed = parseRevenueTarget((req.body ?? {}).target);
+  if (!parsed.ok) {
+    res.status(400).json({ error: parsed.error });
+    return;
+  }
+  const actor = req.adminUser;
+  const actorName = String(actor?.fullName || actor?.email || 'admin');
+  res.json({ ok: true, ...(await saveRevenueTarget(parsed.value, actorName)) });
+};
+
+adminRouter.post(
+  '/revenue-target',
+  requirePermission(PERMISSIONS.COMPANY_ADMIN),
+  saveRevenueTargetHandler
+);
+adminRouter.put(
+  '/revenue-target',
+  requirePermission(PERMISSIONS.COMPANY_ADMIN),
+  saveRevenueTargetHandler
+);
 
 // ── Shared Sales Excel Builder (neon purple theme) ──
 

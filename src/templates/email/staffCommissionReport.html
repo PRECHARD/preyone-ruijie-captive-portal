@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="dark light" />
+  <title>Preyone Commission Statement — {{PERIOD}}</title>
+  <style>
+    /* Progressive enhancement only — every rule also has an inline fallback. */
+    @media screen and (max-width: 600px) {
+      .em-stack { display: block !important; width: 100% !important; max-width: 100% !important; }
+      .em-pad { padding-left: 14px !important; padding-right: 14px !important; }
+      .em-metric { padding: 14px 12px !important; }
+      .em-title { font-size: 21px !important; }
+      .em-value { font-size: 23px !important; }
+    }
+  </style>
+</head>
+<body style="margin:0;padding:0;width:100%;background:#0a0f1d;font-family:'Plus Jakarta Sans','Montserrat','Segoe UI',Arial,sans-serif;color:#e2e8f0;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;background:#0a0f1d">
+    <tr>
+      <td align="center" style="padding:0;background:#0a0f1d">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:680px;margin:0 auto;border-collapse:collapse">
+
+          <!-- masthead -->
+          <tr>
+            <td align="center" class="em-pad" style="padding:34px 20px 24px;background:#0a0f1d;background-image:linear-gradient(160deg,#0a0f1d 0%,#101a33 55%,#0a0f1d 100%);border-bottom:1px solid #1c3a5e">
+              <img src="{{LOGO_URL}}" width="170" height="96" alt="Preyone UltraNet WiFi" style="display:block;width:170px;max-width:100%;height:auto;margin:0 auto 14px;border:0;outline:none;text-decoration:none" />
+              <p style="margin:0 0 6px;font-size:11px;line-height:1.4;letter-spacing:3px;text-transform:uppercase;color:#00ccff;font-weight:700">Preyone Team Console</p>
+              <h1 class="em-title" style="margin:0 0 12px;color:#ffffff;font-size:23px;line-height:1.25;font-weight:800;letter-spacing:0.3px">Commission Statement</h1>
+              <p style="margin:0;font-size:13px;line-height:1.5;color:#ffcc00;font-weight:700;letter-spacing:1px">{{PERIOD_LABEL}}</p>
+              <table role="presentation" width="180" cellpadding="0" cellspacing="0" border="0" style="width:180px;max-width:100%;margin:18px auto 0;border-collapse:collapse">
+                <tr>
+                  <td height="3" style="height:3px;line-height:3px;font-size:0;background:#00ccff;background-image:linear-gradient(90deg,#00ccff,#a855f7,#ffcc00);border-radius:3px">&nbsp;</td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- body -->
+          <tr>
+            <td class="em-pad" style="padding:24px 16px 34px;background:#0a0f1d">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:660px;margin:0 auto;border-collapse:separate;background:#0f172a;border:1px solid #1e3a5f;border-radius:18px">
+                <tr>
+                  <td style="padding:26px 22px;background:#0f172a;border-radius:18px;box-shadow:0 0 30px rgba(0,204,255,0.12),0 18px 48px rgba(0,0,0,0.45)">
+
+                    <p style="margin:0 0 6px;font-size:16px;line-height:1.5;color:#ffffff;font-weight:800">
+                      Hi {{STAFF_NAME}},
+                    </p>
+                    <p style="margin:0 0 20px;font-size:13px;line-height:1.7;color:#a9b6cc">
+                      Here is your personal commission statement for
+                      <strong style="color:#ffffff">{{PERIOD_LABEL}}</strong>.
+                      These figures are read directly from the sales ledger and cover only your own activity.
+                    </p>
+
+                    {{NOTE_HTML}}
+
+                    <!-- metric grid: stacks on mobile -->
+                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:separate;border-spacing:0;margin-bottom:8px">
+                      <tr>
+                        <td class="em-stack em-metric" width="50%" style="width:50%;padding:6px;vertical-align:top">
+                          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:separate;background:#112234;border:1px solid #174a63;border-radius:14px">
+                            <tr>
+                              <td style="padding:16px 14px;border-radius:14px;box-shadow:0 0 18px rgba(0,204,255,0.10)">
+                                <p style="margin:0 0 6px;font-size:10px;line-height:1.4;letter-spacing:1.6px;text-transform:uppercase;color:#a9b6cc;font-weight:700">Your Sales</p>
+                                <p class="em-value" style="margin:0;font-size:26px;line-height:1.2;font-weight:800;color:#00ccff;text-shadow:0 0 16px rgba(0,204,255,0.45)">{{SALES_COUNT}}</p>
+                              </td>
+                            </tr>
+                          </table>
+                        </td>
+                        <td class="em-stack em-metric" width="50%" style="width:50%;padding:6px;vertical-align:top">
+                          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:separate;background:#151f35;border:1px solid #3d3418;border-radius:14px">
+                            <tr>
+                              <td style="padding:16px 14px;border-radius:14px;box-shadow:0 0 18px rgba(255,204,0,0.10)">
+                                <p style="margin:0 0 6px;font-size:10px;line-height:1.4;letter-spacing:1.6px;text-transform:uppercase;color:#a9b6cc;font-weight:700">Gross Sales</p>
+                                <p class="em-value" style="margin:0;font-size:26px;line-height:1.2;font-weight:800;color:#ffcc00;text-shadow:0 0 16px rgba(255,204,0,0.45)">{{GROSS_SALES}}</p>
+                              </td>
+                            </tr>
+                          </table>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td class="em-stack em-metric" width="50%" style="width:50%;padding:6px;vertical-align:top">
+                          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:separate;background:#1a1630;border:1px solid #46307a;border-radius:14px">
+                            <tr>
+                              <td style="padding:16px 14px;border-radius:14px;box-shadow:0 0 18px rgba(168,85,247,0.10)">
+                                <p style="margin:0 0 6px;font-size:10px;line-height:1.4;letter-spacing:1.6px;text-transform:uppercase;color:#a9b6cc;font-weight:700">Commission Rate</p>
+                                <p class="em-value" style="margin:0;font-size:26px;line-height:1.2;font-weight:800;color:#c084fc;text-shadow:0 0 16px rgba(168,85,247,0.45)">{{COMMISSION_PCT}}</p>
+                              </td>
+                            </tr>
+                          </table>
+                        </td>
+                        <td class="em-stack em-metric" width="50%" style="width:50%;padding:6px;vertical-align:top">
+                          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:separate;background:#0e2a24;border:1px solid #1c6b53;border-radius:14px">
+                            <tr>
+                              <td style="padding:16px 14px;border-radius:14px;box-shadow:0 0 18px rgba(34,230,168,0.14)">
+                                <p style="margin:0 0 6px;font-size:10px;line-height:1.4;letter-spacing:1.6px;text-transform:uppercase;color:#a9b6cc;font-weight:700">Commission Due</p>
+                                <p class="em-value" style="margin:0;font-size:26px;line-height:1.2;font-weight:800;color:#22e6a8;text-shadow:0 0 16px rgba(34,230,168,0.45)">{{COMMISSION_DUE}}</p>
+                              </td>
+                            </tr>
+                          </table>
+                        </td>
+                      </tr>
+                    </table>
+
+                    <!-- calculation note -->
+                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;margin:18px 0 4px;border-collapse:separate;background:#101a2e;border:1px solid #1e3a5f;border-radius:14px">
+                      <tr>
+                        <td style="padding:16px;border-radius:14px">
+                          <p style="margin:0 0 8px;font-size:10px;line-height:1.4;letter-spacing:1.6px;text-transform:uppercase;color:#a9b6cc;font-weight:700">How this is calculated</p>
+                          <p style="margin:0;font-size:12px;line-height:1.7;color:#8ea0bb">
+                            Commission is <strong style="color:#e2e8f0">{{COMMISSION_PCT}}</strong> of your
+                            <strong style="color:#e2e8f0">{{GROSS_SALES}}</strong> gross sales for the period,
+                            giving <strong style="color:#22e6a8">{{COMMISSION_DUE}}</strong> due.
+                          </p>
+                        </td>
+                      </tr>
+                    </table>
+
+                    <p style="margin:24px 0 0;font-size:11px;line-height:1.7;color:#66768f">
+                      This statement is generated automatically on the 3rd of every month at 08:10 and sent to
+                      your registered Preyone email address. It covers the previous trading cycle and only shows
+                      your own sales. If any figure looks wrong, reply to this email or contact
+                      <a href="mailto:support@preyone.com" style="color:#00ccff;text-decoration:none;font-weight:700">support@preyone.com</a>.
+                    </p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- footer -->
+          <tr>
+            <td align="center" class="em-pad" style="padding:26px 20px 22px;background:#070b14;border-top:1px solid #14213a">
+              <p style="margin:0 0 12px;font-size:12px;line-height:1.7;color:#66768f">
+                <a href="mailto:support@preyone.com" style="color:#00ccff;text-decoration:none;font-weight:700">support@preyone.com</a>
+                <span style="color:#2b3a52;margin:0 8px">|</span>
+                <a href="https://admin.preyone.com" style="color:#ffcc00;text-decoration:none;font-weight:700">Admin Console</a>
+              </p>
+              <table role="presentation" width="280" cellpadding="0" cellspacing="0" border="0" style="width:280px;max-width:100%;margin:0 auto 14px;border-collapse:collapse">
+                <tr>
+                  <td height="2" style="height:2px;line-height:2px;font-size:0;background:#00ccff;background-image:linear-gradient(90deg,#00ccff,#a855f7,#ffcc00);border-radius:2px">&nbsp;</td>
+                </tr>
+              </table>
+              <p style="margin:0;font-size:10px;line-height:1.6;color:#3d4c63">Generated {{GENERATED_AT}} &middot; &copy; {{YEAR}} Preyone Enterprises. All rights reserved.</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
