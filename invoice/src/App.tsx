@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { createPortal } from 'react-dom';
 import {
   ApiError,
+  NETWORK_ERROR,
   SESSION_EVENT,
   api,
   clearToken,
@@ -76,7 +77,12 @@ function typeLabel(types: DocType[], type: string): string {
 }
 
 function errorText(err: unknown): string {
-  return err instanceof Error ? err.message : 'Something went wrong';
+  if (err instanceof ApiError && err.status === 0) return NETWORK_ERROR;
+  if (err instanceof Error) {
+    if (/failed to fetch|networkerror|load failed/i.test(err.message)) return NETWORK_ERROR;
+    return err.message;
+  }
+  return 'Something went wrong';
 }
 
 /* ────────────────────────────── chrome ─────────────────────────────── */
@@ -118,11 +124,10 @@ function AuthFrame({
     <div className="auth-shell">
       <aside className="auth-hero">
         <div className="auth-hero-brand">
-          <span className="auth-mark" aria-hidden>P</span>
-          <div>
-            <strong>Preyone</strong>
-            <span>Invoicing &amp; finance</span>
-          </div>
+          <span className="auth-logo">
+            <img src="/brand/Preyone.svg" alt="Preyone" />
+          </span>
+          <span className="auth-hero-division">Invoicing &amp; finance</span>
         </div>
 
         <div className="auth-hero-copy">
@@ -1496,12 +1501,17 @@ export default function App() {
     setLoading(true);
     setError(null);
     try {
-      const [cat, theme] = await Promise.all([
-        api.get<Catalog>('/api/pos/catalog'),
-        api.get<ThemeResponse>('/api/pos/theme'),
-      ]);
+      // The catalog is the workspace itself; the palette is cosmetic. A theme
+      // 500 (or a slow theme read) must never keep a signed-in user out of the
+      // ledger — that is what turned a reserved-word bug into "Failed to fetch".
+      const cat = await api.get<Catalog>('/api/pos/catalog');
       setCatalog(cat);
-      applyCssVars(theme.css);
+      try {
+        const theme = await api.get<ThemeResponse>('/api/pos/theme');
+        applyCssVars(theme.css);
+      } catch {
+        /* keep the stylesheet's house palette */
+      }
       setAuthError(false);
       setLocked(false);
       setAuthNotice(null);
@@ -1652,10 +1662,30 @@ export default function App() {
     );
   }
 
+  // A boot that never received its catalog must not fall through to an empty
+  // ledger under a red banner. One calm, retryable screen is the entire UX.
+  if (!catalog) {
+    return (
+      <AuthFrame
+        kicker="Connection interrupted"
+        title="We couldn’t load your ledger"
+        subtitle="The workspace is safe. Reconnect and we’ll pick up exactly where you left off."
+      >
+        <div className="auth-form">
+          <div className="banner error">{error ?? NETWORK_ERROR}</div>
+          <button className="btn primary" type="button" onClick={() => void boot()} disabled={loading}>
+            {loading ? <span className="spinner" aria-hidden /> : null}
+            {loading ? 'Reconnecting…' : 'Try again'}
+          </button>
+        </div>
+      </AuthFrame>
+    );
+  }
+
   return (
     <div className="app-shell">
       <Sidebar
-        company={catalog?.company}
+        company={catalog.company}
         view={view}
         typeFilter={typeFilter}
         statusFilter={statusFilter}

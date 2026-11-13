@@ -186,11 +186,29 @@ function signalSession(state: SessionSignal): void {
   }
 }
 
+/**
+ * Chromium reports transport failures as `TypeError: Failed to fetch`, which is
+ * meaningless on a till screen. Normalise it to status 0 with a message staff
+ * can act on.
+ */
+const NETWORK_ERROR = 'Cannot reach the Preyone server. Check the connection and try again.';
+
+async function send(url: string, opts: RequestInit): Promise<Response> {
+  try {
+    return await fetch(url, opts);
+  } catch (err) {
+    if (err instanceof TypeError || (err instanceof Error && /failed to fetch|networkerror|load failed/i.test(err.message))) {
+      throw new ApiError(NETWORK_ERROR, 0);
+    }
+    throw err;
+  }
+}
+
 async function req<T>(path: string, opts: RequestInit = {}): Promise<T> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   const token = auth.token();
   if (token) headers.Authorization = `Bearer ${token}`;
-  const res = await fetch(`/api/pos${path}`, { credentials: 'include', ...opts, headers });
+  const res = await send(`/api/pos${path}`, { credentials: 'include', ...opts, headers });
   if (res.status === 401) {
     signalSession('expired');
     throw new ApiError('Session expired — sign in again', 401);
@@ -212,7 +230,7 @@ async function root<T>(path: string, opts: RequestInit = {}): Promise<T> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   const token = auth.token();
   if (token) headers.Authorization = `Bearer ${token}`;
-  const res = await fetch(`/api${path}`, { credentials: 'include', ...opts, headers });
+  const res = await send(`/api${path}`, { credentials: 'include', ...opts, headers });
   if (res.status === 401) {
     signalSession('expired');
     throw new ApiError('Session expired — sign in again', 401);

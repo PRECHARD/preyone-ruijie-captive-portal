@@ -24,22 +24,28 @@
 }
 
 :root {
-  --ink-900: #0f172a;
-  --navy-800: #0f172a;
-  --navy-700: #065f46;
-  --violet: #059669;
-  --line-soft: #dbe4f0;
-  --muted: #64748b;
+  --ink-900: #1b1032;
+  --navy-800: #2a0b4e;
+  --navy-700: #5b21b6;
+  --violet: #7c3aed;
+  --line-soft: #e6dcf8;
+  --muted: #6b6480;
   --ok: #059669;
-  --warn: #d97706;
+  --warn: #b45309;
   --danger: #b3261e;
+  /* Preyone brand ramp, sampled from the corporate mark: deep plum through
+     violet to fuchsia. Runtime theming aliases these from the merchant theme. */
+  --brand-plum: #2a0b4e;
+  --brand-violet: #7c3aed;
+  --brand-orchid: #a855f7;
+  --brand-fuchsia: #d946ef;
   --grad-brand: linear-gradient(
     100deg,
-    #064e3b 0%,
-    #047857 32%,
-    #059669 62%,
-    #b45309 86%,
-    #d97706 100%
+    #2a0b4e 0%,
+    #5b21b6 30%,
+    #7c3aed 58%,
+    #a855f7 82%,
+    #d946ef 100%
   );
 }
 
@@ -90,12 +96,17 @@ input:focus, select:focus, button:focus-visible {
   color: #fff;
   box-shadow: 0 2px 10px rgba(5, 14, 36, 0.35);
 }
-.topbar .brand-name {
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  font-size: 0.95rem;
+.topbar .brand-lockup { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.topbar .brand-lockup img {
+  display: block;
+  height: 26px;
+  width: auto;
+  padding: 3px 8px;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28);
 }
-.topbar .brand-sub { font-size: 0.62rem; opacity: 0.75; letter-spacing: 0.22em; }
+.topbar .brand-sub { font-size: 0.6rem; opacity: 0.82; letter-spacing: 0.22em; text-transform: uppercase; white-space: nowrap; }
 .topbar .spacer { flex: 1; }
 .chip {
   background: rgba(255, 255, 255, 0.14);
@@ -354,8 +365,8 @@ input:focus, select:focus, button:focus-visible {
 /* ── PIN access terminal ─────────────────────────────────────────────── */
 
 .pin-shell {
-  --pin-ink: #eaf1ff;
-  --pin-muted: #93a4c1;
+  --pin-ink: #f3efff;
+  --pin-muted: #a99cc7;
   --pin-edge: rgba(148, 163, 184, 0.2);
   min-height: 100vh;
   display: grid;
@@ -364,10 +375,10 @@ input:focus, select:focus, button:focus-visible {
   padding: clamp(16px, 3vw, 34px);
   color: var(--pin-ink);
   background:
-    radial-gradient(900px 560px at 4% -8%, rgba(5, 150, 105, 0.26), transparent 62%),
-    radial-gradient(760px 520px at 102% 108%, rgba(217, 119, 6, 0.17), transparent 60%),
-    radial-gradient(900px 700px at 50% 120%, rgba(37, 99, 235, 0.1), transparent 64%),
-    #0b1424;
+    radial-gradient(900px 560px at 4% -8%, rgba(124, 58, 237, 0.3), transparent 62%),
+    radial-gradient(760px 520px at 102% 108%, rgba(217, 70, 239, 0.18), transparent 60%),
+    radial-gradient(900px 700px at 50% 120%, rgba(168, 85, 247, 0.12), transparent 64%),
+    #0a0513;
 }
 
 .pin-hero {
@@ -379,11 +390,12 @@ input:focus, select:focus, button:focus-visible {
   border-radius: 24px;
   border: 1px solid var(--pin-edge);
   background:
-    radial-gradient(620px 380px at 6% 0%, rgba(5, 150, 105, 0.22), transparent 64%),
-    linear-gradient(150deg, rgba(23, 36, 58, 0.86), rgba(8, 14, 26, 0.94));
+    radial-gradient(620px 380px at 6% 0%, rgba(124, 58, 237, 0.28), transparent 64%),
+    radial-gradient(520px 420px at 100% 100%, rgba(217, 70, 239, 0.12), transparent 62%),
+    linear-gradient(150deg, rgba(38, 20, 66, 0.9), rgba(9, 5, 19, 0.96));
   box-shadow:
-    0 42px 100px rgba(0, 0, 0, 0.46),
-    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    0 42px 100px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07);
   overflow: hidden;
   position: relative;
 }
@@ -401,20 +413,29 @@ input:focus, select:focus, button:focus-visible {
 }
 .pin-hero > * { position: relative; z-index: 1; }
 
-.pin-brand { display: flex; align-items: center; gap: 12px; }
-.pin-brand strong { display: block; font-size: 0.82rem; letter-spacing: 0.16em; }
-.pin-brand span { display: block; font-size: 0.58rem; letter-spacing: 0.24em; text-transform: uppercase; color: var(--pin-muted); margin-top: 3px; }
-.pin-brand-mark {
-  width: 44px;
-  height: 44px;
+.pin-brand { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+
+/* Real corporate wordmark on a light plate: the mark is a dark violet
+   gradient, so it needs its own white surface to stay crisp on the dark
+   terminal hero instead of being recoloured into a placeholder block. */
+.pin-brand-logo {
+  display: inline-flex;
+  align-items: center;
+  padding: 9px 16px;
   border-radius: 14px;
-  display: grid;
-  place-items: center;
-  font-weight: 800;
-  font-size: 20px;
-  color: #fff;
-  background-image: var(--grad-brand);
-  box-shadow: 0 0 28px rgba(5, 150, 105, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+  background: #ffffff;
+  box-shadow:
+    0 12px 34px rgba(0, 0, 0, 0.45),
+    0 0 0 1px rgba(255, 255, 255, 0.18),
+    0 0 26px rgba(124, 58, 237, 0.28);
+}
+.pin-brand-logo img { display: block; height: 24px; width: auto; }
+.pin-brand-tag {
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--pin-muted);
 }
 
 .pin-hero-copy h1 {
@@ -422,7 +443,7 @@ input:focus, select:focus, button:focus-visible {
   font-size: clamp(28px, 3.4vw, 46px);
   line-height: 1.06;
   letter-spacing: -0.04em;
-  color: #f8fbff;
+  color: #f7f3ff;
 }
 .pin-hero-copy p {
   margin: 0;
@@ -437,15 +458,15 @@ input:focus, select:focus, button:focus-visible {
   gap: 7px;
   padding: 4px 10px;
   border-radius: 99px;
-  border: 1px solid rgba(5, 150, 105, 0.34);
-  background: rgba(5, 150, 105, 0.12);
-  color: #6ee7b7;
+  border: 1px solid rgba(124, 58, 237, 0.34);
+  background: rgba(124, 58, 237, 0.12);
+  color: #c4b5fd;
   font-size: 0.58rem;
   font-weight: 700;
   letter-spacing: 0.16em;
   text-transform: uppercase;
 }
-.pin-eyebrow i { width: 6px; height: 6px; border-radius: 50%; background: #34d399; box-shadow: 0 0 9px rgba(52, 211, 153, 0.9); }
+.pin-eyebrow i { width: 6px; height: 6px; border-radius: 50%; background: #c084fc; box-shadow: 0 0 9px rgba(192, 132, 252, 0.9); }
 
 .pin-stats {
   display: grid;
@@ -479,14 +500,14 @@ input:focus, select:focus, button:focus-visible {
   padding: clamp(24px, 3vw, 34px);
   border-radius: 22px;
   border: 1px solid var(--pin-edge);
-  background: linear-gradient(165deg, rgba(23, 36, 58, 0.86), rgba(11, 19, 34, 0.94));
+  background: linear-gradient(165deg, rgba(38, 20, 66, 0.9), rgba(12, 6, 24, 0.96));
   box-shadow:
-    0 40px 90px rgba(0, 0, 0, 0.5),
-    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    0 40px 90px rgba(0, 0, 0, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07);
   animation: pin-rise 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 .pin-card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
-.pin-card-kicker { font-size: 0.56rem; font-weight: 700; letter-spacing: 0.22em; text-transform: uppercase; color: #6ee7b7; }
+.pin-card-kicker { font-size: 0.56rem; font-weight: 700; letter-spacing: 0.22em; text-transform: uppercase; color: #c4b5fd; }
 .pin-card-chip {
   padding: 4px 8px;
   border-radius: 99px;
@@ -494,11 +515,14 @@ input:focus, select:focus, button:focus-visible {
   font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: #fbbf24;
-  border: 1px solid rgba(217, 119, 6, 0.34);
-  background: rgba(217, 119, 6, 0.12);
+  color: #f0abfc;
+  border: 1px solid rgba(217, 70, 239, 0.34);
+  background: rgba(217, 70, 239, 0.12);
 }
-.pin-card h2 { margin: 0 0 5px; font-size: 1.55rem; letter-spacing: -0.03em; color: #f8fbff; }
+/* The hero is hidden on phones, so the card carries the wordmark there. */
+.pin-card-logo { display: none; margin-bottom: 14px; }
+.pin-card-logo img { display: block; height: 20px; width: auto; }
+.pin-card h2 { margin: 0 0 5px; font-size: 1.55rem; letter-spacing: -0.03em; color: #f7f3ff; }
 .pin-card-sub { margin: 0 0 20px; font-size: 0.74rem; line-height: 1.55; color: var(--pin-muted); }
 .pin-legal { margin: 0; font-size: 0.6rem; color: rgba(147, 164, 193, 0.8); text-align: center; }
 
@@ -536,11 +560,11 @@ input:focus, select:focus, button:focus-visible {
   letter-spacing: 0.08em;
   padding: 3px 6px;
   border-radius: 6px;
-  color: #6ee7b7;
-  border: 1px solid rgba(5, 150, 105, 0.3);
-  background: rgba(5, 150, 105, 0.1);
+  color: #c4b5fd;
+  border: 1px solid rgba(124, 58, 237, 0.3);
+  background: rgba(124, 58, 237, 0.1);
 }
-.pin-step strong { display: block; font-size: 0.78rem; color: #eef4ff; }
+.pin-step strong { display: block; font-size: 0.78rem; color: #f3efff; }
 .pin-step span:not(.pin-step-num) { display: block; margin-top: 3px; font-size: 0.66rem; color: var(--pin-muted); }
 
 .op-list { display: flex; flex-direction: column; gap: 8px; max-height: 46vh; overflow-y: auto; padding-right: 2px; }
@@ -559,8 +583,8 @@ input:focus, select:focus, button:focus-visible {
 }
 .op-btn:hover:not(:disabled) {
   transform: translateY(-1px);
-  border-color: rgba(5, 150, 105, 0.5);
-  background: rgba(5, 150, 105, 0.1);
+  border-color: rgba(124, 58, 237, 0.5);
+  background: rgba(124, 58, 237, 0.1);
 }
 .op-avatar {
   width: 36px;
@@ -573,16 +597,16 @@ input:focus, select:focus, button:focus-visible {
   font-weight: 700;
   letter-spacing: 0.02em;
   color: #d1fae5;
-  background: linear-gradient(135deg, rgba(5, 150, 105, 0.85), rgba(6, 78, 59, 0.95));
+  background: linear-gradient(135deg, rgba(124, 58, 237, 0.85), rgba(42, 11, 78, 0.95));
   border: 1px solid rgba(110, 231, 183, 0.28);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18);
 }
 .op-avatar--lg { width: 46px; height: 46px; border-radius: 14px; font-size: 0.86rem; }
 .op-meta { flex: 1; min-width: 0; }
-.op-meta strong { display: block; font-size: 0.82rem; font-weight: 600; color: #eef4ff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.op-meta strong { display: block; font-size: 0.82rem; font-weight: 600; color: #f3efff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .op-meta span { display: block; margin-top: 2px; font-size: 0.6rem; color: var(--pin-muted); text-transform: capitalize; }
 .op-arrow { color: var(--pin-muted); font-size: 0.9rem; transition: transform 0.18s ease, color 0.18s ease; }
-.op-btn:hover .op-arrow { transform: translateX(3px); color: #6ee7b7; }
+.op-btn:hover .op-arrow { transform: translateX(3px); color: #c4b5fd; }
 
 .op-skeleton {
   height: 58px;
@@ -594,7 +618,7 @@ input:focus, select:focus, button:focus-visible {
 
 .pin-operator { display: flex; align-items: center; gap: 11px; padding: 10px 12px; border-radius: 12px; background: rgba(148, 163, 184, 0.06); border: 1px solid var(--pin-edge); }
 .pin-operator-meta { flex: 1; min-width: 0; }
-.pin-step-label { display: block; font-size: 0.54rem; letter-spacing: 0.16em; text-transform: uppercase; color: #6ee7b7; margin-bottom: 3px; }
+.pin-step-label { display: block; font-size: 0.54rem; letter-spacing: 0.16em; text-transform: uppercase; color: #c4b5fd; margin-bottom: 3px; }
 .pin-operator-meta strong { display: block; font-size: 0.86rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .op-change-btn {
   flex: none;
@@ -606,7 +630,7 @@ input:focus, select:focus, button:focus-visible {
   border: 1px solid var(--pin-edge);
   border-radius: 7px;
 }
-.op-change-btn:hover:not(:disabled) { color: #eef4ff; border-color: rgba(5, 150, 105, 0.5); }
+.op-change-btn:hover:not(:disabled) { color: #f3efff; border-color: rgba(124, 58, 237, 0.5); }
 
 .pin-dots { display: flex; gap: 10px; justify-content: center; margin: 20px 0 16px; min-height: 14px; }
 .pin-dot {
@@ -618,10 +642,10 @@ input:focus, select:focus, button:focus-visible {
   transition: transform 0.15s ease, background 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
 }
 .pin-dot.filled {
-  background: #34d399;
-  border-color: #34d399;
+  background: #c084fc;
+  border-color: #c084fc;
   transform: scale(1.12);
-  box-shadow: 0 0 12px rgba(52, 211, 153, 0.6);
+  box-shadow: 0 0 12px rgba(192, 132, 252, 0.6);
 }
 
 .pin-error {
@@ -643,7 +667,7 @@ input:focus, select:focus, button:focus-visible {
   border-radius: 12px;
   font-size: 1.3rem;
   font-weight: 600;
-  color: #eef4ff;
+  color: #f3efff;
   background: rgba(148, 163, 184, 0.08);
   border: 1px solid rgba(148, 163, 184, 0.16);
   transition: transform 0.1s ease, background 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease;
@@ -660,7 +684,7 @@ input:focus, select:focus, button:focus-visible {
   color: #fff;
   font-size: 0.86rem;
   letter-spacing: 0.12em;
-  box-shadow: 0 10px 26px rgba(5, 150, 105, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.24);
+  box-shadow: 0 10px 26px rgba(124, 58, 237, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.24);
 }
 .pin-key--ok:hover:not(:disabled) { filter: brightness(1.06); }
 .pin-spinner {
@@ -687,7 +711,7 @@ input:focus, select:focus, button:focus-visible {
 .pin-modal .pin-step strong,
 .pin-modal .op-meta strong,
 .pin-modal .pin-operator-meta strong { color: var(--ink-900); }
-.pin-modal .pin-step-num { color: #047857; background: rgba(5, 150, 105, 0.08); }
+.pin-modal .pin-step-num { color: #6d28d9; background: rgba(124, 58, 237, 0.08); }
 .pin-modal .op-btn { color: var(--ink-900); background: #fff; border-color: var(--line-soft); }
 .pin-modal .op-btn:hover:not(:disabled) { background: #f8fafc; }
 .pin-modal .op-arrow { color: var(--muted); }
@@ -713,6 +737,15 @@ input:focus, select:focus, button:focus-visible {
   .pin-shell { grid-template-columns: 1fr; padding: 14px; }
   .pin-hero { display: none; }
   .pin-card-wrap { min-height: calc(100vh - 28px); }
+  .pin-card-logo {
+    display: inline-flex;
+    align-items: center;
+    align-self: flex-start;
+    padding: 8px 13px;
+    border-radius: 12px;
+    background: #fff;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  }
 }
 
 /* Shift open screen */

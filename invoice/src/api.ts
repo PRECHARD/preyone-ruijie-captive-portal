@@ -44,13 +44,36 @@ function signalSession(state: SessionSignal): void {
   }
 }
 
+/**
+ * Raised when the browser cannot reach the API at all (offline, DNS, TLS or a
+ * dropped connection mid-request). Chromium reports this as the opaque
+ * `TypeError: Failed to fetch`, which is useless in a banner, so it is
+ * normalised into an actionable ApiError with status 0.
+ */
+export const NETWORK_ERROR =
+  'Cannot reach the Preyone server. Check your connection, then try again.';
+
+function isNetworkFailure(err: unknown): boolean {
+  return err instanceof TypeError || (err instanceof Error && /failed to fetch|networkerror|load failed/i.test(err.message));
+}
+
+/** fetch that turns transport failures into status-0 ApiErrors. */
+export async function send(path: string, opts: RequestInit = {}): Promise<Response> {
+  try {
+    return await fetch(path, opts);
+  } catch (err) {
+    if (isNetworkFailure(err)) throw new ApiError(NETWORK_ERROR, 0, 'NETWORK');
+    throw err;
+  }
+}
+
 export async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
   const base: Record<string, string> = { 'Content-Type': 'application/json' };
   const override = (opts.headers as Record<string, string> | undefined) ?? {};
   const token = getToken();
   const headers = { ...base, ...(token ? { Authorization: `Bearer ${token}` } : {}), ...override };
 
-  let res = await fetch(path, { credentials: 'include', ...opts, headers });
+  let res = await send(path, { credentials: 'include', ...opts, headers });
 
   // A stale bearer token must never shadow a fresh wildcard cookie. That
   // combination is common: sign in on admin.preyone.com, then open the invoice
@@ -58,7 +81,7 @@ export async function request<T>(path: string, opts: RequestInit = {}): Promise<
   // valid, so retry once without the bearer and keep the working credential.
   const authEndpoint = path.startsWith('/api/admin/auth/');
   if (res.status === 401 && token && !authEndpoint && !override.Authorization) {
-    const retry = await fetch(path, { credentials: 'include', ...opts, headers: { ...base, ...override } });
+    const retry = await send(path, { credentials: 'include', ...opts, headers: { ...base, ...override } });
     if (retry.ok) {
       clearToken();
       res = retry;
@@ -92,7 +115,7 @@ export async function download(path: string, filename: string): Promise<void> {
   const headers: Record<string, string> = {};
   const token = getToken();
   if (token) headers.Authorization = `Bearer ${token}`;
-  const res = await fetch(path, { credentials: 'include', headers });
+  const res = await send(path, { credentials: 'include', headers });
   if (!res.ok) throw new ApiError(`Download failed (${res.status})`, res.status);
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);

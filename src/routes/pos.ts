@@ -9,7 +9,7 @@ import { INACTIVITY_TIMEOUT_SEC } from '../sessionPolicy';
 import { requireCompany } from '../middleware/company';
 import { requireDeviceAuth } from '../middleware/deviceAuth';
 import { INVOICE_DOCUMENT_TYPES, ALL_DOCUMENT_TYPES } from '../services/pesepay';
-import { POS_THEMES, CURRENCIES } from '../catalog/ecosystem';
+import { POS_THEMES, CURRENCIES, type PosTheme } from '../catalog/ecosystem';
 import { themeCssVariables, themeCssBlock } from '../utils/themeVars';
 import { FINGERPRINT_HEADER } from '../middleware/deviceAuth';
 import {
@@ -309,23 +309,44 @@ const DOC_TYPE_CATALOGUE = INVOICE_DOCUMENT_TYPES.map((t) => ({
   credit: t.credit,
 }));
 
-async function loadThemeRow(companyId: string, themeId?: number | null) {
+/**
+ * pos_themes stores the palette as `*_color` columns. `primary` is a reserved
+ * word in PostgreSQL, so selecting it unquoted (or aliasing it unquoted) is a
+ * syntax error — which is exactly how `GET /api/pos/theme` 500'd in production
+ * and blocked the invoice workspace from booting. Always map the real columns.
+ */
+function mapThemeRow(row: any): PosTheme {
+  return {
+    id: row.id,
+    name: row.name,
+    description: row.description ?? '',
+    primary: row.primary_color,
+    secondary: row.secondary_color,
+    accent: row.accent_color,
+    bg: row.bg_color,
+    text: row.text_color,
+  };
+}
+
+const THEME_COLUMNS =
+  'id, name, description, primary_color, secondary_color, accent_color, bg_color, text_color';
+
+async function loadThemeRow(_companyId: string, themeId?: number | null): Promise<PosTheme> {
   try {
     const { rows } = await pool.query(
-      `SELECT id, name, primary, secondary, accent, bg, text
+      `SELECT ${THEME_COLUMNS}
          FROM pos_themes
         WHERE is_active AND ($1::int IS NULL OR id = $1)
         ORDER BY id
         LIMIT 1`,
       [themeId ?? null]
     );
-    if (rows.length > 0) return rows[0];
+    if (rows.length > 0) return mapThemeRow(rows[0]);
   } catch {
     // Pre-v3.2 database: pos_themes does not exist yet. Fall through to the
     // static mirror so the till still renders the house palette.
   }
-  const fallback = POS_THEMES.find((t) => t.id === themeId) ?? POS_THEMES[0];
-  return fallback;
+  return POS_THEMES.find((t) => t.id === themeId) ?? POS_THEMES[0];
 }
 
 async function resolveCompanyTheme(companyId: string) {
@@ -343,8 +364,15 @@ async function resolveCompanyTheme(companyId: string) {
 }
 
 router.get('/theme', async (req, res) => {
-  const theme = await resolveCompanyTheme(tenantId(req));
-  res.json({ theme, css: themeCssVariables(theme as any), cssBlock: themeCssBlock(theme as any) });
+  // The palette is cosmetic: a theme lookup must never take the whole workspace
+  // down (the invoice SPA and the till both boot through this endpoint).
+  let theme: PosTheme;
+  try {
+    theme = await resolveCompanyTheme(tenantId(req));
+  } catch {
+    theme = POS_THEMES[0];
+  }
+  res.json({ theme, css: themeCssVariables(theme), cssBlock: themeCssBlock(theme) });
 });
 
 router.patch('/theme', requireRole(...MANAGER_ROLES), async (req, res) => {
@@ -386,8 +414,7 @@ router.get('/catalog', async (req, res) => {
          FROM invoice_templates WHERE is_active ORDER BY id`
     ).catch(() => ({ rows: [] as any[] })),
     pool.query(
-      `SELECT id, name, description, primary, secondary, accent, bg, text
-         FROM pos_themes WHERE is_active ORDER BY id`
+      `SELECT ${THEME_COLUMNS} FROM pos_themes WHERE is_active ORDER BY id`
     ).catch(() => ({ rows: [] as any[] })),
   ]);
   const company = companyRes.rows[0] ?? {};
@@ -401,7 +428,7 @@ router.get('/catalog', async (req, res) => {
         showLogo: t.show_logo,
       }))
     : (await import('../catalog/ecosystem')).INVOICE_TEMPLATES;
-  const themes = themesRes.rows.length ? themesRes.rows : POS_THEMES;
+  const themes = themesRes.rows.length ? themesRes.rows.map(mapThemeRow) : POS_THEMES;
   res.json({
     company,
     templates,

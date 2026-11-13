@@ -1,40 +1,40 @@
 /* ══════════════════════════════════════════════════════════════════════════
    Preyone Invoicing — high-tech glass workspace
-   House palette: Slate #0F172A · Emerald #059669 · Amber #D97706
+   House palette: Plum #2A0B4E · Violet #7C3AED · Fuchsia #D946EF
    The merchant's POS theme still drives --pos-* at runtime; everything below
    is built on those variables so all Preyone surfaces stay in step.
    ══════════════════════════════════════════════════════════════════════════ */
 
 :root {
-  --pos-primary: #059669;
-  --pos-primary-strong: #047857;
-  --pos-primary-soft: rgba(5, 150, 105, 0.16);
-  --pos-secondary: #065f46;
-  --pos-accent: #d97706;
-  --pos-accent-soft: rgba(217, 119, 6, 0.18);
-  --pos-bg: #0f172a;
-  --pos-bg-elevated: #111b2e;
-  --pos-surface: #16213a;
-  --pos-surface-2: #1b2742;
-  --pos-border: #2a3752;
-  --pos-text: #e8eefb;
-  --pos-text-muted: #93a1b8;
+  --pos-primary: #7c3aed;
+  --pos-primary-strong: #6d28d9;
+  --pos-primary-soft: rgba(124, 58, 237, 0.16);
+  --pos-secondary: #2a0b4e;
+  --pos-accent: #d946ef;
+  --pos-accent-soft: rgba(217, 70, 239, 0.18);
+  --pos-bg: #0c0618;
+  --pos-bg-elevated: #130a24;
+  --pos-surface: #1a0f30;
+  --pos-surface-2: #22143c;
+  --pos-border: #33224f;
+  --pos-text: #f3efff;
+  --pos-text-muted: #a79bc4;
   --pos-on-primary: #ffffff;
-  --pos-on-accent: #1a1200;
-  --pos-glow: rgba(5, 150, 105, 0.35);
-  --pos-glow-accent: rgba(217, 119, 6, 0.3);
+  --pos-on-accent: #ffffff;
+  --pos-glow: rgba(124, 58, 237, 0.35);
+  --pos-glow-accent: rgba(217, 70, 239, 0.3);
   --pos-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
   --pos-radius: 16px;
   --pos-font: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
 
   /* Glass system */
-  --pos-glass: rgba(21, 33, 55, 0.6);
-  --pos-glass-strong: rgba(13, 22, 39, 0.82);
-  --pos-glass-edge: rgba(148, 163, 184, 0.14);
-  --pos-glass-edge-strong: rgba(148, 163, 184, 0.26);
+  --pos-glass: rgba(30, 17, 52, 0.6);
+  --pos-glass-strong: rgba(16, 8, 30, 0.82);
+  --pos-glass-edge: rgba(168, 148, 200, 0.16);
+  --pos-glass-edge-strong: rgba(168, 148, 200, 0.28);
   --pos-glass-highlight: rgba(255, 255, 255, 0.06);
   --pos-hairline: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.16), transparent);
-  --pos-ring: 0 0 0 1px rgba(5, 150, 105, 0.45), 0 0 0 4px rgba(5, 150, 105, 0.14);
+  --pos-ring: 0 0 0 1px rgba(124, 58, 237, 0.45), 0 0 0 4px rgba(124, 58, 237, 0.14);
   --pos-radius-sm: 11px;
   --pos-radius-lg: 22px;
   --pos-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
@@ -45,7 +45,7 @@
 
 html, body, #root { height: 100%; }
 
-::selection { background: rgba(5, 150, 105, 0.32); color: #f8fafc; }
+::selection { background: rgba(124, 58, 237, 0.32); color: #f8fafc; }
 
 body {
   margin: 0;
@@ -803,9 +803,9 @@ a:focus-visible {
 .btn:active { transform: translateY(0) scale(0.98); }
 
 .btn.primary {
-  background: linear-gradient(135deg, var(--pos-primary), var(--pos-primary-strong) 58%, #064e3b);
+  background: linear-gradient(135deg, var(--pos-primary), var(--pos-primary-strong) 58%, #2a0b4e);
   border-color: color-mix(in srgb, var(--pos-primary) 60%, transparent);
-  color: #ecfdf5;
+  color: #f7f4ff;
   box-shadow:
     0 12px 30px color-mix(in srgb, var(--pos-primary) 34%, transparent),
     inset 0 1px 0 rgba(255, 255, 255, 0.2);
@@ -1399,25 +1399,33 @@ tbody tr:last-child td { border-bottom: none; }
 .auth-hero-brand {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 14px;
+  flex-wrap: wrap;
 }
-.auth-hero-brand strong { display: block; font-size: 15px; letter-spacing: 0.01em; }
-.auth-hero-brand span { display: block; font-size: 10px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--pos-text-muted); margin-top: 3px; }
 
-.auth-mark {
-  width: 44px;
-  height: 44px;
+/* The brand mark is the real gradient wordmark, so it needs a light plate to
+   stay legible on the dark hero instead of a recoloured placeholder. */
+.auth-logo {
+  display: inline-flex;
+  align-items: center;
+  padding: 9px 16px;
   border-radius: 14px;
-  display: grid;
-  place-items: center;
-  font-weight: 800;
-  font-size: 20px;
-  color: var(--pos-on-primary);
-  background: linear-gradient(135deg, var(--pos-primary), var(--pos-accent));
+  background: #ffffff;
   box-shadow:
-    0 0 30px var(--pos-glow),
-    inset 0 1px 0 rgba(255, 255, 255, 0.3),
-    inset 0 -10px 20px rgba(0, 0, 0, 0.24);
+    0 10px 30px rgba(0, 0, 0, 0.35),
+    0 0 0 1px rgba(255, 255, 255, 0.16);
+}
+.auth-logo img {
+  display: block;
+  height: 22px;
+  width: auto;
+}
+.auth-hero-division {
+  display: block;
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--pos-text-muted);
 }
 
 .auth-hero-copy { max-width: 560px; }

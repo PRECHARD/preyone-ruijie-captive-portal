@@ -1,4 +1,4 @@
-import type { ThemeResponse } from './api';
+﻿import type { ThemeResponse } from './api';
 
 /**
  * Runtime theming for the till.
@@ -18,7 +18,7 @@ function hexToRgb(value: string): [number, number, number] {
   return [parseInt(full.slice(0, 2), 16), parseInt(full.slice(2, 4), 16), parseInt(full.slice(4, 6), 16)];
 }
 
-/** Linear blend: weight 0 → a, weight 1 → b. */
+/** Linear blend: weight 0 â†’ a, weight 1 â†’ b. */
 function mix(a: string, b: string, weight: number): string {
   const [ar, ag, ab] = hexToRgb(a);
   const [br, bg, bb] = hexToRgb(b);
@@ -40,7 +40,7 @@ export function applyPosTheme(response: ThemeResponse | null | undefined): void 
   const css = response.css;
   applyCssVars(css);
 
-  const primary = css['--pos-primary'] || response.theme?.primary || '#059669';
+  const primary = css['--pos-primary'] || response.theme?.primary || '#7c3aed';
   const primaryStrong = css['--pos-primary-strong'] || primary;
   const secondary = css['--pos-secondary'] || primary;
   const accent = css['--pos-accent'] || primary;
@@ -56,3 +56,4 @@ export function applyPosTheme(response: ThemeResponse | null | undefined): void 
   root.setProperty('--line-soft', mix(primary, '#ffffff', 0.86));
   root.setProperty('--muted', mix(secondary, '#ffffff', 0.42));
 }
+

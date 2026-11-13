@@ -110,14 +110,13 @@ export default function App() {
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
-    Promise.all([api.theme(), api.catalog()])
-      .then(([theme, catalog]) => {
+    Promise.allSettled([api.theme(), api.catalog()])
+      .then(([themeRes, catalogRes]) => {
         if (cancelled) return;
-        applyPosTheme(theme);
-        setModules(catalog.modules);
-      })
-      .catch(() => {
-        /* pre-migration database: keep the built-in palette */
+        // Palette and module switches are independent: a theme read that fails
+        // must not hide the KDS/tables workspaces (and vice versa).
+        if (themeRes.status === 'fulfilled') applyPosTheme(themeRes.value);
+        if (catalogRes.status === 'fulfilled') setModules(catalogRes.value.modules);
       });
     return () => {
       cancelled = true;
@@ -159,9 +158,9 @@ export default function App() {
       ) : (
         <div className="app-shell">
           <header className="topbar">
-            <div>
-              <div className="brand-name">PREYONE POS</div>
-              <div className="brand-sub">ENTERPRISE</div>
+            <div className="brand-lockup">
+              <img src="/Preyone.svg" alt="Preyone" />
+              <span className="brand-sub">POS · Enterprise</span>
             </div>
             <span
               className={`live-badge ${live.connected ? 'on' : ''}`}

@@ -218,11 +218,10 @@ export default function PinLogin({
     <div className="pin-shell">
       <aside className="pin-hero">
         <div className="pin-brand">
-          <span className="pin-brand-mark">P</span>
-          <div>
-            <strong>PREYONE POS</strong>
-            <span>Enterprise till</span>
-          </div>
+          <span className="pin-brand-logo">
+            <img src="/Preyone.svg" alt="Preyone" />
+          </span>
+          <span className="pin-brand-tag">POS · Enterprise till</span>
         </div>
 
         <div className="pin-hero-copy">
@@ -254,6 +253,9 @@ export default function PinLogin({
 
       <main className="pin-card-wrap">
         <section className="pin-card">
+          <span className="pin-card-logo">
+            <img src="/Preyone.svg" alt="Preyone" />
+          </span>
           <div className="pin-card-head">
             <span className="pin-card-kicker">Access terminal</span>
             <span className="pin-card-chip">Shift required</span>

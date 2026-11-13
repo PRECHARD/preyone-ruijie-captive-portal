@@ -2255,21 +2255,23 @@ CREATE INDEX IF NOT EXISTS idx_payments_user_id ON payments (user_id);
 
     // ── v3.2.0-master house palette ────────────────────────────────────────
     // The seed above is ON CONFLICT DO NOTHING, so an existing install keeps
-    // whatever theme 1 it already has. Move the ORIGINAL teal house theme to
-    // Preyone Slate (emerald #059669 / amber #D97706 on #0F172A), but only when
-    // it is still exactly the old stock palette — a merchant who customised
-    // theme 1 keeps their colours.
+    // whatever theme 1 it already has. Move the ORIGINAL stock palettes (teal,
+    // then emerald) to the Preyone brand ramp — violet/fuchsia on deep plum —
+    // but only when the row is still exactly a stock palette. A merchant who
+    // customised theme 1 keeps their colours.
     await client.query(`
       UPDATE pos_themes
-         SET primary_color   = '#059669',
-             secondary_color = '#0f172a',
-             accent_color    = '#d97706',
-             bg_color        = '#0f172a',
-             text_color      = '#f8fafc',
-             description     = 'Preyone Slate: emerald and amber on deep slate.'
+         SET primary_color   = '#7c3aed',
+             secondary_color = '#2a0b4e',
+             accent_color    = '#d946ef',
+             bg_color        = '#0c0618',
+             text_color      = '#f7f4ff',
+             description     = 'Preyone Brand: violet and fuchsia on deep plum.'
        WHERE id = 1
-         AND primary_color = '#0d9488'
-         AND bg_color = '#0f172a';
+         AND (
+              (primary_color = '#0d9488' AND bg_color = '#0f172a')
+           OR (primary_color = '#059669' AND bg_color = '#0f172a')
+         );
     `);
 
     console.log('Migration complete. Packages + transit + RBAC seeded.');
