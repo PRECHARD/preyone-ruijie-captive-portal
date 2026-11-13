@@ -5,6 +5,7 @@ import 'express-async-errors';
 import express from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
+import { isTrustedAppHost } from './utils/ssoCookie';
 import compression from 'compression';
 import cookieParser from 'cookie-parser';
 import morgan from 'morgan';
@@ -64,15 +65,21 @@ app.use(
     },
   })
 );
-// Cross-subdomain CORS: reflect only Preyone origins so the SSO cookie can be
-// sent (credentials) without opening the API up to third-party sites.
-const PREYONE_ORIGIN_RE = /^https:\/\/(?:[a-z0-9-]+\.)*preyone\.com(\/|$)/i;
+// Credentialed CORS is limited to the app hosts. The public site and the
+// Wi-Fi portal stay same-origin for their own pages and cannot call the
+// admin APIs with the SSO cookie.
 const isDevOrigin = (origin: string) => /^https?:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?(\/|$)/.test(origin);
 app.use(
   cors({
     origin(origin, callback) {
       if (!origin) return callback(null, false);
-      if (PREYONE_ORIGIN_RE.test(origin) || isDevOrigin(origin)) return callback(null, origin);
+      if (isDevOrigin(origin)) return callback(null, origin);
+      try {
+        const url = new URL(origin);
+        if (url.protocol === 'https:' && isTrustedAppHost(url.hostname)) return callback(null, origin);
+      } catch {
+        /* refuse an unparseable origin */
+      }
       return callback(null, false);
     },
     credentials: true,

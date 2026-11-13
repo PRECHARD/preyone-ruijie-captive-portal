@@ -89,11 +89,6 @@ function signTwoFaChallenge(adminId: string, purpose: '2fa' | '2fa-enable' = '2f
   });
 }
 
-/** Invoice/POS may opt into email OTP; admin console always requires it. */
-function isOptionalAuthClient(client: unknown): boolean {
-  return client === 'invoice' || client === 'pos';
-}
-
 /** SHA-256 of the 6-digit code, peppered with the JWT secret. Cheap by design:
  *  brute force is bounded by 5 attempts per challenge + the rate limiters. */
 function hashTwoFaCode(code: string): string {
@@ -434,10 +429,9 @@ adminAuthRouter.post('/signup', authLimiter, async (req: Request, res: Response)
 });
 
 adminAuthRouter.post('/login', authLimiter, async (req: Request, res: Response) => {
-  const { email, password, client } = req.body as {
+  const { email, password } = req.body as {
     email: string;
     password: string;
-    client?: string;
   };
 
   if (!email || !password) {
@@ -482,10 +476,9 @@ adminAuthRouter.post('/login', authLimiter, async (req: Request, res: Response) 
     return;
   }
 
-  // Admin console: email OTP is mandatory whenever an address is on file.
-  // Invoice/POS: only challenge when the staff member opted in (settings).
-  const optionalClient = isOptionalAuthClient(client);
-  const requireOtp = !!user.email && (!optionalClient || user.two_factor_enabled === true);
+  // A password alone never mints a session when the account has an email.
+  // The request body cannot name a client that skips the emailed code.
+  const requireOtp = !!user.email;
 
   if (requireOtp) {
     const challenge = await prepareTwoFaChallenge(user.id);
@@ -516,7 +509,7 @@ adminAuthRouter.post('/login', authLimiter, async (req: Request, res: Response) 
     return;
   }
 
-  // Password-only: no email, or invoice/POS without optional 2FA enabled.
+  // Password-only is limited to accounts with no email address on file.
   await recordAuditLog(user.id, user.full_name, 'login', 'admin_user', user.id);
   await startAdminSession(req, res, user);
 });
@@ -769,9 +762,8 @@ adminAuthRouter.get('/policy', (_req: Request, res: Response) => {
 });
 
 /**
- * Self-serve optional 2FA for invoice/POS. Admin console login remains
- * mandatory regardless of this flag; these endpoints only control whether
- * invoice/pos clients (body.client) challenge after password.
+ * The emailed sign-in code is required whenever the account has an email.
+ * These endpoints keep the preference flag; they do not waive that code.
  */
 adminAuthRouter.get('/2fa', requireAdminAuth, async (req: Request, res: Response) => {
   const { rows } = await pool.query(
@@ -781,7 +773,7 @@ adminAuthRouter.get('/2fa', requireAdminAuth, async (req: Request, res: Response
   res.json({
     enabled: rows[0]?.two_factor_enabled === true,
     mandatoryOnAdmin: true,
-    optionalOnClients: ['invoice', 'pos'],
+    optionalOnClients: [],
   });
 });
 

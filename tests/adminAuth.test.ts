@@ -26,6 +26,41 @@ describe('requireAdminAuth middleware', () => {
     vi.clearAllMocks();
   });
 
+  it('accepts the SSO cookie on an app host', async () => {
+    const token = jwt.sign({ id: 'user-1', email: 'a@b', role: 'CEO', fullName: 'Test' }, SECRET, { expiresIn: '1h' });
+    (pool.query as any)
+      .mockResolvedValueOnce({ rows: [{ id: 'user-1', approved: true, role: 'CEO' }] })
+      .mockResolvedValueOnce({ rows: [{ permission_code: 'system.developer' }] });
+    const req: any = {
+      headers: { host: 'invoice.preyone.com' },
+      hostname: 'invoice.preyone.com',
+      cookies: { preyone_token: token },
+      get: () => undefined,
+    };
+    const res = makeRes();
+    const next = vi.fn();
+    await requireAdminAuth(req, res as any, next);
+    expect(next).toHaveBeenCalled();
+  });
+
+  it('ignores the SSO cookie on the public site and the Wi-Fi portal', async () => {
+    const token = jwt.sign({ id: 'user-1', email: 'a@b', role: 'CEO', fullName: 'Test' }, SECRET, { expiresIn: '1h' });
+    for (const host of ['preyone.com', 'wifi.preyone.com']) {
+      const req: any = {
+        headers: { host, origin: `https://${host}` },
+        hostname: host,
+        cookies: { preyone_token: token },
+        get: (name: string) => (name === 'origin' ? `https://${host}` : undefined),
+      };
+      const res = makeRes();
+      const next = vi.fn();
+      await requireAdminAuth(req, res as any, next);
+      expect(res.status).toHaveBeenCalledWith(401);
+      expect(next).not.toHaveBeenCalled();
+    }
+    expect(pool.query).not.toHaveBeenCalled();
+  });
+
   it('rejects requests without a Bearer token', async () => {
     const req = makeReq();
     const res = makeRes();
