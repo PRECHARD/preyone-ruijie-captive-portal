@@ -6,7 +6,7 @@ import EmptyState from '../components/EmptyState';
 import Table from '../components/Table';
 import Modal from '../components/Modal';
 
-const TYPE_LABEL: Record<string, string> = { desktop: 'Desktop', web: 'Web', android: 'Android' };
+const TYPE_LABEL: Record<string, string> = { desktop: 'Desktop', electron: 'Desktop', web: 'Web', android: 'Android', phone: 'Phone', tablet: 'Tablet' };
 const STATUS_COLOR: Record<string, string> = {
   active: 'var(--green)',
   suspended: 'var(--red)',
@@ -138,6 +138,7 @@ export default function Devices() {
             <label>Type</label>
             <select value={form.deviceType} onChange={e => setForm({ ...form, deviceType: e.target.value })} style={{ width: '100%', background: 'var(--card)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 8, padding: 10 }}>
               <option value="desktop">Desktop</option>
+              <option value="electron">Desktop app</option>
               <option value="web">Web POS</option>
               <option value="android">Android APK</option>
             </select>

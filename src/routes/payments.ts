@@ -25,6 +25,7 @@ import { isRuijieCloudConfigured, findRuijieProfile, mintRuijieVoucherForTier } 
 import { requireStarlinkAuth } from '../middleware/starlinkAuth';
 import { createStarlinkInvoice, applyStarlinkPayment, getStarlinkKit } from '../db/starlink';
 import { PLAN_TIERS } from './subscription';
+import { syncPlanModules } from '../plans/entitlements';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'preyone-jwt-secret-change-in-production';
 let _jwtSecretWarned = false;
@@ -1048,6 +1049,16 @@ async function applySubscriptionPayment(
     throw new HttpError(404, 'Subscription not found');
   }
 
+  // plan_type wins. A legacy module payment cannot grant Invoice on PreTill
+  // or take it away from PreBiz and above. Re-sync after the row update.
+  const { rows: planRows } = await client.query(
+    `SELECT plan_type FROM companies WHERE id = $1`,
+    [intent.tenant_id]
+  );
+  if (planRows[0]?.plan_type) {
+    await syncPlanModules(client, intent.tenant_id, planRows[0].plan_type);
+  }
+
   return {
     subscriptionId: rows[0].id,
     module: intent.subscription_module,
@@ -1641,6 +1652,8 @@ paymentsRouter.post('/pesepay/webhook', async (req: Request, res: Response) => {
         return;
       }
 
+      const company = updated[0];
+
       if (intent) {
         await client.query(
           `UPDATE pesepay_intents
@@ -1652,9 +1665,12 @@ paymentsRouter.post('/pesepay/webhook', async (req: Request, res: Response) => {
         );
       }
 
+      if (company.plan_type) {
+        await syncPlanModules(client, company.id, company.plan_type);
+      }
+
       await client.query('COMMIT');
 
-      const company = updated[0];
       res.json({
         success: true,
         referenceNumber: reference ?? null,

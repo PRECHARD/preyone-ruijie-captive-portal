@@ -9,28 +9,12 @@ import {
   normalizeGatewayCurrency,
 } from '../services/pesepayService';
 import type { PesepayCurrency, PesepayRail } from '../services/pesepayService';
+import { isPlanTier, PLAN_TIERS, TIER_CATALOG, planNameFor, type PlanTier } from '../plans/entitlements';
 
 export const subscriptionRouter = Router();
 
-// The three purchasable tiers. Prices are USD/month and must stay in lockstep
-// with the Upgrade modal (pos/src/components/UpgradeModal.tsx) and the
-// companies.plan_type CHECK constraint.
-export const PLAN_TIERS = ['standard_10', 'growth_20', 'unlimited_30'] as const;
-export type PlanTier = (typeof PLAN_TIERS)[number];
-
-export const TIER_CATALOG: Array<{
-  id: PlanTier;
-  name: string;
-  price: number;
-  devices: number;
-  tagline: string;
-}> = [
-  { id: 'standard_10', name: 'Standard', price: 10, devices: 1, tagline: 'Single till, one registered device.' },
-  { id: 'growth_20', name: 'Growth', price: 20, devices: 6, tagline: 'Up to 6 devices across your team.' },
-  { id: 'unlimited_30', name: 'Unlimited', price: 30, devices: 9999, tagline: 'Unlimited devices, priority support.' },
-];
-
-const isPlanTier = (v: unknown): v is PlanTier => PLAN_TIERS.includes(v as PlanTier);
+// Re-exported so admin catalogues and the Pesepay webhook keep a single import.
+export { PLAN_TIERS, TIER_CATALOG, type PlanTier };
 
 const str = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
 
@@ -76,6 +60,7 @@ subscriptionRouter.get('/plans', requireAdminAuth, async (req: Request, res: Res
       current: company
         ? {
             plan_type: company.plan_type,
+            plan_name: planNameFor(company.plan_type),
             max_devices: Number(company.max_devices),
             subscription_status: company.subscription_status,
             subscription_expires_at: company.subscription_expires_at,

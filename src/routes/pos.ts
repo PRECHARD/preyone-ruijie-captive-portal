@@ -5,7 +5,8 @@ import crypto from 'crypto';
 import rateLimit from 'express-rate-limit';
 import { pool } from '../db/pool';
 import { requireAdminAuth, requireRole } from '../middleware/adminAuth';
-import { requireCompany } from '../middleware/company';
+import { moduleAccess, requireCompany } from '../middleware/company';
+import { invoiceBlock, subscriptionBlock } from '../plans/entitlements';
 import { requireDeviceAuth } from '../middleware/deviceAuth';
 import { enforceSubscriptionGuard } from '../middleware/subscriptionGuard';
 
@@ -154,7 +155,7 @@ function requireStaff(req: Request, res: Response, next: NextFunction): void {
   }
   next();
 }
-router.use(requireAdminAuth, requireStaff, requireCompany);
+router.use(requireAdminAuth, requireStaff, requireCompany, moduleAccess('pos'));
 
 // ── Tenant scoping ─────────────────────────────────────────────────
 //
@@ -191,8 +192,11 @@ router.get('/company', async (_req, res) => {
 router.get('/company/subscriptions', (req, res) => {
   res.json({
     company: { id: req.company!.id, name: req.company!.name },
-    plan_tier: req.company!.plan_tier ?? null,
+    plan_type: req.company!.plan_type ?? null,
+    plan_name: req.company!.plan_name ?? null,
+    plan_tier: req.company!.plan_name ?? req.company!.plan_tier ?? null,
     modules: req.company!.modules,
+    subscription_status: req.company!.subscription_status ?? null,
   });
 });
 
@@ -250,12 +254,11 @@ router.post('/devices/register', requireAdminAuth, async (req, res) => {
 // ── Auto-registration (world-class, Preyone Transit technology) ─────
 // POST /api/pos/devices/auto-register
 // Called by desktop/Android on first launch. Uses admin JWT for company
-// scoping (req.company, the portal tenant). Enforces 3-device quota: 1 phone
-// + 1 tablet + 1 desktop, plus the subscription plan's device cap.
+// scoping (req.company, the portal tenant). The only cap is the plan's
+// max_devices (enforced below). electron is a desktop shell.
 // Body: { device_uuid, device_public_key, device_type, device_name, app_version }
 // Returns: { device_token, company_id, shop_id, device_name, quota }
-const ALLOWED_AUTO_TYPES = ['phone', 'tablet', 'desktop'] as const;
-const DEVICE_TYPE_QUOTA: Record<string, number> = { phone: 1, tablet: 1, desktop: 1 };
+const ALLOWED_AUTO_TYPES = ['phone', 'tablet', 'desktop', 'electron'] as const;
 
 function isValidEd25519PublicKey(key: string): boolean {
   // Ed25519 public keys are 32 bytes, base64 or hex encoded (44 or 64 chars)
@@ -298,31 +301,8 @@ router.post('/devices/auto-register', requireAdminAuth, async (req, res) => {
     res.status(403).json({ error: 'This device has been suspended. Contact your administrator.' }); return;
   }
 
-  // Subscription engine: plan cap and expiry outrank the per-type quota below.
+  // Subscription engine: the plan's device cap is the only registration limit.
   if (!(await enforceSubscriptionGuard(res, companyId, existingDevice.rows.length > 0))) return;
-
-  // Enforce quota: max N devices per type per company (only for NEW devices)
-  const isNewDevice = existingDevice.rows.length === 0;
-  if (isNewDevice && companyId) {
-    const quota = DEVICE_TYPE_QUOTA[deviceType];
-    if (quota) {
-      const countResult = await pool.query(
-        `SELECT COUNT(*)::int AS cnt FROM pos_devices
-          WHERE company_id = $1 AND device_type = $2 AND status = 'active'
-            AND device_uuid IS DISTINCT FROM $3`,
-        [companyId, deviceType, deviceUuid]
-      );
-      const activeCount = countResult.rows[0].cnt;
-      if (activeCount >= quota) {
-        res.status(409).json({
-          error: `Device quota exceeded: maximum ${quota} ${deviceType}(s) allowed per company. Deactivate an existing ${deviceType} first.`,
-          code: 'DEVICE_QUOTA_EXCEEDED',
-          quota: { type: deviceType, max: quota, current: activeCount },
-        });
-        return;
-      }
-    }
-  }
 
   const deviceToken = crypto.randomBytes(32).toString('hex'); // 64-char token
 
@@ -349,11 +329,10 @@ router.post('/devices/auto-register', requireAdminAuth, async (req, res) => {
 
   const device = rows[0];
 
-  // Return quota summary so client knows its limits
-  const quotaSummary = await pool.query(
-    `SELECT device_type, COUNT(*)::int AS cnt FROM pos_devices
-      WHERE company_id = $1 AND status = 'active' AND device_type IN ('phone','tablet','desktop')
-      GROUP BY device_type`,
+  const cap = await pool.query(
+    `SELECT max_devices,
+            (SELECT COUNT(*)::int FROM pos_devices WHERE company_id = $1 AND status = 'active') AS active
+       FROM companies WHERE id = $1`,
     [companyId]
   );
 
@@ -366,8 +345,8 @@ router.post('/devices/auto-register', requireAdminAuth, async (req, res) => {
     device_uuid: device.device_uuid,
     device_type: device.device_type,
     quota: {
-      limits: DEVICE_TYPE_QUOTA,
-      current: Object.fromEntries(quotaSummary.rows.map((r: { device_type: string; cnt: number }) => [r.device_type, r.cnt])),
+      max_devices: Number(cap.rows[0]?.max_devices ?? 0),
+      active_devices: Number(cap.rows[0]?.active ?? 0),
     },
   });
 });
@@ -385,17 +364,17 @@ router.get('/devices/mine', requireDeviceAuth, async (req, res) => {
   if (rows.length === 0) {
     res.status(404).json({ error: 'Device not found' }); return;
   }
-  const quotaSummary = await pool.query(
-    `SELECT device_type, COUNT(*)::int AS cnt FROM pos_devices
-      WHERE company_id = $1 AND status = 'active' AND device_type IN ('phone','tablet','desktop')
-      GROUP BY device_type`,
+  const cap = await pool.query(
+    `SELECT max_devices,
+            (SELECT COUNT(*)::int FROM pos_devices WHERE company_id = $1 AND status = 'active') AS active
+       FROM companies WHERE id = $1`,
     [device.company_id]
   );
   res.json({
     device: rows[0],
     quota: {
-      limits: DEVICE_TYPE_QUOTA,
-      current: Object.fromEntries(quotaSummary.rows.map((r: { device_type: string; cnt: number }) => [r.device_type, r.cnt])),
+      max_devices: Number(cap.rows[0]?.max_devices ?? 0),
+      active_devices: Number(cap.rows[0]?.active ?? 0),
     },
   });
 });
@@ -875,6 +854,11 @@ router.get('/documents/:id', async (req, res) => {
 // or sale owned by this tenant can be converted; the doc_number is re-issued
 // from the shared sequence so the UNIQUE constraint keeps holding.
 router.post('/documents/:id/convert-to-invoice', async (req, res) => {
+  const blocked = invoiceBlock(req.company!);
+  if (blocked) {
+    res.status(403).json(blocked);
+    return;
+  }
   const doc = await pool.query(
     `SELECT id, doc_type, status FROM pos_documents
       WHERE id = $1 AND company_id = $2 AND doc_type IN ('quotation', 'sale') AND status <> 'void'`,
@@ -902,6 +886,11 @@ router.post('/checkout', async (req, res) => {
   const me = req.adminUser!;
   const b = req.body || {};
   const docType = ['sale', 'invoice', 'quotation'].includes(str(b.docType)) ? str(b.docType) : 'sale';
+  const blocked = docType === 'sale' ? subscriptionBlock(req.company!) : invoiceBlock(req.company!);
+  if (blocked) {
+    res.status(403).json(blocked);
+    return;
+  }
   const channel = ['till', 'online', 'office'].includes(str(b.channel)) ? str(b.channel) : 'till';
   const rawItems: CartItemInput[] = Array.isArray(b.items) ? b.items : [];
   if (rawItems.length === 0) {
