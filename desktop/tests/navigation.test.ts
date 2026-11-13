@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isAllowedAppUrl, isShellUrl } from '../src/shared/navigation';
+import { isAllowedAppUrl, isExternalBrowserUrl, isShellUrl } from '../src/shared/navigation';
 import { deviceRegistrationMessage } from '../src/shared/device';
 
 describe('guest navigation allowlist', () => {
@@ -17,6 +17,15 @@ describe('guest navigation allowlist', () => {
     expect(isAllowedAppUrl('http://pos.preyone.com/')).toBe(false);
     expect(isAllowedAppUrl('javascript:alert(1)')).toBe(false);
     expect(isAllowedAppUrl('not a url')).toBe(false);
+  });
+
+  it('opens only http and https links outside the app', () => {
+    expect(isExternalBrowserUrl('https://payments.pesepay.com/pay')).toBe(true);
+    expect(isExternalBrowserUrl('http://192.168.1.20/receipt')).toBe(true);
+    expect(isExternalBrowserUrl('file:///etc/passwd')).toBe(false);
+    expect(isExternalBrowserUrl('smb://till/share')).toBe(false);
+    expect(isExternalBrowserUrl('myapp://open')).toBe(false);
+    expect(isExternalBrowserUrl('javascript:alert(1)')).toBe(false);
   });
 
   it('keeps the shell on its own file or the dev server', () => {

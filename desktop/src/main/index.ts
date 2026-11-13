@@ -12,7 +12,7 @@ import {
   rememberToken,
   type ShellSession,
 } from './auth';
-import { isAllowedAppUrl, isShellUrl } from '../shared/navigation';
+import { isAllowedAppUrl, isExternalBrowserUrl, isShellUrl } from '../shared/navigation';
 import { isModuleKey, upgradeCopy, MODULE_TILES, type ModuleKey } from '../shared/plans';
 
 const DEV_URL = process.env.ELECTRON_RENDERER_URL || null;
@@ -50,19 +50,24 @@ function layoutGuest(): void {
   });
 }
 
+function openInBrowser(url: string): void {
+  if (!isExternalBrowserUrl(url)) return;
+  shell.openExternal(url).catch(() => {});
+}
+
 function guardNavigation(contents: Electron.WebContents): void {
   contents.setWindowOpenHandler(({ url }) => {
     if (isAllowedAppUrl(url)) {
       contents.loadURL(url).catch(() => {});
     } else {
-      shell.openExternal(url).catch(() => {});
+      openInBrowser(url);
     }
     return { action: 'deny' };
   });
   const block = (event: Electron.Event, url: string) => {
     if (url === 'about:blank' || isAllowedAppUrl(url)) return;
     event.preventDefault();
-    shell.openExternal(url).catch(() => {});
+    openInBrowser(url);
   };
   contents.on('will-navigate', block);
   contents.on('will-redirect', block);
@@ -107,7 +112,7 @@ function createWindow(): void {
   });
 
   win.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url).catch(() => {});
+    openInBrowser(url);
     return { action: 'deny' };
   });
   win.webContents.on('will-navigate', (event, url) => {
@@ -118,6 +123,7 @@ function createWindow(): void {
   win.on('closed', () => {
     win = null;
     guest = null;
+    moduleOpen = null;
   });
 
   if (DEV_URL) {
@@ -143,6 +149,14 @@ async function afterSignIn(next: ShellSession): Promise<ShellSession> {
   return next;
 }
 
+function printPage(contents: Electron.WebContents, silent: boolean, deviceName?: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    contents.print(
+      { silent, deviceName, printBackground: true },
+      (success) => resolve(success)
+    );
+  });
+}
 function setupUpdates(): void {
   if (!app.isPackaged) return;
   autoUpdater.autoDownload = true;
@@ -230,18 +244,11 @@ function registerIpc(): void {
     const printers = await contents.getPrintersAsync();
     const match = printerName ? printers.find((printer) => printer.name === printerName) : undefined;
     const silent = Boolean(match);
-    try {
-      await contents.print({
-        silent,
-        deviceName: match?.name,
-        printBackground: true,
-      });
-      return { ok: true, silent };
-    } catch (err) {
-      console.warn('Silent print failed, opening the print dialog.', err);
-      await contents.print({ silent: false, printBackground: true });
-      return { ok: true, silent: false };
-    }
+    const printed = await printPage(contents, silent, match?.name);
+    if (printed) return { ok: true, silent };
+    console.warn('Silent print failed, opening the print dialog.');
+    const dialogOk = await printPage(contents, false);
+    return { ok: dialogOk, silent: false };
   });
 }
 

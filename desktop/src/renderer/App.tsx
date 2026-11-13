@@ -17,7 +17,13 @@ export default function App() {
   const [upgrade, setUpgrade] = useState('');
 
   useEffect(() => {
-    const offOnline = window.preyone.onOnline(setOnline);
+    const offOnline = window.preyone.onOnline((up) => {
+      setOnline(up);
+      if (!up) {
+        setOpenKey(null);
+        setScreen((current) => (current === 'login' || current === 'loading' ? current : 'home'));
+      }
+    });
     const offDevice = window.preyone.onDeviceNotice(setDeviceNotice);
     window.preyone.retry().then(setOnline).catch(() => setOnline(false));
     window.preyone
@@ -188,6 +194,10 @@ export default function App() {
               onClick={async () => {
                 const up = await window.preyone.retry();
                 setOnline(up);
+                if (up) {
+                  setOpenKey(null);
+                  setScreen('home');
+                }
               }}
             >
               Retry

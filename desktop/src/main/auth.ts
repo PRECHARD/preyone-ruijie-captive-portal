@@ -79,6 +79,11 @@ export async function login(session: Session, email: string, password: string): 
 }
 
 export async function fetchMe(session: Session): Promise<ShellSession> {
+  if (!token) {
+    const cookies = await session.cookies.get({ url: API_ORIGIN, name: 'preyone_token' });
+    const saved = cookies.find((cookie) => cookie.value)?.value;
+    if (saved) token = saved;
+  }
   const res = await session.fetch(`${API_ORIGIN}/api/admin/auth/me`, {
     headers: authHeaders(),
   });

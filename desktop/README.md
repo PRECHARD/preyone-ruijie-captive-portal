@@ -7,7 +7,7 @@ One window for Windows and Mac. Sign in once, then open **Preyone POS** and **In
 | PreTill | POS only |
 | PreBiz, PrePro, PreUnlimited | POS and Invoice |
 
-The tiles come from `GET https://app.preyone.com/api/admin/auth/me` (`subscribed_modules` and `plan_name`). POS loads `https://pos.preyone.com`. Invoice loads `https://invoice.preyone.com`. Anything that is not on `https://*.preyone.com` opens in the system browser.
+The tiles come from `GET https://app.preyone.com/api/admin/auth/me` (`subscribed_modules` and `plan_name`). POS loads `https://pos.preyone.com`. Invoice loads `https://invoice.preyone.com`. Other links open in the system browser only when they are `http` or `https`. `file:`, `smb:`, and custom app links are ignored.
 
 ## Develop
 
