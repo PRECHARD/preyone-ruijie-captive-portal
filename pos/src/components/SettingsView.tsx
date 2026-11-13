@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   api,
+  auth,
   type CashierRow,
   type CompanyProfile,
   type CurrencyRate,
@@ -54,6 +55,13 @@ export default function SettingsView({
   const [shiftsAll, setShiftsAll] = useState(false);
   const manager = isManagerRole(user.role);
 
+  const [twoFactorEnabled, setTwoFactorEnabled] = useState(false);
+  const [twoFactorBusy, setTwoFactorBusy] = useState(false);
+  const [twoFactorChallenge, setTwoFactorChallenge] = useState<string | null>(null);
+  const [twoFactorMasked, setTwoFactorMasked] = useState('');
+  const [twoFactorCode, setTwoFactorCode] = useState('');
+  const [disablePassword, setDisablePassword] = useState('');
+
   const loadTill = useCallback(async () => {
     const [c, s] = await Promise.all([
       manager ? api.cashiers().catch(() => [] as CashierRow[]) : Promise.resolve([] as CashierRow[]),
@@ -62,6 +70,27 @@ export default function SettingsView({
     setCashiers(c);
     setShifts(s);
   }, [manager, shiftsAll]);
+
+  const authHeaders = useCallback((): HeadersInit => {
+    const token = auth.token() || '';
+    return {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    };
+  }, []);
+
+  const loadTwoFactor = useCallback(async () => {
+    try {
+      const res = await fetch('/api/admin/auth/2fa', {
+        credentials: 'include',
+        headers: authHeaders(),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) setTwoFactorEnabled(data.enabled === true);
+    } catch {
+      /* keep previous */
+    }
+  }, [authHeaders]);
 
   const load = useCallback(async () => {
     try {
@@ -74,11 +103,11 @@ export default function SettingsView({
       setCompany(c);
       setRates(r.rates);
       setRateFallback(r.fallback);
-      await loadTill();
+      await Promise.all([loadTill(), loadTwoFactor()]);
     } finally {
       setLoading(false);
     }
-  }, [loadTill]);
+  }, [loadTill, loadTwoFactor]);
 
   useEffect(() => {
     load();
@@ -118,6 +147,84 @@ export default function SettingsView({
       if (!onApiError(e)) notify(e instanceof Error ? e.message : 'Drawer audit failed', 'error');
     } finally {
       setBusy(false);
+    }
+  };
+
+  const requestEnable2fa = async () => {
+    setTwoFactorBusy(true);
+    try {
+      const res = await fetch('/api/admin/auth/2fa/enable-request', {
+        method: 'POST',
+        credentials: 'include',
+        headers: authHeaders(),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Could not start two-factor setup');
+      if (data.enabled) {
+        setTwoFactorEnabled(true);
+        notify(data.message || 'Two-factor authentication is already enabled');
+        return;
+      }
+      setTwoFactorChallenge(data.challengeToken || null);
+      setTwoFactorMasked(data.maskedEmail || '');
+      setTwoFactorCode('');
+      notify('We emailed a 6-digit code — enter it below to finish');
+    } catch (e) {
+      if (!onApiError(e)) notify(e instanceof Error ? e.message : 'Could not enable 2FA', 'error');
+    } finally {
+      setTwoFactorBusy(false);
+    }
+  };
+
+  const confirmEnable2fa = async () => {
+    if (!twoFactorChallenge || !/^\d{6}$/.test(twoFactorCode)) {
+      notify('Enter the 6-digit code from the email', 'error');
+      return;
+    }
+    setTwoFactorBusy(true);
+    try {
+      const res = await fetch('/api/admin/auth/2fa/enable-confirm', {
+        method: 'POST',
+        credentials: 'include',
+        headers: authHeaders(),
+        body: JSON.stringify({ challengeToken: twoFactorChallenge, code: twoFactorCode }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Could not verify the code');
+      setTwoFactorEnabled(true);
+      setTwoFactorChallenge(null);
+      setTwoFactorCode('');
+      notify(data.message || 'Two-factor authentication enabled');
+    } catch (e) {
+      if (!onApiError(e)) notify(e instanceof Error ? e.message : 'Could not confirm 2FA', 'error');
+    } finally {
+      setTwoFactorBusy(false);
+    }
+  };
+
+  const disable2fa = async () => {
+    if (!disablePassword) {
+      notify('Enter your password to turn off two-factor authentication', 'error');
+      return;
+    }
+    setTwoFactorBusy(true);
+    try {
+      const res = await fetch('/api/admin/auth/2fa/disable', {
+        method: 'POST',
+        credentials: 'include',
+        headers: authHeaders(),
+        body: JSON.stringify({ password: disablePassword }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Could not disable two-factor authentication');
+      setTwoFactorEnabled(false);
+      setDisablePassword('');
+      setTwoFactorChallenge(null);
+      notify(data.message || 'Two-factor authentication turned off');
+    } catch (e) {
+      if (!onApiError(e)) notify(e instanceof Error ? e.message : 'Could not disable 2FA', 'error');
+    } finally {
+      setTwoFactorBusy(false);
     }
   };
 
@@ -240,6 +347,63 @@ export default function SettingsView({
         <button className="secondary-btn" disabled={busy} onClick={testDrawer}>
           {busy ? 'Logging…' : 'Log a test drawer kick'}
         </button>
+      </section>
+
+      <section className="settings-card">
+        <div className="settings-card-head"><span>Sign-in security</span></div>
+        <div className="hint">
+          Optional email OTP for SSO password login. Admin console still always requires a code.
+          Status: <strong>{twoFactorEnabled ? 'Enabled' : 'Off'}</strong>
+        </div>
+        {!twoFactorEnabled && !twoFactorChallenge && (
+          <button className="secondary-btn" disabled={twoFactorBusy} onClick={() => void requestEnable2fa()}>
+            {twoFactorBusy ? 'Sending…' : 'Enable email OTP'}
+          </button>
+        )}
+        {!twoFactorEnabled && twoFactorChallenge && (
+          <div className="pin-grid">
+            <label>
+              <span className="field-label">Code sent to {twoFactorMasked || 'your email'}</span>
+              <input
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                maxLength={6}
+                value={twoFactorCode}
+                onChange={(e) => setTwoFactorCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                placeholder="6-digit code"
+              />
+            </label>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+              <button className="secondary-btn" disabled={twoFactorBusy} onClick={() => void confirmEnable2fa()}>
+                {twoFactorBusy ? 'Verifying…' : 'Confirm'}
+              </button>
+              <button className="ghost-btn small" disabled={twoFactorBusy} onClick={() => void requestEnable2fa()}>
+                Resend
+              </button>
+            </div>
+          </div>
+        )}
+        {twoFactorEnabled && (
+          <div className="pin-grid">
+            <label>
+              <span className="field-label">Password to disable</span>
+              <input
+                type="password"
+                autoComplete="current-password"
+                value={disablePassword}
+                onChange={(e) => setDisablePassword(e.target.value)}
+                placeholder="Account password"
+              />
+            </label>
+            <button
+              className="secondary-btn"
+              disabled={twoFactorBusy || !disablePassword}
+              onClick={() => void disable2fa()}
+            >
+              {twoFactorBusy ? 'Updating…' : 'Turn off email OTP'}
+            </button>
+          </div>
+        )}
       </section>
 
       <section className="settings-card">
