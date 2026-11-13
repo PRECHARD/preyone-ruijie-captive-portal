@@ -13,6 +13,7 @@ import {
   type ShellSession,
 } from './auth';
 import { isAllowedAppUrl, isExternalBrowserUrl, isShellUrl } from '../shared/navigation';
+import { printFollowUp } from '../shared/print';
 import { isModuleKey, upgradeCopy, MODULE_TILES, type ModuleKey } from '../shared/plans';
 
 const DEV_URL = process.env.ELECTRON_RENDERER_URL || null;
@@ -245,7 +246,9 @@ function registerIpc(): void {
     const match = printerName ? printers.find((printer) => printer.name === printerName) : undefined;
     const silent = Boolean(match);
     const printed = await printPage(contents, silent, match?.name);
-    if (printed) return { ok: true, silent };
+    const followUp = printFollowUp(silent, printed);
+    if (followUp === 'done') return { ok: true, silent };
+    if (followUp === 'stop') return { ok: false, silent: false };
     console.warn('Silent print failed, opening the print dialog.');
     const dialogOk = await printPage(contents, false);
     return { ok: dialogOk, silent: false };

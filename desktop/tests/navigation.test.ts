@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { isAllowedAppUrl, isExternalBrowserUrl, isShellUrl } from '../src/shared/navigation';
+import { printFollowUp } from '../src/shared/print';
 import { deviceRegistrationMessage } from '../src/shared/device';
 
 describe('guest navigation allowlist', () => {
@@ -33,6 +34,15 @@ describe('guest navigation allowlist', () => {
     expect(isShellUrl('http://127.0.0.1:5176/index.html', 'http://127.0.0.1:5176')).toBe(true);
     expect(isShellUrl('https://pos.preyone.com/', 'http://127.0.0.1:5176')).toBe(false);
     expect(isShellUrl('http://127.0.0.1:9999/', 'http://127.0.0.1:5176')).toBe(false);
+  });
+});
+
+describe('receipt print fallback', () => {
+  it('opens the dialog only after a silent print fails', () => {
+    expect(printFollowUp(true, false)).toBe('dialog');
+    expect(printFollowUp(true, true)).toBe('done');
+    expect(printFollowUp(false, false)).toBe('stop');
+    expect(printFollowUp(false, true)).toBe('done');
   });
 });
 
