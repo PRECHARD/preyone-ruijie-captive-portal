@@ -658,6 +658,15 @@
   font-weight: 600;
 }
 
+/* Right-hand column of the voucher header: keeps the access badge pinned to
+   the top-right corner regardless of how tall the logo group grows. */
+.badge-container {
+  display: flex;
+  justify-content: flex-end;
+  align-items: flex-start;
+  flex-shrink: 0;
+}
+
 .access-badge {
   background: linear-gradient(135deg, var(--purple), var(--pink));
   color: #fff;
@@ -914,22 +923,23 @@
 
 .vd-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
 }
 
 .vd-cell {
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  padding: 8px 10px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid var(--border);
+  gap: 2px;
+  min-width: 0;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 8px;
 }
 
 .vd-label {
-  font-size: 0.6rem;
+  font-size: 0.62rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -937,9 +947,14 @@
 }
 
 .vd-value {
-  font-size: 0.85rem;
+  font-size: 0.75rem;
+  line-height: 1.35;
   color: var(--text);
   overflow-wrap: anywhere;
+}
+
+@media (max-width: 560px) {
+  .vd-grid { grid-template-columns: 1fr; }
 }
 
 .vd-mono {
@@ -995,8 +1010,63 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   margin-top: 10px;
+}
+
+.vd-actions .btn-sm,
+.vd-actions .btn-action {
+  padding: 7px 11px;
+  border-radius: 999px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.vd-actions .btn-action--wa {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  justify-content: center;
+  border-radius: 999px;
+  color: #06130b;
+  background: linear-gradient(135deg, #25d366, #00ccff);
+  border-color: transparent;
+  box-shadow: 0 0 14px rgba(37, 211, 102, 0.28);
+}
+
+.vd-actions .btn-action--wa:hover {
+  background: linear-gradient(135deg, #2ef27a, #22ddff);
+  border-color: transparent;
+  box-shadow: 0 0 20px rgba(37, 211, 102, 0.45);
+}
+
+.vd-actions .btn-action--wa .vd-action-label {
+  display: none;
+}
+
+/* ── Renew / Resell modal ────────────────────────────────────────────────── */
+.renew-hint {
+  margin: -2px 0 12px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+
+.renew-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 14px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.renew-check input {
+  margin-top: 2px;
+  accent-color: var(--purple-glow);
+  cursor: pointer;
 }
 
 /* ── High-stakes holder capture modal (#0D0F18 glass + cyan) ────────────────
@@ -1074,4 +1144,130 @@
   display: inline-flex;
   gap: 6px;
   flex-wrap: wrap;
+}
+
+/* ── Live voucher list ─────────────────────────────────────────────────────
+   The list re-syncs every 10s, so every state that can change without anyone
+   touching this screen — redemption, a bound handset, an expiry passing — has
+   to read as current at a glance. */
+.live-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 0.68rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.live-pill__label {
+  color: var(--green);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.live-pill__time {
+  color: var(--text-muted);
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+
+/* Shared heartbeat: live pill, "In use" badge, bound-device chip. */
+.live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--green);
+  flex: none;
+  animation: livePulse 1.8s ease-out infinite;
+}
+
+@keyframes livePulse {
+  0%   { box-shadow: 0 0 0 0 rgba(0, 230, 118, 0.55); }
+  70%  { box-shadow: 0 0 0 7px rgba(0, 230, 118, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(0, 230, 118, 0); }
+}
+
+/* Status tones beyond yes/no/warn: Unused and Expired should sit quietly in
+   the list instead of competing with a genuinely running voucher. */
+.badge--idle { background: rgba(120, 155, 210, 0.15); color: #9dbbdd; }
+.badge--muted { background: rgba(255, 255, 255, 0.05); color: var(--text-muted); }
+
+.badge--live {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(0, 230, 118, 0.12);
+  color: var(--green);
+  border: 1px solid rgba(0, 230, 118, 0.32);
+  box-shadow: none;
+}
+
+.cell-badges {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.vd-badges {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* Redemption counter: a bar makes "1/1 spent" obvious without reading digits. */
+.used-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.used-bar {
+  width: 46px;
+  height: 5px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+  flex: none;
+}
+
+.used-bar__fill {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: linear-gradient(90deg, var(--un-cyan, #00f0ff), var(--green));
+  transition: width 0.4s ease;
+}
+
+.used-cell__n {
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+
+/* Device slots: green and pulsing the moment a handset is actually bound. */
+.dev-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.dev-chip--live {
+  background: rgba(0, 230, 118, 0.13);
+  color: var(--green);
+}
+
+.dev-chip--idle {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-muted);
 }

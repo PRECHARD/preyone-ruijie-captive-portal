@@ -10,15 +10,43 @@ function clearToken(): void {
   localStorage.removeItem('admin_token');
 }
 
-interface ApiError extends Error {
+export interface ApiError extends Error {
   requiresApproval?: boolean;
   requiresHandover?: boolean;
   unhandedCount?: number;
   status?: number;
+  code?: string;
+}
+
+/**
+ * Console is in the inactivity-locked state (State A). While true, every
+ * protected call is refused LOCALLY as well as by the server, so a busy page
+ * with background polling cannot hammer /refresh or keep data flowing behind
+ * the lock screen. Only the endpoints needed to leave the locked state are
+ * allowed through.
+ */
+let consoleLocked = false;
+
+export function setConsoleLocked(next: boolean): void {
+  consoleLocked = next;
+}
+
+/** Endpoints that remain callable while locked (unlock + sign out). */
+const LOCK_ALLOWLIST = ['/auth/unlock', '/auth/logout', '/auth/policy'];
+
+function isAllowedWhileLocked(path: string): boolean {
+  return LOCK_ALLOWLIST.some((p) => path.endsWith(p));
 }
 
 function createClient(base: string) {
   async function request<T = any>(path: string, options: RequestInit = {}): Promise<T> {
+    if (consoleLocked && !isAllowedWhileLocked(path)) {
+      const err: ApiError = new Error('Session locked after inactivity. Enter your password to continue.');
+      err.status = 423;
+      err.code = 'SESSION_LOCKED';
+      throw err;
+    }
+
     const token = getToken();
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
@@ -34,6 +62,16 @@ function createClient(base: string) {
       if (json.requiresHandover) err.requiresHandover = true;
       if (json.unhandedCount) err.unhandedCount = json.unhandedCount;
       err.status = res.status;
+      err.code = typeof json.code === 'string' ? json.code : undefined;
+      // The server rejected the session clocks: tell AuthContext which state
+      // we are in so it can lock the console (423) or force a re-login (401).
+      if (typeof window !== 'undefined') {
+        if (res.status === 423 && json.code === 'SESSION_LOCKED') {
+          window.dispatchEvent(new CustomEvent('admin:session-locked'));
+        } else if (res.status === 401 && (json.code === 'SESSION_EXPIRED' || json.code === 'SESSION_REVOKED')) {
+          window.dispatchEvent(new CustomEvent('admin:session-expired', { detail: { code: json.code } }));
+        }
+      }
       throw err;
     }
     return json;

@@ -54,6 +54,26 @@ export function formatSpeed(upMbps: number | null, downMbps: number | null): str
   return `${upMbps ?? '—'}/${downMbps ?? '—'} Mbps`;
 }
 
+/**
+ * Live link/throughput rate from Ruijie, which reports BITS per second.
+ *
+ * Verified live (2026-10): `downRate` tops out at 9_012_250 — as kbps that
+ * would be 9.0 Gbps for a single Wi-Fi client, which is impossible, and
+ * dividing the reported rate by the flowDown delta across the API's 301s
+ * refresh bucket lands the ratio at ~1.0 only when read as bps.
+ *
+ * The previous formatter divided by 1000 (treating the value as kbps), which
+ * is precisely what produced the "3340.8 Mbps" corruption: 3_340_800 bps is
+ * 3.34 Mbps, not 3.3 Gbps.
+ */
+export function formatRate(bps: number | null | undefined): string {
+  if (bps == null || !Number.isFinite(bps)) return '—';
+  const abs = Math.abs(bps);
+  if (abs >= 1_000_000) return `${(bps / 1_000_000).toFixed(1)} Mbps`;
+  if (abs >= 1000) return `${Math.round(bps / 1000)} kbps`;
+  return `${Math.round(bps)} bps`;
+}
+
 /** Duration in minutes as a short human label. */
 export function fmtDurationMin(minutes: number | null | undefined): string {
   if (!minutes) return '—';

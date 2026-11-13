@@ -405,6 +405,16 @@
   text-align: center;
 }
 
+/* Wrapper for the ticket manifest block: gives the head + table a shared
+   surface and clips the horizontal scroll of the table inside it. */
+.tx-manifest {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  padding: 4px 14px 12px;
+  overflow: hidden;
+}
+
 .tx-manifest-head {
   display: flex;
   justify-content: space-between;

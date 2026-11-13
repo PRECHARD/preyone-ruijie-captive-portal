@@ -1,0 +1,5 @@
+@media (max-width: 900px) {
+  .my-sales-charts {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}

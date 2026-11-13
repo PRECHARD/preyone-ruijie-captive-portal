@@ -13,6 +13,7 @@ export const WORKSPACE_KEY = 'admin_workspace';
  */
 const ULTRA_SECTIONS: readonly string[] = [
   'vouchers',
+  'consumption',
   'sessions',
   'access-log',
   'ap-health',

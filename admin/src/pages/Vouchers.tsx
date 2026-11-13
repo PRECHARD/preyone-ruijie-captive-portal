@@ -1,10 +1,14 @@
-import { useState, useEffect, useCallback, useRef, Fragment } from 'react';
+﻿import { useState, useEffect, useCallback, useRef, Fragment } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../api/client';
 import { showToast } from '../utils/toast';
+import { drawVoucherCanvas, voucherSerial } from '../utils/voucherCard';
+import { formatVoucherExpiry, parseVoucherDate } from '../utils/voucherExpiry';
+import { shareVoucherJpeg } from '../utils/voucherShare';
 import jsPDF from 'jspdf';
 import { playVoucherSound, playAlertSound } from '../utils/sound';
-import EmptyState from '../components/EmptyState';
+import { packagesForMinting } from '../utils/packages';
+import PendingApprovals from '../components/PendingApprovals';
 import Modal from '../components/Modal';
 import './Vouchers.css';
 
@@ -18,6 +22,8 @@ interface Package {
   bandwidth_mbps_down: number;
   data_limit_gb: number | null;
   is_uncapped: boolean;
+  /** Derived server-side from src/config/packages.ts. */
+  ceo_exclusive?: boolean;
 }
 
   interface Voucher {
@@ -40,7 +46,11 @@ interface Package {
     status?: string | null;
     first_redeemed_at?: string | null;
     activated_at?: string | null;
+    last_seen_at?: string | null;
+    ruijie_sync_status?: string | null;
+    ruijie_voucher_id?: string | null;
     max_devices?: number | null;
+    effective_max_devices?: number | null;
     device_count?: number;
     bound_macs?: string[] | null;
     devices?: Array<{
@@ -72,6 +82,9 @@ interface Package {
     // PATCH /vouchers/:id. Rendered on the voucher canvas when present.
     holder_name?: string | null;
     holder_phone?: string | null;
+    // Returned by the list query (admin.ts SELECT) and /vouchers/:id/renew.
+    is_disabled?: boolean;
+    deleted_at?: string | null;
   }
 
 interface ApprovalRequest {
@@ -99,19 +112,38 @@ interface ClockStatus {
 const APPROVAL_TIERS = ['PreMax', 'PreUltra', 'PreExecutive'];
 
 function fmtDur(m: number): string {
-  if (!m) return '—';
+  if (!m) return 'â€”';
   if (m >= 43200) return Math.round(m / 43200) + 'mo';
   if (m >= 1440) return Math.round(m / 1440) + 'd';
   if (m >= 60) return Math.round(m / 60) + 'h';
   return m + 'min';
 }
 
-function fmtDate(d: string): string {
-  try { return new Date(d).toLocaleString(); } catch { return d || '—'; }
+/**
+ * Ledger timestamps (created / activated / last seen / first redeemed).
+ *
+ * `vouchers.expires_at` is NULL for "never expires", and `expires_at` columns
+ * used to be handed to `new Date(null)`, which is epoch 0 â€” that is where the
+ * "1/1/1970" rows in the detail sheet came from. Null/garbage now renders `â€”`
+ * so an absent stored date is never invented here (the customer-facing share
+ * text is the one place a date is derived; see utils/voucherExpiry.ts).
+ */
+function fmtDate(d?: string | number | null): string {
+  const parsed = parseVoucherDate(d);
+  return parsed ? parsed.toLocaleString() : 'â€”';
 }
 
 const PAYMENT_METHODS = ['Cash', 'EcoCash', 'OneMoney', 'Omari', 'InnBucks'];
 const IS_MOBILE_MONEY = (m: string) => m !== 'Cash';
+
+// One mapping for every status badge so the list and the detail sheet can
+// never disagree. Only a live or a disabled code earns colour; `Expired` and
+// anything unexpected fall through to a quiet grey.
+const statusTone = (status?: string | null) =>
+  status === 'Active' ? 'yes'
+    : status === 'Disabled' ? 'no'
+    : status === 'Unused' ? 'idle'
+    : 'muted';
 const lc = (s?: string) => (s || '').toLowerCase();
 
 export default function Vouchers() {
@@ -119,9 +151,18 @@ export default function Vouchers() {
   const role = user?.role || 'Staff';
   const isMgmt = role === 'CEO' || role === 'Manager';
   const needsClockIn = role !== 'CEO';
+  // admin.ts puts company.admin on renew/reset-mac/disable/delete. It is seeded
+  // for CEO, Manager, SUPER_ADMIN and COMPANY_ADMIN â€” never Staff â€” so without
+  // this gate Staff would see the buttons and only ever get a 403 back.
+  const canManageVoucher =
+    user?.permissions?.includes('company.admin') ||
+    ['CEO', 'Manager', 'SUPER_ADMIN', 'COMPANY_ADMIN'].includes(role);
 
   const [clockStatus, setClockStatus] = useState<ClockStatus | null>(null);
   const [packages, setPackages] = useState<Package[]>([]);
+  // Promo tiers (prePromo_Monthly) are CEO-only: hide them from every mint
+  // picker for Staff/Manager. POST /vouchers still answers 403 if bypassed.
+  const mintPackages = packagesForMinting(packages, user);
   const [selectedPkg, setSelectedPkg] = useState<Package | null>(null);
   const [vCode, setVCode] = useState('');
   const [vPrice, setVPrice] = useState('');
@@ -130,10 +171,11 @@ export default function Vouchers() {
   const [vPayRef, setVPayRef] = useState('');
   const [vouchers, setVouchers] = useState<Voucher[]>([]);
   const [vStatus, setVStatus] = useState<{ type: string; msg: string } | null>(null);
+  const [sharingWa, setSharingWa] = useState(false);
   const [creating, setCreating] = useState(false);
 
   const [bulkTier, setBulkTier] = useState('');
-  const [bulkCount, setBulkCount] = useState(10);
+  const [bulkCount, setBulkCount] = useState(2);
   const [bulkPrice, setBulkPrice] = useState('');
   const [bulkPayMethod, setBulkPayMethod] = useState('Cash');
   const [bulkPayRef, setBulkPayRef] = useState('');
@@ -151,7 +193,33 @@ export default function Vouchers() {
   const [detailVoucher, setDetailVoucher] = useState<Voucher | null>(null);
   const [releasingMac, setReleasingMac] = useState(false);
 
-  // ── High-stakes (>= $4.99) customer capture + inline holder editing ──
+  // â”€â”€ Renew / Resell â”€â”€
+  // Re-arms an expired or spent voucher under the same PIN. The backend books a
+  // sale_type='renewal' row on every call, so the revenue always lands in the
+  // reports â€” the price field therefore defaults from the voucher but is never
+  // blanked out to a zero.
+  const [renewTarget, setRenewTarget] = useState<Voucher | null>(null);
+  const [renewDuration, setRenewDuration] = useState(60);
+  const [renewPrice, setRenewPrice] = useState('');
+  const [renewPayMethod, setRenewPayMethod] = useState('Cash');
+  const [renewPayRef, setRenewPayRef] = useState('');
+  const [renewResetQuota, setRenewResetQuota] = useState(true);
+  // '' = keep the voucher on its current package. Any other value is a tier
+  // swap the backend applies alongside the renewal (speed, quota, validity).
+  const [renewPackageTier, setRenewPackageTier] = useState('');
+  const [renewSaving, setRenewSaving] = useState(false);
+  const [renewError, setRenewError] = useState('');
+  // Stamp of the last successful list sync, surfaced as the "Live" pill so an
+  // operator can tell at a glance whether what they are reading is current.
+  const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
+  const [listStatus, setListStatus] = useState('all');
+  const [syncingStatuses, setSyncingStatuses] = useState(false);
+
+  const [toggleBusy, setToggleBusy] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<Voucher | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+
+  // â”€â”€ High-stakes (>= $4.99) customer capture + inline holder editing â”€â”€
   // The modal intercepts generation so no >=$4.99 voucher can be created
   // without a customer name; Edit Holder patches holder_name/holder_phone via
   // PATCH /vouchers/:id (backend allowlists those two fields only).
@@ -183,13 +251,13 @@ export default function Vouchers() {
   useEffect(() => {
     api.get<Package[]>('/packages').then(setPackages).catch(() => {});
     api.get<{ vouchers: Voucher[] }>('/vouchers').then(data => setVouchers(data.vouchers)).catch(() => {});
-    // Staff: opening Vouchers means they've seen their approved requests —
+    // Staff: opening Vouchers means they've seen their approved requests â€”
     // clears the persistent "new approvals" badge (POST /notifications/acknowledge).
     api.post('/notifications/acknowledge').catch(() => {});
     if (isMgmt) {
       api.get<ApprovalRequest[]>('/vouchers/pending-approvals').then(setPendingApprovals).catch(() => {});
     }
-    // Initial myApprovals fetch — record already-approved IDs so they don't trigger
+    // Initial myApprovals fetch â€” record already-approved IDs so they don't trigger
     api.get<ApprovalRequest[]>('/vouchers/my-approvals').then(approvals => {
       setMyApprovals(approvals);
       for (const a of approvals) {
@@ -197,6 +265,43 @@ export default function Vouchers() {
       }
     }).catch(() => {});
   }, [isMgmt]);
+
+  // The list is the operator's live view of the network: a client redeems, a
+  // handset binds, an expiry passes â€” none of that waits for someone to refresh
+  // this screen. So it re-reads itself:
+  //   1. Every page is walked. The endpoint defaults to 25 rows and this UI has
+  //      no pager, so a single call silently hid everything older than the
+  //      newest page â€” which is why already-bound codes looked like they had
+  //      vanished from the list.
+  //   2. On an interval, merging into any open detail sheet so the drawer never
+  //      contradicts the row behind it.
+  useEffect(() => {
+    let cancelled = false;
+
+    const sync = async () => {
+      try {
+        const all: Voucher[] = [];
+        // 200 is the server's cap; loop until a short page ends the walk.
+        for (let page = 1; page <= 20; page++) {
+          const data = await api.get<{ vouchers: Voucher[] }>(`/vouchers?pageSize=200&page=${page}`);
+          const rows = data?.vouchers ?? [];
+          all.push(...rows);
+          if (rows.length < 200) break;
+        }
+        if (cancelled) return;
+        setVouchers(all);
+        setLastSyncedAt(new Date());
+        setDetailVoucher(prev => (prev ? all.find(r => r.id === prev.id) ?? prev : prev));
+      } catch {
+        // A dropped request keeps the last good snapshot on screen rather than
+        // blanking a list the operator is part-way through reading.
+      }
+    };
+
+    sync();
+    const interval = setInterval(sync, 10000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, []);
 
   // Poll myApprovals to detect newly-approved items and show card/bulk results
   useEffect(() => {
@@ -303,7 +408,7 @@ const codes = a.voucher_data?.codes;
     await submitCreate('', '');
   };
 
-  // Generation half of handleCreate — runs only after the holder gate (or for
+  // Generation half of handleCreate â€” runs only after the holder gate (or for
   // sub-threshold sales, which skip the modal entirely).
   const submitCreate = async (hName: string, hPhone: string): Promise<boolean> => {
     if (!selectedPkg) return false;
@@ -364,7 +469,7 @@ const codes = a.voucher_data?.codes;
     }
   };
 
-  // Inline holder edit — PATCH allowlists holderName/holderPhone server-side,
+  // Inline holder edit â€” PATCH allowlists holderName/holderPhone server-side,
   // so PIN, price and expiry can never be touched from here.
   const saveEditHolder = async () => {
     if (!editHolderVoucher) return;
@@ -386,7 +491,7 @@ const codes = a.voucher_data?.codes;
     }
   };
 
-  // ── Disable / re-enable + extend expiry (POST /vouchers/:id/…) ──
+  // â”€â”€ Disable / re-enable + extend expiry (POST /vouchers/:id/â€¦) â”€â”€
   const reloadVouchers = () => {
     api.get<{ vouchers: Voucher[] }>('/vouchers').then(data => setVouchers(data.vouchers)).catch(() => {});
   };
@@ -444,7 +549,7 @@ const codes = a.voucher_data?.codes;
     }
   };
 
-  // ── Archive (soft-delete) — DELETE /vouchers/:id (management only) ──
+  // â”€â”€ Archive (soft-delete) â€” DELETE /vouchers/:id (management only) â”€â”€
   const handleArchive = async (v: Voucher) => {
     const ok = window.confirm(
       `Archive voucher ${lc(v.code)}? It will be soft-deleted (disabled + hidden from lists). Redemption history is preserved.`
@@ -475,7 +580,7 @@ const codes = a.voucher_data?.codes;
         paymentMethod: vPayMethod,
         paymentReference: IS_MOBILE_MONEY(vPayMethod) ? vPayRef.trim() : undefined,
       });
-      setVStatus({ type: 'success', msg: '✓ ' + data.message });
+      setVStatus({ type: 'success', msg: 'âœ“ ' + data.message });
       api.get<ApprovalRequest[]>('/vouchers/my-approvals').then(setMyApprovals).catch(() => {});
     } catch (err: any) {
       setVStatus({ type: 'error', msg: err.message || 'Failed to submit request' });
@@ -485,7 +590,7 @@ const codes = a.voucher_data?.codes;
   const handleBulk = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!bulkTier) { setBulkStatus({ type: 'error', msg: 'Select a package tier' }); return; }
-    if (bulkCount < 1 || bulkCount > 100) { setBulkStatus({ type: 'error', msg: 'Count must be 1-100' }); return; }
+    if (bulkCount < 2 || bulkCount > 100) { setBulkStatus({ type: 'error', msg: 'Count must be 2-100' }); return; }
     if (needsClockIn && !isClockedIn) { setBulkStatus({ type: 'error', msg: 'You must clock in before selling vouchers.' }); return; }
 
     // High-stakes gate (unit price: custom price, else package price)
@@ -540,7 +645,7 @@ const codes = a.voucher_data?.codes;
         paymentMethod: bulkPayMethod,
         paymentReference: IS_MOBILE_MONEY(bulkPayMethod) ? bulkPayRef.trim() : undefined,
       });
-      setBulkStatus({ type: 'success', msg: '✓ ' + data.message });
+      setBulkStatus({ type: 'success', msg: 'âœ“ ' + data.message });
       api.get<ApprovalRequest[]>('/vouchers/my-approvals').then(setMyApprovals).catch(() => {});
     } catch (err: any) {
       setBulkStatus({ type: 'error', msg: err.message || 'Failed' });
@@ -596,225 +701,148 @@ const codes = a.voucher_data?.codes;
     }
   };
 
-  function voucherSerial(code: string) {
-    var d = new Date();
-    return (code || 'PREYONE').slice(0, 3).toUpperCase() + d.getFullYear() + ('0' + (d.getMonth() + 1)).slice(-2) + ('0' + d.getDate()).slice(-2) + '-' + String(Math.floor(Math.random() * 9000) + 1000);
-  }
+  const refreshVouchers = () => {
+    api.get<{ vouchers: Voucher[] }>('/vouchers').then(d => setVouchers(d.vouchers)).catch(() => {});
+  };
+
+  const syncVoucherStatuses = async () => {
+    setSyncingStatuses(true);
+    try {
+      const result = await api.post<any>('/vouchers/sync-status');
+      if (result?.errors?.length) throw new Error(result.errors[0]);
+      const all: Voucher[] = [];
+      for (let page = 1; page <= 20; page++) {
+        const data = await api.get<{ vouchers: Voucher[] }>(`/vouchers?pageSize=200&page=${page}`);
+        const rows = data?.vouchers ?? [];
+        all.push(...rows);
+        if (rows.length < 200) break;
+      }
+      setVouchers(all);
+      setLastSyncedAt(new Date());
+      showToast({
+        title: 'Voucher statuses synced',
+        message: result?.skipped
+          ? 'Ruijie sync is not configured or is already running.'
+          : `${result?.updated ?? 0} of ${result?.matched ?? 0} matched vouchers refreshed.`,
+        type: 'success',
+      });
+    } catch (err: any) {
+      showToast({
+        title: 'Status sync failed',
+        message: err?.message || 'Please try again.',
+        type: 'error',
+      });
+    } finally {
+      setSyncingStatuses(false);
+    }
+  };
+
+  // Seeds the renew modal. Duration comes from the voucher's own package so a
+  // renewal buys exactly what the client bought the first time; price is
+  // pre-filled but editable, since a renewal is a real cash transaction.
+  const openRenew = (v: Voucher) => {
+    setRenewTarget(v);
+    setRenewDuration(v.duration_min || 60);
+    setRenewPrice(v.price_amount ? parseFloat(v.price_amount).toFixed(2) : '');
+    setRenewPayMethod('Cash');
+    setRenewPayRef('');
+    setRenewResetQuota(true);
+    setRenewPackageTier('');
+    setRenewError('');
+  };
+
+  // Selecting a package pulls its validity, price, data quota and speed onto
+  // the form in one go, so swapping tiers is a single choice rather than four
+  // separate edits. Duration and amount stay editable afterwards.
+  const applyRenewPackage = (tier: string) => {
+    setRenewPackageTier(tier);
+    if (!tier) return;
+    const pkg = packages.find(p => p.tier_name === tier);
+    if (!pkg) return;
+    if (pkg.duration_min) setRenewDuration(pkg.duration_min);
+    if (pkg.price_amount) setRenewPrice(parseFloat(String(pkg.price_amount)).toFixed(2));
+  };
+  const renewSelectedPkg = renewPackageTier
+    ? packages.find(p => p.tier_name === renewPackageTier) ?? null
+    : null;
+
+  const submitRenew = async () => {
+    if (!renewTarget || renewSaving) return;
+    const price = parseFloat(renewPrice);
+    if (!Number.isFinite(price) || price <= 0) {
+      setRenewError('Enter the amount the client paid for this renewal.');
+      return;
+    }
+    setRenewSaving(true);
+    setRenewError('');
+    try {
+      const data = await api.post<any>(`/vouchers/${renewTarget.id}/renew`, {
+        durationMin: renewDuration,
+        priceAmount: price,
+        paymentMethod: renewPayMethod,
+        paymentReference: renewPayRef.trim() || undefined,
+        resetDataQuota: renewResetQuota,
+        packageTier: renewPackageTier || undefined,
+      });
+      showToast({
+        title: 'Voucher renewed',
+        message: data?.message || `${lc(renewTarget.code)} resold for $${price.toFixed(2)} â€” sale recorded`,
+        type: 'success',
+      });
+      setRenewTarget(null);
+      const id = renewTarget.id;
+      setVouchers(prev => prev.map(x => (x.id === id ? { ...x, ...data, sale: undefined } : x)));
+      setDetailVoucher(prev => (prev && prev.id === id ? { ...prev, ...data, sale: undefined } : prev));
+      refreshVouchers();
+    } catch (err: any) {
+      setRenewError(err.message || 'Could not renew this voucher.');
+    } finally {
+      setRenewSaving(false);
+    }
+  };
+
+  // Disabling is reversible (the endpoint takes {disabled:false} to re-enable),
+  // unlike Delete which soft-deletes and turns the code off in the same breath.
+  const toggleDisable = async (v: Voucher) => {
+    if (toggleBusy) return;
+    const next = !v.is_disabled;
+    setToggleBusy(true);
+    try {
+      await api.post(`/vouchers/${v.id}/disable`, { disabled: next });
+      showToast({
+        title: next ? 'Voucher disabled' : 'Voucher enabled',
+        message: `${lc(v.code)} is now ${next ? 'blocked from redemption' : 'redeemable again'}`,
+        type: next ? 'warning' : 'success',
+      });
+      setDetailVoucher(prev => (prev && prev.id === v.id ? { ...prev, is_disabled: next, status: next ? 'Disabled' : prev.status } : prev));
+      setVouchers(prev => prev.map(x => (x.id === v.id ? { ...x, is_disabled: next, status: next ? 'Disabled' : x.status } : x)));
+    } catch (err: any) {
+      showToast({ title: 'Could not update voucher', message: err.message || 'Please try again.', type: 'error' });
+    } finally {
+      setToggleBusy(false);
+    }
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteTarget || deleteBusy) return;
+    setDeleteBusy(true);
+    try {
+      const data = await api.del<any>(`/vouchers/${deleteTarget.id}`);
+      showToast({ title: 'Voucher deleted', message: data?.message || `${lc(deleteTarget.code)} removed`, type: 'warning' });
+      const id = deleteTarget.id;
+      setDeleteTarget(null);
+      setDetailVoucher(prev => (prev && prev.id === id ? null : prev));
+      setVouchers(prev => prev.filter(x => x.id !== id));
+    } catch (err: any) {
+      showToast({ title: 'Could not delete voucher', message: err.message || 'Please try again.', type: 'error' });
+    } finally {
+      setDeleteBusy(false);
+    }
+  };
 
   const downloadVoucherJPEG = () => {
     if (!voucherCardData) return;
     renderVoucherJPEG(voucherCardData, user?.fullName || 'Preyone UltraNet');
-  };
-
-  const drawVoucherCanvas = async (c: HTMLCanvasElement, data: any, issuedByName: string) => {
-    const code = (data.code || 'PREYONE-XXXX').toLowerCase();
-    const tierText = data.package_tier || 'Custom';
-    const priceText = data.price_amount ? '$' + parseFloat(data.price_amount).toFixed(2) : '';
-    const durShort = fmtDurShort(data.duration_min);
-    const validUntil = calcValidUntil(data);
-    const dataVal = data.is_uncapped ? 'UNCAPPED DATA' : (data.data_limit_gb != null ? data.data_limit_gb + ' GB' : 'UNLIMITED');
-    const bwVal = data.bandwidth_mbps_up ? data.bandwidth_mbps_up + ' Mbps' : '—';
-    const serial = voucherSerial(code);
-
-    const W = 800, H = 450;
-    c.width = W;
-    c.height = H;
-    const ctx = c.getContext('2d')!;
-
-    // ── Cyberpunk border glow ──
-    var bgGrad = ctx.createLinearGradient(0, 0, W, H);
-    bgGrad.addColorStop(0, '#050604'); bgGrad.addColorStop(0.46, '#020202'); bgGrad.addColorStop(1, '#050506');
-    ctx.fillStyle = bgGrad; ctx.fillRect(0, 0, W, H);
-
-    // ── Cyberpunk radial glow spots ──
-    [[50, 40, 300], [750, 50, 280], [30, 400, 260], [770, 380, 300]].forEach(function (g) {
-      var rg = ctx.createRadialGradient(g[0], g[1], 5, g[0], g[1], g[2]);
-      rg.addColorStop(0, 'rgba(113,255,47,0.15)'); rg.addColorStop(0.4, 'rgba(113,255,47,0.15)'); rg.addColorStop(1, 'transparent');
-      if (g[0] === 750) { rg = ctx.createRadialGradient(g[0], g[1], 5, g[0], g[1], g[2]); rg.addColorStop(0, 'rgba(19,216,255,0.15)'); rg.addColorStop(0.4, 'rgba(19,216,255,0.15)'); rg.addColorStop(1, 'transparent'); }
-      if (g[0] === 30) { rg = ctx.createRadialGradient(g[0], g[1], 5, g[0], g[1], g[2]); rg.addColorStop(0, 'rgba(54,124,255,0.12)'); rg.addColorStop(0.4, 'rgba(54,124,255,0.12)'); rg.addColorStop(1, 'transparent'); }
-      if (g[0] === 770) { rg = ctx.createRadialGradient(g[0], g[1], 5, g[0], g[1], g[2]); rg.addColorStop(0, 'rgba(139,77,255,0.12)'); rg.addColorStop(0.4, 'rgba(139,77,255,0.12)'); rg.addColorStop(1, 'transparent'); }
-      ctx.fillStyle = rg; ctx.fillRect(0, 0, W, H);
-    });
-
-    // ── Voucher logo image (under text, left-aligned) ──
-    const logoImg = new Image();
-    await new Promise(resolve => { logoImg.onload = resolve; logoImg.onerror = resolve; logoImg.src = '/images/preyone-techy-voucher.png'; });
-    var iw = logoImg.naturalWidth, ih = logoImg.naturalHeight, maxH = 90;
-    if (ih > maxH) { iw *= maxH / ih; ih = maxH; }
-    ctx.drawImage(logoImg, -5, 21, iw, ih);
-
-    // ── LEFT: Logo ──
-    var logoG = ctx.createLinearGradient(115, 0, 221, 0);
-    logoG.addColorStop(0, '#71ff2f'); logoG.addColorStop(0.5, '#13d8ff'); logoG.addColorStop(1, '#367cff');
-    ctx.fillStyle = logoG; ctx.font = '700 30px Montserrat, sans-serif'; ctx.textAlign = 'left';
-    ctx.fillText('PREYONE', 115, 51);
-
-    // ── ULTRANET WIFI / VOUCHER ──
-    var hGrad = ctx.createLinearGradient(115, 0, 341, 0);
-    hGrad.addColorStop(0, '#71ff2f'); hGrad.addColorStop(0.5, '#13d8ff'); hGrad.addColorStop(1, '#367cff');
-    ctx.fillStyle = hGrad; ctx.font = '900 22px Montserrat, sans-serif'; ctx.textAlign = 'left';
-    ctx.fillText('ULTRANET WIFI', 115, 88);
-    ctx.fillStyle = '#ffffff'; ctx.font = '900 36px Montserrat, sans-serif';
-    ctx.shadowColor = 'rgba(255,255,255,0.15)'; ctx.shadowBlur = 12;
-    ctx.fillText('VOUCHER', 115, 122); ctx.shadowBlur = 0;
-    var nGrad = ctx.createLinearGradient(115, 0, 301, 0);
-    nGrad.addColorStop(0, '#71ff2f'); nGrad.addColorStop(0.5, '#13d8ff'); nGrad.addColorStop(1, '#8b4dff');
-    ctx.fillStyle = nGrad; ctx.beginPath(); ctx.roundRect(115, 132, 200, 3, 2); ctx.fill();
-
-    // ── Holder (customer) name — printed between the header rule and the
-    // spec columns when the sale captured one. Auto-skips otherwise, so
-    // legacy vouchers render byte-identical to before.
-    var holderName = String(data.holder_name || '').trim();
-    if (holderName) {
-      ctx.fillStyle = 'rgba(255,255,255,0.45)'; ctx.font = '600 8px Montserrat, sans-serif'; ctx.textAlign = 'left';
-      ctx.fillText('ISSUED FOR', 115, 152);
-      ctx.fillStyle = '#ffffff'; ctx.font = '700 14px Montserrat, sans-serif';
-      var hn = holderName;
-      while (ctx.measureText(hn).width > 232 && hn.length > 2) { hn = hn.slice(0, -1); }
-      if (hn !== holderName) hn += '..';
-      ctx.fillText(hn, 115, 170);
-    }
-
-    // ── RIGHT: Voucher Code Box ──
-    var cpX = 370, cpY = 28, cpW = 400, codeBoxH = 84;
-    var codeBoxY = cpY + 24;
-    ctx.fillStyle = '#ffffff';
-    ctx.beginPath(); ctx.roundRect(cpX, codeBoxY, cpW, codeBoxH, 12); ctx.fill();
-    ctx.shadowColor = '#71ff2f'; ctx.shadowBlur = 22;
-    ctx.strokeStyle = '#71ff2f'; ctx.lineWidth = 3;
-    ctx.beginPath(); ctx.roundRect(cpX - 2, codeBoxY - 2, cpW + 4, codeBoxH + 4, 14); ctx.stroke();
-    ctx.shadowBlur = 0;
-    ctx.strokeStyle = 'rgba(54,124,255,0.45)'; ctx.lineWidth = 3;
-    ctx.beginPath(); ctx.roundRect(cpX - 5, codeBoxY - 5, cpW + 10, codeBoxH + 10, 17); ctx.stroke();
-    ctx.strokeStyle = 'rgba(139,77,255,0.35)'; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.roundRect(cpX - 8, codeBoxY - 8, cpW + 16, codeBoxH + 16, 20); ctx.stroke();
-    ctx.fillStyle = '#0f172a'; ctx.font = '600 10px Montserrat, sans-serif'; ctx.textAlign = 'center';
-    ctx.fillText('ACCESS VOUCHER PIN', cpX + cpW / 2, codeBoxY + 14);
-    ctx.fillStyle = '#0f172a';
-    ctx.font = '800 42px Montserrat, sans-serif';
-    ctx.textAlign = 'center';
-    var cfSize = 42;
-    while (ctx.measureText(code).width > cpW - 24 && cfSize > 22) { cfSize -= 2; ctx.font = cfSize + 'px Montserrat, sans-serif'; }
-    ctx.shadowColor = 'rgba(15,23,42,0.1)'; ctx.shadowBlur = 3;
-    ctx.fillText(code, cpX + cpW / 2, codeBoxY + codeBoxH / 2 + cfSize / 3 + 2);
-    ctx.shadowBlur = 0;
-
-    // ── Package Allocation with canvas-drawn icons ──
-    var colY = 178, colW = 215;
-    var cols = [
-      { label: 'DATA ALLOWANCE', value: dataVal, x: 38, color: '#13d8ff' },
-      { label: 'SPEED PROFILE', value: bwVal, x: 285, color: '#71ff2f' },
-      { label: 'VALIDITY', value: durShort, x: 530, color: '#8b4dff' },
-    ];
-    cols.forEach(function (col) {
-      ctx.fillStyle = col.color; ctx.beginPath(); ctx.roundRect(col.x, colY, colW, 2, 1); ctx.fill();
-      ctx.fillStyle = 'rgba(255,255,255,0.45)'; ctx.font = '600 8px Montserrat, sans-serif'; ctx.textAlign = 'left';
-      ctx.fillText(col.label, col.x, colY + 16);
-      var ix = col.x + 14, iconCY = colY + 34;
-      ctx.strokeStyle = col.color; ctx.lineWidth = 1.3;
-      if (col.label === 'DATA ALLOWANCE') {
-        ctx.beginPath(); ctx.ellipse(ix, iconCY - 4, 8, 3.5, 0, 0, Math.PI * 2); ctx.stroke();
-        ctx.beginPath(); ctx.rect(ix - 8, iconCY - 4, 16, 8); ctx.stroke();
-        ctx.beginPath(); ctx.ellipse(ix, iconCY + 4, 8, 3.5, 0, 0, Math.PI * 2); ctx.stroke();
-      } else if (col.label === 'SPEED PROFILE') {
-        ctx.beginPath(); ctx.arc(ix, iconCY, 10, Math.PI * 1.15, Math.PI * 1.85); ctx.stroke();
-        ctx.beginPath(); ctx.moveTo(ix, iconCY); ctx.lineTo(ix + 7, iconCY - 5); ctx.stroke();
-        ctx.beginPath(); ctx.arc(ix, iconCY, 1.5, 0, Math.PI * 2); ctx.fill();
-      } else {
-        ctx.strokeRect(ix - 8, iconCY - 7, 16, 14);
-        ctx.fillRect(ix - 8, iconCY - 7, 16, 5);
-        ctx.beginPath();
-        ctx.moveTo(ix - 4, iconCY - 2); ctx.lineTo(ix + 4, iconCY - 2);
-        ctx.moveTo(ix - 4, iconCY + 1); ctx.lineTo(ix + 4, iconCY + 1);
-        ctx.moveTo(ix - 3, iconCY - 7); ctx.lineTo(ix - 3, iconCY + 7);
-        ctx.moveTo(ix + 3, iconCY - 7); ctx.lineTo(ix + 3, iconCY + 7);
-        ctx.stroke();
-      }
-      var vt = col.value;
-      ctx.fillStyle = '#ffffff'; ctx.font = '700 16px Montserrat, sans-serif'; ctx.textAlign = 'left';
-      while (ctx.measureText(vt).width > colW - 44 && vt.length > 2) { vt = vt.slice(0, -1); }
-      if (vt !== col.value) vt += '..';
-      ctx.fillText(vt, col.x + 26, colY + 40);
-    });
-
-    // ── Instructions strip ──
-    var iy = 248;
-    ctx.fillStyle = 'rgba(255,255,255,0.08)'; ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.roundRect(38, iy, 724, 32, 6); ctx.stroke();
-    ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.font = '600 7px Montserrat, sans-serif'; ctx.textAlign = 'left';
-    ctx.fillText('HOW TO CONNECT', 52, iy + 13);
-    ctx.fillStyle = 'rgba(255,255,255,0.75)'; ctx.font = '600 9px Montserrat, sans-serif';
-    ctx.fillText('1  Connect to "Preyone UltraNet Wi-Fi"', 52, iy + 26);
-    ctx.fillText('2  Login screen appears automatically', 290, iy + 26);
-    ctx.fillText('3  Enter your unique Voucher PIN', 530, iy + 26);
-
-    // ── Info row ──
-    var fy = 296;
-    ctx.fillStyle = 'rgba(255,255,255,0.45)'; ctx.font = '600 8px Montserrat, sans-serif'; ctx.textAlign = 'left';
-    ctx.fillText('Issued By', 38, fy);
-    ctx.fillStyle = '#ffffff'; ctx.font = '600 13px Montserrat, sans-serif';
-    var iv = issuedByName;
-    while (ctx.measureText(iv).width > 140 && iv.length > 2) { iv = iv.slice(0, -1); }
-    if (iv !== issuedByName) iv += '..';
-    ctx.fillText(iv, 38, fy + 18);
-    ctx.fillStyle = 'rgba(255,255,255,0.45)'; ctx.font = '600 8px Montserrat, sans-serif';
-    ctx.fillText('Location', 220, fy);
-    ctx.fillStyle = '#ffffff'; ctx.font = '600 13px Montserrat, sans-serif';
-    ctx.fillText('Chitungwiza', 220, fy + 18);
-    ctx.fillStyle = 'rgba(255,255,255,0.45)'; ctx.font = '600 8px Montserrat, sans-serif';
-    ctx.fillText('Valid Until', 380, fy);
-    ctx.fillStyle = '#ffffff'; ctx.font = '600 13px Montserrat, sans-serif';
-    var vu = validUntil;
-    while (ctx.measureText(vu).width > 140 && vu.length > 3) { vu = vu.slice(0, -1); }
-    if (vu !== validUntil) vu += '..';
-    ctx.fillText(vu, 380, fy + 18);
-    ctx.fillStyle = 'rgba(255,255,255,0.45)'; ctx.font = '600 8px Montserrat, sans-serif';
-    ctx.fillText('PACKAGE', 560, fy);
-    var pkgG = ctx.createLinearGradient(560, 0, 720, 0);
-    pkgG.addColorStop(0, '#71ff2f'); pkgG.addColorStop(0.5, '#13d8ff'); pkgG.addColorStop(1, '#367cff');
-    ctx.fillStyle = pkgG; ctx.font = '700 30px Montserrat, sans-serif';
-    var ptSize = 30;
-    while (ctx.measureText(tierText).width > 180 && ptSize > 12) { ptSize -= 1; ctx.font = '700 ' + ptSize + 'px Montserrat, sans-serif'; }
-    ctx.fillText(tierText, 560, fy + 28);
-    if (priceText) {
-      ctx.shadowColor = 'rgba(255,255,255,0.8)'; ctx.shadowBlur = 22;
-      ctx.fillStyle = '#ffffff'; ctx.font = '900 34px Montserrat, sans-serif';
-      ctx.fillText(priceText, 560, fy + 58);
-      ctx.shadowBlur = 0;
-    }
-
-    // ── Support + Starlink ──
-    ctx.fillStyle = '#71ff2f'; ctx.font = '600 11px Montserrat, sans-serif'; ctx.textAlign = 'center';
-    ctx.fillText('Support Helpdesk: +263 771 327 202', W / 2, 372);
-    ctx.fillStyle = 'rgba(255,255,255,0.45)'; ctx.font = '600 9px Montserrat, sans-serif';
-    ctx.fillText('⚡ Powered by Starlink Business Infrastructure', W / 2, 388);
-
-    // ── Thank You ──
-    ctx.strokeStyle = 'rgba(255,255,255,0.07)'; ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(38, 400); ctx.lineTo(W - 38, 400); ctx.stroke();
-    var tGrad = ctx.createLinearGradient(100, 0, 700, 0);
-    tGrad.addColorStop(0, '#71ff2f'); tGrad.addColorStop(0.5, '#13d8ff'); tGrad.addColorStop(1, '#8b4dff');
-    ctx.fillStyle = tGrad; ctx.font = '900 14px Montserrat, sans-serif'; ctx.textAlign = 'center';
-    ctx.fillText('Thank you for choosing Preyone UltraNet WiFi.', W / 2, 426);
-    ctx.fillStyle = 'rgba(255,255,255,0.75)'; ctx.font = '600 10px Montserrat, sans-serif';
-    ctx.fillText('We appreciate your trust and support.', W / 2, 444);
-
-    // ── Left-edge barcode strip ──
-    var ribW = 22;
-    var bwSeq = [3, 6, 2, 7, 4];
-    ctx.fillStyle = 'rgba(15,23,42,0.55)';
-    ctx.fillRect(0, 0, ribW, H);
-    ctx.fillStyle = 'rgba(203,213,225,0.45)';
-    var by = 10;
-    for (var bi = 0; by < H - 14; bi++) {
-      var bw = bwSeq[bi % 5];
-      ctx.fillRect(0, by, ribW, bw * 3);
-      by += bw * 3 + 3;
-    }
-    ctx.fillStyle = '#64748b';
-    ctx.font = '600 10px Montserrat, sans-serif';
-    ctx.textAlign = 'right';
-    ctx.fillText('SN: ' + serial, W - 14, H - 10);
   };
 
   const renderVoucherJPEG = async (data: any, issuedByName: string) => {
@@ -932,28 +960,80 @@ const codes = a.voucher_data?.codes;
     setTimeout(() => setVStatus(null), 2000);
   };
 
-  const shareWhatsApp = async (target?: Voucher) => {
-    const data = target || voucherCardData;
-    if (!data) return;
-    const c = document.createElement('canvas');
-    c.width = 800; c.height = 450;
-    await drawVoucherCanvas(c, data, user?.fullName || 'Preyone UltraNet');
-    const blob = await new Promise<Blob | null>(resolve => c.toBlob(resolve, 'image/jpeg', 0.95));
-    if (!blob) return;
-    const file = new File([blob], 'voucher-' + (data.code || 'PREYONE-XXXX').toLowerCase() + '.jpeg', { type: 'image/jpeg' });
-    if (navigator.canShare?.({ files: [file] })) {
-      try { await navigator.share({ files: [file], title: 'Preyone Voucher' }); return; } catch {}
+  /**
+   * "Copy All" copies the voucher PIN and nothing else. Staff paste it straight
+   * into WhatsApp/usernames, and the old behaviour (full multi-line voucher
+   * blurb) put the package, price and URL on the clipboard instead of the code.
+   */
+  const copyVoucherPin = (code?: string | null) => {
+    const pin = lc(code ?? '');
+    if (!pin) {
+      setVStatus({ type: 'error', msg: 'No voucher PIN to copy' });
+      setTimeout(() => setVStatus(null), 2500);
+      return;
     }
-    const url = URL.createObjectURL(blob);
-    window.open(url, '_blank');
-    setTimeout(() => URL.revokeObjectURL(url), 10000);
+    navigator.clipboard.writeText(pin);
+    setVStatus({ type: 'success', msg: `PIN ${pin} copied` });
+    setTimeout(() => setVStatus(null), 2000);
+  };
+
+  const buildVoucherWaText = (v: Voucher) => [
+    '*Preyone Voucher*',
+    '',
+    `Code: ${lc(v.code)}`,
+    `Package: ${v.package_tier || 'Standard'}`,
+    `Price: ${v.price_amount ? '$' + parseFloat(v.price_amount).toFixed(2) : 'â€”'}`,
+    `Duration: ${fmtDur(v.duration_min)}`,
+    `Speed: ${v.bandwidth_mbps_up}/${v.bandwidth_mbps_down} Mbps`,
+    `Data: ${v.is_uncapped ? 'Unlimited' : (v.data_limit_gb ?? 'Unlimited') + ' GB'}`,
+    `Valid until: ${formatVoucherExpiry(v)}`,
+    'Connect: https://wifi.preyone.com',
+    '',
+    '_Thank you for choosing Preyone_',
+  ].join('\n');
+
+  const shareWhatsApp = async (target?: Voucher) => {
+    const data: any = target || voucherCardData;
+    if (!data || sharingWa) return;
+    const code = lc(data.code);
+    if (!code) return;
+    setSharingWa(true);
+    setVStatus({ type: 'success', msg: 'Preparing the voucher imageâ€¦' });
+    try {
+      // Renders the same canvas card as Download/Print and hands WhatsApp a real
+      // JPEG File via the native share sheet; desktop falls back to download +
+      // clipboard + WhatsApp Web (see utils/voucherShare.ts).
+      const result = await shareVoucherJpeg({
+        data: {
+          code: data.code,
+          package_tier: data.package_tier,
+          price_amount: data.price_amount,
+          duration_min: data.duration_min,
+          is_uncapped: data.is_uncapped,
+          data_limit_gb: data.data_limit_gb,
+          bandwidth_mbps_up: data.bandwidth_mbps_up,
+          bandwidth_mbps_down: data.bandwidth_mbps_down,
+          holder_name: data.holder_name || [data.first_name, data.last_name].filter(Boolean).join(' ') || data.alias || data.redemption_name || null,
+          expires_at: data.expires_at,
+          activated_at: data.activated_at,
+          created_at: data.created_at,
+        },
+        code,
+        issuedByName: user?.fullName || 'Preyone UltraNet',
+        text: buildVoucherWaText(data),
+      });
+      setVStatus({ type: result.method === 'failed' ? 'error' : 'success', msg: result.message });
+    } catch {
+      setVStatus({ type: 'error', msg: 'Could not prepare the voucher image.' });
+    } finally {
+      setSharingWa(false);
+      setTimeout(() => setVStatus(null), 6000);
+    }
   };
 
   const copyAllVoucher = () => {
     if (!voucherCardData) return;
-    navigator.clipboard.writeText(voucherCardData.code);
-    setVStatus({ type: 'success', msg: 'Voucher PIN copied to clipboard' });
-    setTimeout(() => setVStatus(null), 2000);
+    copyVoucherPin(voucherCardData.code);
   };
 
   function buildBarcodeHtml() {
@@ -970,6 +1050,10 @@ const codes = a.voucher_data?.codes;
 
   const isRestrictedTier = selectedPkg && APPROVAL_TIERS.includes(selectedPkg.tier_name);
   const createDisabled = creating || (needsClockIn && !isClockedIn && !isRestrictedTier);
+  const listStatuses = ['all', 'Unused', 'Active', 'Expired', 'Disabled'];
+  const filteredVouchers = listStatus === 'all'
+    ? vouchers
+    : vouchers.filter(v => (v.status || 'Unknown') === listStatus);
 
   return (
     <div className="vouchers-page">
@@ -983,7 +1067,7 @@ const codes = a.voucher_data?.codes;
       {/* Clock-in / Clock-out Banner */}
       {needsClockIn && clockStatus !== null && (
         <div className={'clock-banner ' + (isClockedIn ? 'clocked-in' : 'clocked-out')}>
-          <span className="clock-status-icon">{isClockedIn ? '✓' : '✕'}</span>
+          <span className="clock-status-icon">{isClockedIn ? 'âœ“' : 'âœ•'}</span>
           <span>
             {isClockedIn
               ? 'Clocked In' + (clockStatus?.log ? ' since ' + new Date(clockStatus.log.clock_in).toLocaleTimeString() : '')
@@ -1004,7 +1088,7 @@ const codes = a.voucher_data?.codes;
           </div>
 
           <div className="package-grid">
-            {packages.map(pkg => (
+            {mintPackages.map(pkg => (
               <div
                 key={pkg.tier_name}
                 className={'package-card' + (selectedPkg?.tier_name === pkg.tier_name ? ' package-card--selected' : '')}
@@ -1020,7 +1104,7 @@ const codes = a.voucher_data?.codes;
                 <div className="pkg-badges">
                   <span className="pkg-badge"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="6" cy="6" r="5" /><path d="M6 3v3l2 2" /></svg>{fmtDur(pkg.duration_min)}</span>
                   <span className="pkg-badge"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M1 4h10M1 8h10" /><rect x="1" y="2" width="10" height="8" rx="1" /></svg>{pkg.bandwidth_mbps_up}/{pkg.bandwidth_mbps_down} Mbps</span>
-                  <span className="pkg-badge"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="2" y="1" width="8" height="10" rx="1" /><path d="M2 5h8" /></svg>{pkg.is_uncapped ? 'Unlim' : (pkg.data_limit_gb ?? '—') + 'GB'}</span>
+                  <span className="pkg-badge"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="2" y="1" width="8" height="10" rx="1" /><path d="M2 5h8" /></svg>{pkg.is_uncapped ? 'Unlim' : (pkg.data_limit_gb ?? 'â€”') + 'GB'}</span>
                 </div>
               </div>
             ))}
@@ -1028,7 +1112,7 @@ const codes = a.voucher_data?.codes;
 
           <div className="voucher-code-bar">
             <div className="vcb-selected">
-              <span className="vcb-pkg-badge">{selectedPkg?.tier_name || '—'}</span>
+              <span className="vcb-pkg-badge">{selectedPkg?.tier_name || 'â€”'}</span>
             </div>
             <div className="vcb-code">
               <label>Voucher Code</label>
@@ -1135,9 +1219,9 @@ const codes = a.voucher_data?.codes;
       </div>
 
       <div className="voucher-card-actions-bar">
-            <button className="btn-action btn-action--wa" onClick={() => shareWhatsApp()}>
+            <button className="btn-action btn-action--wa" onClick={() => { void shareWhatsApp(); }} disabled={sharingWa}>
               <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
-              WhatsApp
+              {sharingWa ? 'Preparingâ€¦' : 'WhatsApp'}
             </button>
             <button className="btn-action btn-action--copy" onClick={copyAllVoucher}>
               <svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2"><rect x="5" y="2" width="13" height="15" rx="2"/><polyline points="2 5 2 18 15 18"/></svg>
@@ -1167,7 +1251,7 @@ const codes = a.voucher_data?.codes;
               <label>Package Tier</label>
               <select value={bulkTier} onChange={e => { const t = e.target.value; setBulkTier(t); const pkg = packages.find(p => p.tier_name === t); if (pkg) setBulkPrice(pkg.price_amount); }} className="form-select">
                 <option value="">Select package...</option>
-                {packages.map(p => (
+                {mintPackages.map(p => (
                   <option key={p.tier_name} value={p.tier_name}>{p.display_name} ({p.tier_name}) - ${parseFloat(p.price_amount).toFixed(2)}</option>
                 ))}
               </select>
@@ -1183,10 +1267,10 @@ const codes = a.voucher_data?.codes;
             <div className="form-field" style={{ maxWidth: 130 }}>
               <label>Users</label>
               <div className="stepper">
-                <button type="button" className="stepper-btn" onClick={() => setBulkCount(c => Math.max(1, c - 5))} disabled={bulkCreating}>&minus;</button>
-                <input type="number" className="stepper-input" value={bulkCount} min="1" max="100"
-                  onChange={e => { const n = parseInt(e.target.value); if (!isNaN(n)) setBulkCount(Math.max(1, Math.min(100, n))); }} />
-                <button type="button" className="stepper-btn" onClick={() => setBulkCount(c => Math.min(100, c + 5))} disabled={bulkCreating}>+</button>
+                <button type="button" className="stepper-btn" onClick={() => setBulkCount(c => Math.max(2, c - 1))} disabled={bulkCreating}>&minus;</button>
+                <input type="number" className="stepper-input" value={bulkCount} min="2" max="100"
+                  onChange={e => { const n = parseInt(e.target.value); if (!isNaN(n)) setBulkCount(Math.max(2, Math.min(100, n))); }} />
+                <button type="button" className="stepper-btn" onClick={() => setBulkCount(c => Math.min(100, c + 1))} disabled={bulkCreating}>+</button>
               </div>
             </div>
             <div className="form-field" style={{ maxWidth: 190 }}>
@@ -1273,7 +1357,15 @@ const codes = a.voucher_data?.codes;
             <p className="section-head-desc">Staff requests awaiting your authorization</p>
           </div>
           {pendingApprovals.length > 0 ? (
-            <div className="card card-table approvals-scroll">
+            <>
+              <div style={{ marginBottom: 10 }}>
+                <PendingApprovals
+                  pending={pendingApprovals.length}
+                  title="Pending Approvals"
+                  message="Awaiting your authorization"
+                />
+              </div>
+              <div className="card card-table approvals-scroll">
               <table className="data-table">
                 <thead><tr><th>Staff</th><th>Type</th><th>Package</th><th>Amount</th><th>Count</th><th>Requested</th><th>Actions</th></tr></thead>
                 <tbody>
@@ -1282,7 +1374,7 @@ const codes = a.voucher_data?.codes;
                       <td style={{ color: '#fff', fontWeight: 600 }}>{a.requested_by_name}</td>
                       <td>{a.request_type}</td>
                       <td>{a.package_tier}</td>
-                      <td><span className="money money--sm">{a.price_amount ? '$' + Number(a.price_amount).toFixed(2) : '—'}</span></td>
+                      <td><span className="money money--sm">{a.price_amount ? '$' + Number(a.price_amount).toFixed(2) : 'â€”'}</span></td>
                       <td>{a.voucher_count ?? 1}</td>
                       <td style={{ fontSize: 11, color: 'var(--text-dim)' }}>{a.created_at ? new Date(a.created_at).toLocaleString() : ''}</td>
                       <td>
@@ -1302,8 +1394,9 @@ const codes = a.voucher_data?.codes;
                 </tbody>
               </table>
             </div>
+            </>
           ) : (
-            <EmptyState icon="🕐" title="No Pending Approvals" message="No approval requests at the moment." />
+            <PendingApprovals pending={0} />
           )}
         </div>
       )}
@@ -1331,15 +1424,15 @@ const codes = a.voucher_data?.codes;
                               {codes.length === 1 ? codes[0] : codes[0] + ' +' + (codes.length - 1) + ' more'}
                             </span>
                           ) : (
-                            <span className="code-cell">{lc(a.voucher_data?.code) || '—'}</span>
+                            <span className="code-cell">{lc(a.voucher_data?.code) || 'â€”'}</span>
                           )}
                         </td>
-                        <td>{a.package_tier || '—'}</td>
-                        <td style={{ fontSize: 11, textTransform: 'uppercase', color: 'var(--text-dim)' }}>{a.request_type || '—'}</td>
-                        <td><span className="money money--sm">{a.price_amount ? '$' + Number(a.price_amount).toFixed(2) : '—'}</span></td>
+                        <td>{a.package_tier || 'â€”'}</td>
+                        <td style={{ fontSize: 11, textTransform: 'uppercase', color: 'var(--text-dim)' }}>{a.request_type || 'â€”'}</td>
+                        <td><span className="money money--sm">{a.price_amount ? '$' + Number(a.price_amount).toFixed(2) : 'â€”'}</span></td>
                         <td><span className={'badge badge--' + (a.status === 'approved' ? 'yes' : a.status === 'rejected' ? 'no' : 'warn')}>{a.status}</span></td>
                         <td>{fmtDate(a.created_at)}</td>
-                        <td>{a.approved_by_name || '—'}</td>
+                        <td>{a.approved_by_name || 'â€”'}</td>
                       </tr>
                       {isExpanded && (
                         <tr className="expand-row">
@@ -1408,27 +1501,90 @@ const codes = a.voucher_data?.codes;
       )}
 
       {/* Voucher List */}
-      <div className="section-head" style={{ marginTop: '2rem' }}>
-        <h2 className="section-head-title">Voucher List</h2>
+      <div className="section-head" style={{ marginTop: '2rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap' }}>
+        <h2 className="section-head-title" style={{ margin: 0 }}>Voucher List</h2>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+          <select
+            className="form-select"
+            aria-label="Filter vouchers by status"
+            value={listStatus}
+            onChange={e => setListStatus(e.target.value)}
+            style={{ width: 140, padding: '0.35rem 0.5rem', fontSize: '0.8rem' }}
+          >
+            {listStatuses.map(status => (
+              <option key={status} value={status}>{status === 'all' ? 'All statuses' : status}</option>
+            ))}
+          </select>
+          {canManageVoucher && (
+            <button
+              type="button"
+              className="btn-sm"
+              onClick={syncVoucherStatuses}
+              disabled={syncingStatuses}
+              title="Pull the latest usage, online state and expiry from Ruijie Cloud for online and staff-issued vouchers."
+            >
+              {syncingStatuses ? 'Syncingâ€¦' : 'Sync Statuses'}
+            </button>
+          )}
+          <span
+            className="live-pill"
+            title="Re-reads every 10 seconds, so redemptions, bound devices and statuses stay current without a manual reload."
+          >
+            <span className="live-dot" />
+            <span className="live-pill__label">Live</span>
+            <span className="live-pill__time">{lastSyncedAt ? `synced ${lastSyncedAt.toLocaleTimeString()}` : 'syncingâ€¦'}</span>
+          </span>
+        </div>
       </div>
       <div className="card card-table">
         {vouchers.length === 0 ? (
           <div className="table-empty"><p>No vouchers created yet.</p></div>
+        ) : filteredVouchers.length === 0 ? (
+          <div className="table-empty"><p>No vouchers match this status.</p></div>
         ) : (
           <table className="data-table">
-            <thead><tr><th>Code</th><th>Price</th><th>Duration</th><th>Bandwidth</th><th>Data</th><th>Max Uses</th><th>Used</th><th>Devices</th><th>Package</th><th>Created</th><th>Actions</th></tr></thead>
+            <thead><tr><th>Code</th><th>Status</th><th>Price</th><th>Duration</th><th>Bandwidth</th><th>Data</th><th>Max Uses</th><th>Used</th><th>Devices</th><th>Package</th><th>Created</th><th>Actions</th></tr></thead>
             <tbody>
-              {vouchers.map(v => (
+              {filteredVouchers.map(v => {
+                const bound = (v.device_count ?? 0) > 0;
+                const maxDevices = v.effective_max_devices ?? v.max_devices;
+                const uses = v.used_count || 0;
+                const maxUses = Math.max(1, v.max_uses || 1);
+                const usedPct = Math.min(100, Math.round((uses / maxUses) * 100));
+                return (
                 <tr key={v.id}>
                   <td><span className="code-cell" onClick={() => copyCode(lc(v.code))} title="Click to copy">{lc(v.code)}</span></td>
-                  <td><span className="money money--sm">{v.price_amount ? '$' + parseFloat(v.price_amount).toFixed(2) : '—'}</span></td>
+                  <td>
+                    <span className="cell-badges">
+                      <span className={`badge badge--${statusTone(v.status)}`}>{v.status || 'Unknown'}</span>
+                      {bound && (
+                        <span className="badge badge--live" title="Bound to at least one device right now">
+                          <span className="live-dot" />In use
+                        </span>
+                      )}
+                    </span>
+                  </td>
+                  <td><span className="money money--sm">{v.price_amount ? '$' + parseFloat(v.price_amount).toFixed(2) : 'â€”'}</span></td>
                   <td>{fmtDur(v.duration_min)}</td>
                   <td>{v.bandwidth_mbps_up}/{v.bandwidth_mbps_down} Mbps</td>
                   <td>{v.is_uncapped ? 'Unlimited' : (v.data_limit_gb ?? 'Unlimited') + ' GB'}</td>
                   <td>{v.max_uses}</td>
-                  <td>{v.used_count}/{v.max_uses}</td>
-                  <td>{v.device_count ?? 0}/{v.max_devices ?? '—'}</td>
-                  <td>{v.package_tier || <span className="muted">—</span>}</td>
+                  <td>
+                    <span className="used-cell">
+                      <span className="used-bar"><span className="used-bar__fill" style={{ width: `${usedPct}%` }} /></span>
+                      <span className="used-cell__n">{uses}/{v.max_uses}</span>
+                    </span>
+                  </td>
+                  <td>
+                    <span
+                      className={`dev-chip ${bound ? 'dev-chip--live' : 'dev-chip--idle'}`}
+                      title={`${v.device_count ?? 0} of ${maxDevices ?? 'â€”'} device slots in use`}
+                    >
+                      {bound && <span className="live-dot" />}
+                      {v.device_count ?? 0}/{maxDevices ?? 'â€”'}
+                    </span>
+                  </td>
+                  <td>{v.package_tier || <span className="muted">â€”</span>}</td>
                   <td>{fmtDate(v.created_at)}</td>
                   <td>
                     <div className="row-actions">
@@ -1457,7 +1613,7 @@ const codes = a.voucher_data?.codes;
                         onClick={() => handleToggleDisable(v)}
                         aria-label={`${v.status === 'Disabled' ? 'Enable' : 'Disable'} voucher ${lc(v.code)}`}
                       >
-                        {voucherActionBusy === v.id ? '…' : v.status === 'Disabled' ? 'Enable' : 'Disable'}
+                        {voucherActionBusy === v.id ? 'â€¦' : v.status === 'Disabled' ? 'Enable' : 'Disable'}
                       </button>
                       <button
                         className="btn-sm"
@@ -1470,13 +1626,14 @@ const codes = a.voucher_data?.codes;
                     </div>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         )}
       </div>
 
-      {/* ── High-stakes (>= $4.99) customer capture — gates generation ── */}
+      {/* â”€â”€ High-stakes (>= $4.99) customer capture â€” gates generation â”€â”€ */}
       {holderModal && (() => {
         const gatePrice = holderModal === 'single'
           ? parseFloat(vPrice || '0')
@@ -1489,7 +1646,7 @@ const codes = a.voucher_data?.codes;
           >
             <div className="holder-capture">
               <p className="holder-capture__lead">
-                This sale is <strong>${gatePrice.toFixed(2)}</strong>{holderModal === 'bulk' ? ' per voucher' : ''} — record the customer before the voucher{holderModal === 'bulk' ? 's are' : ' is'} generated.
+                This sale is <strong>${gatePrice.toFixed(2)}</strong>{holderModal === 'bulk' ? ' per voucher' : ''} â€” record the customer before the voucher{holderModal === 'bulk' ? 's are' : ' is'} generated.
               </p>
               <label className="holder-capture__label" htmlFor="holder-name-input">Customer Full Name / Holder Name *</label>
               <input
@@ -1519,7 +1676,7 @@ const codes = a.voucher_data?.codes;
                   onClick={submitHolderModal}
                   disabled={holderSaving || !holderName.trim()}
                 >
-                  {holderSaving ? 'Generating…' : 'Confirm & Generate'}
+                  {holderSaving ? 'Generatingâ€¦' : 'Confirm & Generate'}
                 </button>
               </div>
             </div>
@@ -1527,12 +1684,12 @@ const codes = a.voucher_data?.codes;
         );
       })()}
 
-      {/* ── Edit Holder (row action → PATCH /vouchers/:id) ── */}
+      {/* â”€â”€ Edit Holder (row action â†’ PATCH /vouchers/:id) â”€â”€ */}
       {editHolderVoucher && (
         <Modal
           open
           onClose={() => { if (!editSaving) setEditHolderVoucher(null); }}
-          title={`Edit Holder — ${lc(editHolderVoucher.code)}`}
+          title={`Edit Holder â€” ${lc(editHolderVoucher.code)}`}
         >
           <div className="holder-capture">
             <p className="holder-capture__lead">
@@ -1566,7 +1723,7 @@ const codes = a.voucher_data?.codes;
                 onClick={saveEditHolder}
                 disabled={editSaving || (!editName.trim() && !editPhone.trim())}
               >
-                {editSaving ? 'Saving…' : 'Save Holder'}
+                {editSaving ? 'Savingâ€¦' : 'Save Holder'}
               </button>
             </div>
           </div>
@@ -1575,69 +1732,62 @@ const codes = a.voucher_data?.codes;
 
       {detailVoucher && (() => {
         const v = detailVoucher;
-        const statusTone = v.status === 'Active' ? 'yes' : v.status === 'Unused' ? 'warn' : 'no';
+        const maxDevices = v.effective_max_devices ?? v.max_devices ?? null;
         const macs = Array.isArray(v.bound_macs) ? v.bound_macs : [];
         const gb = (b?: number | null) => (b == null ? null : (b / (1024 ** 3)).toFixed(2) + ' GB');
         const trafficUsed = gb(v.traffic_used_bytes);
         const trafficTotal = v.traffic_total_bytes == null ? null : gb(v.traffic_total_bytes);
-        const holderName = [v.first_name, v.last_name].filter(Boolean).join(' ') || v.alias || null;
+        const holderName = v.holder_name || [v.first_name, v.last_name].filter(Boolean).join(' ') || v.alias || null;
         // Redemption row is the source of truth for the person + MAC + login time;
-        // the users account (if any) only supplements it.
-        const redemptionName = v.redemption_name || holderName || null;
+        // the captured holder name (Customer Details Required) outranks it because
+        // it is the name staff recorded at the sale, and the users account only
+        // supplements it.
+        const redemptionName = v.holder_name || v.redemption_name || holderName || null;
         const redemptionMac = v.redemption_mac || v.mac_address || null;
         const redemptionAt = v.redemption_at || v.first_redeemed_at || null;
+        const redemptionPhone = v.holder_phone || v.phone || null;
         const theRedemptions = Array.isArray(v.redemptions) ? v.redemptions : [];
         const devices = (Array.isArray(v.devices) && v.devices.length > 0)
           ? v.devices
           : macs.map(m => ({ mac_address: m, label: null, is_active: true, bound_at: null, last_seen_at: null, unbound_at: null }));
 
-        // Real triggers only: code + terms the customer needs. There is no
-        // message-template schema in this build, so nothing here is invented.
-        const waText = [
-          '*Preyone Voucher*',
-          '',
-          `Code: ${lc(v.code)}`,
-          `Package: ${v.package_tier || 'Standard'}`,
-          `Price: ${v.price_amount ? '$' + parseFloat(v.price_amount).toFixed(2) : '—'}`,
-          `Duration: ${fmtDur(v.duration_min)}`,
-          `Speed: ${v.bandwidth_mbps_up}/${v.bandwidth_mbps_down} Mbps`,
-          `Data: ${v.is_uncapped ? 'Unlimited' : (v.data_limit_gb ?? 'Unlimited') + ' GB'}`,
-          `Valid until: ${fmtDate(v.expires_at)}`,
-          '',
-          '_Thank you for choosing Preyone_',
-        ].join('\n');
-
         return (
-          <Modal open onClose={() => setDetailVoucher(null)} title={`Voucher ${lc(v.code)}`}>
+          <Modal open onClose={() => setDetailVoucher(null)} title={`Voucher ${lc(v.code)}`} wide>
             <div className="voucher-detail">
               <div className="vd-head">
                 <div className="vd-code" onClick={() => copyCode(lc(v.code))} title="Click to copy">{lc(v.code)}</div>
-                <span className={`badge badge--${statusTone}`}>{v.status || 'Unknown'}</span>
+                <span className="vd-badges">
+                  <span className={`badge badge--${statusTone(v.status)}`}>{v.status || 'Unknown'}</span>
+                  {(v.device_count ?? 0) > 0 && (
+                    <span className="badge badge--live"><span className="live-dot" />In use</span>
+                  )}
+                </span>
               </div>
 
               <div className="vd-grid">
-                <div className="vd-cell"><span className="vd-label">Price</span><span className="vd-value">{v.price_amount ? '$' + parseFloat(v.price_amount).toFixed(2) : '—'}</span></div>
+                <div className="vd-cell"><span className="vd-label">Price</span><span className="vd-value">{v.price_amount ? '$' + parseFloat(v.price_amount).toFixed(2) : 'â€”'}</span></div>
                 <div className="vd-cell"><span className="vd-label">Duration</span><span className="vd-value">{fmtDur(v.duration_min)}</span></div>
                 <div className="vd-cell"><span className="vd-label">Bandwidth</span><span className="vd-value">{v.bandwidth_mbps_up}/{v.bandwidth_mbps_down} Mbps</span></div>
                 <div className="vd-cell"><span className="vd-label">Data</span><span className="vd-value">{v.is_uncapped ? 'Unlimited' : (v.data_limit_gb ?? 'Unlimited') + ' GB'}</span></div>
                 <div className="vd-cell"><span className="vd-label">Uses</span><span className="vd-value">{v.used_count}/{v.max_uses}</span></div>
-                <div className="vd-cell"><span className="vd-label">Devices</span><span className="vd-value">{(v.device_count ?? 0)}/{v.max_devices ?? '—'}</span></div>
-                <div className="vd-cell"><span className="vd-label">Package</span><span className="vd-value">{v.package_tier || '—'}</span></div>
+                <div className="vd-cell"><span className="vd-label">Devices</span><span className="vd-value">{(v.device_count ?? 0)}/{maxDevices ?? 'â€”'}</span></div>
+                <div className="vd-cell"><span className="vd-label">Package</span><span className="vd-value">{v.package_tier || 'â€”'}</span></div>
                 <div className="vd-cell"><span className="vd-label">Created</span><span className="vd-value">{fmtDate(v.created_at)}</span></div>
-                <div className="vd-cell"><span className="vd-label">Activated</span><span className="vd-value">{v.activated_at ? fmtDate(v.activated_at) : '—'}</span></div>
-                <div className="vd-cell"><span className="vd-label">First redeemed</span><span className="vd-value">{v.first_redeemed_at ? fmtDate(v.first_redeemed_at) : '—'}</span></div>
+                <div className="vd-cell"><span className="vd-label">Activated</span><span className="vd-value">{v.activated_at ? fmtDate(v.activated_at) : 'â€”'}</span></div>
+                <div className="vd-cell"><span className="vd-label">Last seen</span><span className="vd-value">{v.last_seen_at ? fmtDate(v.last_seen_at) : 'â€”'}</span></div>
+                <div className="vd-cell"><span className="vd-label">First redeemed</span><span className="vd-value">{v.first_redeemed_at ? fmtDate(v.first_redeemed_at) : 'â€”'}</span></div>
                 <div className="vd-cell"><span className="vd-label">Expires</span><span className="vd-value">{fmtDate(v.expires_at)}</span></div>
               </div>
 
-              {(redemptionName || v.phone || redemptionMac || redemptionAt || trafficUsed || theRedemptions.length > 0) && (
+              {(redemptionName || redemptionPhone || redemptionMac || redemptionAt || trafficUsed || theRedemptions.length > 0) && (
                 <section className="vd-section">
                   <h4 className="vd-section-title">Redemption</h4>
                   <div className="vd-grid">
-                    <div className="vd-cell"><span className="vd-label">Holder</span><span className="vd-value">{redemptionName || '—'}</span></div>
-                    <div className="vd-cell"><span className="vd-label">Phone</span><span className="vd-value">{v.phone || '—'}</span></div>
-                    <div className="vd-cell"><span className="vd-label">MAC</span><span className="vd-value vd-mono">{redemptionMac || '—'}</span></div>
-                    <div className="vd-cell"><span className="vd-label">Redeemed on</span><span className="vd-value">{redemptionAt ? fmtDate(redemptionAt) : '—'}</span></div>
-                    <div className="vd-cell"><span className="vd-label">Traffic</span><span className="vd-value">{trafficUsed ? `${trafficUsed}${trafficTotal ? ' / ' + trafficTotal : ''}` : '—'}</span></div>
+                    <div className="vd-cell"><span className="vd-label">Holder</span><span className="vd-value">{redemptionName || 'â€”'}</span></div>
+                    <div className="vd-cell"><span className="vd-label">Phone</span><span className="vd-value">{redemptionPhone || 'â€”'}</span></div>
+                    <div className="vd-cell"><span className="vd-label">MAC</span><span className="vd-value vd-mono">{redemptionMac || 'â€”'}</span></div>
+                    <div className="vd-cell"><span className="vd-label">Redeemed on</span><span className="vd-value">{redemptionAt ? fmtDate(redemptionAt) : 'â€”'}</span></div>
+                    <div className="vd-cell"><span className="vd-label">Traffic</span><span className="vd-value">{trafficUsed ? `${trafficUsed}${trafficTotal ? ' / ' + trafficTotal : ''}` : 'â€”'}</span></div>
                   </div>
                   {theRedemptions.length > 0 && (
                     <>
@@ -1646,9 +1796,9 @@ const codes = a.voucher_data?.codes;
                         {theRedemptions.map((red, i) => (
                           <li key={i}>
                             {red.full_name || 'Unknown person'}
-                            {red.mac_address ? ` · ${red.mac_address}` : ''}
-                            {red.ip_address ? ` · ${red.ip_address}` : ''}
-                            {red.redeemed_at ? ` · ${fmtDate(red.redeemed_at)}` : ''}
+                            {red.mac_address ? ` Â· ${red.mac_address}` : ''}
+                            {red.ip_address ? ` Â· ${red.ip_address}` : ''}
+                            {red.redeemed_at ? ` Â· ${fmtDate(red.redeemed_at)}` : ''}
                           </li>
                         ))}
                       </ul>
@@ -1659,29 +1809,31 @@ const codes = a.voucher_data?.codes;
 
               <section className="vd-section">
                 <h4 className="vd-section-title">Device bindings</h4>
-                <p className="vd-count">{(v.device_count ?? macs.length)} of {v.max_devices ?? '—'} device slot{(v.max_devices ?? 2) === 1 ? '' : 's'} in use</p>
+                <p className="vd-count">{(v.device_count ?? macs.length)} of {maxDevices ?? 'â€”'} device slot{(maxDevices ?? 2) === 1 ? '' : 's'} in use</p>
                 {devices.length > 0 ? (
                   <ul className="vd-macs">
                     {devices.map(d => (
                       <li key={d.mac_address}>
                         <span className="vd-mono">{d.mac_address}</span>
-                        {d.label ? ` · ${d.label}` : ''}
-                        {d.bound_at ? ` · bound ${fmtDate(d.bound_at)}` : ''}
-                        {d.last_seen_at ? ` · last seen ${fmtDate(d.last_seen_at)}` : ''}
-                        {!d.is_active ? ' · released' : ''}
+                        {d.label ? ` Â· ${d.label}` : ''}
+                        {d.bound_at ? ` Â· bound ${fmtDate(d.bound_at)}` : ''}
+                        {d.last_seen_at ? ` Â· last seen ${fmtDate(d.last_seen_at)}` : ''}
+                        {!d.is_active ? ' Â· released' : ''}
                       </li>
                     ))}
                   </ul>
                 ) : (
                   <p className="muted">No devices currently bound.</p>
                 )}
-                <button
-                  className="btn-sm btn-reject"
-                  onClick={() => handleReleaseMac(v)}
-                  disabled={releasingMac || (v.device_count ?? macs.length) === 0}
-                >
-                  {releasingMac ? 'Releasing…' : 'Release all bindings'}
-                </button>
+                {canManageVoucher && (
+                  <button
+                    className="btn-sm btn-reject"
+                    onClick={() => handleReleaseMac(v)}
+                    disabled={releasingMac || (v.device_count ?? macs.length) === 0}
+                  >
+                    {releasingMac ? 'Releasingâ€¦' : 'Release all bindings'}
+                  </button>
+                )}
               </section>
 
               <section className="vd-section">
@@ -1702,7 +1854,7 @@ const codes = a.voucher_data?.codes;
                     disabled={voucherActionBusy === v.id}
                     onClick={() => handleExtend(v)}
                   >
-                    Extend expiry…
+                    Extend expiryâ€¦
                   </button>
                   {isMgmt && (
                     <button
@@ -1721,7 +1873,7 @@ const codes = a.voucher_data?.codes;
                 <h4 className="vd-section-title">Share &amp; Notify</h4>
                 <p className="vd-count">Download, print, or send this voucher as an image.</p>
                 <div className="vd-actions">
-                  <button className="btn-sm" onClick={() => copyCode(waText)}>
+                  <button className="btn-sm" onClick={() => copyVoucherPin(v.code)} title="Copy the voucher PIN only">
                     Copy All
                   </button>
                   <button className="btn-action btn-action--download" onClick={() => handleDownloadJpeg(v)}>
@@ -1732,32 +1884,191 @@ const codes = a.voucher_data?.codes;
                     <svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 4h12v12H4z" /><path d="M7 10h6M10 7v6" /></svg>
                     Print
                   </button>
-                  <button className="btn-action btn-action--wa" onClick={() => shareWhatsApp(v)}>
+                  <button className="btn-action btn-action--wa" onClick={() => { void shareWhatsApp(v); }} aria-label="Share voucher on WhatsApp" title="Share on WhatsApp" disabled={sharingWa}>
                     <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
-                    Send via WhatsApp
+                    <span className="vd-action-label">{sharingWa ? 'Preparingâ€¦' : 'Send via WhatsApp'}</span>
                   </button>
                 </div>
               </section>
+
+              {canManageVoucher && (
+                <section className="vd-section">
+                  <h4 className="vd-section-title">Manage</h4>
+                  <p className="vd-count">
+                    Renew keeps this PIN, buys the client another period and books the payment as a new sale.
+                    Disable blocks redemption but keeps the voucher (and its history) intact.
+                  </p>
+                  <div className="vd-actions">
+                    <button className="btn-sm btn-approve" onClick={() => openRenew(v)}>
+                      Renew / Resell
+                    </button>
+                    <button
+                      className={`btn-sm ${v.is_disabled ? 'btn-approve' : 'btn-reject'}`}
+                      disabled={toggleBusy}
+                      onClick={() => toggleDisable(v)}
+                    >
+                      {toggleBusy ? 'â€¦' : v.is_disabled ? 'Enable' : 'Disable'}
+                    </button>
+                    <button className="btn-sm btn-danger" onClick={() => setDeleteTarget(v)}>
+                      Delete
+                    </button>
+                  </div>
+                </section>
+              )}
             </div>
           </Modal>
         );
       })()}
+
+      {/* â”€â”€ Renew / Resell (POST /vouchers/:id/renew) â”€â”€
+          Same PIN, new period, and the payment is written to `sales` as
+          sale_type='renewal', so resale revenue counts towards every report. */}
+      {renewTarget && (
+        <Modal
+          open
+          onClose={() => { if (!renewSaving) setRenewTarget(null); }}
+          title={`Renew / Resell â€” ${lc(renewTarget.code)}`}
+        >
+          <div className="holder-capture">
+            <p className="holder-capture__lead">
+              Issues <strong>{lc(renewTarget.code)}</strong> for another period instead of minting a new PIN.
+              The client keeps their code, bound devices stay attached, and this payment is booked as a
+              <strong> new sale</strong>.
+            </p>
+
+            <label className="holder-capture__label" htmlFor="renew-package">Package</label>
+            <select
+              id="renew-package"
+              className="holder-capture__input"
+              value={renewPackageTier}
+              onChange={e => applyRenewPackage(e.target.value)}
+            >
+              <option value="">
+                Keep {renewTarget.package_tier ? `${renewTarget.package_tier} (current)` : 'the current package'}
+              </option>
+              {mintPackages.map(p => (
+                <option key={p.tier_name} value={p.tier_name}>
+                  {p.display_name || p.tier_name} â€” ${parseFloat(String(p.price_amount || 0)).toFixed(2)} Â· {fmtDur(p.duration_min)} Â· {p.is_uncapped ? 'Unlimited' : `${p.data_limit_gb ?? 'Unlimited'} GB`} Â· {p.bandwidth_mbps_up}/{p.bandwidth_mbps_down} Mbps
+                </option>
+              ))}
+            </select>
+
+            {renewSelectedPkg && (
+              <>
+                <div className="vd-grid" style={{ marginTop: 8 }}>
+                  <div className="vd-cell"><span className="vd-label">Speed</span><span className="vd-value">{renewSelectedPkg.bandwidth_mbps_up}/{renewSelectedPkg.bandwidth_mbps_down} Mbps</span></div>
+                  <div className="vd-cell"><span className="vd-label">Data quota</span><span className="vd-value">{renewSelectedPkg.is_uncapped ? 'Unlimited' : `${renewSelectedPkg.data_limit_gb ?? 'Unlimited'} GB`}</span></div>
+                  <div className="vd-cell"><span className="vd-label">Validity</span><span className="vd-value">{fmtDur(renewSelectedPkg.duration_min)}</span></div>
+                  <div className="vd-cell"><span className="vd-label">Price</span><span className="vd-value">${parseFloat(String(renewSelectedPkg.price_amount || 0)).toFixed(2)}</span></div>
+                </div>
+                <p className="renew-hint">
+                  Swaps {renewTarget.package_tier || 'custom'} â†’ {renewSelectedPkg.tier_name}: speed, data quota,
+                  validity and device cap are copied onto the voucher. PIN, bound devices and history are untouched.
+                </p>
+              </>
+            )}
+
+            <label className="holder-capture__label" htmlFor="renew-duration">Additional duration (minutes)</label>
+            <input
+              id="renew-duration"
+              className="holder-capture__input"
+              type="number"
+              min={1}
+              max={525600}
+              value={renewDuration}
+              onChange={e => setRenewDuration(parseInt(e.target.value || '0', 10))}
+            />
+            <p className="renew-hint">{fmtDur(renewDuration)} of access{renewTarget.expires_at ? ` on top of ${fmtDate(renewTarget.expires_at)}` : ''}</p>
+
+            <label className="holder-capture__label" htmlFor="renew-price">Amount paid (USD) *</label>
+            <input
+              id="renew-price"
+              className="holder-capture__input"
+              type="number"
+              min="0.01"
+              step="0.5"
+              inputMode="decimal"
+              value={renewPrice}
+              onChange={e => setRenewPrice(e.target.value)}
+              placeholder="0.00"
+              autoFocus
+            />
+
+            <label className="holder-capture__label" htmlFor="renew-pay-method">Payment method</label>
+            <select
+              id="renew-pay-method"
+              className="holder-capture__input"
+              value={renewPayMethod}
+              onChange={e => { setRenewPayMethod(e.target.value); if (e.target.value === 'Cash') setRenewPayRef(''); }}
+            >
+              {PAYMENT_METHODS.map(m => <option key={m} value={m}>{m}</option>)}
+            </select>
+
+            {IS_MOBILE_MONEY(renewPayMethod) && (
+              <>
+                <label className="holder-capture__label" htmlFor="renew-pay-ref">Payment reference</label>
+                <input
+                  id="renew-pay-ref"
+                  className="holder-capture__input"
+                  value={renewPayRef}
+                  onChange={e => setRenewPayRef(e.target.value)}
+                  placeholder="Transaction / approval code"
+                  maxLength={64}
+                />
+              </>
+            )}
+
+            <label className="renew-check">
+              <input
+                type="checkbox"
+                checked={renewResetQuota}
+                onChange={e => setRenewResetQuota(e.target.checked)}
+              />
+              <span>Reset the data quota so the new period starts fresh</span>
+            </label>
+            <p className="renew-hint">Uncheck to carry the client's remaining data over. Redemption uses are always reset.</p>
+
+            {renewError && <p className="holder-capture__error" role="alert">{renewError}</p>}
+            <div className="holder-capture__actions">
+              <button className="btn-sm" onClick={() => setRenewTarget(null)} disabled={renewSaving}>Cancel</button>
+              <button className="btn-action btn-action--download" onClick={submitRenew} disabled={renewSaving}>
+                {renewSaving ? 'Recordingâ€¦' : `Renew for $${(parseFloat(renewPrice) || 0).toFixed(2)}`}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* â”€â”€ Delete (DELETE /vouchers/:id) â€” soft delete, reverses nothing â”€â”€ */}
+      {deleteTarget && (
+        <Modal
+          open
+          onClose={() => { if (!deleteBusy) setDeleteTarget(null); }}
+          title={`Delete ${lc(deleteTarget.code)}?`}
+        >
+          <div className="holder-capture">
+            <p className="holder-capture__lead">
+              This <strong>soft-deletes</strong> <strong>{lc(deleteTarget.code)}</strong> and disables it so the code
+              can no longer be redeemed. Redemption and device history are kept, but the voucher will no longer appear
+              in your active lists.
+            </p>
+            <p className="holder-capture__lead">
+              Already received money for it? Use <strong>Renew / Resell</strong> instead â€” that re-arms the same PIN
+              and records the payment.
+            </p>
+            <div className="holder-capture__actions">
+              <button className="btn-sm" onClick={() => setDeleteTarget(null)} disabled={deleteBusy}>Keep voucher</button>
+              <button
+                className="btn-sm btn-danger"
+                onClick={confirmDelete}
+                disabled={deleteBusy}
+              >
+                {deleteBusy ? 'Deletingâ€¦' : 'Delete permanently'}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
-}
-
-// Helper functions for PNG generation
-function fmtDurShort(m: number): string {
-  if (!m) return '—';
-  if (m >= 43200) { const vm = Math.round(m / 43200); return vm + ' Month' + (vm > 1 ? 's' : ''); }
-  if (m >= 1440) { const vd = Math.round(m / 1440); return vd + ' Day' + (vd > 1 ? 's' : ''); }
-  if (m >= 60) { const vh = Math.round(m / 60); return vh + ' Hour' + (vh > 1 ? 's' : ''); }
-  return m + ' Min';
-}
-
-function calcValidUntil(data: any): string {
-  if (data.expires_at) return new Date(data.expires_at).toISOString().split('T')[0];
-  const d = new Date();
-  d.setMinutes(d.getMinutes() + (data.duration_min || 60));
-  return d.toISOString().split('T')[0];
 }

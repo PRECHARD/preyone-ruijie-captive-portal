@@ -152,6 +152,43 @@
   white-space: nowrap;
 }
 
+/* Base button + primary modifier. Only .btn--sm existed, so a plain
+   `className="btn btn--sm btn--primary"` rendered with no button styling at
+   all — these two complete the set. */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: 13px;
+  line-height: 1;
+  padding: 9px 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.04);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, border-color 0.15s, box-shadow 0.15s, opacity 0.15s;
+}
+.btn:hover:not(:disabled) {
+  border-color: var(--purple-glow);
+  background: rgba(255, 0, 255, 0.08);
+}
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn--primary {
+  border: none;
+  color: #fff;
+  background: linear-gradient(135deg, var(--purple), var(--pink));
+  box-shadow: 0 4px 16px rgba(255, 0, 127, 0.32);
+}
+.btn--primary:hover:not(:disabled) {
+  opacity: 0.94;
+  background: linear-gradient(135deg, var(--purple), var(--pink));
+  box-shadow: 0 6px 22px rgba(255, 0, 127, 0.45);
+}
 .btn--sm { padding: 4px 10px; font-size: 12px; display: inline-flex; align-items: center; gap: 5px; }
 
 @media (max-width: 900px) {
@@ -174,6 +211,17 @@
   overflow: hidden;
   box-shadow: 0 6px 22px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.03);
 }
+/* Accent variant: the "live/primary" stat in each HUD row reads cyan instead
+   of the default slate card, so the eye lands on it first. */
+.hud-card--cyan {
+  border-color: rgba(0,240,255,0.42);
+  background: linear-gradient(160deg, rgba(0,64,84,0.42), rgba(12,26,44,0.92));
+  box-shadow:
+    0 6px 22px rgba(0,0,0,0.35),
+    0 0 22px rgba(0,240,255,0.16),
+    inset 0 1px 0 rgba(255,255,255,0.05);
+}
+.hud-card--cyan .hud-label { color: rgba(160,248,255,0.85); }
 .hud-label {
   font-size: 11px;
   letter-spacing: 0.06em;
@@ -192,6 +240,15 @@
   overflow: hidden;
   text-overflow: ellipsis;
   text-shadow: 0 0 18px rgba(0,240,255,0.35);
+}
+/* Denominator beside a hud-value (e.g. "8/12 gateways"): quieter, smaller and
+   un-glowed so it reads as context. No left margin — the markup joins it
+   directly to the numerator ("8" + "/12"), so a gap would read as a typo. */
+.hud-unit {
+  font-size: 0.55em;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.5);
+  text-shadow: none;
 }
 .hud-meta {
   font-size: 11px;
@@ -271,7 +328,7 @@
 .un-clock { font-size: 11px; color: rgba(255,255,255,0.5); display: inline-flex; align-items: center; gap: 5px; }
 .un-hero-stats {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0,1fr));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 10px;
   margin-top: 16px;
   position: relative;

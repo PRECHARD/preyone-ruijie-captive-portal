@@ -95,6 +95,42 @@
   letter-spacing: 0.5px;
 }
 
+.stats-grid--hero .stat-number {
+  font-size: 1.85rem;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+.stat-card.stat-gold .stat-number {
+  color: #ffcc00;
+  text-shadow: 0 0 16px rgba(255, 204, 0, 0.3);
+}
+
+.stat-card.stat-cyan .stat-number {
+  color: #00ccff;
+  text-shadow: 0 0 16px rgba(0, 204, 255, 0.3);
+}
+
+.stat-card.stat-green .stat-number {
+  color: var(--green);
+  text-shadow: 0 0 16px rgba(0, 230, 118, 0.28);
+}
+
+.stat-card.stat-orange .stat-number {
+  color: var(--orange);
+  text-shadow: 0 0 16px rgba(255, 145, 0, 0.28);
+}
+
+.stat-card.stat-blue .stat-number {
+  color: #13d8ff;
+  text-shadow: 0 0 16px rgba(19, 216, 255, 0.28);
+}
+
+.stat-card.stat-violet .stat-number {
+  color: var(--purple-glow);
+  text-shadow: 0 0 16px rgba(255, 0, 255, 0.25);
+}
+
 /* ── Selected table row ── */
 .row-selected {
   background: rgba(106, 13, 173, 0.15) !important;
