@@ -28,6 +28,7 @@ import {
   getRecentActivity,
 } from '../db/sales';
 import { RuijieApiError } from '../services/ruijieCloud';
+import { syncRuijieVoucherStatuses } from '../services/ruijieVoucherStatusSync';
 import { loadRevenueTarget, parseRevenueTarget, saveRevenueTarget } from '../services/revenueTarget';
 import ExcelJS from 'exceljs';
 import path from 'path';
@@ -468,7 +469,18 @@ adminRouter.get('/vouchers', async (req: Request, res: Response) => {
               v.activated_at,
               (SELECT MIN(vr.created_at) FROM voucher_redemptions vr WHERE vr.voucher_id = v.id)
             ) AS first_redeemed_at,
-            COALESCE(dev.device_count, 0) AS device_count,
+            -- "In use" prefers the fresh Ruijie roster count; the local binding
+            -- table is only a fallback for codes that have never been synced.
+            CASE WHEN v.ruijie_sync_status = 'synced'
+                 THEN COALESCE(v.ruijie_active_clients, 0)
+                 ELSE COALESCE(dev.device_count, 0) END AS device_count,
+            COALESCE(
+              NULLIF(v.ruijie_max_clients, 0),
+              NULLIF(v.max_devices, 0),
+              (SELECT p.max_devices FROM packages p
+                WHERE p.tier_name = v.package_tier AND p.deleted_at IS NULL
+                LIMIT 1)
+            ) AS effective_max_devices,
             dev.bound_macs,
             dev.devices,
             red.redemptions,
@@ -483,6 +495,18 @@ adminRouter.get('/vouchers', async (req: Request, res: Response) => {
 
   res.json({ vouchers: rows, total, page, pageSize });
 });
+
+// Pull the latest Ruijie lifecycle counters for every local voucher matched by
+// code. Additive: only used_count / activated_at / last_seen_at / expires_at
+// and the Ruijie sync markers are written; payment and pool metadata are not.
+adminRouter.post(
+  '/vouchers/sync-status',
+  requirePermission(PERMISSIONS.COMPANY_ADMIN),
+  async (_req: Request, res: Response) => {
+    const result = await syncRuijieVoucherStatuses({ force: true });
+    res.json(result);
+  }
+);
 
 /**
  * Load a voucher for mutation, enforcing the Staff scope so a staff account can
