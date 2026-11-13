@@ -42,6 +42,13 @@ vi.mock('../src/services/ruijieService', () => ({
   bypassRuijieFirewall: vi.fn().mockResolvedValue(true),
 }));
 
+vi.mock('../src/db/accounting', () => ({
+  syncSaleToLedgerAndStock: vi.fn().mockResolvedValue({ ledgerId: 'led-1', stockApplied: true }),
+  markStockApplied: vi.fn().mockResolvedValue(undefined),
+  ensureStockDecremented: vi.fn().mockResolvedValue({ applied: false, lines: 0 }),
+  recordLedgerEntry: vi.fn().mockResolvedValue({ id: 'led-1', created: true }),
+}));
+
 // /pesepay/initiate must reject unauthenticated callers, so the auth guard is
 // stubbed: the stub still 401s when no Bearer header is present, which keeps the
 // "requires authentication" assertions honest.
@@ -805,7 +812,23 @@ describe('Payments routes', () => {
         if (/BEGIN|COMMIT|ROLLBACK/.test(sql)) return { rows: [], rowCount: 0 };
         if (/FROM pesepay_intents/.test(sql)) return { rows: [intent], rowCount: 1 };
         if (/FROM pos_documents/.test(sql)) {
-          return { rows: [{ id: DOC, doc_number: 'INV-001', total: 100, amount_paid: 0, shift_id: SHIFT }], rowCount: 1 };
+          return {
+            rows: [{
+              id: DOC,
+              doc_number: 'INV-001',
+              doc_type: 'invoice',
+              total: 100,
+              amount_paid: 0,
+              shift_id: SHIFT,
+              tax_pct: 15.5,
+              currency: 'USD',
+              company_id: TENANT,
+            }],
+            rowCount: 1,
+          };
+        }
+        if (/INSERT INTO pos_document_payments/.test(sql)) {
+          return { rows: [{ id: 42 }], rowCount: 1 };
         }
         if (/UPDATE pos_documents/.test(sql)) return { rows: [{ status: 'paid' }], rowCount: 1 };
         if (/UPDATE subscriptions/.test(sql)) {

@@ -59,6 +59,7 @@ const POS_SECTIONS: readonly string[] = [
   'pos-devices',
   'pos-company',
   'pos-settings',
+  'accounting',
 ];
 
 /** The workspace a section lives in; 'both' for global sections shown everywhere. */

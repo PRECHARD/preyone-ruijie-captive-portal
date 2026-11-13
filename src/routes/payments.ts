@@ -24,6 +24,7 @@ import { RuijieApiError } from '../services/ruijieCloud';
 import { isRuijieCloudConfigured, findRuijieProfile, mintRuijieVoucherForTier } from '../services/ruijieMint';
 import { requireStarlinkAuth } from '../middleware/starlinkAuth';
 import { createStarlinkInvoice, applyStarlinkPayment, getStarlinkKit } from '../db/starlink';
+import { syncSaleToLedgerAndStock } from '../db/accounting';
 import { PLAN_TIERS } from './subscription';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'preyone-jwt-secret-change-in-production';
@@ -984,7 +985,8 @@ async function applyDocumentPayment(
   }
 
   const { rows } = await client.query(
-    `SELECT id, doc_number, total, amount_paid, shift_id FROM pos_documents WHERE id = $1 FOR UPDATE`,
+    `SELECT id, doc_number, doc_type, total, amount_paid, shift_id, tax_pct, currency, company_id
+       FROM pos_documents WHERE id = $1 FOR UPDATE`,
     [intent.target_id]
   );
 
@@ -1003,9 +1005,10 @@ async function applyDocumentPayment(
     throw new HttpError(400, 'Document does not belong to the recorded shift');
   }
 
-  await client.query(
+  const payIns = await client.query(
     `INSERT INTO pos_document_payments (document_id, amount, method, reference, shift_id)
-     VALUES ($1, $2, $3, $4, $5)`,
+     VALUES ($1, $2, $3, $4, $5)
+     RETURNING id`,
     [doc.id, intent.amount, intent.payment_method, reference, intent.shift_id || doc.shift_id]
   );
 
@@ -1018,6 +1021,24 @@ async function applyDocumentPayment(
       RETURNING status`,
     [doc.id, intent.amount]
   );
+
+  // Post to the enterprise GL and decrement stock if not already applied
+  // (office invoices created outside POS checkout may still need stock pulled).
+  const companyId = doc.company_id || intent.tenant_id;
+  if (companyId) {
+    await syncSaleToLedgerAndStock(client, {
+      companyId,
+      documentId: doc.id,
+      paymentId: Number(payIns.rows[0].id),
+      amount: Number(intent.amount),
+      method: intent.payment_method,
+      docType: doc.doc_type,
+      docNumber: doc.doc_number,
+      reference,
+      taxPct: Number(doc.tax_pct) || undefined,
+      currency: doc.currency || intent.currency,
+    });
+  }
 
   return {
     documentId: doc.id,

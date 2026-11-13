@@ -12,7 +12,8 @@ jobs:
 
     strategy:
       matrix:
-        node-version: [18, 20]
+        # jsdom@29 (portal.test.ts) requires Node ^20.19 / ^22.13 / >=24
+        node-version: [20]
 
     steps:
       - uses: actions/checkout@v4

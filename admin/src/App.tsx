@@ -45,6 +45,7 @@ import PosReports from './pages/PosReports';
 import PosDevices from './pages/PosDevices';
 import PosCompanyProfile from './pages/PosCompanyProfile';
 import GlobalSettingsHub from './pages/GlobalSettingsHub';
+import Accounting from './pages/Accounting';
 import type { AuthUser } from './context/AuthContext';
 import { FiAlertOctagon } from 'react-icons/fi';
 import { WORKSPACE_KEY, type Workspace, loadWorkspace, persistWorkspace, workspaceForSection } from './workspace';
@@ -79,6 +80,7 @@ const sectionRoles: Record<string, string[]> = {
   'pos-devices': ['Manager', 'CEO'],
   'pos-company': ['CEO'],
   'pos-settings': ['CEO'],
+  accounting: ['CEO', 'Manager', 'Cashier'],
 };
 
 /** Platform (Level 0) sections — CEO operators with no company binding only. */
@@ -278,6 +280,7 @@ export default function App() {
       {safeSection === 'pos-devices' && <PosDevices />}
       {safeSection === 'pos-company' && <PosCompanyProfile />}
       {safeSection === 'pos-settings' && <GlobalSettingsHub />}
+      {safeSection === 'accounting' && <Accounting />}
     </Layout>
   );
 }
