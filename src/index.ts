@@ -310,21 +310,6 @@ app.use((req, res, next) => {
     return res.status(503).send('POS build not found. Run `cd pos && npm run build`.');
   }
 
-  // invoice.preyone.com → Invoice Accounting & Finance SPA (monorepo build).
-  // The legacy office invoice engine may still run on :4000 behind nginx; this
-  // host path serves the finance module when invoice/dist is present.
-  if (host === 'invoice.preyone.com' || host === 'invoices.preyone.com') {
-    const invoiceDist = path.join(__dirname, '..', 'invoice', 'dist');
-    if (fs.existsSync(invoiceDist)) {
-      delete req.headers['range'];
-      delete req.headers['if-range'];
-      return express.static(invoiceDist)(req, res, () => {
-        res.sendFile(path.join(invoiceDist, 'index.html'));
-      });
-    }
-    return res.status(503).send('Invoice build not found. Run `cd invoice && npm run build`.');
-  }
-
   // app.preyone.com → enterprise gateway (single-login module launcher)
   if (host === 'app.preyone.com') {
     const appDist = path.join(__dirname, '..', 'app', 'dist');

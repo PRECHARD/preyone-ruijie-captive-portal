@@ -628,30 +628,3 @@ input:focus, select:focus, button:focus-visible {
 
 /* Modal tweaks (switch-cashier reuses the PIN picker) */
 .modal-card .pin-login-wrap { margin: 0 auto; }
-
-/* ── Accounting & Finance view ─────────────────────── */
-.acct-view { padding: 1rem 1.1rem 2rem; max-width: 1100px; margin: 0 auto; }
-.acct-view-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 14px; }
-.acct-view-title { margin: 0; font-size: 1.15rem; }
-.acct-kpi-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
-.acct-kpi-card {
-  background: linear-gradient(145deg, #0f172a, #1e293b);
-  color: #e2e8f0;
-  border-radius: 14px;
-  padding: 12px 14px;
-  display: flex; flex-direction: column; gap: 6px;
-  border: 1px solid rgba(148,163,184,0.2);
-}
-.acct-kpi-card span { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em; color: #94a3b8; }
-.acct-kpi-card strong { font-size: 1.2rem; }
-.acct-kpi-card.emerald { border-color: rgba(5,150,105,0.5); }
-.acct-kpi-card.amber { border-color: rgba(217,119,6,0.5); }
-.acct-panel {
-  margin-top: 12px;
-  background: #fff;
-  border: 1px solid var(--line-soft);
-  border-radius: 14px;
-  padding: 12px 14px;
-}
-.acct-mini-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
-.acct-mini-table th, .acct-mini-table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line-soft); }
