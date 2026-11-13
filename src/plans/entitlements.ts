@@ -60,8 +60,21 @@ export const TIER_CATALOG: PlanTierInfo[] = [
 
 export const isPlanTier = (v: unknown): v is PlanTier => PLAN_TIERS.includes(v as PlanTier);
 
+/** Production started the $15 tier as invoicing_15. Checkout and enforcement treat it as PreBiz. */
+const LEGACY_PLAN_IDS: Record<string, PlanTier> = {
+  invoicing_15: 'pos_invoice_15',
+};
+
+export function canonicalPlanId(v: unknown): PlanTier | null {
+  if (typeof v !== 'string') return null;
+  const id = v.trim();
+  if (isPlanTier(id)) return id;
+  return LEGACY_PLAN_IDS[id] ?? null;
+}
+
 export function tierById(planType: string | null | undefined): PlanTierInfo | null {
-  return TIER_CATALOG.find((t) => t.id === planType) ?? null;
+  const id = canonicalPlanId(planType);
+  return id ? TIER_CATALOG.find((t) => t.id === id) ?? null : null;
 }
 
 export function planNameFor(planType: string | null | undefined): string | null {

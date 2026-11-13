@@ -8,13 +8,49 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="shortcut icon" href="/favicon.ico" />
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
-    <meta name="apple-mobile-web-app-title" content="MyWebSite" />
+    <meta name="apple-mobile-web-app-title" content="Preyone" />
     <link rel="manifest" href="/site.webmanifest" />
     <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Montserrat:wght@500;600;700;800&display=swap" rel="stylesheet" />
-    <script type="module" crossorigin src="/assets/index-CKNlBwVq.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-DYOubbKs.css">
+    <style>
+      /* Boot loader — admin console theme, switched to the Starlink palette below. */
+      #boot-loader{--bl-bg:#050505;--bl-ring:#ff007f,#a855f7,#00e5ff,#ff007f;--bl-text:#ff2d95,#a855f7,#00e5ff;--bl-glow-1:rgba(255,0,127,.30);--bl-glow-2:rgba(0,229,255,.20);--bl-font:'Montserrat',system-ui,-apple-system,sans-serif;position:fixed;inset:0;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:clamp(20px,5vh,40px);background:var(--bl-bg,#050505);transition:opacity .4s ease,visibility .4s ease}
+      #boot-loader[data-portal="starlink"]{--bl-bg:#0d0f18;--bl-ring:#00e5ff,#a855f7,#58c8ff,#00e5ff;--bl-text:#00e5ff,#58c8ff,#a855f7;--bl-glow-1:rgba(0,229,255,.30);--bl-glow-2:rgba(168,85,247,.22)}
+      #root:not(:empty)~#boot-loader,#boot-loader.is-hidden{opacity:0;visibility:hidden;pointer-events:none}
+      .boot-spinner{width:clamp(80px,20vw,160px);height:clamp(80px,20vw,160px);border-radius:50%;position:relative;display:flex;align-items:center;justify-content:center;background:conic-gradient(from 0deg,var(--bl-ring));animation:boot-spin 1.4s cubic-bezier(.45,.05,.55,.95) infinite;box-shadow:0 0 clamp(20px,5vw,60px) var(--bl-glow-1),0 0 clamp(40px,8vw,100px) var(--bl-glow-2)}
+      .boot-spinner-inner{width:clamp(60px,15vw,128px);height:clamp(60px,15vw,128px);border-radius:50%;background:var(--bl-bg,#050505);display:flex;align-items:center;justify-content:center;position:absolute}
+      .boot-spinner-inner img{width:clamp(32px,8vw,72px);height:clamp(32px,8vw,72px);display:block;animation:boot-pulse 1.5s ease-in-out infinite}
+      .boot-text{font-family:var(--bl-font,'Montserrat',system-ui,sans-serif);font-size:clamp(11px,2.5vw,16px);font-weight:600;letter-spacing:.2em;text-transform:uppercase;text-align:center;padding:0 1.5rem;background:linear-gradient(90deg,var(--bl-text));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent;animation:boot-pulse-text 1.5s ease-in-out infinite}
+      @keyframes boot-spin{to{transform:rotate(360deg)}}
+      @keyframes boot-pulse{0%,100%{opacity:.6}50%{opacity:1}}
+      @keyframes boot-pulse-text{0%,100%{opacity:.6}50%{opacity:1}}
+      @media (prefers-reduced-motion:reduce){.boot-spinner{animation-duration:3s}.boot-spinner-inner img,.boot-text{animation:none}}
+    </style>
+    <script type="module" crossorigin src="/assets/index-C_6U7fkA.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-B888V4lt.css">
   </head>
   <body>
     <div id="root"></div>
+    <div id="boot-loader" role="status" aria-live="polite" aria-label="Loading Preyone Admin">
+      <div class="boot-spinner">
+        <div class="boot-spinner-inner">
+          <img src="/boot-mark.png" alt="Preyone" width="72" height="72" decoding="async" fetchpriority="high" />
+        </div>
+      </div>
+      <div class="boot-text" id="boot-text">Loading Admin Console…</div>
+    </div>
+    <script>
+      (function () {
+        var loader = document.getElementById('boot-loader');
+        if (!loader) return;
+        var isStarlink =
+          window.location.pathname.indexOf('/starlink') === 0 ||
+          window.location.hostname.indexOf('starlink.') === 0;
+        if (isStarlink) {
+          loader.setAttribute('data-portal', 'starlink');
+          var text = document.getElementById('boot-text');
+          if (text) text.textContent = 'Loading Starlink Portal…';
+        }
+      })();
+    </script>
   </body>
 </html>

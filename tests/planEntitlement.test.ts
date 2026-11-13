@@ -24,6 +24,11 @@ vi.mock('../src/db/pool', () => ({
   },
 }));
 
+vi.mock('../src/db/accounting', () => ({
+  syncSaleToLedgerAndStock: vi.fn(async () => {}),
+  markStockApplied: vi.fn(async () => {}),
+}));
+
 vi.mock('../src/middleware/adminAuth', () => ({
   requireAdminAuth: (_req: unknown, _res: unknown, next: () => void) => next(),
   requireRole: () => (_req: unknown, _res: unknown, next: () => void) => next(),
@@ -98,8 +103,11 @@ beforeEach(() => {
     if (/BEGIN|COMMIT|ROLLBACK/.test(sql)) return { rows: [] };
     if (/pos_shifts/.test(sql) && /SELECT/.test(sql)) return { rows: [{ id: 'shift-1' }] };
     if (/nextval/.test(sql)) return { rows: [{ v: 12 }] };
-    if (/INSERT INTO pos_documents/.test(sql)) {
+    if (/INSERT INTO pos_documents /.test(sql) || /INSERT INTO pos_documents\n/.test(sql)) {
       return { rows: [{ id: 'doc-1', doc_number: 'RCP-0012', doc_type: 'sale', total: 1 }] };
+    }
+    if (/INSERT INTO pos_document_payments/.test(sql)) {
+      return { rows: [{ id: 1 }] };
     }
     return { rows: [] };
   });
@@ -120,6 +128,7 @@ describe('plan catalogue', () => {
   it('gives PreTill POS only and every higher plan POS and Invoice', () => {
     expect(modulesForPlan('standard_10')).toEqual(['pos']);
     expect(modulesForPlan('pos_invoice_15')).toEqual(['pos', 'invoice']);
+    expect(modulesForPlan('invoicing_15')).toEqual(['pos', 'invoice']);
     expect(modulesForPlan('growth_20')).toEqual(['pos', 'invoice']);
     expect(modulesForPlan('unlimited_30')).toEqual(['pos', 'invoice']);
     expect(modulesForPlan('enterprise')).toEqual([]);
@@ -162,6 +171,27 @@ describe('POS sale and invoice entitlement', () => {
     const suspended = await request(app()).post('/api/pos/checkout').send(saleBody);
     expect(suspended.status).toBe(403);
     expect(suspended.body.code).toBe('SUBSCRIPTION_SUSPENDED');
+  });
+
+  it('refuses to send an office document on PreTill or after the subscription lapses', async () => {
+    const pretill = await request(app()).post('/api/pos/documents/doc-1/send').send({});
+    expect(pretill.status).toBe(403);
+    expect(pretill.body.code).toBe('PLAN_MODULE_DISABLED');
+    expect(pool.query).not.toHaveBeenCalled();
+
+    usePlan('pos_invoice_15');
+    session.company.subscription_status = 'suspended';
+    const lapsed = await request(app()).post('/api/pos/documents/doc-1/send').send({});
+    expect(lapsed.status).toBe(403);
+    expect(lapsed.body.code).toBe('SUBSCRIPTION_SUSPENDED');
+  });
+
+  it('sends an office document when Invoice is on the plan', async () => {
+    usePlan('pos_invoice_15');
+    (pool.query as any).mockResolvedValue({ rows: [{ id: 'doc-1', status: 'unpaid' }] });
+    const res = await request(app()).post('/api/pos/documents/doc-1/send').send({});
+    expect(res.status).toBe(200);
+    expect(res.body.id).toBe('doc-1');
   });
 
   it('hides POS data routes when the plan does not include POS', async () => {

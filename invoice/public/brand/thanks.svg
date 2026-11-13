@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg id="Layer_2" data-name="Layer 2" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 309.68 42.8">
+  <defs>
+    <style>
+      .cls-1 {
+        fill: #122b70;
+        font-size: 19.98px;
+        letter-spacing: .03em;
+      }
+
+      .cls-1, .cls-2 {
+        font-family: Poppins-Bold, Poppins;
+        font-weight: 700;
+      }
+
+      .cls-2 {
+        fill: #272c5e;
+        font-size: 14px;
+        letter-spacing: .03em;
+      }
+    </style>
+  </defs>
+  <g id="PRINT">
+    <text class="cls-2" transform="translate(83.54 34.31)"><tspan x="0" y="0">Terms &amp; conditions</tspan></text>
+    <text class="cls-1" transform="translate(0 17.03)"><tspan x="0" y="0">THANKS FOR YOUR PURCHASE</tspan></text>
+  </g>
+</svg>

@@ -9,6 +9,10 @@ import { moduleAccess, requireCompany } from '../middleware/company';
 import { invoiceBlock, subscriptionBlock } from '../plans/entitlements';
 import { requireDeviceAuth } from '../middleware/deviceAuth';
 import { enforceSubscriptionGuard } from '../middleware/subscriptionGuard';
+import { markStockApplied, syncSaleToLedgerAndStock } from '../db/accounting';
+import { INVOICE_DOCUMENT_TYPES, ALL_DOCUMENT_TYPES } from '../services/pesepay';
+import { POS_THEMES, CURRENCIES, type PosTheme } from '../catalog/ecosystem';
+import { themeCssVariables, themeCssBlock } from '../utils/themeVars';
 
 /**
  * Preyone POS module — additive only.
@@ -198,6 +202,422 @@ router.get('/company/subscriptions', (req, res) => {
     modules: req.company!.modules,
     subscription_status: req.company!.subscription_status ?? null,
   });
+});
+
+// ── Theme + catalogue (invoicing workspace & POS theming) ────────────
+//
+// The merchant picks one of the 20 seeded palettes; every surface derives its
+// surfaces, borders and readable ink from it. Returning the variables (not just
+// the hex values) is what lets the POS, invoice and IoT SPAs share one contract.
+//
+// Document-number prefixes. Declared before DOC_TYPE_CATALOGUE: that catalogue
+// is a top-level initializer, so referencing this const from further down the
+// module hit the temporal dead zone and took the whole POS router down at import.
+const DOC_PREFIX: Record<string, string> = {
+  sale: 'RCP',
+  invoice: 'INV',
+  tax_invoice: 'TAX',
+  proforma: 'PRO',
+  receipt: 'REC',
+  sales_receipt: 'SR',
+  cash_receipt: 'CR',
+  quote: 'QUO',
+  quotation: 'QUO',
+  estimate: 'EST',
+  credit_memo: 'CM',
+  credit_note: 'CN',
+  purchase_order: 'PO',
+  delivery_note: 'DN',
+};
+
+const DOC_TYPE_CATALOGUE = INVOICE_DOCUMENT_TYPES.map((t) => ({
+  type: t.type,
+  label: t.label,
+  prefix: DOC_PREFIX[t.type] ?? t.prefix,
+  ar: t.ar,
+  credit: t.credit,
+}));
+
+/**
+ * pos_themes stores the palette as `*_color` columns. `primary` is a reserved
+ * word in PostgreSQL, so selecting it unquoted (or aliasing it unquoted) is a
+ * syntax error — which is exactly how `GET /api/pos/theme` 500'd in production
+ * and blocked the invoice workspace from booting. Always map the real columns.
+ */
+function mapThemeRow(row: any): PosTheme {
+  return {
+    id: row.id,
+    name: row.name,
+    description: row.description ?? '',
+    primary: row.primary_color,
+    secondary: row.secondary_color,
+    accent: row.accent_color,
+    bg: row.bg_color,
+    text: row.text_color,
+  };
+}
+
+const THEME_COLUMNS =
+  'id, name, description, primary_color, secondary_color, accent_color, bg_color, text_color';
+
+async function loadThemeRow(_companyId: string, themeId?: number | null): Promise<PosTheme> {
+  try {
+    const { rows } = await pool.query(
+      `SELECT ${THEME_COLUMNS}
+         FROM pos_themes
+        WHERE is_active AND ($1::int IS NULL OR id = $1)
+        ORDER BY id
+        LIMIT 1`,
+      [themeId ?? null]
+    );
+    if (rows.length > 0) return mapThemeRow(rows[0]);
+  } catch {
+    // Pre-v3.2 database: pos_themes does not exist yet. Fall through to the
+    // static mirror so the till still renders the house palette.
+  }
+  return POS_THEMES.find((t) => t.id === themeId) ?? POS_THEMES[0];
+}
+
+async function resolveCompanyTheme(companyId: string) {
+  let themeId = 1;
+  try {
+    const { rows } = await pool.query(
+      `SELECT pos_theme_id FROM companies WHERE id = $1`,
+      [companyId]
+    );
+    themeId = Number(rows[0]?.pos_theme_id) || 1;
+  } catch {
+    /* companies.pos_theme_id not migrated yet */
+  }
+  return loadThemeRow(companyId, themeId);
+}
+
+router.get('/theme', async (req, res) => {
+  // The palette is cosmetic: a theme lookup must never take the whole workspace
+  // down (the invoice SPA and the till both boot through this endpoint).
+  let theme: PosTheme;
+  try {
+    theme = await resolveCompanyTheme(tenantId(req));
+  } catch {
+    theme = POS_THEMES[0];
+  }
+  res.json({ theme, css: themeCssVariables(theme), cssBlock: themeCssBlock(theme) });
+});
+
+router.patch('/theme', requireRole(...MANAGER_ROLES), async (req, res) => {
+  const themeId = num(req.body?.themeId);
+  if (!Number.isInteger(themeId) || themeId < 1 || themeId > 20) {
+    res.status(422).json({ error: 'themeId must be between 1 and 20' });
+    return;
+  }
+  await pool.query(
+    `UPDATE companies SET pos_theme_id = $1, updated_at = NOW() WHERE id = $2`,
+    [themeId, tenantId(req)]
+  );
+  const theme = await loadThemeRow(tenantId(req), themeId);
+  res.json({ theme, css: themeCssVariables(theme as any), cssBlock: themeCssBlock(theme as any) });
+});
+
+router.get('/catalog', async (req, res) => {
+  const cid = tenantId(req);
+  const [companyRes, templatesRes, themesRes] = await Promise.all([
+    pool.query(
+      // Contact + terms fields feed the A4 document sheet's bill-to block and
+      // footer band, so they travel with the catalogue.
+      `SELECT id, name, tagline, address, email, support_phone, website, terms_text,
+              receipt_footer, logo_url, logo_path, currency, tax_pct, business_profile,
+              kds_enabled, table_service_enabled, invoice_template_id, pos_theme_id,
+              invoice_prefix, quote_prefix, invoice_settings
+         FROM companies WHERE id = $1`,
+      [cid]
+    ).catch(() =>
+      // Pre-v3.2 database: the presentation columns do not exist yet. Return a
+      // minimal company so the workspace still opens with house defaults.
+      pool.query(
+        `SELECT id, name, tagline, logo_path, currency, tax_pct FROM companies WHERE id = $1`,
+        [cid]
+      )
+    ),
+    pool.query(
+      `SELECT id, name, description, layout, accent_color, show_logo
+         FROM invoice_templates WHERE is_active ORDER BY id`
+    ).catch(() => ({ rows: [] as any[] })),
+    pool.query(
+      `SELECT ${THEME_COLUMNS} FROM pos_themes WHERE is_active ORDER BY id`
+    ).catch(() => ({ rows: [] as any[] })),
+  ]);
+  const company = companyRes.rows[0] ?? {};
+  const templates = templatesRes.rows.length
+    ? templatesRes.rows.map((t: any) => ({
+        id: t.id,
+        name: t.name,
+        description: t.description,
+        layout: t.layout,
+        accentColor: t.accent_color,
+        showLogo: t.show_logo,
+      }))
+    : (await import('../catalog/ecosystem')).INVOICE_TEMPLATES;
+  const themes = themesRes.rows.length ? themesRes.rows.map(mapThemeRow) : POS_THEMES;
+  res.json({
+    company,
+    templates,
+    themes,
+    currencies: CURRENCIES,
+    documentTypes: DOC_TYPE_CATALOGUE,
+    modules: {
+      kds: Boolean(company.kds_enabled) || company.business_profile === 'fast_food_qsr',
+      tables:
+        Boolean(company.table_service_enabled) || company.business_profile === 'restaurant_dine_in',
+    },
+  });
+});
+
+// Merchant-level module switches (QSR KDS routing, dine-in floor plan). Kept
+// separate from business_profile so a restaurant can run the till without the
+// floor plan (or enable the kitchen screen without re-profiling the business).
+router.patch('/company/modules', requireRole(...MANAGER_ROLES), async (req, res) => {
+  const cid = tenantId(req);
+  const kds = typeof req.body?.kds === 'boolean' ? req.body.kds : null;
+  const tables = typeof req.body?.tables === 'boolean' ? req.body.tables : null;
+  if (kds === null && tables === null) {
+    res.status(422).json({ error: 'Provide kds and/or tables as booleans' });
+    return;
+  }
+  const { rows } = await pool.query(
+    `UPDATE companies
+        SET kds_enabled = COALESCE($1, kds_enabled),
+            table_service_enabled = COALESCE($2, table_service_enabled),
+            updated_at = NOW()
+      WHERE id = $3
+      RETURNING kds_enabled, table_service_enabled`,
+    [kds, tables, cid]
+  );
+  res.json(rows[0]);
+});
+
+// Invoicing workspace defaults: which of the 20 PDF templates a tenant's
+// documents render with, plus the copy that appears on them. This is separate
+// from the admin Global Settings Hub so the invoice SPA can save a template
+// without needing a CEO-only `/api/admin/company` PUT.
+router.patch('/invoice-settings', requireRole(...MANAGER_ROLES), async (req, res) => {
+  const cid = tenantId(req);
+  const b = req.body || {};
+  const templateId =
+    b.templateId === undefined || b.templateId === null ? null : Number(b.templateId);
+  if (templateId !== null && (!Number.isInteger(templateId) || templateId < 1 || templateId > 20)) {
+    res.status(422).json({ error: 'templateId must be between 1 and 20' });
+    return;
+  }
+  const currency = str(b.currency) ? str(b.currency).toUpperCase() : null;
+  const taxPct = b.taxPct === undefined || b.taxPct === null ? null : round2(num(b.taxPct));
+  const { rows } = await pool.query(
+    `UPDATE companies
+        SET invoice_template_id = COALESCE($1, invoice_template_id),
+            currency            = COALESCE($2, currency),
+            tax_pct             = COALESCE($3, tax_pct),
+            terms_text          = COALESCE($4, terms_text),
+            receipt_footer      = COALESCE($5, receipt_footer),
+            invoice_settings    = COALESCE($6::jsonb, invoice_settings),
+            updated_at          = NOW()
+      WHERE id = $7
+      RETURNING id, name, logo_url, currency, tax_pct, invoice_template_id,
+                terms_text, receipt_footer, invoice_settings`,
+    [
+      templateId,
+      currency,
+      taxPct,
+      str(b.termsText) || null,
+      str(b.footer) || null,
+      b.settings === undefined ? null : JSON.stringify(b.settings),
+      cid,
+    ]
+  );
+  res.json(rows[0] ?? {});
+});
+
+// ── Office-created documents (invoicing workspace) ───────────────────
+//
+// The till creates documents through /checkout (stock, serials, payments).
+// Office work is different: a draft invoice or quote has no shift, no stock
+// movement and no money yet. This endpoint persists any of the 12 document
+// types with line items, FX and template, and never touches inventory.
+router.post('/documents', async (req, res) => {
+  const blocked = invoiceBlock(req.company!);
+  if (blocked) {
+    res.status(403).json(blocked);
+    return;
+  }
+  const b = req.body || {};
+  const cid = tenantId(req);
+  const docType = str(b.docType);
+  if (!(ALL_DOCUMENT_TYPES as readonly string[]).includes(docType) || docType === 'sale') {
+    res.status(422).json({
+      error: `docType must be one of: ${INVOICE_DOCUMENT_TYPES.map((t) => t.type).join(', ')}`,
+    });
+    return;
+  }
+
+  const rawItems = Array.isArray(b.items) ? b.items : [];
+  const items = rawItems
+    .map((it: any) => ({
+      description: str(it?.description),
+      price: round2(num(it?.price)),
+      qty: round2(num(it?.qty)) || 1,
+      productId: str(it?.productId) || null,
+    }))
+    .filter((it: any) => it.description.length > 0);
+  if (items.length === 0) {
+    res.status(422).json({ error: 'At least one line item with a description is required' });
+    return;
+  }
+
+  const { rows: compRows } = await pool.query(
+    `SELECT currency, tax_pct, invoice_template_id, name FROM companies WHERE id = $1`,
+    [cid]
+  );
+  const company = compRows[0] ?? {};
+  const currency = (str(b.currency) || str(company.currency) || 'USD').toUpperCase();
+  const exchangeRate = num(b.exchangeRate) > 0 ? num(b.exchangeRate) : 1;
+  const discountPct = num(b.discountPct);
+  const taxPct = b.taxPct === undefined || b.taxPct === null ? num(company.tax_pct) : num(b.taxPct);
+
+  const { lines, subtotal, taxAmount, total } = computeTotals(items as any, discountPct, taxPct);
+  const credit = docType === 'credit_memo' || docType === 'credit_note';
+  const signedTotal = credit ? -Math.abs(total) : total;
+
+  const status = ['draft', 'sent'].includes(str(b.status))
+    ? str(b.status)
+    : ['quote', 'estimate', 'proforma'].includes(docType)
+      ? 'sent'
+      : 'draft';
+
+  const issueDate = /^\d{4}-\d{2}-\d{2}$/.test(str(b.issueDate)) ? str(b.issueDate) : null;
+  const dueDate =
+    /^\d{4}-\d{2}-\d{2}$/.test(str(b.dueDate))
+      ? str(b.dueDate)
+      : issueDate && ['invoice', 'tax_invoice', 'proforma', 'sales_receipt'].includes(docType)
+        ? null // computed in SQL as issue + net days
+        : null;
+  const netDays = Number.isFinite(Number(b.netDays)) ? Math.max(0, Math.min(365, Number(b.netDays))) : 30;
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    let customerId = str(b.customerId) || null;
+    if (!customerId && b.customer && typeof b.customer === 'object') {
+      customerId = await upsertCustomer(client, b.customer);
+    }
+
+    const seq = await client.query(`SELECT nextval('pos_doc_number_seq') AS v`);
+    const docNumber = `${DOC_PREFIX[docType]}-${String(seq.rows[0].v).padStart(4, '0')}`;
+    const templateId = num(b.templateId) || num(company.invoice_template_id) || null;
+
+    const inserted = await client.query(
+      `INSERT INTO pos_documents
+         (doc_number, doc_type, channel, status, customer_id, cashier_id, issue_date, due_date,
+          subtotal, discount_pct, tax_pct, total, amount_paid, notes, company_id,
+          currency, exchange_rate, template_id, doc_meta)
+       VALUES ($1,$2,'office',$3,$4,$5,
+               COALESCE($6::date, CURRENT_DATE),
+               COALESCE($7::date, COALESCE($6::date, CURRENT_DATE) + ($8::int * INTERVAL '1 day')),
+               $9,$10,$11,$12,0,$13,$14,$15,$16,$17,$18)
+       RETURNING *`,
+      [
+        docNumber,
+        docType,
+        status,
+        customerId,
+        req.adminUser!.id,
+        issueDate,
+        dueDate,
+        netDays,
+        subtotal,
+        round2(discountPct),
+        round2(taxPct),
+        signedTotal,
+        str(b.notes) || null,
+        cid,
+        currency,
+        exchangeRate,
+        templateId,
+        JSON.stringify({
+          taxAmount,
+          netDays,
+          credit,
+          poNumber: str(b.poNumber) || null,
+          reference: str(b.reference) || null,
+        }),
+      ]
+    );
+    const doc = inserted.rows[0];
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      await client.query(
+        `INSERT INTO pos_document_items (document_id, product_id, description, price, qty, line_total, position)
+         VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+        [doc.id, line.productId ?? null, line.description, line.price, line.qty, line.lineTotal, line.position]
+      );
+    }
+
+    await client.query(
+      `INSERT INTO pos_document_events (document_id, company_id, event, detail, actor_id)
+       VALUES ($1,$2,'created',$3,$4)`,
+      [doc.id, cid, JSON.stringify({ docType, total: signedTotal, currency }), req.adminUser!.id]
+    ).catch(() => undefined); // pre-migration databases simply skip the audit row
+
+    await client.query('COMMIT');
+    res.status(201).json({ ...doc, items: lines });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    throw err;
+  } finally {
+    client.release();
+  }
+});
+
+// Mark a document as sent (quote/invoice handed to the customer). Idempotent.
+router.post('/documents/:id/send', async (req, res) => {
+  const blocked = invoiceBlock(req.company!);
+  if (blocked) {
+    res.status(403).json(blocked);
+    return;
+  }
+  const cid = tenantId(req);
+  const { rows } = await pool.query(
+    `UPDATE pos_documents
+        SET status = CASE WHEN status IN ('draft') THEN 'unpaid' ELSE status END,
+            sent_at = NOW(),
+            updated_at = NOW()
+      WHERE id = $1 AND company_id = $2 AND status <> 'void'
+      RETURNING *`,
+    [req.params.id, cid]
+  );
+  if (rows.length === 0) {
+    res.status(404).json({ error: 'Document not found' });
+    return;
+  }
+  await pool.query(
+    `INSERT INTO pos_document_events (document_id, company_id, event, detail, actor_id)
+     VALUES ($1,$2,'sent',$3,$4)`,
+    [rows[0].id, cid, JSON.stringify({ to: str(req.body?.to) || null }), req.adminUser!.id]
+  ).catch(() => undefined);
+  res.json(rows[0]);
+});
+
+// Append-only document timeline (audit trail for the workspace drawer).
+router.get('/documents/:id/events', async (req, res) => {
+  const { rows } = await pool.query(
+    `SELECT e.*, u.full_name AS actor_name
+       FROM pos_document_events e
+       JOIN pos_documents d ON d.id = e.document_id
+       LEFT JOIN admin_users u ON u.id = e.actor_id
+      WHERE e.document_id = $1 AND d.company_id = $2
+      ORDER BY e.created_at DESC`,
+    [req.params.id, tenantId(req)]
+  );
+  res.json(rows);
 });
 
 // ── Device registration (Admin only) ─────────────────────────────────
@@ -745,8 +1165,6 @@ interface CartItemInput {
   qty?: number | string;
 }
 
-const DOC_PREFIX: Record<string, string> = { sale: 'RCP', invoice: 'INV', quotation: 'QUO' };
-
 export function computeTotals(items: CartItemInput[], discountPct: number, taxPct: number) {
   let subtotal = 0;
   const lines = items.map((it, index) => {
@@ -1008,11 +1426,31 @@ router.post('/checkout', async (req, res) => {
       const method = PAYMENT_METHODS.includes(str(p?.method))
         ? str(p.method)
         : 'cash';
-      await client.query(
+      const payIns = await client.query(
         `INSERT INTO pos_document_payments (document_id, amount, method, reference, recorded_by, shift_id)
-         VALUES ($1,$2,$3,$4,$5,$6)`,
+         VALUES ($1,$2,$3,$4,$5,$6)
+         RETURNING id`,
         [doc.id, amount, method, str(p?.reference) || null, me.id, shiftId]
       );
+      // Checkout already decremented stock above — mark applied and post GL.
+      await syncSaleToLedgerAndStock(client, {
+        companyId: tenantId(req),
+        documentId: doc.id,
+        paymentId: Number(payIns.rows[0].id),
+        amount,
+        method,
+        docType,
+        docNumber,
+        reference: str(p?.reference) || null,
+        taxPct,
+        alreadyDecrementedStock: true,
+      });
+    }
+
+    // Quotations / unpaid invoices with no payment still need the stock flag
+    // set so a later Pesepay settle does not double-decrement.
+    if (rawPayments.length === 0 || lines.some((l) => l.productId)) {
+      await markStockApplied(client, doc.id);
     }
 
     await client.query('COMMIT');
@@ -1073,9 +1511,10 @@ router.post('/documents/:id/payments', async (req, res) => {
       );
       shiftId = open.rows.length > 0 ? open.rows[0].id : shiftId;
     }
-    await client.query(
+    const payIns = await client.query(
       `INSERT INTO pos_document_payments (document_id, amount, method, reference, recorded_by, shift_id)
-       VALUES ($1,$2,$3,$4,$5,$6)`,
+       VALUES ($1,$2,$3,$4,$5,$6)
+       RETURNING id`,
       [doc.id, amount, method, reference, me.id, shiftId]
     );
     const sums = await client.query(
@@ -1089,6 +1528,18 @@ router.post('/documents/:id/payments', async (req, res) => {
         WHERE id = $1 AND company_id = $2 RETURNING *`,
       [doc.id, tenantId(req), paid, newStatus]
     );
+    await syncSaleToLedgerAndStock(client, {
+      companyId: tenantId(req),
+      documentId: doc.id,
+      paymentId: Number(payIns.rows[0].id),
+      amount,
+      method,
+      docType: doc.doc_type,
+      docNumber: doc.doc_number,
+      reference,
+      taxPct: num(doc.tax_pct),
+      currency: doc.currency,
+    });
     await client.query('COMMIT');
     res.json({ ...updated.rows[0], balanceDue: round2(Math.max(num(updated.rows[0].total) - paid, 0)) });
   } catch (e) {
@@ -1146,6 +1597,95 @@ router.post('/documents/:id/void', requireRole(...MANAGER_ROLES), async (req, re
   } finally {
     client.release();
   }
+});
+
+// ── International invoicing: UBL/Peppol export ──────────────────────
+
+router.get('/documents/:id/ubl', async (req, res) => {
+  const cid = tenantId(req);
+  const { rows } = await pool.query(
+    `SELECT d.*, c.name AS customer_name, c.email AS customer_email, c.address AS customer_address
+       FROM pos_documents d
+       LEFT JOIN pos_customers c ON c.id = d.customer_id
+      WHERE d.id = $1 AND d.company_id = $2`,
+    [req.params.id, cid]
+  );
+  if (rows.length === 0) { res.status(404).json({ error: 'Document not found' }); return; }
+  const d = rows[0];
+  const { rows: items } = await pool.query(
+    `SELECT * FROM pos_document_items WHERE document_id = $1 ORDER BY position`,
+    [d.id]
+  );
+  const { rows: comp } = await pool.query(`SELECT * FROM companies WHERE id = $1`, [cid]);
+  const co = comp[0] || {};
+  const esc = (s: unknown) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
+         xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
+         xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">
+  <cbc:UBLVersionID>2.1</cbc:UBLVersionID>
+  <cbc:CustomizationID>urn:cen.eu:en16931:2017#compliant#urn:fdc:peppol.eu:2017:poacc:billing:3.0</cbc:CustomizationID>
+  <cbc:ProfileID>urn:fdc:peppol.eu:2017:poacc:billing:01:1.0</cbc:ProfileID>
+  <cbc:ID>${esc(d.doc_number)}</cbc:ID>
+  <cbc:IssueDate>${esc(d.issue_date)}</cbc:IssueDate>
+  <cbc:InvoiceTypeCode>380</cbc:InvoiceTypeCode>
+  <cbc:DocumentCurrencyCode>${esc(d.currency || 'USD')}</cbc:DocumentCurrencyCode>
+  <cac:AccountingSupplierParty>
+    <cac:Party>
+      <cac:PartyName><cbc:Name>${esc(co.name)}</cbc:Name></cac:PartyName>
+    </cac:Party>
+  </cac:AccountingSupplierParty>
+  <cac:AccountingCustomerParty>
+    <cac:Party>
+      <cac:PartyName><cbc:Name>${esc(d.customer_name || 'Walk-in')}</cbc:Name></cac:PartyName>
+    </cac:Party>
+  </cac:AccountingCustomerParty>
+  <cac:LegalMonetaryTotal>
+    <cbc:LineExtensionAmount currencyID="${esc(d.currency || 'USD')}">${Number(d.subtotal).toFixed(2)}</cbc:LineExtensionAmount>
+    <cbc:TaxExclusiveAmount currencyID="${esc(d.currency || 'USD')}">${Number(d.subtotal).toFixed(2)}</cbc:TaxExclusiveAmount>
+    <cbc:TaxInclusiveAmount currencyID="${esc(d.currency || 'USD')}">${Number(d.total).toFixed(2)}</cbc:TaxInclusiveAmount>
+    <cbc:PayableAmount currencyID="${esc(d.currency || 'USD')}">${Number(d.total).toFixed(2)}</cbc:PayableAmount>
+  </cac:LegalMonetaryTotal>
+${items.map((it: any, i: number) => `  <cac:InvoiceLine>
+    <cbc:ID>${i + 1}</cbc:ID>
+    <cbc:InvoicedQuantity unitCode="EA">${Number(it.qty)}</cbc:InvoicedQuantity>
+    <cbc:LineExtensionAmount currencyID="${esc(d.currency || 'USD')}">${Number(it.line_total).toFixed(2)}</cbc:LineExtensionAmount>
+    <cac:Item><cbc:Name>${esc(it.description)}</cbc:Name></cac:Item>
+    <cac:Price><cbc:PriceAmount currencyID="${esc(d.currency || 'USD')}">${Number(it.price).toFixed(2)}</cbc:PriceAmount></cac:Price>
+  </cac:InvoiceLine>`).join('\n')}
+</Invoice>`;
+  res.type('application/xml').send(xml);
+});
+
+// ── Accounts Receivable aging ───────────────────────────────────────
+
+router.get('/reports/ar-aging', async (req, res) => {
+  const cid = tenantId(req);
+  const { rows } = await pool.query(
+    `SELECT d.id, d.doc_number, d.doc_type, d.status, d.total, d.amount_paid, d.issue_date, d.due_date, c.name AS customer_name
+       FROM pos_documents d
+       LEFT JOIN pos_customers c ON c.id = d.customer_id
+      WHERE d.company_id = $1
+        AND d.status IN ('unpaid','partial')
+        AND d.doc_type IN ('invoice','tax_invoice','proforma','sales_receipt')
+      ORDER BY d.issue_date`,
+    [cid]
+  );
+  const now = new Date();
+  const buckets = { current: 0, d1_30: 0, d31_60: 0, d61_90: 0, d90plus: 0 };
+  const detail = rows.map((r: any) => {
+    const due = r.due_date ? new Date(r.due_date) : new Date(r.issue_date);
+    const days = Math.floor((now.getTime() - due.getTime()) / 86400000);
+    const balance = round2(Number(r.total) - Number(r.amount_paid));
+    let bucket = 'current';
+    if (days > 90) bucket = 'd90plus';
+    else if (days > 60) bucket = 'd61_90';
+    else if (days > 30) bucket = 'd31_60';
+    else if (days > 0) bucket = 'd1_30';
+    (buckets as any)[bucket] += balance;
+    return { ...r, balance, daysOverdue: Math.max(0, days), bucket };
+  });
+  res.json({ buckets, detail, total: round2(Object.values(buckets).reduce((a, b) => a + b, 0)) });
 });
 
 // ── POS sector dashboard ───────────────────────────────────────────

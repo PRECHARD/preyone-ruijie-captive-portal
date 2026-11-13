@@ -136,6 +136,7 @@ const groups: LinkGroup[] = [
     links: [
       { label: 'Sales & Invoices', section: 'pos-sales', roles: ['Staff', 'Manager', 'CEO', 'Cashier'], icon: <FiShoppingCart /> },
       { label: 'POS Reports', section: 'pos-reports', roles: ['Manager', 'CEO'], icon: <FiTrendingUp /> },
+      { label: 'Accounting & Financing', section: 'accounting', roles: ['Manager', 'CEO', 'Cashier'], icon: <FiDollarSign /> },
     ],
   },
   {

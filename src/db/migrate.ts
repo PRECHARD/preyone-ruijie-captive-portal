@@ -219,6 +219,34 @@ const SQL = `
      SET auth_time = COALESCE(last_activity, created_at, NOW())
    WHERE auth_time IS NULL;
 
+  -- Optional email OTP for invoice/POS staff (self-serve). Admin console login
+  -- always challenges regardless of this flag.
+  ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS two_factor_enabled BOOLEAN NOT NULL DEFAULT FALSE;
+
+  -- Per-device session rows (JWT "sid" claim). Revocation = DELETE the row.
+  CREATE TABLE IF NOT EXISTS admin_user_sessions (
+    sid           TEXT PRIMARY KEY,
+    admin_user_id UUID NOT NULL REFERENCES admin_users(id) ON DELETE CASCADE,
+    auth_time     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_activity TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_ip    TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_admin_user_sessions_user
+    ON admin_user_sessions (admin_user_id, last_activity DESC);
+
+  -- Adopt the single live pre-upgrade session so running this migration never
+  -- signs anybody out. All other pre-upgrade tokens were already dead under
+  -- the old one-session-per-account rule.
+  INSERT INTO admin_user_sessions (sid, admin_user_id, auth_time, last_activity)
+  SELECT active_sid, id,
+         COALESCE(auth_time, NOW()),
+         COALESCE(last_activity, NOW())
+    FROM admin_users
+   WHERE active_sid IS NOT NULL
+     AND active_sid <> '__revoked__'
+   ON CONFLICT (sid) DO NOTHING;
+
   -- Email OTP challenge for admin console 2FA (login step-up verification).
   CREATE TABLE IF NOT EXISTS admin_2fa_challenges (
     id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1255,13 +1283,14 @@ const SQL = `
   CREATE INDEX IF NOT EXISTS idx_site_invoices_account  ON site_invoices (lower(account_ref));
   CREATE INDEX IF NOT EXISTS idx_site_invoices_email    ON site_invoices (lower(email));
 
-  -- POS devices & endpoints (desktop / phone / tablet / electron)
-  -- Device cap is companies.max_devices (the paid plan), enforced in
-  -- src/middleware/subscriptionGuard.ts. electron is a desktop shell.
+  -- POS devices & endpoints (desktop / phone / tablet)
+  -- World-class auto-registration: device_uuid (hardware ID) + device_public_key
+  -- (Ed25519, Preyone Transit technology) + 64-char device_token for API auth.
+  -- Quota: 1 phone + 1 tablet + 1 desktop per company (enforced in code).
   CREATE TABLE IF NOT EXISTS pos_devices (
     id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     device_id          TEXT UNIQUE NOT NULL,
-    device_type        TEXT NOT NULL DEFAULT 'tablet' CHECK (device_type IN ('desktop', 'web', 'android', 'phone', 'tablet', 'electron')),
+    device_type        TEXT NOT NULL DEFAULT 'tablet' CHECK (device_type IN ('desktop', 'web', 'android', 'phone', 'tablet')),
     device_uuid        TEXT,
     device_public_key  TEXT,
     device_token       TEXT UNIQUE,
@@ -1792,10 +1821,13 @@ const SQL = `
     await client.query(`
       ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS holder_name TEXT;
       ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS holder_phone TEXT;
+      ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ;
       ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS ruijie_sync_status TEXT;
       ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS ruijie_voucher_id TEXT;
       ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS data_consumed_mb NUMERIC(12,2);
       ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS last_accounting_sync TIMESTAMPTZ;
+      ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS ruijie_active_clients INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS ruijie_max_clients INTEGER;
       CREATE INDEX IF NOT EXISTS idx_vouchers_ruijie_sync_status
         ON vouchers (ruijie_sync_status) WHERE ruijie_sync_status IS NOT NULL;
     `);
@@ -1825,15 +1857,47 @@ const SQL = `
       console.warn(`Skipped ecosystem upgrade: ${v3UpgradePath} not found.`);
     }
 
-    // Plan entitlements: PreTill / PreBiz / PrePro / PreUnlimited, subscriptions
-    // table, and the electron device type. Runs after v2 and v3 so the trigger
-    // replacement is the one that knows about the $15 plan.
-    const v4UpgradePath = path.resolve(__dirname, '../../db/migrations/v4_plan_entitlements.sql');
-    if (fs.existsSync(v4UpgradePath)) {
-      await client.query(fs.readFileSync(v4UpgradePath, 'utf8'));
-      console.log('Applied db/migrations/v4_plan_entitlements.sql (plan modules + PreBiz).');
+    // v3.2 workspace columns and v3.3 A4 templates. Both are idempotent.
+    // v3.3 contains its own BEGIN/COMMIT and runs as one script.
+    const v32Path = path.resolve(__dirname, '../../db/migrations/v3_2_ecosystem.sql');
+    if (fs.existsSync(v32Path)) {
+      await client.query(fs.readFileSync(v32Path, 'utf8'));
+      console.log('Applied db/migrations/v3_2_ecosystem.sql.');
+    }
+    const v33Path = path.resolve(__dirname, '../../db/migrations/v3_3_invoice_a4_templates.sql');
+    if (fs.existsSync(v33Path)) {
+      await client.query(fs.readFileSync(v33Path, 'utf8'));
+      console.log('Applied db/migrations/v3_3_invoice_a4_templates.sql.');
+    }
+
+    // Enterprise accounting ledger + stock_applied idempotency flag.
+    const v4AccountingPath = path.resolve(__dirname, '../../db/migrations/v4_accounting_ledger.sql');
+    if (fs.existsSync(v4AccountingPath)) {
+      await client.query(fs.readFileSync(v4AccountingPath, 'utf8'));
+      console.log('Applied db/migrations/v4_accounting_ledger.sql (accounting ledger).');
     } else {
-      console.warn(`Skipped plan entitlements: ${v4UpgradePath} not found.`);
+      console.warn(`Skipped accounting upgrade: ${v4AccountingPath} not found.`);
+    }
+
+    // Add invoicing_15 ($15 / 3 devices) to plan_type CHECK + device-limit trigger.
+    const v5SubPath = path.resolve(__dirname, '../../db/migrations/v5_subscription_invoicing_15.sql');
+    if (fs.existsSync(v5SubPath)) {
+      await client.query(fs.readFileSync(v5SubPath, 'utf8'));
+      console.log('Applied db/migrations/v5_subscription_invoicing_15.sql (invoicing_15 tier).');
+    } else {
+      console.warn(`Skipped subscription tier upgrade: ${v5SubPath} not found.`);
+    }
+
+    // Canonical PreBiz id (pos_invoice_15). Renames any invoicing_15 rows first,
+    // then installs subscriptions, the device cap, and the electron device type.
+    // Runs after v5 so a database that already applied the older $15 check
+    // is rewritten instead of rejected.
+    const v4PlanPath = path.resolve(__dirname, '../../db/migrations/v4_plan_entitlements.sql');
+    if (fs.existsSync(v4PlanPath)) {
+      await client.query(fs.readFileSync(v4PlanPath, 'utf8'));
+      console.log('Applied db/migrations/v4_plan_entitlements.sql (PreBiz entitlements).');
+    } else {
+      console.warn(`Skipped plan entitlements: ${v4PlanPath} not found.`);
     }
 
     console.log('Migration complete. Packages + transit + RBAC seeded.');

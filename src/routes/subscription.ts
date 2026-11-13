@@ -9,7 +9,7 @@ import {
   normalizeGatewayCurrency,
 } from '../services/pesepayService';
 import type { PesepayCurrency, PesepayRail } from '../services/pesepayService';
-import { isPlanTier, PLAN_TIERS, TIER_CATALOG, planNameFor, type PlanTier } from '../plans/entitlements';
+import { PLAN_TIERS, TIER_CATALOG, canonicalPlanId, planNameFor, type PlanTier } from '../plans/entitlements';
 
 export const subscriptionRouter = Router();
 
@@ -80,8 +80,8 @@ subscriptionRouter.get('/plans', requireAdminAuth, async (req: Request, res: Res
 // fulfilment happens server-to-server in /api/payments/pesepay/webhook, which
 // applies plan_tier to companies.plan_type (device cap follows via trigger).
 subscriptionRouter.post('/checkout', requireAdminAuth, async (req: Request, res: Response) => {
-  const tierId = str(req.body?.tier);
-  if (!isPlanTier(tierId)) {
+  const tierId = canonicalPlanId(str(req.body?.tier));
+  if (!tierId) {
     res.status(400).json({ error: `tier must be one of: ${PLAN_TIERS.join(', ')}` });
     return;
   }

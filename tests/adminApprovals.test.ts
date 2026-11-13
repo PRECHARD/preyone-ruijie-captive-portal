@@ -20,6 +20,7 @@ vi.mock('../src/db/pool', () => ({
 
 vi.mock('../src/middleware/adminAuth', () => ({
   requireAdminAuth: vi.fn(),
+  requireAdminAuthAllowLocked: vi.fn((_req: any, _res: any, next: any) => next()),
   requireRole: () => vi.fn((_req: any, _res: any, next: any) => next()),
 }));
 

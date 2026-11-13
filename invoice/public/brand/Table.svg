@@ -1,0 +1,165 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg id="Layer_2" data-name="Layer 2" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 504.81 277.8">
+  <defs>
+    <style>
+      .cls-1 {
+        letter-spacing: .08em;
+      }
+
+      .cls-1, .cls-2, .cls-3 {
+        fill: #fff;
+      }
+
+      .cls-1, .cls-3 {
+        font-family: Poppins-Bold, Poppins;
+        font-size: 16px;
+        font-weight: 700;
+      }
+
+      .cls-4 {
+        fill: url(#linear-gradient-5);
+      }
+
+      .cls-4, .cls-5, .cls-6, .cls-7 {
+        opacity: .43;
+      }
+
+      .cls-5 {
+        fill: url(#linear-gradient);
+      }
+
+      .cls-8 {
+        stroke: #fff;
+      }
+
+      .cls-8, .cls-9 {
+        fill: none;
+        stroke-miterlimit: 10;
+      }
+
+      .cls-10 {
+        fill: url(#linear-gradient-3);
+      }
+
+      .cls-6 {
+        fill: url(#linear-gradient-4);
+      }
+
+      .cls-9 {
+        stroke: #e5e5f5;
+      }
+
+      .cls-7 {
+        fill: url(#linear-gradient-2);
+      }
+
+      .cls-3 {
+        letter-spacing: .07em;
+      }
+    </style>
+    <linearGradient id="linear-gradient" x1="429.46" y1="-5.33" x2="39.96" y2="384.18" gradientUnits="userSpaceOnUse">
+      <stop offset=".04" stop-color="#36116a"/>
+      <stop offset=".51" stop-color="#461066"/>
+      <stop offset=".53" stop-color="#4a0f64"/>
+      <stop offset=".68" stop-color="#640e5d"/>
+      <stop offset=".8" stop-color="#740e58"/>
+      <stop offset=".9" stop-color="#7a0e57"/>
+    </linearGradient>
+    <linearGradient id="linear-gradient-2" x1="429.46" y1="-65.94" x2="39.96" y2="323.57" xlink:href="#linear-gradient"/>
+    <linearGradient id="linear-gradient-3" x1="676.15" y1="-205.92" x2="-567.56" y2="450.35" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#14002e"/>
+      <stop offset=".07" stop-color="#170133"/>
+      <stop offset=".17" stop-color="#200644"/>
+      <stop offset=".28" stop-color="#300e5f"/>
+      <stop offset=".32" stop-color="#36116a"/>
+      <stop offset=".43" stop-color="#4a1064"/>
+      <stop offset=".61" stop-color="#640e5d"/>
+      <stop offset=".77" stop-color="#740e58"/>
+      <stop offset=".9" stop-color="#7a0e57"/>
+    </linearGradient>
+    <linearGradient id="linear-gradient-4" x1="429.46" y1="-126.55" x2="39.96" y2="262.96" xlink:href="#linear-gradient"/>
+    <linearGradient id="linear-gradient-5" x1="429.46" y1="55.28" x2="39.96" y2="444.79" xlink:href="#linear-gradient"/>
+  </defs>
+  <g id="PRINT">
+    <g>
+      <g>
+        <rect class="cls-2" y="186.88" width="504.81" height="30.31"/>
+        <g>
+          <line class="cls-9" x1="246.42" y1="186.88" x2="246.42" y2="217.19"/>
+          <line class="cls-9" x1="331.96" y1="186.88" x2="331.96" y2="217.19"/>
+          <line class="cls-9" x1="398.45" y1="186.88" x2="398.45" y2="217.19"/>
+        </g>
+      </g>
+      <g>
+        <rect class="cls-5" y="156.58" width="504.81" height="30.31"/>
+        <g>
+          <line class="cls-8" x1="246.42" y1="156.58" x2="246.42" y2="186.88"/>
+          <line class="cls-8" x1="331.96" y1="156.58" x2="331.96" y2="186.88"/>
+          <line class="cls-8" x1="398.45" y1="156.58" x2="398.45" y2="186.88"/>
+        </g>
+      </g>
+      <g>
+        <rect class="cls-2" y="126.27" width="504.81" height="30.31"/>
+        <g>
+          <line class="cls-9" x1="246.42" y1="126.27" x2="246.42" y2="156.58"/>
+          <line class="cls-9" x1="331.96" y1="126.27" x2="331.96" y2="156.58"/>
+          <line class="cls-9" x1="398.45" y1="126.27" x2="398.45" y2="156.58"/>
+        </g>
+      </g>
+      <g>
+        <rect class="cls-7" y="95.97" width="504.81" height="30.31"/>
+        <g>
+          <line class="cls-8" x1="246.42" y1="95.97" x2="246.42" y2="126.27"/>
+          <line class="cls-8" x1="331.96" y1="95.97" x2="331.96" y2="126.27"/>
+          <line class="cls-8" x1="398.45" y1="95.97" x2="398.45" y2="126.27"/>
+        </g>
+      </g>
+      <g>
+        <rect class="cls-2" y="65.66" width="504.81" height="30.31"/>
+        <g>
+          <line class="cls-9" x1="246.42" y1="65.66" x2="246.42" y2="95.97"/>
+          <line class="cls-9" x1="331.96" y1="65.66" x2="331.96" y2="95.97"/>
+          <line class="cls-9" x1="398.45" y1="65.66" x2="398.45" y2="95.97"/>
+        </g>
+      </g>
+      <g>
+        <rect class="cls-10" width="504.81" height="35.35"/>
+        <g>
+          <line class="cls-8" x1="246.42" x2="246.42" y2="35.35"/>
+          <line class="cls-8" x1="331.96" x2="331.96" y2="35.35"/>
+          <line class="cls-8" x1="398.45" x2="398.45" y2="35.35"/>
+        </g>
+      </g>
+      <g>
+        <rect class="cls-6" y="35.35" width="504.81" height="30.31"/>
+        <g>
+          <line class="cls-8" x1="246.42" y1="35.35" x2="246.42" y2="65.66"/>
+          <line class="cls-8" x1="331.96" y1="35.35" x2="331.96" y2="65.66"/>
+          <line class="cls-8" x1="398.45" y1="35.35" x2="398.45" y2="65.66"/>
+        </g>
+      </g>
+      <g>
+        <text class="cls-1" transform="translate(80.68 23.11)"><tspan x="0" y="0">PRODUCT</tspan></text>
+        <text class="cls-1" transform="translate(264.58 23.11)"><tspan x="0" y="0">PRICE</tspan></text>
+        <text class="cls-1" transform="translate(347.35 22.86)"><tspan x="0" y="0">QTY</tspan></text>
+        <text class="cls-3" transform="translate(423.52 23.11)"><tspan x="0" y="0">TOTAL</tspan></text>
+      </g>
+      <g>
+        <rect class="cls-2" y="247.49" width="504.81" height="30.31"/>
+        <g>
+          <line class="cls-9" x1="246.42" y1="247.49" x2="246.42" y2="277.8"/>
+          <line class="cls-9" x1="331.96" y1="247.49" x2="331.96" y2="277.8"/>
+          <line class="cls-9" x1="398.45" y1="247.49" x2="398.45" y2="277.8"/>
+        </g>
+      </g>
+      <g>
+        <rect class="cls-4" y="217.19" width="504.81" height="30.31"/>
+        <g>
+          <line class="cls-8" x1="246.42" y1="217.19" x2="246.42" y2="247.49"/>
+          <line class="cls-8" x1="331.96" y1="217.19" x2="331.96" y2="247.49"/>
+          <line class="cls-8" x1="398.45" y1="217.19" x2="398.45" y2="247.49"/>
+        </g>
+      </g>
+    </g>
+  </g>
+</svg>

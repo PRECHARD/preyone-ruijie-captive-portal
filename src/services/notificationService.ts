@@ -55,7 +55,7 @@ function emailFooter(): string {
 }
 
 // ── Generic email helper ──────────────────────────────────────────────
-async function sendMail(to: string, subject: string, html: string, fromName?: string, fromEmail?: string, attachments?: Array<{ filename: string; content: Buffer; cid: string }>): Promise<boolean> {
+async function sendMail(to: string, subject: string, html: string, fromName?: string, fromEmail?: string, attachments?: Array<{ filename: string; content: Buffer; cid?: string }>): Promise<boolean> {
   const t = getTransporter();
   if (!t) {
     console.log('[NOTIFICATION] Email not sent (SMTP not configured). To:', to);
@@ -825,4 +825,96 @@ export async function sendAdminLoginCode(email: string, fullName: string, code: 
 </html>`,
     'Preyone', 'admin@preyone.com'
   );
+}
+
+export async function sendAdminPasswordChangedEmail(email: string, fullName: string): Promise<boolean> {
+  const baseUrl = (process.env.BASE_URL || 'https://wifi.preyone.com').replace(/\/$/, '');
+  const logo = `${baseUrl}/images/preyonelogomainzw-email.png`;
+  const footerMark = `${baseUrl}/images/preyonelogomainzw-email.png`;
+  const safeName = String(fullName ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+  return sendMail(
+    email,
+    'Your Preyone password was changed',
+    `<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark"><meta name="supported-color-schemes" content="dark"><title>Password changed</title></head>
+<body style="margin:0;padding:0;background:#050505;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#050505"><tr><td align="center" style="padding:40px 16px">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width:520px;width:100%;background:#0a0d17;border:1px solid #1c2438;border-radius:16px;overflow:hidden">
+      <tr><td style="height:3px;background:#6a0dad;background-image:linear-gradient(90deg,#6a0dad,#ff00ff);font-size:1px;line-height:1px">&nbsp;</td></tr>
+      <tr><td align="center" style="padding:34px 32px 0"><img src="${logo}" width="120" alt="Preyone" style="display:block;width:120px;max-width:100%;height:auto;border:0;outline:none;text-decoration:none"></td></tr>
+      <tr><td align="center" style="padding:24px 32px 0;font-family:'Segoe UI',Arial,sans-serif"><h1 style="margin:0;color:#f8fbff;font-size:24px;line-height:1.3">Password changed</h1></td></tr>
+      <tr><td style="padding:22px 32px 0;font-family:'Segoe UI',Arial,sans-serif;font-size:15px;line-height:1.6;color:#94a3b8"><p style="margin:0 0 10px">Hi <strong style="color:#f8fbff">${safeName}</strong>,</p><p style="margin:0">Your Preyone Admin Console password was successfully changed. All existing console sessions have been signed out.</p></td></tr>
+      <tr><td style="padding:20px 32px 0;font-family:'Segoe UI',Arial,sans-serif;font-size:13px;line-height:1.6;color:#64748b">If you made this change, no further action is needed. If you did not, contact support immediately at <a href="mailto:support@preyone.com" style="color:#7be0ff;text-decoration:none">support@preyone.com</a>.</td></tr>
+      <tr><td style="padding:30px 32px 0"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0"><tr><td style="border-top:1px solid #1c2438;font-size:1px;line-height:1px">&nbsp;</td></tr></table></td></tr>
+      <tr><td align="center" style="padding:24px 32px 8px"><img src="${footerMark}" width="120" alt="Preyone" style="display:block;width:120px;max-width:100%;height:auto;border:0;outline:none;text-decoration:none"></td></tr>
+      <tr><td align="center" style="padding:14px 32px 0"><a href="https://wa.me/263771327202" style="display:inline-block;background:#6a0dad;color:#fff;padding:11px 26px;border-radius:8px;text-decoration:none;font-family:'Segoe UI',Arial,sans-serif;font-size:13px;font-weight:700">Chat on WhatsApp</a></td></tr>
+      <tr><td align="center" style="padding:18px 32px 30px;font-family:'Segoe UI',Arial,sans-serif;font-size:12px;line-height:1.7;color:#64748b"><a href="mailto:support@preyone.com" style="color:#7be0ff;text-decoration:none">support@preyone.com</a><br>&copy; ${new Date().getFullYear()} Preyone Enterprises. All rights reserved.</td></tr>
+    </table>
+  </td></tr></table>
+</body></html>`,
+    'Preyone', 'support@preyone.com'
+  );
+}
+
+
+export async function sendTransactionalEmail(opts: {
+  to: string | string[];
+  subject: string;
+  html: string;
+  fromName?: string;
+  fromEmail?: string;
+  attachments?: Array<{ filename: string; content: Buffer; cid?: string }>;
+}): Promise<boolean> {
+  const recipients = (Array.isArray(opts.to) ? opts.to : [opts.to])
+    .map((value) => String(value || '').trim())
+    .filter(Boolean);
+  if (recipients.length === 0) return false;
+  const results = await Promise.all(recipients.map((recipient) => sendMail(
+    recipient,
+    opts.subject,
+    opts.html,
+    opts.fromName ?? 'Preyone UltraNet',
+    opts.fromEmail ?? 'support@preyone.com',
+    opts.attachments
+  )));
+  return results.every(Boolean);
+}
+
+export function buildEmailShell(title: string, bodyHtml: string): string {
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="dark light" />
+  <title>${title}</title>
+</head>
+<body style="margin:0;padding:0;width:100%;background:#050505;font-family:'Montserrat','Segoe UI',Arial,sans-serif;color:#f8fbff">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;background:#050505">
+    <tr>
+      <td align="center" style="padding:0;background:#050505">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:680px;margin:0 auto;border-collapse:collapse">
+          <tr><td style="padding:0">${emailHeader(title)}</td></tr>
+          <tr>
+            <td style="padding:8px 16px 32px;background:#050505">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:640px;margin:0 auto;border-collapse:separate;background:#0a0d17;border:1px solid #1c2438;border-radius:16px">
+                <tr>
+                  <td style="padding:28px 22px;background:#0a0d17;border-radius:16px;box-shadow:0 0 28px rgba(106,13,173,0.22),0 18px 48px rgba(0,0,0,0.45)">
+                    ${bodyHtml}
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr><td style="padding:0">${emailFooter()}</td></tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
 }

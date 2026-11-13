@@ -5,6 +5,7 @@ import 'express-async-errors';
 import express from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
+import { isTrustedAppHost } from './utils/ssoCookie';
 import compression from 'compression';
 import cookieParser from 'cookie-parser';
 import morgan from 'morgan';
@@ -24,6 +25,15 @@ import { systemAdminRouter } from './routes/systemAdmin';
 import { starlinkRouter } from './routes/starlink';
 import { ruijieRouter } from './routes/ruijie';
 import { currencyRouter } from './routes/currency';
+import { accountingRouter } from './routes/accounting';
+import { portalRouter } from './routes/portal';
+import { alertsRouter } from './routes/alerts';
+import { voucherAnalyticsRouter } from './routes/voucherAnalytics';
+import { reportsRouter } from './routes/reports';
+import { startVoucherMonitor } from './services/voucherMonitorService';
+import { startVoucherPoolWorker } from './services/voucherPool';
+import { startRuijieVoucherStatusWorker } from './services/ruijieVoucherStatusSync';
+import { startReportScheduler } from './services/scheduler';
 import { ensureStarlinkSchema } from './db/starlink';
 import { errorHandler } from './middleware/errorHandler';
 import { maintenanceCheck } from './middleware/maintenanceMode';
@@ -55,15 +65,21 @@ app.use(
     },
   })
 );
-// Cross-subdomain CORS: reflect only Preyone origins so the SSO cookie can be
-// sent (credentials) without opening the API up to third-party sites.
-const PREYONE_ORIGIN_RE = /^https:\/\/(?:[a-z0-9-]+\.)*preyone\.com(\/|$)/i;
+// Credentialed CORS is limited to the app hosts. The public site and the
+// Wi-Fi portal stay same-origin for their own pages and cannot call the
+// admin APIs with the SSO cookie.
 const isDevOrigin = (origin: string) => /^https?:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?(\/|$)/.test(origin);
 app.use(
   cors({
     origin(origin, callback) {
       if (!origin) return callback(null, false);
-      if (PREYONE_ORIGIN_RE.test(origin) || isDevOrigin(origin)) return callback(null, origin);
+      if (isDevOrigin(origin)) return callback(null, origin);
+      try {
+        const url = new URL(origin);
+        if (url.protocol === 'https:' && isTrustedAppHost(url.hostname)) return callback(null, origin);
+      } catch {
+        /* refuse an unparseable origin */
+      }
       return callback(null, false);
     },
     credentials: true,
@@ -309,6 +325,22 @@ app.use((req, res, next) => {
     return res.status(503).send('POS build not found. Run `cd pos && npm run build`.');
   }
 
+  // invoice.preyone.com → Preyone Invoice workspace SPA (Documents / Clients /
+  // Settings). nginx proxies this host to the portal on :5000; the SPA lives in
+  // invoice/dist. The separate preyone-invoice PM2 on :4000 is the legacy
+  // office engine and is not what this vhost serves.
+  if (host === 'invoice.preyone.com' || host === 'invoices.preyone.com') {
+    const invoiceDist = path.join(__dirname, '..', 'invoice', 'dist');
+    if (fs.existsSync(invoiceDist)) {
+      delete req.headers['range'];
+      delete req.headers['if-range'];
+      return express.static(invoiceDist)(req, res, () => {
+        res.sendFile(path.join(invoiceDist, 'index.html'));
+      });
+    }
+    return res.status(503).send('Invoice build not found. Run `cd invoice && npm run build`.');
+  }
+
   // app.preyone.com → enterprise gateway (single-login module launcher)
   if (host === 'app.preyone.com') {
     const appDist = path.join(__dirname, '..', 'app', 'dist');
@@ -350,6 +382,11 @@ app.use('/api/subscription', subscriptionRouter);
 app.use('/api/site', siteInvoicesRouter);
 app.use('/api/transit', transitRouter);
 app.use('/api/pos', posRouter);
+app.use('/api/accounting', accountingRouter);
+app.use('/api/portal', portalRouter);
+app.use('/api/alerts', alertsRouter);
+app.use('/api/admin/voucher-analytics', voucherAnalyticsRouter);
+app.use('/api/admin/reports', reportsRouter);
 app.use('/api/starlink', starlinkRouter);
 // Ruijie Cloud maint-API proxy — admin-auth guarded inside the router.
 // Mounted under /api/ so the subdomain middleware (line ~169) is bypassed and
@@ -375,8 +412,15 @@ app.get('/connect', (_req, res) => {
   res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
 });
 
-// Fallback for unmatched routes
-app.get('*', (_req, res) => {
+// Fallback for unmatched routes.
+// API misses must stay JSON: serving portal index.html here is exactly how
+// invoice.preyone.com showed "Unexpected token '<' ... <!DOCTYPE" when a
+// signed-in boot hit a missing /api/pos/* handler (SPA parsed HTML as JSON).
+app.get('*', (req, res) => {
+  if (req.path.startsWith('/api/') || req.path === '/api') {
+    res.status(404).json({ error: 'Not found' });
+    return;
+  }
   res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
 });
 
@@ -439,6 +483,14 @@ app.listen(PORT, () => {
     console.error('Ruijie accounting polling failed to start:', err);
   }
 
+  // Mirrors Ruijie Cloud lifecycle onto local vouchers so the Vouchers tab
+  // shows the same lifecycle for online-paid and staff-issued codes.
+  try {
+    startRuijieVoucherStatusWorker();
+  } catch (err) {
+    console.error('Ruijie voucher status sync failed to start:', err);
+  }
+
   if (process.env.ENABLE_SESSION_CLEANUP !== 'false') {
     const intervalMinutes = Number(process.env.SESSION_CLEANUP_INTERVAL_MIN ?? 15);
     scheduleSessionCleanup(intervalMinutes);
@@ -461,7 +513,10 @@ app.listen(PORT, () => {
   // 3-tier subscription dunning: 3-day warning, 1-day urgent notice and
   // suspension on expiry, every day at midnight.
   if (process.env.ENABLE_SUBSCRIPTION_CRON !== 'false') {
-    scheduleSubscriptionCron();
+      startVoucherMonitor();
+  startVoucherPoolWorker();
+  startReportScheduler();
+  scheduleSubscriptionCron();
     console.log('Subscription dunning scheduled daily at midnight.');
   }
 });

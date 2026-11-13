@@ -19,7 +19,15 @@
 -- Idempotent: safe to re-run from `npm run migrate`.
 -- ============================================================================
 
--- ── 1. Accept the $15 plan id ───────────────────────────────────────────────
+-- ── 1. Accept both $15 ids, then keep only pos_invoice_15 (PreBiz) ─────────
+-- A database that already ran the first v5 file may store invoicing_15.
+-- The CHECK cannot drop that value until those rows are renamed.
+ALTER TABLE companies DROP CONSTRAINT IF EXISTS companies_plan_type_check;
+ALTER TABLE companies ADD CONSTRAINT companies_plan_type_check
+  CHECK (plan_type IN ('standard_10', 'invoicing_15', 'pos_invoice_15', 'growth_20', 'unlimited_30'));
+
+UPDATE companies SET plan_type = 'pos_invoice_15' WHERE plan_type = 'invoicing_15';
+
 ALTER TABLE companies DROP CONSTRAINT IF EXISTS companies_plan_type_check;
 ALTER TABLE companies ADD CONSTRAINT companies_plan_type_check
   CHECK (plan_type IN ('standard_10', 'pos_invoice_15', 'growth_20', 'unlimited_30'));
@@ -29,6 +37,7 @@ CREATE OR REPLACE FUNCTION update_company_device_limit() RETURNS TRIGGER AS $$
 BEGIN
   NEW.max_devices := CASE NEW.plan_type
     WHEN 'standard_10'     THEN 1
+    WHEN 'invoicing_15'    THEN 3
     WHEN 'pos_invoice_15'  THEN 3
     WHEN 'growth_20'       THEN 6
     WHEN 'unlimited_30'    THEN 9999
