@@ -633,8 +633,9 @@ function formatExpiryDate(value: Date | string): string {
 const SUBSCRIPTION_PLANS_HTML = `
     <div style="margin:20px 0 4px;padding:16px;background:#111827;border:1px solid #1f2937;border-radius:12px">
       <p style="margin:0 0 10px;font-size:13px;color:#94a3b8;font-weight:600;text-transform:uppercase;letter-spacing:1px">Current plans</p>
-      <p style="margin:0 0 6px;font-size:14px;color:#e2e8f0"><strong style="color:#ffffff">Standard</strong> &mdash; $10/month &bull; 1 device</p>
-      <p style="margin:0 0 6px;font-size:14px;color:#e2e8f0"><strong style="color:#ffffff">Growth</strong> &mdash; $20/month &bull; 6 devices</p>
+      <p style="margin:0 0 6px;font-size:14px;color:#e2e8f0"><strong style="color:#ffffff">POS Only</strong> &mdash; $10/month &bull; 1 device</p>
+      <p style="margin:0 0 6px;font-size:14px;color:#e2e8f0"><strong style="color:#ffffff">POS + Invoicing</strong> &mdash; $15/month &bull; 3 devices</p>
+      <p style="margin:0 0 6px;font-size:14px;color:#e2e8f0"><strong style="color:#ffffff">POS + Invoicing</strong> &mdash; $20/month &bull; 6 devices</p>
       <p style="margin:0;font-size:14px;color:#e2e8f0"><strong style="color:#ffffff">Unlimited</strong> &mdash; $30/month &bull; unlimited devices</p>
     </div>`;
 

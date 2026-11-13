@@ -81,8 +81,8 @@ export default function AccountingPage() {
     return p.toString() ? `?${p}` : '';
   }, [from, to]);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (quiet = false) => {
+    if (!quiet) setLoading(true);
     setError(null);
     try {
       const o = await api.get<Overview>(`/api/accounting/overview${qs()}`);
@@ -104,14 +104,18 @@ export default function AccountingPage() {
         setTax(t);
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load accounting');
+      if (!quiet) setError(e instanceof Error ? e.message : 'Failed to load accounting');
     } finally {
-      setLoading(false);
+      if (!quiet) setLoading(false);
     }
   }, [qs, from, to, railFilter, typeFilter]);
 
   useEffect(() => {
-    void load();
+    void load(false);
+    const id = window.setInterval(() => {
+      void load(true);
+    }, 20_000);
+    return () => window.clearInterval(id);
   }, [load]);
 
   const exportCsv = () => {

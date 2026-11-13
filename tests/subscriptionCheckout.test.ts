@@ -181,6 +181,22 @@ describe('Subscription checkout routes', () => {
     expect(insert![1][7]).toBe('unlimited_30');
   });
 
+  it('accepts invoicing_15 checkout at $15 / 3 devices', async () => {
+    const res = await request(createApp())
+      .post('/api/subscription/checkout')
+      .set('Authorization', 'Bearer test-token')
+      .send({ tier: 'invoicing_15' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.tier).toBe('invoicing_15');
+    expect(res.body.amount).toBe(15);
+    const insert = (pool.query as any).mock.calls.find((c: any[]) =>
+      String(c[0]).includes('INTO pesepay_intents')
+    );
+    expect(insert![1][2]).toBe(15);
+    expect(insert![1][7]).toBe('invoicing_15');
+  });
+
   it('marks the intent failed when the gateway declines', async () => {
     (initiatePesepayPayment as any).mockResolvedValue({ success: false, error: 'Gateway down' });
 
@@ -205,8 +221,13 @@ describe('Subscription checkout routes', () => {
     expect(res.status).toBe(200);
     expect(res.body.current.plan_type).toBe('standard_10');
     expect(res.body.current.max_devices).toBe(1);
-    expect(res.body.tiers).toHaveLength(3);
-    expect(res.body.tiers.map((t: any) => t.price)).toEqual([10, 20, 30]);
-    expect(res.body.tiers.map((t: any) => t.id)).toEqual(['standard_10', 'growth_20', 'unlimited_30']);
+    expect(res.body.tiers).toHaveLength(4);
+    expect(res.body.tiers.map((t: any) => t.price)).toEqual([10, 15, 20, 30]);
+    expect(res.body.tiers.map((t: any) => t.id)).toEqual([
+      'standard_10',
+      'invoicing_15',
+      'growth_20',
+      'unlimited_30',
+    ]);
   });
 });
