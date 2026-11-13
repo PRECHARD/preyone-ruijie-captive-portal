@@ -1086,6 +1086,7 @@ tbody tr[role='button']:focus-visible {
     inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 
+select,
 .select {
   appearance: none;
   -webkit-appearance: none;
@@ -1098,6 +1099,7 @@ tbody tr[role='button']:focus-visible {
   background-size: 11px 7px;
   cursor: pointer;
 }
+select:focus,
 .select:focus {
   outline: none;
   border-color: #34d399;
@@ -1107,6 +1109,7 @@ tbody tr[role='button']:focus-visible {
     0 0 0 3px rgba(52, 211, 153, 0.22),
     0 0 22px rgba(217, 119, 6, 0.18);
 }
+select option,
 .select option { background: #0f172a; color: var(--pos-text); }
 
 .textarea { resize: vertical; min-height: 84px; line-height: 1.55; }

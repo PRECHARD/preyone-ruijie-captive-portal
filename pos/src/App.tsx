@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, auth, ApiError, type StaffUser, type MethodTotal, type Shift } from './api';
-import PinLogin from './components/PinLogin';
+import Login from './pages/Login';
 import ShiftGate from './components/ShiftGate';
 import Terminal from './components/Terminal';
 import XReportModal from './components/XReportModal';
@@ -96,7 +96,7 @@ export default function App() {
   return (
     <>
       {!user ? (
-        <PinLogin onLoggedIn={handleLoggedIn} />
+        <Login onLoggedIn={handleLoggedIn} />
       ) : (
         <div className="app-shell">
           <header className="topbar">
@@ -184,7 +184,8 @@ export default function App() {
               <div className="modal-card" onClick={(e) => e.stopPropagation()}>
                 <h3 className="modal-title">Switch cashier</h3>
                 <p className="hint">Select the next operator and enter their PIN to hand over the till.</p>
-                <PinLogin
+                <Login
+                  compact
                   onLoggedIn={(t, u) => {
                     handleLoggedIn(t, u);
                     setSwitching(false);
