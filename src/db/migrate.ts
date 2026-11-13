@@ -814,6 +814,42 @@ const SQL = `
   -- Level 1 company admins belong to a transit company; NULL (Level 0) means platform ops
   ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS company_id UUID REFERENCES transit_companies(id);
   CREATE INDEX IF NOT EXISTS idx_admin_users_company ON admin_users (company_id);
+  -- Company profile must exist before portal_company_id references it. On a
+  -- database that already ran an older migrate this is a no-op; on a fresh
+  -- cluster the FK below would abort the whole migration (42P01) because this
+  -- statement used to run before CREATE TABLE companies.
+  CREATE TABLE IF NOT EXISTS companies (
+    id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name           TEXT NOT NULL DEFAULT 'Preyone',
+    tagline        TEXT,
+    address        TEXT,
+    email          TEXT,
+    support_phone  TEXT,
+    website        TEXT,
+    logo_path      TEXT,
+    currency       TEXT NOT NULL DEFAULT 'USD',
+    tax_pct        NUMERIC(5,2) NOT NULL DEFAULT 0,
+    invoice_prefix TEXT NOT NULL DEFAULT 'INV',
+    quote_prefix   TEXT NOT NULL DEFAULT 'QT',
+    receipt_footer TEXT,
+    terms_text     TEXT,
+    updated_by     UUID REFERENCES admin_users(id) ON DELETE SET NULL,
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+  -- Module entitlements read by requireCompany (POS, invoices, Wi-Fi).
+  -- Production already has this table; a fresh migrate used to leave it
+  -- missing and every company-scoped route returned 500.
+  CREATE TABLE IF NOT EXISTS subscriptions (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id  UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    module      TEXT NOT NULL,
+    plan_tier   TEXT,
+    status      TEXT NOT NULL DEFAULT 'active',
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (company_id, module)
+  );
   -- Two-realm split: company_id is transit-owned; the portal realm (POS/invoice/WiFi)
   -- gets its own FK. Both are nullable; NULL means "unassigned" and is resolved
   -- by the existing singleton fallbacks in middleware/company.ts and /me.
@@ -1155,26 +1191,7 @@ const SQL = `
   CREATE INDEX IF NOT EXISTS idx_pos_doc_pay_method   ON pos_document_payments (method);
   CREATE INDEX IF NOT EXISTS idx_pos_doc_pay_paid_at  ON pos_document_payments (paid_at);
 
-  -- Company profile (single source of truth for receipts/notifications)
-  CREATE TABLE IF NOT EXISTS companies (
-    id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name           TEXT NOT NULL DEFAULT 'Preyone',
-    tagline        TEXT,
-    address        TEXT,
-    email          TEXT,
-    support_phone  TEXT,
-    website        TEXT,
-    logo_path      TEXT,
-    currency       TEXT NOT NULL DEFAULT 'USD',
-    tax_pct        NUMERIC(5,2) NOT NULL DEFAULT 0,
-    invoice_prefix TEXT NOT NULL DEFAULT 'INV',
-    quote_prefix   TEXT NOT NULL DEFAULT 'QT',
-    receipt_footer TEXT,
-    terms_text     TEXT,
-    updated_by     UUID REFERENCES admin_users(id) ON DELETE SET NULL,
-    created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
-  );
+  -- companies is created earlier, before portal_company_id references it.
   ALTER TABLE companies ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
   INSERT INTO companies (name, tagline, email, support_phone, currency, tax_pct)
   SELECT 'Preyone', 'Connecting People. Powering Business.', 'info@preyone.com', '+263771327202', 'USD', 0
