@@ -13,7 +13,7 @@ import {
   type ShellSession,
 } from './auth';
 import { isAllowedAppUrl, isExternalBrowserUrl, isShellUrl } from '../shared/navigation';
-import { printFollowUp } from '../shared/print';
+import { isPosReceiptUrl, printFollowUp } from '../shared/print';
 import { isModuleKey, upgradeCopy, MODULE_TILES, type ModuleKey } from '../shared/plans';
 
 const DEV_URL = process.env.ELECTRON_RENDERER_URL || null;
@@ -96,6 +96,7 @@ function createWindow(): void {
       preload: guestPreload(),
       contextIsolation: true,
       nodeIntegration: false,
+      nodeIntegrationInSubFrames: false,
       sandbox: true,
       webSecurity: true,
     },
@@ -241,6 +242,10 @@ function registerIpc(): void {
   });
 
   ipcMain.handle('preyone:print-receipt', async (event) => {
+    const frameUrl = event.senderFrame?.url || event.sender.getURL();
+    if (!isPosReceiptUrl(frameUrl)) {
+      return { ok: false, silent: false };
+    }
     const contents = event.sender;
     const printers = await contents.getPrintersAsync();
     const match = printerName ? printers.find((printer) => printer.name === printerName) : undefined;

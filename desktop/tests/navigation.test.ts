@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { isAllowedAppUrl, isExternalBrowserUrl, isShellUrl } from '../src/shared/navigation';
-import { printFollowUp } from '../src/shared/print';
+import { isPosReceiptUrl, printFollowUp } from '../src/shared/print';
 import { deviceRegistrationMessage } from '../src/shared/device';
 
 describe('guest navigation allowlist', () => {
@@ -43,6 +43,15 @@ describe('receipt print fallback', () => {
     expect(printFollowUp(true, true)).toBe('done');
     expect(printFollowUp(false, false)).toBe('stop');
     expect(printFollowUp(false, true)).toBe('done');
+  });
+
+  it('allows silent printing only from the POS till', () => {
+    expect(isPosReceiptUrl('https://pos.preyone.com/till')).toBe(true);
+    expect(isPosReceiptUrl('https://invoice.preyone.com/documents')).toBe(false);
+    expect(isPosReceiptUrl('https://wifi.preyone.com/')).toBe(false);
+    expect(isPosReceiptUrl('https://admin.preyone.com/')).toBe(false);
+    expect(isPosReceiptUrl('http://pos.preyone.com/')).toBe(false);
+    expect(isPosReceiptUrl('https://pos.preyone.com.evil.com/')).toBe(false);
   });
 });
 
