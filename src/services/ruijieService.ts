@@ -1,11 +1,14 @@
 import axios from 'axios';
+import type { PoolClient } from 'pg';
 import { pool } from '../db/pool';
+import { attachRuijieQuotaGuard } from './ruijieRateLimiter';
 import {
   getRuijieVouchers,
   isRuijieCloudConfigured,
   RuijieApiError,
   withTokenRefresh,
 } from './ruijieCloud';
+import { resolveVoucherBindings, resolveVoucherCodesByIp, verifyVoucherCodes } from './voucherBindingService';
 
 /**
  * Call Ruijie authentication URL to apply WISPr parameters and unlock a MAC
@@ -40,7 +43,7 @@ export async function bypassRuijieFirewall(macAddress: string, ruijieAuthUrl: st
 }
 
 // ===========================================================================
-// Ruijie Cloud maint API — voucher sync, accounting reconciliation, session
+// Ruijie Cloud maint API ΓÇö voucher sync, accounting reconciliation, session
 // management (kick) and telemetry. ADDITIVE LAYER: bypassRuijieFirewall above
 // and everything in ruijieCloud.ts are untouched. Every function degrades to a
 // structured no-op when RUIJIE_CLOUD_* keys are missing, so local DB flows
@@ -48,7 +51,7 @@ export async function bypassRuijieFirewall(macAddress: string, ruijieAuthUrl: st
 // ===========================================================================
 
 // Live-verified against the tenant (2026-10): Ruijie Cloud Open API exposes
-// these three shapes — probe results, not guesses:
+// these three shapes ΓÇö probe results, not guesses:
 //   GET  /service/api/open/v1/dev/user/current-user?group_id&page_index&page_size
 //   POST /logbizagent/logbiz/api/sta/sta_users   body {groupId, staType, pageSize, pageIndex}
 //   GET  /service/api/maint/devices?common_type&group_id&page&per_page
@@ -61,10 +64,13 @@ const DEVICES_URL = '/service/api/maint/devices';
 const VOUCHER_SYNC_COLUMNS_SQL = `
   ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS holder_name TEXT;
   ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS holder_phone TEXT;
+  ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ;
   ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS ruijie_sync_status TEXT;
   ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS ruijie_voucher_id TEXT;
   ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS data_consumed_mb NUMERIC(12,2);
   ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS last_accounting_sync TIMESTAMPTZ;
+  ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS ruijie_active_clients INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS ruijie_max_clients INTEGER;
   CREATE INDEX IF NOT EXISTS idx_vouchers_ruijie_sync_status
     ON vouchers (ruijie_sync_status) WHERE ruijie_sync_status IS NOT NULL;
 `;
@@ -74,11 +80,13 @@ function maintConfig() {
 }
 
 function maintClient(): ReturnType<typeof axios.create> {
-  return axios.create({
+  // Same cluster-wide quota guard as ruijieCloud.client(): all maintenance
+  // endpoints share one tenant quota with voucher minting.
+  return attachRuijieQuotaGuard(axios.create({
     baseURL: process.env.RUIJIE_CLOUD_BASE_URL || 'https://cloud.ruijienetworks.com',
     timeout: 20000,
     headers: { 'Content-Type': 'application/json' },
-  });
+  }));
 }
 
 function errMsg(err: unknown): string {
@@ -87,7 +95,7 @@ function errMsg(err: unknown): string {
   return String(err);
 }
 
-/** Lowercase hex-only MAC (colons/dashes/spaces stripped) — matches voucher_devices.mac_norm. */
+/** Lowercase hex-only MAC (colons/dashes/spaces stripped) ΓÇö matches voucher_devices.mac_norm. */
 export function normalizeRuijieMac(raw: unknown): string {
   return String(raw ?? '').toLowerCase().replace(/[^a-f0-9]/g, '');
 }
@@ -131,6 +139,16 @@ function toSeconds(v: unknown): number | null {
   return n > 1_000_000 ? Math.round(n / 1000) : Math.round(n);
 }
 
+/** Epoch milliseconds for "Connected At". Accepts ms or s epoch, else null. */
+function toEpochMs(v: unknown): number | null {
+  const n = toNumber(v);
+  if (n === null || n <= 0) return null;
+  // Real connection timestamps are post-2001 in either unit.
+  if (n > 1_000_000_000_000) return Math.round(n);
+  if (n > 1_000_000_000) return Math.round(n * 1000);
+  return null;
+}
+
 /**
  * Pull the array payload out of a maint-API envelope. Non-zero `code`
  * (e.g. "Parameter group_id is null", permission denied) becomes a
@@ -162,7 +180,7 @@ function extractMaintList(payload: unknown, context: string): Record<string, unk
   return [];
 }
 
-/** Required group id — throws a structured config error when absent. */
+/** Required group id ΓÇö throws a structured config error when absent. */
 function requireGroupId(): string {
   const groupId = maintConfig().groupId;
   if (!groupId) throw new RuijieApiError('config', 'RUIJIE_CLOUD_GROUP_ID not configured');
@@ -176,7 +194,7 @@ function axiosStatus(err: unknown): { status?: number; message?: string } {
 }
 
 // ---------------------------------------------------------------------------
-// Boot schema (additive, idempotent) — same pattern as ensureStarlinkSchema.
+// Boot schema (additive, idempotent) ΓÇö same pattern as ensureStarlinkSchema.
 // ---------------------------------------------------------------------------
 
 export async function ensureVoucherRuijieSchema(): Promise<void> {
@@ -191,11 +209,12 @@ export async function ensureVoucherRuijieSchema(): Promise<void> {
         .query(
           `SELECT COUNT(*)::int AS n FROM information_schema.columns
             WHERE table_name = 'vouchers'
-              AND column_name IN ('holder_name','holder_phone','ruijie_sync_status',
-                                  'ruijie_voucher_id','data_consumed_mb','last_accounting_sync')`
+              AND column_name IN ('holder_name','holder_phone','last_seen_at','ruijie_sync_status',
+                                  'ruijie_voucher_id','data_consumed_mb','last_accounting_sync',
+                                  'ruijie_active_clients','ruijie_max_clients')`
         )
         .catch(() => ({ rows: [{ n: -1 }] }));
-      if (Number(rows[0]?.n) >= 6) return;
+      if (Number(rows[0]?.n) >= 9) return;
       await new Promise((r) => setTimeout(r, attempt * 750));
     }
   }
@@ -209,17 +228,61 @@ export async function ensureVoucherRuijieSchema(): Promise<void> {
 export interface RuijieOnlineUser {
   mac: string;
   ip: string | null;
+  /**
+   * Ruijie's own label for the client (device/person name ΓÇö live samples are
+   * 15-18 chars with spaces, e.g. "M2003J15SC-636333004"). This is NOT a
+   * voucher PIN; see voucherBindingService.verifyVoucherCodes before ever
+   * displaying it as one.
+   */
   username: string | null;
+  /** Raw `account` field when Ruijie reports one separately ΓÇö may be the PIN. */
+  account: string | null;
   sessionId: string | null;
   usedMb: number | null;
   upMb: number | null;
   downMb: number | null;
   onlineTimeSec: number | null;
+  /** Epoch ms the client came online ΓÇö the "Connected At" column. */
+  connectedAt: number | null;
   ssid: string | null;
   band: string | null;
   rssi: number | null;
+  /** Rates are BITS per second ΓÇö verified live against flow deltas (not kbps). */
   upRate: number | null;
   downRate: number | null;
+
+  // ΓöÇΓöÇ Identity (current-user) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+  label: string | null;
+  deviceName: string | null;
+  linkedDevice: string | null;
+  groupName: string | null;
+  connectType: string | null;
+  clientSource: string | null;
+  manufacturer: string | null;
+  manufacturerId: string | null;
+  staCategory: string | null;
+  staLabel: string | null;
+  staLabelName: string | null;
+  staOs: string | null;
+  staModel: string | null;
+  isMlo: boolean | null;
+  mloBand: string | null;
+
+  // ΓöÇΓöÇ AP / radio / health (station telemetry) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+  apName: string | null;
+  apSn: string | null;
+  buildingName: string | null;
+  channel: string | null;
+  utilization: number | null;
+  score: number | null;
+  scoreReason: string | null;
+  timeDelayMs: number | null;
+  floorNoise: number | null;
+  pktLoseRate: number | null;
+}
+
+function str(v: unknown): string | null {
+  return v === undefined || v === null || v === '' ? null : String(v);
 }
 
 function parseOnlineUser(u: Record<string, unknown>): RuijieOnlineUser {
@@ -229,36 +292,131 @@ function parseOnlineUser(u: Record<string, unknown>): RuijieOnlineUser {
   // flowUpDown / wifiUpDown are session-cumulative BYTES (verified live).
   const total = pickEntry(u, ['flowUpDown', 'wifiUpDown', 'usedBytes', 'useBytes', 'totalFlow', 'flow', 'usedFlow', 'bytes', 'traffic', 'usedMb']);
   const code = pick(u, ['userName', 'username', 'name', 'account', 'code', 'voucherCode', 'codeNo']);
+  const account = pick(u, ['account', 'userAccount']);
   const ip = pick(u, ['ip', 'userIp', 'ipAddress', 'hostIp', 'clientIp']);
   const sid = pick(u, ['onlineId', 'sessionId', 'sessionToken', 'id', 'token']);
   const ssid = pick(u, ['ssid', 'ssidName']);
   const band = pick(u, ['band', 'radioBand', 'frequency']);
   // Duration: activeSec is seconds; activeTime is milliseconds. `onlineTime`
-  // is an epoch start timestamp, NOT a duration — never treat it as one.
+  // is an epoch start timestamp, NOT a duration ΓÇö never treat it as one.
   const activeSec = toNumber(u.activeSec);
   const activeMs = toNumber(u.activeTime);
   const onlineTimeSec = activeSec !== null ? Math.round(activeSec) : activeMs !== null ? Math.round(activeMs / 1000) : null;
+  const isMlo = toNumber(u.isMlo);
   return {
     mac,
     ip: ip != null ? String(ip) : null,
     username: code != null ? String(code) : null,
+    account: account != null ? String(account) : null,
     sessionId: sid != null ? String(sid) : null,
     usedMb: total ? toMb(total[1], total[0]) : null,
     upMb: up ? toMb(up[1], up[0]) : null,
     downMb: down ? toMb(down[1], down[0]) : null,
     onlineTimeSec,
+    // `onlineTime` is the epoch START timestamp (not a duration) ΓÇö it feeds
+    // the "Connected At" column instead of the uptime cell.
+    connectedAt: toEpochMs(u.onlineTime),
     ssid: ssid != null ? String(ssid) : null,
     band: band != null ? String(band) : null,
-    rssi: toNumber(pick(u, ['rssi', 'rssiInt'])),
+    // rssi is a STRING in sta_users and a NUMBER in current-user ΓÇö prefer rssiInt.
+    rssi: toNumber(pick(u, ['rssiInt', 'rssi'])),
     upRate: toNumber(pick(u, ['upRate', 'uplinkRate'])),
     downRate: toNumber(pick(u, ['downRate', 'downlinkRate'])),
+
+    label: str(pick(u, ['alias', 'clientName'])),
+    deviceName: str(pick(u, ['deviceName'])),
+    linkedDevice: str(pick(u, ['linkedDevice'])),
+    groupName: str(pick(u, ['groupName'])),
+    connectType: str(pick(u, ['connectType'])),
+    clientSource: str(pick(u, ['clientSource'])),
+    manufacturer: str(pick(u, ['manufacturer'])),
+    manufacturerId: str(pick(u, ['manufacturerId'])),
+    staCategory: str(pick(u, ['staCategory'])),
+    staLabel: str(pick(u, ['staLabel'])),
+    staLabelName: str(pick(u, ['staLabelName'])),
+    staOs: str(pick(u, ['staOs'])),
+    staModel: str(pick(u, ['staModel'])),
+    isMlo: isMlo === null ? null : isMlo !== 0,
+    mloBand: str(pick(u, ['mloBand'])),
+
+    apName: null,
+    apSn: null,
+    buildingName: null,
+    channel: str(pick(u, ['channel'])),
+    utilization: toNumber(u.utilization),
+    score: toNumber(u.score),
+    scoreReason: str(u.scoreReason),
+    timeDelayMs: toNumber(u.timeDelay),
+    floorNoise: toNumber(u.floorNoise),
+    pktLoseRate: toNumber(u.pktLoseRate),
   };
 }
 
-export async function listRuijieOnlineUsers(): Promise<RuijieOnlineUser[]> {
+/**
+ * Station-telemetry row from POST sta_users ΓÇö the radio/health side of the
+ * picture (AP serial, airtime, latency, noise floor, health score).
+ * Only fills gaps on the current-user record; never overwrites a live value.
+ */
+function mergeStationTelemetry(user: RuijieOnlineUser, s: Record<string, unknown>): void {
+  if (user.apSn === null) user.apSn = str(pick(s, ['sn']));
+  if (user.connectedAt === null) user.connectedAt = toEpochMs(s.onlineTime);
+  if (user.apName === null) user.apName = str(pick(s, ['deviceAliasName', 'apName']));
+  if (user.buildingName === null) user.buildingName = str(pick(s, ['buildingName']));
+  if (user.label === null) user.label = str(pick(s, ['alias']));
+  if (user.ssid === null) user.ssid = str(pick(s, ['ssid']));
+  if (user.band === null) user.band = str(pick(s, ['band']));
+  if (user.channel === null) user.channel = str(pick(s, ['channel']));
+  if (user.rssi === null) user.rssi = toNumber(pick(s, ['rssiInt', 'rssi']));
+  if (user.utilization === null) user.utilization = toNumber(s.utilization);
+  if (user.score === null) user.score = toNumber(s.score);
+  if (user.scoreReason === null) user.scoreReason = str(s.scoreReason);
+  if (user.timeDelayMs === null) user.timeDelayMs = toNumber(s.timeDelay);
+  if (user.floorNoise === null) user.floorNoise = toNumber(s.floorNoise);
+  if (user.pktLoseRate === null) user.pktLoseRate = toNumber(s.pktLoseRate);
+  if (user.upRate === null) user.upRate = toNumber(s.uplinkRate);
+  if (user.downRate === null) user.downRate = toNumber(s.downlinkRate);
+  if (user.onlineTimeSec === null) {
+    const activeMs = toNumber(s.activeTime);
+    if (activeMs !== null) user.onlineTimeSec = Math.round(activeMs / 1000);
+  }
+  if (user.usedMb === null) {
+    const usage = pickEntry(s, ['wifiUpDown', 'wifiUp', 'wifiDown']);
+    if (usage) user.usedMb = toMb(usage[1], usage[0]);
+  }
+}
+
+/** Fetch the sta_users side (radio/health telemetry) keyed by normalized MAC. */
+async function fetchStationTelemetry(
+  accessToken: string,
+  pageSize: number
+): Promise<Map<string, Record<string, unknown>>> {
+  const out = new Map<string, Record<string, unknown>>();
+  try {
+    const res = await maintClient().post(`${STA_USERS_URL}?access_token=${encodeURIComponent(accessToken)}`, {
+      groupId: Number(requireGroupId()),
+      staType: 'currentUser',
+      pageSize,
+      pageIndex: 1,
+    });
+    for (const row of extractMaintList(res.data, 'sta_users/currentUser')) {
+      const mac = normalizeRuijieMac(pick(row, ['mac', 'MAC', 'macAddress']));
+      if (mac.length >= 12) out.set(mac, row);
+    }
+  } catch (err) {
+    // Telemetry is supplementary ΓÇö a sta_users failure must not lose the live list.
+    console.warn('[RUIJIE ACCT] station telemetry unavailable:', errMsg(err));
+  }
+  return out;
+}
+
+export async function listRuijieOnlineUsers(
+  opts: { stationTelemetry?: boolean } = {}
+): Promise<RuijieOnlineUser[]> {
   if (!isRuijieCloudConfigured()) return [];
   const groupId = requireGroupId();
+  const wantTelemetry = opts.stationTelemetry !== false;
   return withTokenRefresh(async (accessToken) => {
+    let users: RuijieOnlineUser[];
     try {
       const res = await maintClient().get(ONLINE_USERS_URL, {
         params: {
@@ -268,17 +426,26 @@ export async function listRuijieOnlineUsers(): Promise<RuijieOnlineUser[]> {
           access_token: accessToken,
         },
       });
-      return extractMaintList(res.data, 'open/v1/dev/user/current-user').map(parseOnlineUser);
+      users = extractMaintList(res.data, 'open/v1/dev/user/current-user').map(parseOnlineUser);
     } catch (err) {
       const { status, message } = axiosStatus(err);
       if (err instanceof RuijieApiError) throw err;
       throw new RuijieApiError('http', `current-user: ${status ?? 'network error'}${message ? ` ${message}` : ''}`);
     }
+
+    if (wantTelemetry && users.length > 0) {
+      const telemetry = await fetchStationTelemetry(accessToken, Math.max(100, users.length));
+      for (const user of users) {
+        const row = telemetry.get(user.mac);
+        if (row) mergeStationTelemetry(user, row);
+      }
+    }
+    return users;
   });
 }
 
 // ---------------------------------------------------------------------------
-// Accounting records (cumulative usage per MAC → attributed to vouchers)
+// Accounting records (cumulative usage per MAC ΓåÆ attributed to vouchers)
 // ---------------------------------------------------------------------------
 
 export interface RuijieAccountingRecord {
@@ -290,7 +457,7 @@ export interface RuijieAccountingRecord {
 }
 
 function parseAccountingRecord(r: Record<string, unknown>): RuijieAccountingRecord {
-  // No voucher-code field exists on sta_users records (verified live) — the
+  // No voucher-code field exists on sta_users records (verified live) ΓÇö the
   // code stays null and syncAccountingData attributes via MAC lookup instead.
   const usage = pickEntry(r, ['wifiUpDown', 'wifiUp', 'wifiDown', 'flowUpDown', 'usedBytes', 'usage', 'flow', 'totalUsedBytes', 'usedFlow', 'bytes', 'usedMb', 'totalFlow']);
   const ip = pick(r, ['userIp', 'ip', 'ipAddress', 'hostIp']);
@@ -339,7 +506,7 @@ export async function fetchRuijieAccountingRecords(opts: { pageSize?: number } =
 }
 
 // ---------------------------------------------------------------------------
-// AP/switch/gateway telemetry — GET /service/api/maint/devices (verified
+// AP/switch/gateway telemetry ΓÇö GET /service/api/maint/devices (verified
 // live). One call per common_type, per Ruijie's API contract.
 // ---------------------------------------------------------------------------
 
@@ -406,10 +573,10 @@ export async function listRuijieDevices(commonTypes: string[] = ['AP', 'Switch',
 }
 
 // ---------------------------------------------------------------------------
-// Accounting reconciliation → vouchers (data_consumed_mb + last_accounting_sync)
+// Accounting reconciliation ΓåÆ vouchers (data_consumed_mb + last_accounting_sync)
 //
 // Writes ONLY the two accounting columns (+ ruijie_sync_status when matched).
-// used_count / activated_at / expires_at / is_disabled — the session state —
+// used_count / activated_at / expires_at / is_disabled ΓÇö the session state ΓÇö
 // are never touched, so RADIUS decisions stay exactly as they were.
 // ---------------------------------------------------------------------------
 
@@ -423,7 +590,66 @@ export interface AccountingSyncResult {
   errors: string[];
 }
 
+const ACCOUNTING_SYNC_LOCK = 'preyone:ruijie-accounting-sync';
+
+/**
+ * Cross-worker gate for the accounting sweep.
+ *
+ * PM2 runs four workers and each one used to sweep the same online/accounting
+ * feeds at the same moment. That single burst (3 calls x 4 workers) consumed
+ * the whole per-minute Ruijie budget and starved the roster refresh, the
+ * voucher status sweep and customer usage lookups.
+ *
+ * One worker runs; the others skip and keep serving the shared caches.
+ */
 export async function syncAccountingData(): Promise<AccountingSyncResult> {
+  if (!isRuijieCloudConfigured()) return runAccountingSync();
+
+  let client: PoolClient | null = null;
+  let locked = false;
+  try {
+    client = await pool.connect();
+    const lock = await client.query(
+      `SELECT pg_try_advisory_lock(hashtext($1)::bigint) AS locked`,
+      [ACCOUNTING_SYNC_LOCK]
+    );
+    locked = Boolean(lock.rows[0]?.locked);
+  } catch {
+    // DB coordination unavailable ΓÇö keep the legacy single-shot behaviour.
+    client?.release();
+    client = null;
+    locked = true;
+  }
+
+  if (!locked) {
+    // The loser must give the client back. Leaving it checked out leaked one
+    // connection per worker every 5 minutes until the pool was full and login
+    // timed out with "Internal server error".
+    client?.release();
+    return {
+      skipped: true,
+      reason: 'another_worker_running',
+      onlineUsers: 0,
+      accountingRecords: 0,
+      matchedVouchers: 0,
+      updated: 0,
+      errors: [],
+    };
+  }
+
+  try {
+    return await runAccountingSync();
+  } finally {
+    if (client) {
+      await client
+        .query(`SELECT pg_advisory_unlock(hashtext($1)::bigint)`, [ACCOUNTING_SYNC_LOCK])
+        .catch(() => undefined);
+      client.release();
+    }
+  }
+}
+
+async function runAccountingSync(): Promise<AccountingSyncResult> {
   const result: AccountingSyncResult = {
     skipped: false,
     onlineUsers: 0,
@@ -443,7 +669,9 @@ export async function syncAccountingData(): Promise<AccountingSyncResult> {
   let records: RuijieAccountingRecord[] = [];
 
   try {
-    online = await listRuijieOnlineUsers();
+    // stationTelemetry: false ΓÇö sync fetches sta_users itself below, so the
+    // merge would just duplicate the call.
+    online = await listRuijieOnlineUsers({ stationTelemetry: false });
     result.onlineUsers = online.length;
   } catch (err) {
     result.errors.push(`online/users: ${errMsg(err)}`);
@@ -456,7 +684,7 @@ export async function syncAccountingData(): Promise<AccountingSyncResult> {
   }
 
   if (online.length === 0 && records.length === 0) {
-    // Offline or empty — leave local data exactly as-is (graceful fallback).
+    // Offline or empty ΓÇö leave local data exactly as-is (graceful fallback).
     return result;
   }
 
@@ -470,48 +698,69 @@ export async function syncAccountingData(): Promise<AccountingSyncResult> {
   for (const rec of records) {
     if (rec.code) bump(rec.code, rec.usedMb);
   }
-  for (const u of online) {
-    if (u.username) bump(u.username.trim().toLowerCase(), u.usedMb);
-  }
 
   // MAC-based attribution: Ruijie reports the station MAC, not the voucher
-  // code. Resolve MAC → voucher through voucher_devices (preferred, has
-  // mac_norm) then through portal users (mac_address → voucher_code).
-  const macTargets = [...new Set([...records.map((r) => r.mac), ...online.map((u) => u.mac)].filter((m) => m.length >= 12))];
+  // code. The shared resolver handles the case mismatch (Ruijie keys are
+  // lowercase, voucher_devices.mac_norm is UPPERCASE) across all four sources.
+  const macTargets = [...new Set([...records.map((r) => r.mac), ...online.map((u) => u.mac)])];
   const macUsage = new Map<string, number>();
   for (const rec of records) if (rec.mac && rec.usedMb !== null) macUsage.set(rec.mac, Math.max(macUsage.get(rec.mac) ?? 0, rec.usedMb));
   for (const u of online) if (u.mac && u.usedMb !== null) macUsage.set(u.mac, Math.max(macUsage.get(u.mac) ?? 0, u.usedMb));
 
+  const matchedMacs = new Set<string>();
   if (macTargets.length > 0) {
     try {
-      const { rows } = await pool.query(
-        `SELECT DISTINCT ON (mac_norm) mac_norm, voucher_code
-           FROM voucher_devices
-          WHERE is_active = TRUE AND mac_norm = ANY($1)`,
-        [macTargets]
-      );
-      for (const row of rows) {
-        const code = String(row.voucher_code || '').trim().toLowerCase();
-        if (code) bump(code, macUsage.get(String(row.mac_norm)) ?? null);
-      }
-
-      const unresolved = macTargets.filter((m) => !rows.some((r: any) => String(r.mac_norm) === m));
-      if (unresolved.length > 0) {
-        const { rows: userRows } = await pool.query(
-          `SELECT DISTINCT ON (lower(regexp_replace(mac_address, '[^a-fA-F0-9]', '', 'g')))
-             regexp_replace(mac_address, '[^a-fA-F0-9]', '', 'g') AS mac_norm, voucher_code
-           FROM users
-          WHERE voucher_code IS NOT NULL
-            AND lower(regexp_replace(mac_address, '[^a-fA-F0-9]', '', 'g')) = ANY($1)`,
-          [unresolved]
-        );
-        for (const row of userRows) {
-          const code = String(row.voucher_code || '').trim().toLowerCase();
-          if (code) bump(code, macUsage.get(String(row.mac_norm)) ?? null);
-        }
+      const bindings = await resolveVoucherBindings(macTargets);
+      for (const [key, binding] of bindings) {
+        if (!binding.code) continue;
+        matchedMacs.add(key);
+        bump(binding.code, macUsage.get(key) ?? null);
       }
     } catch (err) {
       result.errors.push(`mac attribution: ${errMsg(err)}`);
+    }
+  }
+
+  // Ruijie's `userName` counts only after it is confirmed to be a real
+  // voucher code ΓÇö it is usually a device/person label, and blindly bumping
+  // it wrote usage rows against codes that do not exist. `account` is checked
+  // too because some deployments put the PIN there instead.
+  try {
+    const verified = await verifyVoucherCodes(online.flatMap((u) => [u.username, u.account]));
+    if (verified.size > 0) {
+      for (const u of online) {
+        const code = [u.username, u.account]
+          .map((candidate) => String(candidate ?? '').trim().toLowerCase())
+          .map((candidate) => verified.get(candidate))
+          .find((candidate): candidate is string => !!candidate);
+        if (code) bump(code, u.usedMb);
+      }
+    }
+  } catch (err) {
+    result.errors.push(`username attribution: ${errMsg(err)}`);
+  }
+
+  // IP fallback: a record whose MAC is not bound yet can still be attributed
+  // through the portal authorization that used the same IP in the last 24h.
+  const ipTargets = [
+    ...new Set(
+      records
+        .filter((rec) => !matchedMacs.has(normalizeRuijieMac(rec.mac)) && rec.ip)
+        .map((rec) => String(rec.ip))
+    ),
+  ];
+  if (ipTargets.length > 0) {
+    try {
+      const byIp = await resolveVoucherCodesByIp(ipTargets);
+      for (const rec of records) {
+        if (!rec.ip || rec.code) continue;
+        if (matchedMacs.has(normalizeRuijieMac(rec.mac))) continue;
+        const key = rec.ip.startsWith('::ffff:') ? rec.ip.slice(7) : rec.ip;
+        const code = byIp.get(key);
+        if (code) bump(code, rec.usedMb);
+      }
+    } catch (err) {
+      result.errors.push(`ip attribution: ${errMsg(err)}`);
     }
   }
 
@@ -544,10 +793,10 @@ export async function syncAccountingData(): Promise<AccountingSyncResult> {
 // Client disconnect controller.
 //
 // Verified live (2026-10): Ruijie Cloud's Open API has NO REST disconnect
-// endpoint — probe attempts at /service/api/maint/user/kick,
+// endpoint ΓÇö probe attempts at /service/api/maint/user/kick,
 // /service/api/open/v1/dev/user/kick and .../user/offline all return 404 SPA
 // HTML, and the official docs expose disconnect only through the Ruijie Cloud
-// console ("Auth Client → Disconnect") or device CLI ("clear web-auth user").
+// console ("Auth Client ΓåÆ Disconnect") or device CLI ("clear web-auth user").
 // So this degrades to a structured `unsupported` result instead of hammering
 // guessed URLs. The route layer forwards it verbatim so operators get a clear,
 // actionable answer rather than a 502.
@@ -580,12 +829,12 @@ export async function kickRuijieUser(target: { mac?: string; sessionToken?: stri
     mac: mac || null,
     sessionId: sessionId || null,
     message:
-      'Ruijie Cloud Open API exposes no disconnect endpoint (console: Auth Client → Disconnect; device CLI: clear web-auth user).',
+      'Ruijie Cloud Open API exposes no disconnect endpoint (console: Auth Client ΓåÆ Disconnect; device CLI: clear web-auth user).',
   };
 }
 
 // ---------------------------------------------------------------------------
-// Voucher synchronization — verify a local voucher exists on Ruijie Cloud and
+// Voucher synchronization ΓÇö verify a local voucher exists on Ruijie Cloud and
 // record the outcome. NEVER fabricates or re-mints a code: if Ruijie does not
 // have it, the row is flagged 'missing' for an operator to decide.
 // ---------------------------------------------------------------------------
@@ -678,8 +927,18 @@ export function startRuijieAccountingPolling(): void {
     console.log('[RUIJIE ACCT] Periodic accounting sync disabled (RUIJIE_ACCOUNTING_INTERVAL_MIN<=0).');
     return;
   }
+  // Ruijie's quota cannot survive sub-5-minute sweeps (it answers code 44 long
+  // before the traffic looks heavy). Clamp rather than disable, so a stale
+  // RUIJIE_ACCOUNTING_INTERVAL_MIN=1 on a box cannot re-exhaust the tenant.
+  const SAFE_MIN_MINUTES = 5;
+  const safeMinutes = Math.max(SAFE_MIN_MINUTES, minutes);
+  if (safeMinutes !== minutes) {
+    console.warn(
+      `[RUIJIE ACCT] RUIJIE_ACCOUNTING_INTERVAL_MIN=${minutes} is below the safe floor; using ${safeMinutes} min.`
+    );
+  }
   if (!isRuijieCloudConfigured()) {
-    console.log('[RUIJIE ACCT] Ruijie Cloud not configured — accounting polling idle (local DB unaffected).');
+    console.log('[RUIJIE ACCT] Ruijie Cloud not configured ΓÇö accounting polling idle (local DB unaffected).');
     return;
   }
 
@@ -697,9 +956,9 @@ export function startRuijieAccountingPolling(): void {
     }
   };
 
-  accountingTimer = setInterval(tick, minutes * 60_000);
+  accountingTimer = setInterval(tick, safeMinutes * 60_000);
   accountingTimer.unref?.();
   // First reconciliation shortly after boot (staggered past DB warm-up).
   setTimeout(tick, 30_000).unref?.();
-  console.log(`[RUIJIE ACCT] Periodic accounting sync enabled (every ${minutes} min).`);
+  console.log(`[RUIJIE ACCT] Periodic accounting sync enabled (every ${safeMinutes} min).`);
 }
