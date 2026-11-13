@@ -33,7 +33,7 @@ async function ssoLogin(email: string, password: string): Promise<{
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password }),
+    body: JSON.stringify({ email, password, client: 'pos' }),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) return { error: data.error || 'Sign-in failed', code: data.code };

@@ -20,7 +20,7 @@ import '../settings.css';
  * this surface reads as the control room, not another invoice list.
  */
 
-type TabKey = 'company' | 'numbering' | 'tax' | 'payments' | 'billing' | 'team';
+type TabKey = 'company' | 'numbering' | 'tax' | 'payments' | 'billing' | 'team' | 'security';
 type RoleKey = 'CEO' | 'Staff' | 'Cashier';
 type SettingsIconName =
   | 'building'
@@ -31,7 +31,8 @@ type SettingsIconName =
   | 'gear'
   | 'lock'
   | 'info'
-  | 'spark';
+  | 'spark'
+  | 'shield';
 
 interface NumberingRule {
   prefix: string;
@@ -79,6 +80,7 @@ const TABS: Array<{ key: TabKey; label: string; icon: SettingsIconName; caption:
   { key: 'payments', label: 'Payment Rails', icon: 'card', caption: 'Pesepay, mobile money and auto-ledger' },
   { key: 'billing', label: 'Upgrade & Billing', icon: 'spark', caption: 'POS / invoicing subscription tiers' },
   { key: 'team', label: 'Team & Roles', icon: 'team', caption: 'Permissions for CEO, Staff and Cashier' },
+  { key: 'security', label: 'Sign-in security', icon: 'shield', caption: 'Optional email OTP for your account' },
 ];
 
 /** Inline icons keep the tabs crisp without depending on an emoji font. */
@@ -111,6 +113,12 @@ const SETTINGS_ICONS: Record<SettingsIconName, ReactNode> = {
       <path d="M3.5 19a5.5 5.5 0 0 1 11 0" />
       <path d="M16 5.5a3 3 0 0 1 0 5.8" />
       <path d="M17 19a5.2 5.2 0 0 0-2-4.1" />
+    </>
+  ),
+  shield: (
+    <>
+      <path d="M12 3 5 6v5c0 4.2 2.7 7.9 7 9 4.3-1.1 7-4.8 7-9V6l-7-3Z" />
+      <path d="m9.5 12 1.8 1.8L14.8 10" />
     </>
   ),
   gear: (
@@ -345,13 +353,49 @@ export default function SettingsPage({
   const [teamLoading, setTeamLoading] = useState(false);
   const [teamError, setTeamError] = useState<string | null>(null);
 
+  const [twoFactorEnabled, setTwoFactorEnabled] = useState(false);
+  const [twoFactorLoading, setTwoFactorLoading] = useState(false);
+  const [twoFactorBusy, setTwoFactorBusy] = useState(false);
+  const [twoFactorChallenge, setTwoFactorChallenge] = useState<string | null>(null);
+  const [twoFactorMasked, setTwoFactorMasked] = useState('');
+  const [twoFactorCode, setTwoFactorCode] = useState('');
+  const [disablePassword, setDisablePassword] = useState('');
+
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
+  const authHeaders = useCallback((): HeadersInit => {
+    const token = getToken();
+    return {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    };
+  }, []);
+
+  const loadTwoFactor = useCallback(async () => {
+    setTwoFactorLoading(true);
+    try {
+      const res = await fetch('/api/admin/auth/2fa', {
+        credentials: 'include',
+        headers: authHeaders(),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) setTwoFactorEnabled(data.enabled === true);
+    } catch {
+      /* keep previous */
+    } finally {
+      setTwoFactorLoading(false);
+    }
+  }, [authHeaders]);
+
   const normalizedRole = (role ?? '').toUpperCase();
   const isCeo = normalizedRole === 'CEO';
   const isManager = isCeo || normalizedRole === 'MANAGER';
+
+  useEffect(() => {
+    if (tab === 'security') void loadTwoFactor();
+  }, [tab, loadTwoFactor]);
 
   // Identify the session so CEO-only fields can be locked without a second
   // permissions endpoint. `/me` also works through the wildcard SSO cookie.
@@ -364,7 +408,11 @@ export default function SettingsPage({
     })
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
-        if (alive) setRole(typeof data?.role === 'string' ? data.role : null);
+        if (!alive) return;
+        setRole(typeof data?.role === 'string' ? data.role : null);
+        if (typeof data?.two_factor_enabled === 'boolean') {
+          setTwoFactorEnabled(data.two_factor_enabled);
+        }
       })
       .catch(() => {
         if (alive) setRole('');
@@ -567,6 +615,87 @@ export default function SettingsPage({
       else current.add(permission);
       return { ...prev, [roleKey]: ALL_PERMISSION_KEYS.filter((key) => current.has(key)) };
     });
+  };
+
+  const requestEnable2fa = async () => {
+    setTwoFactorBusy(true);
+    setNotice(null);
+    try {
+      const res = await fetch('/api/admin/auth/2fa/enable-request', {
+        method: 'POST',
+        credentials: 'include',
+        headers: authHeaders(),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Could not start two-factor setup');
+      if (data.enabled) {
+        setTwoFactorEnabled(true);
+        setNotice({ kind: 'ok', text: data.message || 'Two-factor authentication is already enabled.' });
+        return;
+      }
+      setTwoFactorChallenge(data.challengeToken || null);
+      setTwoFactorMasked(data.maskedEmail || '');
+      setTwoFactorCode('');
+      setNotice({ kind: 'ok', text: 'We emailed a 6-digit code. Enter it below to finish enabling 2FA.' });
+    } catch (err) {
+      setNotice({ kind: 'error', text: errorText(err) });
+    } finally {
+      setTwoFactorBusy(false);
+    }
+  };
+
+  const confirmEnable2fa = async () => {
+    if (!twoFactorChallenge || !/^\d{6}$/.test(twoFactorCode)) {
+      setNotice({ kind: 'error', text: 'Enter the 6-digit code from the email.' });
+      return;
+    }
+    setTwoFactorBusy(true);
+    setNotice(null);
+    try {
+      const res = await fetch('/api/admin/auth/2fa/enable-confirm', {
+        method: 'POST',
+        credentials: 'include',
+        headers: authHeaders(),
+        body: JSON.stringify({ challengeToken: twoFactorChallenge, code: twoFactorCode }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Could not verify the code');
+      setTwoFactorEnabled(true);
+      setTwoFactorChallenge(null);
+      setTwoFactorCode('');
+      setNotice({ kind: 'ok', text: data.message || 'Two-factor authentication enabled.' });
+    } catch (err) {
+      setNotice({ kind: 'error', text: errorText(err) });
+    } finally {
+      setTwoFactorBusy(false);
+    }
+  };
+
+  const disable2fa = async () => {
+    if (!disablePassword) {
+      setNotice({ kind: 'error', text: 'Enter your password to turn off two-factor authentication.' });
+      return;
+    }
+    setTwoFactorBusy(true);
+    setNotice(null);
+    try {
+      const res = await fetch('/api/admin/auth/2fa/disable', {
+        method: 'POST',
+        credentials: 'include',
+        headers: authHeaders(),
+        body: JSON.stringify({ password: disablePassword }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Could not disable two-factor authentication');
+      setTwoFactorEnabled(false);
+      setDisablePassword('');
+      setTwoFactorChallenge(null);
+      setNotice({ kind: 'ok', text: data.message || 'Two-factor authentication turned off.' });
+    } catch (err) {
+      setNotice({ kind: 'error', text: errorText(err) });
+    } finally {
+      setTwoFactorBusy(false);
+    }
   };
 
   const enabledRails = [
@@ -1221,7 +1350,109 @@ export default function SettingsPage({
         </section>
       )}
 
-      {tab !== 'billing' && (
+      {tab === 'security' && (
+        <section
+          className="settings-panel"
+          id="settings-panel-security"
+          role="tabpanel"
+          aria-labelledby="settings-tab-security"
+        >
+          <header className="settings-section-head">
+            <span className="settings-eyebrow">07 · Sign-in</span>
+            <h3>Optional email OTP</h3>
+            <p>
+              Two-factor codes are optional for invoicing and POS. The admin console still requires a
+              code on every sign-in.
+            </p>
+          </header>
+
+          {twoFactorLoading ? (
+            <div className="settings-empty">
+              <span className="spinner" aria-hidden /> Loading security settings…
+            </div>
+          ) : (
+            <div className="settings-fields" style={{ maxWidth: 520 }}>
+              <div className="settings-note">
+                <SettingsIcon name="shield" className="settings-lock-icon" />
+                Status:{' '}
+                <strong>{twoFactorEnabled ? 'Enabled for invoice & POS' : 'Off — password only'}</strong>
+              </div>
+
+              {!twoFactorEnabled && !twoFactorChallenge && (
+                <button
+                  className="btn primary"
+                  type="button"
+                  disabled={twoFactorBusy}
+                  onClick={() => void requestEnable2fa()}
+                >
+                  {twoFactorBusy ? 'Sending code…' : 'Enable email OTP'}
+                </button>
+              )}
+
+              {!twoFactorEnabled && twoFactorChallenge && (
+                <>
+                  <label className="settings-field settings-field--wide">
+                    <span>Code sent to {twoFactorMasked || 'your email'}</span>
+                    <input
+                      className="input"
+                      inputMode="numeric"
+                      autoComplete="one-time-code"
+                      maxLength={6}
+                      value={twoFactorCode}
+                      onChange={(e) => setTwoFactorCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                      placeholder="6-digit code"
+                    />
+                  </label>
+                  <div className="settings-savebar-actions" style={{ justifyContent: 'flex-start', gap: 8 }}>
+                    <button
+                      className="btn primary"
+                      type="button"
+                      disabled={twoFactorBusy}
+                      onClick={() => void confirmEnable2fa()}
+                    >
+                      {twoFactorBusy ? 'Verifying…' : 'Confirm & enable'}
+                    </button>
+                    <button
+                      className="btn ghost"
+                      type="button"
+                      disabled={twoFactorBusy}
+                      onClick={() => void requestEnable2fa()}
+                    >
+                      Resend code
+                    </button>
+                  </div>
+                </>
+              )}
+
+              {twoFactorEnabled && (
+                <>
+                  <label className="settings-field settings-field--wide">
+                    <span>Password (required to disable)</span>
+                    <input
+                      className="input"
+                      type="password"
+                      autoComplete="current-password"
+                      value={disablePassword}
+                      onChange={(e) => setDisablePassword(e.target.value)}
+                      placeholder="Your account password"
+                    />
+                  </label>
+                  <button
+                    className="btn ghost"
+                    type="button"
+                    disabled={twoFactorBusy || !disablePassword}
+                    onClick={() => void disable2fa()}
+                  >
+                    {twoFactorBusy ? 'Updating…' : 'Turn off email OTP'}
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+        </section>
+      )}
+
+      {tab !== 'billing' && tab !== 'security' && (
         <div className="settings-savebar">
           <div className="settings-savebar-copy">
             <strong>{busy ? 'Saving configuration…' : 'Changes apply to new documents'}</strong>
