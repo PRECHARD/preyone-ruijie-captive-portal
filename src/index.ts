@@ -31,6 +31,7 @@ import { voucherAnalyticsRouter } from './routes/voucherAnalytics';
 import { reportsRouter } from './routes/reports';
 import { startVoucherMonitor } from './services/voucherMonitorService';
 import { startVoucherPoolWorker } from './services/voucherPool';
+import { startRuijieVoucherStatusWorker } from './services/ruijieVoucherStatusSync';
 import { startReportScheduler } from './services/scheduler';
 import { ensureStarlinkSchema } from './db/starlink';
 import { errorHandler } from './middleware/errorHandler';
@@ -473,6 +474,14 @@ app.listen(PORT, () => {
     startRuijieAccountingPolling();
   } catch (err) {
     console.error('Ruijie accounting polling failed to start:', err);
+  }
+
+  // Mirrors Ruijie Cloud lifecycle onto local vouchers so the Vouchers tab
+  // shows the same lifecycle for online-paid and staff-issued codes.
+  try {
+    startRuijieVoucherStatusWorker();
+  } catch (err) {
+    console.error('Ruijie voucher status sync failed to start:', err);
   }
 
   if (process.env.ENABLE_SESSION_CLEANUP !== 'false') {
