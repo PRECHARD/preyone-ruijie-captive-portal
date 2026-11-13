@@ -382,12 +382,13 @@
   display: grid;
   place-items: center;
   border-radius: 10px;
-  border: 1px solid rgba(139, 92, 246, 0.26);
-  background:
-    linear-gradient(45deg, rgba(139, 92, 246, 0.06) 25%, transparent 25%) 0 0 / 18px 18px,
-    linear-gradient(-45deg, rgba(139, 92, 246, 0.06) 25%, transparent 25%) 0 0 / 18px 18px,
-    rgba(8, 3, 16, 0.72);
-  box-shadow: inset 0 0 32px rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(196, 181, 253, 0.42);
+  /* Proof it on paper, not on the dark rail: uploaded marks are usually dark
+     artwork meant for a white invoice, so a dark plate hid them completely. */
+  background: #fff;
+  box-shadow:
+    0 10px 26px rgba(0, 0, 0, 0.28),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.7);
 }
 .settings-logo-frame img {
   width: 100%;
@@ -400,8 +401,7 @@
   font-size: 34px;
   font-weight: 850;
   letter-spacing: 0.04em;
-  color: #c4b5fd;
-  text-shadow: 0 0 24px rgba(139, 92, 246, 0.55);
+  color: #7c3aed;
 }
 .settings-logo-ratio {
   position: absolute;

@@ -22,6 +22,13 @@ export interface Toast {
 
 type View = 'home' | 'sell' | 'stock' | 'history' | 'spares' | 'kds' | 'tables' | 'repairs' | 'settings';
 
+/** Initials for the operator pill, e.g. "Prechard Muvirimi" → "PM". */
+function initialsOf(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return '?';
+  return (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : '')).toUpperCase();
+}
+
 export default function App() {
   const [user, setUser] = useState<StaffUser | null>(auth.user());
   const [shift, setShift] = useState<Shift | null>(null);
@@ -32,6 +39,9 @@ export default function App() {
   const [homeTab, setHomeTab] = useState<'register' | 'documents'>('register');
   const [switching, setSwitching] = useState(false);
   const [toast, setToast] = useState<Toast | null>(null);
+  // The header clock is a trust signal on a till: it proves the terminal is
+  // awake and matches the wall clock without touching the sale hot path.
+  const [clock, setClock] = useState(() => new Date());
   // Null until the catalog loads, so a pre-migration backend never hides the
   // KDS/floor-plan buttons from a merchant who can already use them.
   const [modules, setModules] = useState<{ kds: boolean; tables: boolean } | null>(null);
@@ -104,6 +114,11 @@ export default function App() {
     if (user) refreshShift();
   }, [user, refreshShift]);
 
+  useEffect(() => {
+    const id = window.setInterval(() => setClock(new Date()), 20_000);
+    return () => window.clearInterval(id);
+  }, []);
+
   // Theme + module toggles. One read gives the merchant's palette (applied as
   // CSS variables) and whether QSR KDS / dine-in tables are enabled, so the
   // header only offers the workspaces this company actually owns.
@@ -160,8 +175,12 @@ export default function App() {
           <header className="topbar">
             <div className="brand-lockup">
               <img src="/Preyone.svg" alt="Preyone" />
-              <span className="brand-sub">POS · Enterprise</span>
+              <span className="brand-text">
+                <span className="brand-name">Preyone</span>
+                <span className="brand-sub">POS · Enterprise</span>
+              </span>
             </div>
+
             <span
               className={`live-badge ${live.connected ? 'on' : ''}`}
               title={live.connected ? 'Live sales and stock updates are streaming' : 'Reconnecting to the live feed'}
@@ -169,34 +188,51 @@ export default function App() {
               <i className="live-dot" />
               {live.sale ? 'LEDGER LIVE' : live.connected ? 'LIVE' : 'OFFLINE'}
             </span>
+
+            <nav className="top-nav" aria-label="POS workspaces">
+              <button className={`chip ${view === 'home' ? 'on' : ''}`} onClick={() => setView('home')}>HOME</button>
+              {user.role !== 'Cashier' && (
+                <>
+                  <button className={`chip ${view === 'sell' ? 'on' : ''}`} onClick={() => setView('sell')}>SELL</button>
+                  <button className={`chip ${view === 'stock' ? 'on' : ''}`} onClick={() => setView('stock')}>STOCK</button>
+                  <button className={`chip ${view === 'spares' ? 'on' : ''}`} onClick={() => setView('spares')}>SPARES</button>
+                  {modules?.kds !== false && (
+                    <button className={`chip ${view === 'kds' ? 'on' : ''}`} onClick={() => setView('kds')}>KDS</button>
+                  )}
+                  {modules?.tables !== false && (
+                    <button className={`chip ${view === 'tables' ? 'on' : ''}`} onClick={() => setView('tables')}>TABLES</button>
+                  )}
+                  <button className={`chip ${view === 'repairs' ? 'on' : ''}`} onClick={() => setView('repairs')}>REPAIRS</button>
+                </>
+              )}
+              <button className={`chip ${view === 'settings' ? 'on' : ''}`} onClick={() => setView('settings')}>
+                SETTINGS
+              </button>
+            </nav>
+
             <div className="spacer" />
-            <button className={`chip ${view === 'home' ? 'ok' : ''}`} onClick={() => setView('home')}>HOME</button>
-            {user.role !== 'Cashier' && (
-              <>
-                <button className={`chip ${view === 'sell' ? 'ok' : ''}`} onClick={() => setView('sell')}>SELL</button>
-                <button className={`chip ${view === 'stock' ? 'ok' : ''}`} onClick={() => setView('stock')}>STOCK</button>
-                <button className={`chip ${view === 'spares' ? 'ok' : ''}`} onClick={() => setView('spares')}>SPARES</button>
-                {modules?.kds !== false && (
-                  <button className={`chip ${view === 'kds' ? 'ok' : ''}`} onClick={() => setView('kds')}>KDS</button>
-                )}
-                {modules?.tables !== false && (
-                  <button className={`chip ${view === 'tables' ? 'ok' : ''}`} onClick={() => setView('tables')}>TABLES</button>
-                )}
-                <button className={`chip ${view === 'repairs' ? 'ok' : ''}`} onClick={() => setView('repairs')}>REPAIRS</button>
-              </>
-            )}
-            <button className={`chip ${view === 'settings' ? 'ok' : ''}`} onClick={() => setView('settings')}>
-              SETTINGS
-            </button>
+
+            <span className="top-clock" title={clock.toLocaleString()}>
+              <strong>{clock.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</strong>
+              <small>{clock.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })}</small>
+            </span>
+
             {shift && (
-              <button className="chip ok" onClick={() => setShowX(true)}>
-                SHIFT OPEN · ${shiftValue.toFixed(2)}
+              <button className="chip shift-chip" onClick={() => setShowX(true)} title="Open the X report and cash-up">
+                SHIFT OPEN
+                <b>${shiftValue.toFixed(2)}</b>
               </button>
             )}
             <CloudSyncIndicator />
-            <span className="chip">{user.fullName}</span>
-            <button className="ghost-btn" onClick={() => setSwitching(true)} title="Hand the till to another cashier">
-              Switch
+            <span className="operator-pill" title={`${user.fullName} · ${user.role}`}>
+              <span className="operator-avatar" aria-hidden>{initialsOf(user.fullName)}</span>
+              <span className="operator-copy">
+                <strong>{user.fullName}</strong>
+                <small>{user.role}</small>
+              </span>
+            </span>
+            <button className="ghost-btn ghost-btn--icon" onClick={() => setSwitching(true)} title="Hand the till to another cashier" aria-label="Switch cashier">
+              ⇄
             </button>
             <button className="ghost-btn" onClick={logout}>Sign out</button>
           </header>

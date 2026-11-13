@@ -542,10 +542,12 @@ function Composer({
   catalog,
   onClose,
   onCreated,
+  onOpenSettings,
 }: {
   catalog: Catalog;
   onClose: () => void;
   onCreated: (id: string) => void;
+  onOpenSettings: () => void;
 }) {
   const types = catalog.documentTypes.length ? catalog.documentTypes : FALLBACK_TYPES;
   const templates = catalog.templates;
@@ -559,7 +561,6 @@ function Composer({
   const [exchangeRate, setExchangeRate] = useState('1');
   const [taxPct, setTaxPct] = useState(String(Number(catalog.company.tax_pct) || 0));
   const [discountPct, setDiscountPct] = useState('0');
-  const [templateId, setTemplateId] = useState(String(catalog.company.invoice_template_id || templates[0]?.id || 1));
   const [poNumber, setPoNumber] = useState('');
   const [reference, setReference] = useState('');
   const [notes, setNotes] = useState('');
@@ -576,7 +577,11 @@ function Composer({
   const total = subtotal - discount;
   const taxPortion = total - total / (1 + (Number(taxPct) || 0) / 100);
 
-  const selectedTemplate = templates.find((t) => t.id === Number(templateId)) ?? templates[0];
+  // The document design is a workspace setting, not a per-document choice. The
+  // composer only displays the template the company has locked in Settings so
+  // every issued document matches the brand; the server also defaults to it.
+  const lockedTemplate =
+    templates.find((t) => t.id === Number(catalog.company.invoice_template_id)) ?? templates[0];
 
   const previewDueDate = useMemo(() => {
     if (!issueDate) return null;
@@ -637,7 +642,7 @@ function Composer({
         exchangeRate: Number(exchangeRate) || 1,
         taxPct: Number(taxPct) || 0,
         discountPct: Number(discountPct) || 0,
-        templateId: Number(templateId) || undefined,
+        templateId: lockedTemplate?.id,
         poNumber: poNumber || undefined,
         reference: reference || undefined,
         notes: notes || undefined,
@@ -675,23 +680,27 @@ function Composer({
           <div>
             <div className="panel-title" style={{ marginBottom: 6 }}>Document template</div>
             <p className="muted small" style={{ marginTop: 0, marginBottom: 10 }}>
-              All 20 templates are A4 documents — pick one and the proof beside the form updates instantly.
+              Locked to your workspace design so every document matches your brand. Change it
+              any time in Settings.
             </p>
-            <div className="template-strip" role="listbox" aria-label="Document template">
-              {templates.map((t) => (
-                <button
-                  key={t.id}
-                  type="button"
-                  role="option"
-                  aria-selected={Number(templateId) === t.id}
-                  className={`template-strip-item ${Number(templateId) === t.id ? 'selected' : ''}`}
-                  onClick={() => setTemplateId(String(t.id))}
-                  title={`${t.id}. ${t.name} — ${t.description}`}
-                >
-                  <TemplateThumb template={t} />
-                  <span className="template-strip-name">{t.name}</span>
+            <div className="template-locked" aria-label="Document template, configured in Settings">
+              <span className="template-locked-thumb" aria-hidden>
+                {lockedTemplate && <TemplateThumb template={lockedTemplate} />}
+              </span>
+              <span className="template-locked-copy">
+                <span className="template-locked-top">
+                  <span className="template-locked-name">
+                    {lockedTemplate ? `${lockedTemplate.id}. ${lockedTemplate.name}` : 'House template'}
+                  </span>
+                  <span className="template-locked-badge">Locked</span>
+                </span>
+                <span className="template-locked-desc">
+                  {lockedTemplate?.description || 'The design selected in Settings for this workspace.'}
+                </span>
+                <button type="button" className="template-locked-link" onClick={onOpenSettings}>
+                  Configured in Settings — change it there →
                 </button>
-              ))}
+              </span>
             </div>
 
             <div className="form-grid">
@@ -863,10 +872,10 @@ function Composer({
               Live A4 proof
             </div>
             <p className="muted small" style={{ marginTop: 0, marginBottom: 10 }}>
-              {selectedTemplate ? `${selectedTemplate.id}. ${selectedTemplate.name}` : 'House template'} · updates as you type
+              {lockedTemplate ? `${lockedTemplate.id}. ${lockedTemplate.name}` : 'House template'} · updates as you type
             </p>
             <div className="a4-preview-shell">
-              <DocumentSheet doc={previewDoc} company={catalog.company} template={selectedTemplate} />
+              <DocumentSheet doc={previewDoc} company={catalog.company} template={lockedTemplate} />
             </div>
           </aside>
         </div>
@@ -876,7 +885,7 @@ function Composer({
           sheet is never clipped by the modal's scroll container. */}
       {createPortal(
         <div className="a4-print-host">
-          <DocumentSheet doc={previewDoc} company={catalog.company} template={selectedTemplate} printRoot />
+          <DocumentSheet doc={previewDoc} company={catalog.company} template={lockedTemplate} printRoot />
         </div>,
         document.body
       )}
@@ -1932,6 +1941,10 @@ export default function App() {
         <Composer
           catalog={catalog}
           onClose={() => setComposerOpen(false)}
+          onOpenSettings={() => {
+            setComposerOpen(false);
+            navigate('settings');
+          }}
           onCreated={(id) => {
             setComposerOpen(false);
             refreshAll();

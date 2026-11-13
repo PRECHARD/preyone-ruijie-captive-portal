@@ -201,17 +201,34 @@ export default function Terminal({
     <div className="main-split">
       <section className="catalogue">
         <div className="search-row">
-          <input
-            placeholder="Scan barcode or search products…"
-            value={query}
-            autoFocus
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={onSearchKey}
-          />
-          <button onClick={() => setQuery('')} title="Clear" style={{ padding: '0 1rem' }}>✕</button>
+          <label className="search-field">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+              <circle cx="11" cy="11" r="7" />
+              <path d="m20 20-3.2-3.2" />
+            </svg>
+            <input
+              placeholder="Scan barcode or search products…"
+              aria-label="Scan barcode or search products"
+              value={query}
+              autoFocus
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={onSearchKey}
+            />
+            {query && (
+              <button type="button" className="search-clear" onClick={() => setQuery('')} aria-label="Clear search" title="Clear search">
+                ✕
+              </button>
+            )}
+          </label>
+          <span className="catalogue-count">
+            {filtered.length} {filtered.length === 1 ? 'item' : 'items'}
+          </span>
         </div>
         {filtered.length === 0 ? (
-          <div className="empty-note">No products match. Add stock in the admin console.</div>
+          <div className="empty-note">
+            <strong>No products match</strong>
+            <span>Try another name, SKU or barcode — or add stock in the admin console.</span>
+          </div>
         ) : (
           <div className="product-grid">
             {filtered.map((p) => {
@@ -227,7 +244,9 @@ export default function Terminal({
                   className={`product-card ${justMoved && moved > 0 ? 'stock-moved' : ''}`}
                   key={p.id}
                   onClick={() => addToCart(p)}
+                  aria-label={`Add ${p.name}, ${money(Number(p.price))}`}
                 >
+                  <span className="p-cat">{p.category || 'General'}</span>
                   <span className="p-name">{p.name}</span>
                   <span className="p-price">{money(Number(p.price))}</span>
                   {zigRate !== null && <span className="p-zig">≈ {zig(Number(p.price), zigRate)}</span>}
@@ -250,13 +269,39 @@ export default function Terminal({
 
       <aside className="cart-pane">
         <div className="cart-head">
-          <span>CURRENT SALE</span>
-          <button className="remove-btn" onClick={() => setCart([])} title="Clear sale">🗑</button>
+          <span className="cart-head-title">
+            CURRENT SALE
+            <span className="cart-count">{cart.reduce((n, l) => n + Number(l.qty || 0), 0)}</span>
+          </span>
+          <button
+            className="remove-btn cart-clear"
+            onClick={() => setCart([])}
+            title="Clear sale"
+            aria-label="Clear sale"
+            disabled={cart.length === 0}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M4 7h16" />
+              <path d="M9 7V5.5A1.5 1.5 0 0 1 10.5 4h3A1.5 1.5 0 0 1 15 5.5V7" />
+              <path d="M6 7l1 12.5A1.5 1.5 0 0 0 8.5 21h7a1.5 1.5 0 0 0 1.5-1.5L18 7" />
+              <path d="M10 11v6M14 11v6" />
+            </svg>
+          </button>
         </div>
 
         <div className="cart-lines">
           {cart.length === 0 ? (
-            <div className="empty-note">Tap a product to start</div>
+            <div className="cart-empty">
+              <span className="cart-empty-icon" aria-hidden>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M3 4h2l2.4 11.2a2 2 0 0 0 2 1.6h7.9a2 2 0 0 0 2-1.55L21 8H6" />
+                  <circle cx="9.5" cy="20" r="1.4" />
+                  <circle cx="17.5" cy="20" r="1.4" />
+                </svg>
+              </span>
+              <strong>Nothing in the basket</strong>
+              <span>Tap a product or scan a barcode to begin a sale.</span>
+            </div>
           ) : (
             cart.map((l, idx) => (
               <div className="cart-line" key={`${l.productId}-${idx}`}>
@@ -323,7 +368,8 @@ export default function Terminal({
           )}
 
           <button className="charge-btn" disabled={!canCharge} onClick={() => setCheckoutOpen(true)}>
-            CHARGE {money(total)}
+            <span>CHARGE</span>
+            <strong>{money(total)}</strong>
           </button>
         </div>
       </aside>

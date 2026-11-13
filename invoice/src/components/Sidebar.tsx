@@ -437,12 +437,20 @@ export default function Sidebar({
         <div className={`profile-card profile-card--${tone}`}>
           <span className="profile-avatar" aria-hidden>
             {initialsFor(user!)}
+            <i className="profile-presence" />
           </span>
           <span className="profile-id">
             <span className="profile-name" title={displayName}>
               {displayName}
             </span>
-            <span className={`role-badge role-badge--${tone}`}>{roleLabel}</span>
+            <span className="profile-meta">
+              <span className={`role-badge role-badge--${tone}`}>{roleLabel}</span>
+              {user?.email && user.email !== displayName ? (
+                <span className="profile-email" title={user.email}>
+                  {user.email}
+                </span>
+              ) : null}
+            </span>
           </span>
           <button
             type="button"
@@ -450,12 +458,21 @@ export default function Sidebar({
             onClick={() => void signOut()}
             disabled={signingOut}
             aria-label={`Sign out${user?.full_name ? ` ${user.full_name}` : ''}`}
-            title="Sign out"
+            title={signingOut ? 'Signing out…' : 'Sign out'}
           >
-            <span className="profile-signout-icon" aria-hidden>
-              🚪
-            </span>
-            <span className="profile-signout-text">{signingOut ? 'Signing out…' : 'Sign out'}</span>
+            <svg
+              className="profile-signout-icon"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.9"
+              strokeLinecap="round"
+              aria-hidden
+              focusable="false"
+            >
+              <path d="M12 3v8" />
+              <path d="M18.4 6.6a9 9 0 1 1-12.77.04" />
+            </svg>
           </button>
         </div>
       ) : null}

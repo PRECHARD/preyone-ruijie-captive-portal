@@ -211,6 +211,26 @@ app.get('/wispr', (_req, res) => {
   res.send(wisprXml(portalLoginUrl));
 });
 
+// ── Shared brand assets ───────────────────────────────────────
+// Company logos, invoice marks and email artwork all live in
+// `public/images` and are referenced as `/images/<file>` from every SPA. Only
+// the captive portal + main site ever mounted `public`, so on invoice / POS /
+// home-automate a missing `/images` mount fell through to that host's SPA
+// fallback and answered `200 text/html` — the browser then rendered a broken
+// image (and the Settings preview looked empty). Serve the real files from
+// every host, and answer a real 404 (never index.html) when one is absent.
+app.use(
+  '/images',
+  express.static(path.join(__dirname, '..', 'public', 'images'), {
+    dotfiles: 'ignore',
+    fallthrough: true,
+    ...optimizedImageStaticOptions,
+  }),
+  (_req, res) => {
+    res.status(404).type('text/plain').send('Image not found');
+  }
+);
+
 // ── Subdomain-based routing ──
 app.use((req, res, next) => {
   const host = req.hostname;
