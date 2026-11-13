@@ -310,6 +310,22 @@ app.use((req, res, next) => {
     return res.status(503).send('POS build not found. Run `cd pos && npm run build`.');
   }
 
+  // invoice.preyone.com → Preyone Invoice workspace SPA (Documents / Clients /
+  // Settings). nginx proxies this host to the portal on :5000; the SPA lives in
+  // invoice/dist. The separate preyone-invoice PM2 on :4000 is the legacy
+  // office engine and is not what this vhost serves.
+  if (host === 'invoice.preyone.com' || host === 'invoices.preyone.com') {
+    const invoiceDist = path.join(__dirname, '..', 'invoice', 'dist');
+    if (fs.existsSync(invoiceDist)) {
+      delete req.headers['range'];
+      delete req.headers['if-range'];
+      return express.static(invoiceDist)(req, res, () => {
+        res.sendFile(path.join(invoiceDist, 'index.html'));
+      });
+    }
+    return res.status(503).send('Invoice build not found. Run `cd invoice && npm run build`.');
+  }
+
   // app.preyone.com → enterprise gateway (single-login module launcher)
   if (host === 'app.preyone.com') {
     const appDist = path.join(__dirname, '..', 'app', 'dist');
