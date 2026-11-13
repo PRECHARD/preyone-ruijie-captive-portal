@@ -11,7 +11,7 @@ import { getToken, type Company, type DocType } from '../api';
  * without pushing the ledger or app switcher off-screen.
  */
 
-export type View = 'documents' | 'aging' | 'settings';
+export type View = 'documents' | 'aging' | 'accounting' | 'settings';
 
 type IconName =
   | 'docs'
@@ -19,6 +19,7 @@ type IconName =
   | 'aging'
   | 'wallet'
   | 'ledger'
+  | 'accounting'
   | 'settings'
   | 'gear'
   | 'types'
@@ -55,6 +56,15 @@ const ICONS: Record<IconName, ReactNode> = {
       <path d="M5 4.5A1.5 1.5 0 0 1 6.5 3h12A1.5 1.5 0 0 1 20 4.5v15a1.5 1.5 0 0 1-1.5 1.5h-12A1.5 1.5 0 0 1 5 19.5Z" />
       <path d="M8.5 3v18" />
       <path d="M12 8.5h4M12 12h4" />
+    </>
+  ),
+  accounting: (
+    <>
+      <path d="M4 19.5h16" />
+      <path d="M7 16V9.5" />
+      <path d="M12 16V6.5" />
+      <path d="M17 16v-4" />
+      <path d="M4.5 6.5h15" />
     </>
   ),
   settings: (
@@ -289,6 +299,7 @@ export default function Sidebar({
   const outstandingActive = onDocuments && statusFilter === 'unpaid';
   const paidActive = onDocuments && statusFilter === 'paid';
   const agingActive = view === 'aging';
+  const accountingActive = view === 'accounting';
   const settingsActive = view === 'settings';
 
   return (
@@ -388,6 +399,15 @@ export default function Sidebar({
           >
             <span className="nav-icon"><Icon name="aging" /></span>
             <span className="nav-text">AR aging</span>
+          </button>
+          <button
+            type="button"
+            className={`nav-item${accountingActive ? ' active' : ''}`}
+            aria-current={accountingActive ? 'page' : undefined}
+            onClick={() => onView('accounting')}
+          >
+            <span className="nav-icon"><Icon name="accounting" /></span>
+            <span className="nav-text">Accounting &amp; Financing</span>
           </button>
         </section>
 

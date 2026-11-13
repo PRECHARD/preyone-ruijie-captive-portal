@@ -11,6 +11,32 @@ interface ReportSchedule {
   created_at: string;
 }
 
+/** Settings keys read by src/services/voucherMonitorService.ts. */
+const ALERT_WARN_KEY = 'voucher_alert_warn_pct';
+const ALERT_CRIT_KEY = 'voucher_alert_crit_pct';
+const ALERT_WARN_DEFAULT = '80';
+const ALERT_CRIT_DEFAULT = '95';
+
+/** Managed by the dedicated card below, so it is hidden from the raw key/value list. */
+const REVENUE_TARGET_KEYS = [
+  'monthly_revenue_target',
+  'monthly_revenue_target_updated_at',
+  'monthly_revenue_target_updated_by',
+];
+
+/** GET/POST /api/admin/revenue-target */
+interface RevenueTarget {
+  target: number;
+  achieved: number;
+  remaining: number;
+  pct: number | null;
+  currency: string;
+  salesCount: number;
+  label: string;
+  configured: boolean;
+  updatedBy: string | null;
+}
+
 export default function Settings() {
   const [tab, setTab] = useState('general');
   const [loading, setLoading] = useState(true);
@@ -37,6 +63,11 @@ export default function Settings() {
   const [schedRecip, setSchedRecip] = useState('');
   const [schedEnabled, setSchedEnabled] = useState(true);
 
+  // Monthly revenue target (same value the Dashboard + My Sales progress bars read).
+  const [revenueTarget, setRevenueTarget] = useState<RevenueTarget | null>(null);
+  const [targetDraft, setTargetDraft] = useState('');
+  const [savingTarget, setSavingTarget] = useState(false);
+
   const fetch = useCallback(async () => {
     try { setSettings(await api.get('/settings')); } catch { /* ignore */ }
     try { setBranding(await api.get('/branding')); } catch { /* ignore */ }
@@ -44,13 +75,46 @@ export default function Settings() {
     try { setRetention(await api.get('/retention')); } catch { /* ignore */ }
     try { setCommissions(await api.get('/commissions')); } catch { /* ignore */ }
     try { setSchedules(await api.get('/report-schedules')); } catch { /* ignore */ }
+    try {
+      const t = await api.get<RevenueTarget>('/revenue-target');
+      setRevenueTarget(t);
+      setTargetDraft(t?.target ? String(t.target) : '');
+    } catch { /* target widget is optional */ }
     setLoading(false);
   }, []);
 
   useEffect(() => { fetch(); }, [fetch]);
 
+  const saveRevenueTarget = async () => {
+    const value = Number(targetDraft === '' ? 0 : targetDraft);
+    if (!Number.isFinite(value) || value < 0) {
+      setMsg('Revenue target must be 0 or a positive amount.');
+      return;
+    }
+    setSavingTarget(true);
+    try {
+      const data = await api.post<RevenueTarget>('/revenue-target', { target: value });
+      setRevenueTarget(data);
+      setTargetDraft(data?.target ? String(data.target) : '');
+      setMsg('Revenue target updated');
+    } catch (e: any) {
+      setMsg(e?.message || 'Could not save revenue target.');
+    } finally {
+      setSavingTarget(false);
+    }
+  };
+
   const updateSettings = async () => {
-    try { await api.put('/settings', settings); setMsg('Settings updated'); } catch (e: any) { setMsg(e.message); }
+    try {
+      // The revenue target has its own card/endpoint; never round-trip a stale
+      // copy of it through the generic settings save.
+      const payload: Record<string, string> = {};
+      for (const [k, v] of Object.entries(settings)) {
+        if (!REVENUE_TARGET_KEYS.includes(k)) payload[k] = v;
+      }
+      await api.put('/settings', payload);
+      setMsg('Settings updated');
+    } catch (e: any) { setMsg(e.message); }
   };
 
   const toggleMaintenance = async () => {
@@ -144,21 +208,92 @@ export default function Settings() {
         <button className={`auth-tab ${tab === 'branding' ? 'active' : ''}`} onClick={() => setTab('branding')}>Branding</button>
         <button className={`auth-tab ${tab === 'maintenance' ? 'active' : ''}`} onClick={() => setTab('maintenance')}>Maintenance</button>
         <button className={`auth-tab ${tab === 'retention' ? 'active' : ''}`} onClick={() => setTab('retention')}>Retention</button>
+        <button className={`auth-tab ${tab === 'alerts' ? 'active' : ''}`} onClick={() => setTab('alerts')}>Alert Thresholds</button>
         <button className={`auth-tab ${tab === 'commissions' ? 'active' : ''}`} onClick={() => setTab('commissions')}>Commissions</button>
         <button className={`auth-tab ${tab === 'schedules' ? 'active' : ''}`} onClick={() => setTab('schedules')}>Reports</button>
       </div>
 
       {tab === 'general' && (
-        <div className="card" style={{ padding: 20 }}>
-          <div className="auth-form">
-            {Object.entries(settings).map(([key, val]) => (
-              <div key={key} className="auth-field">
-                <label>{key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</label>
-                <input value={val} onChange={e => setSettings({ ...settings, [key]: e.target.value })} />
-              </div>
-            ))}
-            <button className="auth-btn" onClick={updateSettings}>Save Settings</button>
-            {msg && <div className={`form-status ${msg.includes('updated') ? 'form-status--success' : 'form-status--error'}`}>{msg}</div>}
+        <div className="settings-stack">
+          <div className="card settings-target" style={{ padding: 20 }}>
+            <div className="section-header" style={{ border: 'none', padding: 0, marginBottom: 4 }}>
+              Monthly Revenue Target
+              <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-dim)', fontWeight: 500 }}>
+                {revenueTarget?.label || 'This month'}
+              </span>
+            </div>
+            <p className="settings-target__hint">
+              Shared with My Sales and the Dashboard: both progress bars read this saved value live.
+              {revenueTarget?.updatedBy ? ` Last updated by ${revenueTarget.updatedBy}.` : ''}
+            </p>
+
+            <div
+              className="glass-progress"
+              role="progressbar"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={revenueTarget?.pct == null ? 0 : Math.round(Math.min(revenueTarget.pct, 100))}
+              aria-label="Monthly revenue target progress"
+            >
+              <div
+                className="glass-progress__fill"
+                style={{ width: `${revenueTarget?.pct == null ? 0 : Math.max(0, Math.min(revenueTarget.pct, 100))}%` }}
+              />
+              <span className="glass-progress__label">
+                {revenueTarget?.pct == null ? 'No target set' : `${revenueTarget.pct.toFixed(1)}%`}
+              </span>
+            </div>
+
+            <div className="settings-target__meta">
+              <span className="settings-target__achieved">
+                ${Number(revenueTarget?.achieved || 0).toFixed(2)}
+              </span>
+              <span>
+                achieved of ${Number(revenueTarget?.target || 0).toFixed(2)} {revenueTarget?.currency || 'USD'}
+                {revenueTarget?.configured
+                  ? ` · $${Number(revenueTarget.remaining || 0).toFixed(2)} to go`
+                  : ' · no target configured yet'}
+              </span>
+            </div>
+
+            <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap', marginTop: 14 }}>
+              <label className="settings-target__field">
+                Monthly target ({revenueTarget?.currency || 'USD'})
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  inputMode="decimal"
+                  aria-label="Monthly revenue target"
+                  value={targetDraft}
+                  onChange={(e) => setTargetDraft(e.target.value)}
+                  placeholder="e.g. 5000"
+                />
+              </label>
+              <button
+                type="button"
+                className="btn-glass btn-glass--gold"
+                disabled={savingTarget}
+                onClick={() => { void saveRevenueTarget(); }}
+              >
+                {savingTarget ? 'Saving…' : 'Save Target'}
+              </button>
+            </div>
+          </div>
+
+          <div className="card" style={{ padding: 20 }}>
+            <div className="auth-form">
+              {Object.entries(settings)
+                .filter(([key]) => !REVENUE_TARGET_KEYS.includes(key))
+                .map(([key, val]) => (
+                  <div key={key} className="auth-field">
+                    <label>{key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</label>
+                    <input value={val} onChange={e => setSettings({ ...settings, [key]: e.target.value })} />
+                  </div>
+                ))}
+              <button className="auth-btn" onClick={updateSettings}>Save Settings</button>
+              {msg && <div className={`form-status ${msg.includes('updated') ? 'form-status--success' : 'form-status--error'}`}>{msg}</div>}
+            </div>
           </div>
         </div>
       )}
@@ -212,6 +347,42 @@ export default function Settings() {
             <div className="auth-field"><label>Audit Log Retention (days)</label><input type="number" value={retention.audit_log_days ?? ''} onChange={e => setRetention({ ...retention, audit_log_days: e.target.value })} /></div>
             <button className="auth-btn" onClick={updateRetention}>Save Retention Policy</button>
             {retMsg && <div className={`form-status ${retMsg.includes('updated') ? 'form-status--success' : 'form-status--error'}`}>{retMsg}</div>}
+          </div>
+        </div>
+      )}
+
+      {tab === 'alerts' && (
+        <div className="card" style={{ padding: 20 }}>
+          <div className="auth-form">
+            <p style={{ color: 'var(--text-muted)', fontSize: 12, marginBottom: 12, lineHeight: 1.6 }}>
+              These percentages drive both the Consumption tab badges and the automated
+              push reminder sweep. The critical level must stay at least 5 points above the
+              warning level. Defaults are 80 / 95.
+            </p>
+            <div className="auth-field">
+              <label>Warning Threshold (%)</label>
+              <input
+                type="number"
+                min="1"
+                max="99"
+                step="1"
+                value={settings[ALERT_WARN_KEY] ?? ALERT_WARN_DEFAULT}
+                onChange={e => setSettings({ ...settings, [ALERT_WARN_KEY]: e.target.value })}
+              />
+            </div>
+            <div className="auth-field">
+              <label>Critical Threshold (%)</label>
+              <input
+                type="number"
+                min="2"
+                max="100"
+                step="1"
+                value={settings[ALERT_CRIT_KEY] ?? ALERT_CRIT_DEFAULT}
+                onChange={e => setSettings({ ...settings, [ALERT_CRIT_KEY]: e.target.value })}
+              />
+            </div>
+            <button className="auth-btn" onClick={updateSettings}>Save Thresholds</button>
+            {msg && <div className={`form-status ${msg.includes('updated') ? 'form-status--success' : 'form-status--error'}`}>{msg}</div>}
           </div>
         </div>
       )}

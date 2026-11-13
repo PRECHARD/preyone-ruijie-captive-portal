@@ -5,6 +5,7 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, AreaChart, Area,
 } from 'recharts';
 import { FiUsers, FiCreditCard, FiDollarSign, FiClock, FiActivity, FiTrendingUp, FiShoppingBag, FiWifi, FiHardDrive, FiAlertTriangle, FiRadio } from 'react-icons/fi';
+import { DEFAULT_REVENUE_TARGET, resolveMonthlyTarget, monthlyTargetPctRaw } from '../utils/revenueTarget';
 import './Dashboard.css';
 
 interface DashboardData {
@@ -32,7 +33,18 @@ interface DashboardData {
   };
   sales24h: { hour: string; count: number; revenue: number }[];
   byTier: { package_tier: string; count: number; total: number }[];
-  recentSales: { voucher_code: string; amount: number; currency: string; sold_by_name: string; sold_at: string }[];
+  recentSales: {
+    voucher_code: string;
+    amount: number;
+    currency: string;
+    sold_by_name: string;
+    sold_at: string;
+    payment_method?: string;
+    payment_reference?: string;
+    package_tier?: string;
+    client_name?: string;
+    client_phone?: string;
+  }[];
 }
 
 interface StaffStats {
@@ -69,6 +81,18 @@ function fmtTimeAgo(d: string): string {
 
 const tooltipStyle = { background: '#111', border: '1px solid #2a2a3e', borderRadius: 6, color: '#e2e8f0', fontSize: 12 };
 
+/**
+ * Baseline monthly revenue target.
+ *
+ * `/api/admin/revenue-target` is the canonical source for this number, but a
+ * tenant that has never saved one answers `configured: false` and `pct: null`.
+ * The Dashboard still has to show a meaningful gauge instead of "Not set", so it
+ * falls back to `DEFAULT_REVENUE_TARGET` (see `utils/revenueTarget`). Saving a
+ * target always wins over it — nothing is written back to the database here.
+ */
+const GAUGE_RADIUS = 42;
+const GAUGE_CIRCUMFERENCE = 2 * Math.PI * GAUGE_RADIUS;
+
 export default function Dashboard({ onNavigate }: { onNavigate?: (s: string) => void }) {
   const { user } = useAuth();
   const role = user?.role || 'Staff';
@@ -76,20 +100,55 @@ export default function Dashboard({ onNavigate }: { onNavigate?: (s: string) => 
 
   const [data, setData] = useState<DashboardData | null>(null);
   const [staffStats, setStaffStats] = useState<StaffStats | null>(null);
+  const [revenueTarget, setRevenueTarget] = useState<{
+    target: number; achieved: number; remaining: number; pct: number | null;
+    currency: string; label: string; configured: boolean;
+  } | null>(null);
   const [customerKpis, setCustomerKpis] = useState<any>(null);
 
   const loadAll = useCallback(() => {
     if (isMgmt) {
       api.get<DashboardData>('/dashboard').then(setData).catch(() => {});
+      // Monthly revenue target (settings-backed; canonical /api/admin/revenue-target).
+      api.get('/revenue-target').then(setRevenueTarget).catch(() => {});
       api.get('/customer-kpis').then(setCustomerKpis).catch(() => {});
     } else {
       api.get<StaffStats>('/staff/stats').then(setStaffStats).catch(() => {});
     }
   }, [isMgmt]);
 
-  useEffect(() => { loadAll(); const i = setInterval(loadAll, 30000); return () => clearInterval(i); }, [loadAll]);
+  useEffect(() => {
+    loadAll();
+    const i = setInterval(loadAll, 30000);
+    // A target saved in My Sales / Settings must show up immediately when the
+    // operator comes back to the Dashboard instead of waiting for the poll.
+    const onFocus = () => { if (!document.hidden) loadAll(); };
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onFocus);
+    return () => {
+      clearInterval(i);
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onFocus);
+    };
+  }, [loadAll]);
 
   const m = data?.metrics;
+
+  // ── Monthly revenue target (radial gauge) ──
+  // Prefer the stored target, fall back to the $500 baseline so the gauge is
+  // never blank. Fetched on mount through loadAll() and refreshed every 30s,
+  // on window focus and on tab visibility — the same cadence as the metrics.
+  const storedTarget = Number(revenueTarget?.target);
+  const targetIsCustom = Boolean(revenueTarget?.configured) && Number.isFinite(storedTarget) && storedTarget > 0;
+  const targetAmount = resolveMonthlyTarget(storedTarget, DEFAULT_REVENUE_TARGET);
+  const targetAchieved = Number(revenueTarget?.achieved) || 0;
+  const targetCurrency = revenueTarget?.currency || 'USD';
+  const rawTargetPct = monthlyTargetPctRaw(targetAchieved, targetAmount);
+  const targetPct = Number.isFinite(rawTargetPct) ? Math.max(0, rawTargetPct) : 0;
+  // The ring caps at a full circle; the number beside it may exceed 100%.
+  const gaugePct = Math.min(100, targetPct);
+  const gaugeOffset = GAUGE_CIRCUMFERENCE - (gaugePct / 100) * GAUGE_CIRCUMFERENCE;
+  const targetRemaining = Math.max(0, targetAmount - targetAchieved);
 
   if (isMgmt && !data) {
     return (
@@ -118,7 +177,7 @@ export default function Dashboard({ onNavigate }: { onNavigate?: (s: string) => 
     { label: 'Total Users', value: fmtN(m?.totalUsers ?? 0), icon: <FiUsers size={20} />, sub: `${fmtN(m?.activeSessions ?? 0)} active sessions`, color: 'cyan', section: 'sessions' },
     { label: 'Vouchers Created', value: fmtN(m?.vouchersCreated ?? 0), icon: <FiCreditCard size={20} />, sub: `${fmtN(m?.vouchersUsed ?? 0)} redeemed`, color: 'purple' },
     { label: 'Revenue', value: '$' + (m?.totalRevenue ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }), icon: <FiDollarSign size={20} />, sub: 'All-time sales', color: 'green', section: 'reports', money: true },
-    { label: 'Pending Payments', value: '$' + (m?.pendingPayments?.total ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }), icon: <FiClock size={20} />, sub: `${m?.pendingPayments?.count ?? 0} ContiPay pending`, color: 'orange', section: 'reports', money: true },
+    { label: 'Pending Payments', value: '$' + (m?.pendingPayments?.total ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }), icon: <FiClock size={20} />, sub: `${m?.pendingPayments?.count ?? 0} Pesepay pending`, color: 'orange', section: 'reports', money: true },
   ] : staffStats ? [
     { label: 'Active Sessions', value: staffStats.activeSessions.toString(), icon: <FiActivity size={20} />, sub: 'Your clients', color: 'cyan', section: 'sessions' },
     { label: 'Total Users', value: fmtN(staffStats.totalUsers), icon: <FiUsers size={20} />, sub: 'Your referrals', color: 'pink' },
@@ -149,6 +208,67 @@ export default function Dashboard({ onNavigate }: { onNavigate?: (s: string) => 
           </div>
         </div>
       ))}</div>
+
+      {isMgmt && (
+        <div className="glass-stats" style={{ marginTop: '1rem' }}>
+          <div className="glass-stat glass-stat--gold revenue-target" style={{ gridColumn: '1 / -1' }}>
+            <div className="revenue-target__head">
+              <span className="glass-stat__label">
+                Monthly Revenue Target · {revenueTarget?.label || 'This month'}
+              </span>
+              <span className="glass-stat__value glass-stat__value--gold revenue-target__pct">
+                {targetPct.toFixed(1)}%
+              </span>
+            </div>
+
+            <div className="revenue-target__body">
+              <div
+                className="revenue-gauge"
+                role="img"
+                aria-label={`${targetPct.toFixed(1)} percent of the $${targetAmount.toFixed(2)} monthly revenue target`}
+              >
+                <svg className="revenue-gauge__svg" viewBox="0 0 100 100" aria-hidden="true">
+                  <defs>
+                    <linearGradient id="revenueGaugeGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                      <stop offset="0%" stopColor="#00ccff" />
+                      <stop offset="60%" stopColor="#33e1c0" />
+                      <stop offset="100%" stopColor="#f5c451" />
+                    </linearGradient>
+                  </defs>
+                  <circle className="revenue-gauge__track" cx="50" cy="50" r={GAUGE_RADIUS} />
+                  <circle
+                    className="revenue-gauge__arc"
+                    cx="50"
+                    cy="50"
+                    r={GAUGE_RADIUS}
+                    strokeDasharray={GAUGE_CIRCUMFERENCE}
+                    strokeDashoffset={gaugeOffset}
+                  />
+                </svg>
+                <span className="revenue-gauge__center">
+                  {targetPct.toFixed(0)}
+                  <small>%</small>
+                </span>
+              </div>
+
+              <div className="revenue-target__copy">
+                <p className="revenue-target__achieved">
+                  ${targetAchieved.toFixed(2)}
+                  <span> of ${targetAmount.toFixed(2)} {targetCurrency}</span>
+                </p>
+                <p className="revenue-target__meta">
+                  {targetIsCustom
+                    ? `$${targetRemaining.toFixed(2)} to go this month`
+                    : `Default target of $${DEFAULT_REVENUE_TARGET.toFixed(2)} — set your own in My Sales → Revenue Target`}
+                </p>
+                <div className="glass-progress" aria-hidden="true">
+                  <div className="glass-progress__fill" style={{ width: `${gaugePct}%` }} />
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {isMgmt && data && (
         <>
@@ -212,7 +332,7 @@ export default function Dashboard({ onNavigate }: { onNavigate?: (s: string) => 
                   </span>
                 ) : (
                   <>
-                    <span className="stat-number"><span className="money">${(s as any).amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD</span></span>
+                    <span className="stat-number stat-number--money"><span className="money">${(s as any).amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD</span></span>
                     <span className="stat-sub">{s.count} sale{s.count !== 1 ? 's' : ''}</span>
                   </>
                 )}
@@ -331,12 +451,18 @@ export default function Dashboard({ onNavigate }: { onNavigate?: (s: string) => 
               <div className="card-header">Recent Sales</div>
               <div className="card-table" style={{ maxHeight: 320, overflowY: 'auto' }}>
                 <table className="data-table">
-                  <thead><tr><th>Code</th><th>Amount</th><th>Sold By</th><th>Time</th></tr></thead>
+                  <thead><tr><th>Code</th><th>Client</th><th>Package</th><th>Amount</th><th>Method</th><th>Sold By</th><th>Time</th></tr></thead>
                   <tbody>
                     {data.recentSales.map((s, i) => (
                       <tr key={i}>
                         <td><span className="code-cell">{s.voucher_code}</span></td>
-                        <td><span className="money money--sm">${Number(s.amount || 0).toFixed(2)} USD</span></td>
+                        <td>
+                          <div style={{ fontWeight: 600 }}>{s.client_name || '—'}</div>
+                          {s.client_phone && <div className="muted">{s.client_phone}</div>}
+                        </td>
+                        <td>{s.package_tier || '—'}</td>
+                        <td><span className="money money--sm">${Number(s.amount || 0).toFixed(2)} {s.currency || 'USD'}</span></td>
+                        <td>{s.payment_method || '—'}</td>
                         <td>{s.sold_by_name || '—'}</td>
                         <td className="muted">{fmtTimeAgo(s.sold_at)}</td>
                       </tr>

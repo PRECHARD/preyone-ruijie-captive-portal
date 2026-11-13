@@ -46,7 +46,15 @@ describe('Sector dashboards render against live CEO payloads', () => {
     fireEvent.click(screen.getByText('Network'));
     expect(screen.getByText('Access Point Monitoring')).toBeInTheDocument();
     fireEvent.click(screen.getByText('Sessions'));
-    expect(screen.getByText('Active Client Sessions')).toBeInTheDocument();
+    // Phase-2 layout: 3 summary cards (Client Type · Access Type ·
+    // Traffic Ranking) above the unified client-monitor table.
+    expect(screen.getByText('Client Type')).toBeInTheDocument();
+    expect(screen.getByText('Access Type')).toBeInTheDocument();
+    expect(screen.getByText('Traffic Ranking')).toBeInTheDocument();
+    expect(screen.getByText('Client Monitor')).toBeInTheDocument();
+    // The local `data.clients` duplicate table is gone — it was always empty
+    // in production and repeated what the cloud view already showed.
+    expect(screen.queryByText('Active Client Sessions')).not.toBeInTheDocument();
     expect(api.get).toHaveBeenCalledWith('/dashboard/wifi');
     expect(api.get).toHaveBeenCalledWith('/dashboard/ultranet/sales-summary');
   });
@@ -84,6 +92,45 @@ describe('Sector dashboards render against live CEO payloads', () => {
       expect(screen.getAllByText(d.voucherUsage[0].voucher_code).length).toBeGreaterThan(0);
       expect(screen.getAllByText(d.voucherUsage[0].holder_name).length).toBeGreaterThan(0);
     }
+  });
+
+  it('WifiDashboard — monthly revenue gauge defaults to $500 when no target is saved', async () => {
+    (api.get as any).mockImplementation((path: string) => {
+      if (path === '/revenue-target') {
+        return Promise.resolve({ target: 0, achieved: 0, configured: false, currency: 'USD', label: 'This month' });
+      }
+      if (path === '/dashboard/ultranet/sales-summary') {
+        // A tenant that has never saved a target reports 0 — the gauge used to
+        // render "no target set" at 0%.
+        return Promise.resolve({ ...(liveWifi as any), target: 0, monthly: 125 });
+      }
+      return Promise.resolve(liveWifi as any);
+    });
+
+    render(<WifiDashboard />);
+    await screen.findByText('Preyone UltraNet WiFi');
+
+    const label = await screen.findByText(/of \$500 · default/);
+    expect(label).toBeInTheDocument();
+    expect(api.get).toHaveBeenCalledWith('/revenue-target');
+  });
+
+  it('WifiDashboard — a saved target is used instead of the $500 default', async () => {
+    (api.get as any).mockImplementation((path: string) => {
+      if (path === '/revenue-target') {
+        return Promise.resolve({ target: 1000, achieved: 250, configured: true, currency: 'USD', label: 'This month' });
+      }
+      if (path === '/dashboard/ultranet/sales-summary') {
+        return Promise.resolve({ ...(liveWifi as any), target: 1000, monthly: 250 });
+      }
+      return Promise.resolve(liveWifi as any);
+    });
+
+    render(<WifiDashboard />);
+    await screen.findByText('Preyone UltraNet WiFi');
+
+    expect(await screen.findByText(/of \$1,000$/)).toBeInTheDocument();
+    expect(screen.queryByText(/of \$500 · default/)).not.toBeInTheDocument();
   });
 
   it('PosDashboard — live POS aggregate', async () => {

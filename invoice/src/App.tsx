@@ -25,6 +25,7 @@ import { OnlinePaymentModal, ReceiptPreview } from './payments';
 import { DocumentSheet, TemplateThumb, type SheetDoc } from './DocumentSheet';
 import Sidebar, { type View } from './components/Sidebar';
 import SettingsPage from './pages/Settings';
+import AccountingPage from './pages/Accounting';
 import './document.css';
 
 /* ────────────────────────────── helpers ────────────────────────────── */
@@ -1462,12 +1463,14 @@ function viewFromPath(pathname: string): View {
   const clean = pathname.replace(/\/+$/, '').toLowerCase();
   if (clean.endsWith('/settings')) return 'settings';
   if (clean.endsWith('/aging')) return 'aging';
+  if (clean.endsWith('/accounting') || clean.endsWith('/financing')) return 'accounting';
   return 'documents';
 }
 
 function pathForView(view: View): string {
   if (view === 'settings') return '/settings';
   if (view === 'aging') return '/aging';
+  if (view === 'accounting') return '/accounting';
   return '/';
 }
 
@@ -1717,7 +1720,7 @@ export default function App() {
       />
 
       <main className="main">
-        {view !== 'settings' && (
+        {view !== 'settings' && view !== 'accounting' && (
         <div className="topbar">
           <div>
             <h1 className="page-title">
@@ -1746,9 +1749,9 @@ export default function App() {
         </div>
         )}
 
-        {error && <div className="banner error">{error}</div>}
+        {error && view !== 'accounting' && <div className="banner error">{error}</div>}
 
-        {view !== 'settings' && (
+        {view !== 'settings' && view !== 'accounting' && (
           <div className="stats">
             <div className="stat">
               <div className="stat-label">Documents</div>
@@ -1779,6 +1782,8 @@ export default function App() {
             </div>
           </div>
         )}
+
+        {view === 'accounting' && <AccountingPage />}
 
         {view === 'documents' && (
           <div className="card panel">

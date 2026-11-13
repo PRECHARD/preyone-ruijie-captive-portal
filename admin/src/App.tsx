@@ -1,8 +1,11 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAuth } from './context/AuthContext';
 import Layout from './components/Layout';
+import LockScreen from './components/LockScreen';
+import IdleWarningDialog from './components/IdleWarningDialog';
 import Login from './pages/Login';
 import WifiDashboard from './pages/WifiDashboard';
+import VoucherConsumptionTab from './components/wifi/VoucherConsumptionTab';
 import TransitOperationsDashboard from './pages/TransitOperationsDashboard';
 import PosDashboard from './pages/PosDashboard';
 import Vouchers from './pages/Vouchers';
@@ -25,6 +28,7 @@ import Broadcasts from './pages/Broadcasts';
 import AuditLog from './pages/AuditLog';
 import Backup from './pages/Backup';
 import Settings from './pages/Settings';
+import GlobalSettingsHub from './pages/GlobalSettingsHub';
 import SystemHealth from './pages/SystemHealth';
 import Tenants from './pages/Tenants';
 import GlobalRevenue from './pages/GlobalRevenue';
@@ -44,7 +48,6 @@ import PosCustomers from './pages/PosCustomers';
 import PosReports from './pages/PosReports';
 import PosDevices from './pages/PosDevices';
 import PosCompanyProfile from './pages/PosCompanyProfile';
-import GlobalSettingsHub from './pages/GlobalSettingsHub';
 import Accounting from './pages/Accounting';
 import type { AuthUser } from './context/AuthContext';
 import { FiAlertOctagon } from 'react-icons/fi';
@@ -54,6 +57,7 @@ import { currentRoute, writeHash } from './routes';
 const sectionRoles: Record<string, string[]> = {
   overview: ['Staff', 'Manager', 'CEO'],
   vouchers: ['Staff', 'Manager', 'CEO'],
+  consumption: ['Staff', 'Manager', 'CEO'],
   users: ['Staff', 'Manager', 'CEO'],
   sessions: ['Staff', 'Manager', 'CEO'],
   'my-sales': ['Staff', 'Manager', 'CEO'],
@@ -73,13 +77,13 @@ const sectionRoles: Record<string, string[]> = {
   'audit-log': ['CEO'],
   backup: ['CEO'],
   settings: ['CEO'],
+  'pos-settings': ['CEO'],
   'pos-sales': ['Staff', 'Manager', 'CEO', 'Cashier'],
   'pos-inventory': ['Staff', 'Manager', 'CEO', 'Cashier'],
   'pos-customers': ['Staff', 'Manager', 'CEO', 'Cashier'],
   'pos-reports': ['Manager', 'CEO'],
   'pos-devices': ['Manager', 'CEO'],
   'pos-company': ['CEO'],
-  'pos-settings': ['CEO'],
   accounting: ['CEO', 'Manager', 'Cashier'],
 };
 
@@ -136,7 +140,7 @@ function FieldStaffGate({ onLogout }: { onLogout: () => void }) {
 }
 
 export default function App() {
-  const { user, loading, logout } = useAuth();
+  const { user, loading, logout, locked } = useAuth();
   // A deep link wins over the persisted workspace: arriving at
   // #/transit/tenants must land on Transit regardless of what this browser
   // last used, otherwise the page stays unreachable by URL.
@@ -234,32 +238,49 @@ export default function App() {
   if (safeSection !== section) setSection('overview');
 
   return (
-    <Layout activeSection={safeSection} onNavigate={go} workspace={workspace} onWorkspaceChange={changeWorkspace}>
+    <>
+      {/* Session policy overlays. The console stays MOUNTED underneath both so
+          in-progress forms keep their state across a lock/unlock cycle. */}
+      <IdleWarningDialog />
+      {locked && <LockScreen />}
+      <Layout activeSection={safeSection} onNavigate={go} workspace={workspace} onWorkspaceChange={changeWorkspace}>
       {safeSection === 'overview' && (
         workspace === 'transit' ? <TransitOperationsDashboard onNavigate={setSection} />
         : workspace === 'pos' ? <PosDashboard onNavigate={setSection} />
         : <WifiDashboard onNavigate={setSection} />
       )}
       {safeSection === 'vouchers' && <Vouchers />}
+      {safeSection === 'consumption' && <VoucherConsumptionTab />}
       {safeSection === 'users' && <Users />}
       {safeSection === 'sessions' && <Sessions />}
       {safeSection === 'my-sales' && <MySales />}
       {safeSection === 'time' && <TimeAttendance />}
       {safeSection === 'access-log' && <AccessLog />}
-      {safeSection === 'mac-mgmt' && <MacMgmt />}
+      {safeSection === 'mac-mgmt' && (
+        <MacMgmt onNavigate={go} canGateway={sectionAllowed(user, 'gateway-settings')} />
+      )}
       {safeSection === 'alerts' && <Alerts />}
-      {safeSection === 'ap-health' && <ApHealth />}
+      {safeSection === 'ap-health' && (
+        <ApHealth onNavigate={go} canManageDevices={sectionAllowed(user, 'ap-devices')} />
+      )}
       {safeSection === 'bandwidth' && <Bandwidth />}
       {safeSection === 'peak-hours' && <PeakHours />}
-      {safeSection === 'staff' && <StaffManagement />}
-      {safeSection === 'reports' && <Reports />}
+      {safeSection === 'staff' && (
+        <StaffManagement onNavigate={go} canAdminUsers={sectionAllowed(user, 'admin-users')} />
+      )}
+      {safeSection === 'reports' && (
+        <Reports onNavigate={go} canPeakHours={sectionAllowed(user, 'peak-hours')} />
+      )}
       {safeSection === 'admin-users' && <AdminUsers />}
       {safeSection === 'packages' && <Packages />}
       {safeSection === 'ap-devices' && <ApDevices />}
       {safeSection === 'broadcasts' && <Broadcasts />}
-      {safeSection === 'audit-log' && <AuditLog />}
+      {safeSection === 'audit-log' && (
+        <AuditLog onNavigate={go} canPlatform={sectionAllowed(user, 'platform-audit')} />
+      )}
       {safeSection === 'backup' && <Backup />}
       {safeSection === 'settings' && <Settings />}
+      {safeSection === 'pos-settings' && <GlobalSettingsHub />}
       {safeSection === 'system-health' && <SystemHealth />}
       {safeSection === 'tenants' && <Tenants />}
       {safeSection === 'global-revenue' && <GlobalRevenue />}
@@ -279,8 +300,8 @@ export default function App() {
       {safeSection === 'pos-reports' && <PosReports />}
       {safeSection === 'pos-devices' && <PosDevices />}
       {safeSection === 'pos-company' && <PosCompanyProfile />}
-      {safeSection === 'pos-settings' && <GlobalSettingsHub />}
       {safeSection === 'accounting' && <Accounting />}
-    </Layout>
+      </Layout>
+    </>
   );
 }
