@@ -183,6 +183,138 @@ app.get('/robots.txt', (_req, res) => {
   res.send('User-agent: *\nAllow: /\n\nSitemap: https://preyone.com/sitemap.xml\n');
 });
 
+// OTP clipboard helper. Mail clients (Gmail, Outlook, iOS Mail, Samsung Email)
+// strip <script> from message bodies, so a copy button inside the email can
+// never touch the clipboard. This hosted page is the one place a real copy can
+// happen, on every platform. The code travels in the URL fragment, which
+// browsers never send to the server, so it cannot land in access logs,
+// Referer headers or a link scanner's cache.
+const COPY_CODE_PAGE = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<meta name="referrer" content="no-referrer">
+<title>Copy your Preyone code</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px;
+         background: #050505; color: #f8fbff;
+         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; }
+  .card { width: 100%; max-width: 430px; background: #0a0d17; border: 1px solid #1c2438; border-radius: 18px;
+          padding: 30px 22px 26px; text-align: center; box-shadow: 0 18px 60px rgba(0,0,0,.55); }
+  .brand { font-size: 11px; letter-spacing: .18em; text-transform: uppercase; color: #8b93a7; }
+  h1 { margin: 12px 0 6px; font-size: 21px; line-height: 1.3; }
+  .sub { margin: 0; font-size: 14px; line-height: 1.55; color: #94a3b8; }
+  .code { margin: 22px 0; padding: 20px 8px 20px 18px; border-radius: 14px; background: #111827; border: 1px solid #263049;
+          font-family: 'SFMono-Regular', Consolas, Menlo, monospace; font-size: 42px; font-weight: 700;
+          letter-spacing: .22em; user-select: all; -webkit-user-select: all; word-break: break-all; }
+  .code.ok { background: #0f2118; border-color: #2f7d4f; }
+  button { width: 100%; border: 0; border-radius: 12px; padding: 17px; font-size: 16px; font-weight: 700; color: #fff;
+           background: #6a0dad; background-image: linear-gradient(135deg,#6a0dad,#ff00ff); cursor: pointer;
+           font-family: inherit; }
+  button:active { transform: translateY(1px); }
+  button.done { background-image: none; background: #1f7a4d; }
+  .status { margin: 14px 0 0; font-size: 12.5px; line-height: 1.55; color: #64748b; }
+  .foot { margin: 20px 0 0; font-size: 11px; line-height: 1.5; color: #475569; }
+</style>
+</head>
+<body>
+<main class="card">
+  <div class="brand">Preyone UltraNet</div>
+  <h1>Your sign-in code</h1>
+  <p class="sub">Tap the button to copy, then paste it on the sign-in screen.</p>
+  <div class="code" id="code" aria-live="polite">&mdash;&mdash;&mdash;&mdash;&mdash;&mdash;</div>
+  <button id="copy" type="button">Copy code</button>
+  <p class="status" id="status">If copying is blocked, press and hold the code above and choose Copy.</p>
+  <p class="foot">This code expires in 5 minutes. You can close this page.</p>
+</main>
+<script>
+(function () {
+  var raw = (location.hash || '').replace(/^#/, '');
+  var code = raw.replace(/[^0-9A-Za-z]/g, '').slice(0, 12);
+  var el = document.getElementById('code');
+  var btn = document.getElementById('copy');
+  var status = document.getElementById('status');
+
+  if (code) {
+    el.textContent = code;
+  } else {
+    status.textContent = 'Open this page from the "Copy code" button in your email.';
+  }
+
+  function legacyCopy(text) {
+    try {
+      var ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.position = 'fixed';
+      ta.style.top = '-1000px';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      ta.setSelectionRange(0, ta.value.length);
+      var ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      return ok;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function manual() {
+    try {
+      var range = document.createRange();
+      range.selectNodeContents(el);
+      var sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+      status.textContent = 'Press and hold the highlighted code, then choose Copy.';
+    } catch (e) {
+      status.textContent = 'Press and hold the code above, then choose Copy.';
+    }
+  }
+
+  function done() {
+    btn.textContent = 'Copied';
+    btn.className = 'done';
+    el.className = 'code ok';
+    status.textContent = 'Copied. Paste it on the sign-in screen.';
+    if (navigator.vibrate) { try { navigator.vibrate(30); } catch (e) {} }
+  }
+
+  function copy() {
+    if (!code) { return; }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(code).then(done, function () {
+        if (legacyCopy(code)) { done(); } else { manual(); }
+      });
+    } else if (legacyCopy(code)) {
+      done();
+    } else {
+      manual();
+    }
+  }
+
+  btn.addEventListener('click', copy);
+  window.addEventListener('hashchange', function () {
+    var next = (location.hash || '').replace(/^#/, '').replace(/[^0-9A-Za-z]/g, '').slice(0, 12);
+    if (next) { code = next; el.textContent = next; el.className = 'code'; btn.className = ''; btn.textContent = 'Copy code'; }
+  });
+})();
+</script>
+</body>
+</html>`;
+
+app.get('/copy-code', (_req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('X-Robots-Tag', 'noindex, nofollow');
+  res.type('html').send(COPY_CODE_PAGE);
+});
+
 // PWA usage portal. Registered BEFORE the subdomain middleware so it resolves
 // on every host — the wifi.preyone.com branch ends in a sendFile fallback that
 // never calls next(), which would shadow a later route and serve the captive

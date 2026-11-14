@@ -1,4 +1,5 @@
 import nodemailer from 'nodemailer';
+import { randomUUID } from 'crypto';
 
 let transporter: nodemailer.Transporter | null = null;
 
@@ -55,7 +56,7 @@ function emailFooter(): string {
 }
 
 // ── Generic email helper ──────────────────────────────────────────────
-async function sendMail(to: string, subject: string, html: string, fromName?: string, fromEmail?: string, attachments?: Array<{ filename: string; content: Buffer; cid?: string }>): Promise<boolean> {
+async function sendMail(to: string, subject: string, html: string, fromName?: string, fromEmail?: string, attachments?: Array<{ filename: string; content: Buffer; cid?: string }>, headers?: Record<string, string>): Promise<boolean> {
   const t = getTransporter();
   if (!t) {
     console.log('[NOTIFICATION] Email not sent (SMTP not configured). To:', to);
@@ -64,7 +65,7 @@ async function sendMail(to: string, subject: string, html: string, fromName?: st
   const email = fromEmail || process.env.SMTP_FROM || 'info@preyone.com';
   const from = fromName ? `"${fromName}" <${email}>` : email;
   try {
-    await t.sendMail({ from, to, subject, html, attachments });
+    await t.sendMail({ from, to, subject, html, attachments, headers });
     console.log('[NOTIFICATION] Email sent to', to, '-', subject);
     return true;
   } catch (err) {
@@ -705,9 +706,25 @@ export async function sendAdminLoginCode(email: string, fullName: string, code: 
   const sans = "'Segoe UI',-apple-system,BlinkMacSystemFont,Roboto,Arial,sans-serif";
   const mono = "'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace";
 
+  // Gmail and Outlook group transactional mails that share a subject into one
+  // conversation and hide the repeated body behind a "..." (three dots) that
+  // has to be tapped to expand. A timestamped subject plus a per-message
+  // X-Entity-Ref-ID keeps every OTP a standalone message, so the code is
+  // visible immediately without expanding anything.
+  const stamp = new Intl.DateTimeFormat('en-GB', {
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZone: 'Africa/Harare',
+  }).format(new Date());
+  const threadRef = randomUUID();
+
+  // The code travels in the URL fragment, which browsers never send to the
+  // server: it cannot leak into access logs, Referer headers or link scanners.
+  const copyUrl = `${baseUrl}/copy-code#${encodeURIComponent(code)}`;
+
   return sendMail(
     email,
-    'Your Preyone sign-in code',
+    `Your Preyone sign-in code \u00b7 ${stamp}`,
     `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -762,6 +779,25 @@ export async function sendAdminLoginCode(email: string, fullName: string, code: 
                         </td>
                       </tr>
                     </table>
+                  </td>
+                </tr>
+              </table>
+
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                <tr>
+                  <td align="center" style="padding:20px 32px 0">
+                    <table role="presentation" cellspacing="0" cellpadding="0" border="0" align="center">
+                      <tr>
+                        <td align="center" style="border-radius:10px;background:#6a0dad;background-image:linear-gradient(135deg,#6a0dad,#ff00ff)">
+                          <a href="${copyUrl}" target="_blank" style="display:inline-block;padding:14px 36px;font-family:${sans};font-size:15px;line-height:1;font-weight:700;color:#ffffff;text-decoration:none;border-radius:10px">Copy code</a>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+                <tr>
+                  <td align="center" style="padding:12px 32px 0;font-family:${sans};font-size:12px;line-height:1.5;color:#64748b">
+                    Opens a page that copies the code to your clipboard. You can also press and hold the code above.
                   </td>
                 </tr>
               </table>
@@ -823,7 +859,8 @@ export async function sendAdminLoginCode(email: string, fullName: string, code: 
   </table>
 </body>
 </html>`,
-    'Preyone', 'admin@preyone.com'
+    'Preyone', 'admin@preyone.com', undefined,
+    { 'X-Entity-Ref-ID': threadRef, 'X-Auto-Response-Suppress': 'All' }
   );
 }
 
