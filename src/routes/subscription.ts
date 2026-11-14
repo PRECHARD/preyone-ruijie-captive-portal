@@ -12,10 +12,9 @@ import type { PesepayCurrency, PesepayRail } from '../services/pesepayService';
 
 export const subscriptionRouter = Router();
 
-// The three purchasable tiers. Prices are USD/month and must stay in lockstep
-// with the Upgrade modal (pos/src/components/UpgradeModal.tsx) and the
-// companies.plan_type CHECK constraint.
-export const PLAN_TIERS = ['standard_10', 'growth_20', 'unlimited_30'] as const;
+// Purchasable tiers. Prices are USD/month and must stay in lockstep with the
+// Upgrade modals (pos + invoice) and companies.plan_type CHECK constraint.
+export const PLAN_TIERS = ['standard_10', 'invoicing_15', 'growth_20', 'unlimited_30'] as const;
 export type PlanTier = (typeof PLAN_TIERS)[number];
 
 export const TIER_CATALOG: Array<{
@@ -25,8 +24,9 @@ export const TIER_CATALOG: Array<{
   devices: number;
   tagline: string;
 }> = [
-  { id: 'standard_10', name: 'Standard', price: 10, devices: 1, tagline: 'Single till, one registered device.' },
-  { id: 'growth_20', name: 'Growth', price: 20, devices: 6, tagline: 'Up to 6 devices across your team.' },
+  { id: 'standard_10', name: 'POS Only', price: 10, devices: 1, tagline: 'Till only — one registered device.' },
+  { id: 'invoicing_15', name: 'POS + Invoicing', price: 15, devices: 3, tagline: 'POS and invoicing — up to 3 devices.' },
+  { id: 'growth_20', name: 'POS + Invoicing', price: 20, devices: 6, tagline: 'POS and invoicing — up to 6 devices.' },
   { id: 'unlimited_30', name: 'Unlimited', price: 30, devices: 9999, tagline: 'Unlimited devices, priority support.' },
 ];
 

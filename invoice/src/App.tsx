@@ -339,7 +339,9 @@ function LoginPanel({ onSignedIn, initialNotice }: { onSignedIn: () => void; ini
     setNotVerified(false);
     try {
       const path = challenge ? '/api/admin/auth/verify-2fa' : '/api/admin/auth/login';
-      const body = challenge ? { challengeToken: challenge, code } : { email, password };
+      const body = challenge
+        ? { challengeToken: challenge, code }
+        : { email, password, client: 'invoice' };
       const res = await fetch(path, {
         method: 'POST',
         credentials: 'include',

@@ -150,6 +150,9 @@ export default function Terminal({ user, notify, onApiError, onShiftChanged, shi
       setDiscountPct('0');
       setTaxPct('15.5');
       notify(`${result.doc_number} completed`);
+      // Reflect stock decrement immediately so catalogue cards stay in sync
+      // with ledger/Pesepay settle (AccountingView also polls /api/accounting).
+      api.products().then(setProducts).catch(() => { /* best-effort */ });
       // A cash tender opens the physical drawer: log the kick against the
       // shift so the drawer audit trail reconciles with cash-up.
       if (shiftId && payments.some((p) => p.method === 'cash')) {
@@ -256,7 +259,11 @@ export default function Terminal({ user, notify, onApiError, onShiftChanged, shi
             <div className="tot-row zig-line"><span>Local currency</span><span>≈ {zig(total, zigRate)}</span></div>
           )}
 
-          <button className="charge-btn" disabled={!canCharge} onClick={() => setCheckoutOpen(true)}>
+          <button
+            className={`charge-btn${canCharge ? ' ready' : ' empty'}`}
+            disabled={!canCharge}
+            onClick={() => setCheckoutOpen(true)}
+          >
             CHARGE {money(total)}
           </button>
         </div>

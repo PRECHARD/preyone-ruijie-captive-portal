@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, auth, ApiError, type StaffUser, type MethodTotal, type Shift } from './api';
-import PinLogin from './components/PinLogin';
+import Login from './pages/Login';
 import ShiftGate from './components/ShiftGate';
 import Terminal from './components/Terminal';
 import XReportModal from './components/XReportModal';
 import StockManager from './components/StockManager';
 import HistoryView from './components/HistoryView';
 import SettingsView from './components/SettingsView';
+import AccountingView from './components/AccountingView';
 import CloudSyncIndicator from './components/CloudSyncIndicator';
+import { applyCssVars } from './theme';
 
 export interface Toast {
   msg: string;
@@ -20,7 +22,7 @@ export default function App() {
   const [shiftTotals, setShiftTotals] = useState<MethodTotal[]>([]);
   const [shiftLoading, setShiftLoading] = useState(true);
   const [showX, setShowX] = useState(false);
-  const [view, setView] = useState<'home' | 'stock' | 'settings'>('home');
+  const [view, setView] = useState<'home' | 'stock' | 'settings' | 'accounting'>('home');
   const [homeTab, setHomeTab] = useState<'register' | 'documents'>('register');
   const [switching, setSwitching] = useState(false);
   const [toast, setToast] = useState<Toast | null>(null);
@@ -46,6 +48,23 @@ export default function App() {
   useEffect(() => {
     if (user) refreshShift();
   }, [user, refreshShift]);
+
+  // Inherit Settings & Branding palette once the PIN session is live.
+  useEffect(() => {
+    if (!user) return;
+    let alive = true;
+    api
+      .theme()
+      .then((res) => {
+        if (alive) applyCssVars(res.css);
+      })
+      .catch(() => {
+        /* cosmetic — keep CSS fallbacks */
+      });
+    return () => {
+      alive = false;
+    };
+  }, [user]);
 
   const handleLoggedIn = (token: string, u: StaffUser) => {
     auth.save(token, u);
@@ -77,7 +96,7 @@ export default function App() {
   return (
     <>
       {!user ? (
-        <PinLogin onLoggedIn={handleLoggedIn} />
+        <Login onLoggedIn={handleLoggedIn} />
       ) : (
         <div className="app-shell">
           <header className="topbar">
@@ -90,6 +109,9 @@ export default function App() {
             {user.role !== 'Cashier' && (
               <button className={`chip ${view === 'stock' ? 'ok' : ''}`} onClick={() => setView('stock')}>STOCK</button>
             )}
+            <button className={`chip ${view === 'accounting' ? 'ok' : ''}`} onClick={() => setView('accounting')}>
+              FINANCE
+            </button>
             <button className={`chip ${view === 'settings' ? 'ok' : ''}`} onClick={() => setView('settings')}>
               SETTINGS
             </button>
@@ -108,6 +130,8 @@ export default function App() {
 
           {view === 'settings' ? (
             <SettingsView user={user} notify={notify} onApiError={sessionExpired} />
+          ) : view === 'accounting' ? (
+            <AccountingView user={user} notify={notify} onApiError={sessionExpired} />
           ) : shiftLoading ? (
             <div className="empty-note">Checking till…</div>
           ) : !shift ? (
@@ -160,7 +184,8 @@ export default function App() {
               <div className="modal-card" onClick={(e) => e.stopPropagation()}>
                 <h3 className="modal-title">Switch cashier</h3>
                 <p className="hint">Select the next operator and enter their PIN to hand over the till.</p>
-                <PinLogin
+                <Login
+                  compact
                   onLoggedIn={(t, u) => {
                     handleLoggedIn(t, u);
                     setSwitching(false);

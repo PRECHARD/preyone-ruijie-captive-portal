@@ -67,7 +67,7 @@ describe('gateway portal URL: /connect', () => {
 
     expect(res.status).toBe(200);
     // The voucher box lives in index.html; the sign-in form does not.
-    expect(res.text).toContain('id="quick-form"');
+    expect(res.text).toContain('id="connect-form"');
     expect(res.text).toContain('name="voucherCode"');
     expect(res.text).not.toContain('account-login');
   });
@@ -92,7 +92,7 @@ describe('gateway portal URL: /connect', () => {
       .set('Host', 'wifi.preyone.com');
 
     expect(res.status).toBe(200);
-    expect(res.text).toContain('id="quick-form"');
+    expect(res.text).toContain('id="connect-form"');
   });
 });
 
@@ -110,7 +110,7 @@ describe('gateway param forwarding', () => {
   it('navigates to the server-built ext_login URL without rewriting it', () => {
     // redirectToSuccess() must hand the URL over untouched — re-encoding the
     // query is what previously produced duplicate/corrupted params.
-    expect(portalJs).toMatch(/location\.href\s*=\s*json\.redirectUrl/);
+    expect(portalJs).toMatch(/location\.href\s*=\s*(?:json|data)\.redirectUrl/);
   });
 
   it('points the sign-in page at /connect', () => {

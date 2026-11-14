@@ -6,9 +6,9 @@
   align-items: center;
   justify-content: center;
   padding: 1rem;
-  background: rgba(0, 0, 0, 0.6);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  background: rgba(10, 15, 29, 0.35);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   animation: modalFadeIn 0.3s ease;
 }
 
@@ -29,15 +29,21 @@
 }
 
 .payment-modal {
-  background: linear-gradient(145deg, #1a1a2e 0%, #16213e 100%);
+  background: rgba(10, 15, 29, 0.55);
+  backdrop-filter: blur(20px) saturate(1.4);
+  -webkit-backdrop-filter: blur(20px) saturate(1.4);
+  border: 1px solid rgba(0, 212, 255, 0.12);
   border-radius: 20px;
-  padding: 2rem;
-  max-width: 440px;
+  padding: 1.25rem;
+  max-width: 400px;
   width: 100%;
+  max-height: 90vh;
+  overflow-y: auto;
   position: relative;
   box-shadow:
-    0 25px 60px rgba(0, 0, 0, 0.5),
-    0 0 0 1px rgba(255, 255, 255, 0.06);
+    0 20px 50px rgba(0, 0, 0, 0.5),
+    0 0 0 1px rgba(255, 255, 255, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
   animation: modalSlideUp 0.35s ease 0.1s both;
 }
 
@@ -75,7 +81,7 @@
 }
 
 .modal-details {
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(255, 255, 255, 0.07);
   border-radius: 12px;
   padding: 1.25rem;
   margin-bottom: 1.5rem;
@@ -109,12 +115,15 @@
   margin-bottom: 0.4rem;
 }
 
-.modal-form input[type="tel"] {
+.modal-form input[type="tel"],
+.modal-form input[type="text"],
+.modal-form input[type="email"],
+.modal-form input[type="password"] {
   width: 100%;
   padding: 0.85rem 1rem;
   border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.07);
   color: #fff;
   font-size: 1rem;
   font-family: 'Montserrat', sans-serif;
@@ -134,7 +143,7 @@
   color: rgba(255, 255, 255, 0.3);
 }
 
-#confirm-payment-btn {
+#confirm-payment-btn, .payment-btn {
   width: 100%;
   padding: 0.9rem;
   border: none;
@@ -143,7 +152,7 @@
   color: #fff;
   font-size: 1rem;
   font-weight: 700;
-  font-family: 'Montserrat', sans-serif;
+  font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
   cursor: pointer;
   transition: transform 0.2s, box-shadow 0.2s;
 }
@@ -180,6 +189,13 @@
   margin-bottom: 1rem;
   text-align: center;
   line-height: 1.5;
+}
+
+.field-subtext {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-top: 0.3rem;
+  font-style: italic;
 }
 
 .pkg-action.pkg-action--selected {
@@ -225,7 +241,7 @@ body.modal-open {
   padding: 0.85rem 1rem;
   border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.07);
   color: #fff;
   font-size: 1rem;
   font-family: 'Montserrat', sans-serif;
@@ -279,6 +295,13 @@ body.modal-open {
   padding: 1.1rem 1rem 0.5rem;
 }
 
+.field-success.payment-fail {
+  background: rgba(255, 36, 0, 0.08);
+  border: 1px solid rgba(255, 36, 0, 0.42);
+  box-shadow: 0 0 24px rgba(255, 36, 0, 0.12), inset 0 0 22px rgba(255, 36, 0, 0.05);
+  padding: 1.15rem 1rem 0.85rem;
+}
+
 .payment-fail-icon {
   width: 54px;
   height: 54px;
@@ -296,8 +319,9 @@ body.modal-open {
 .payment-fail-title {
   font-size: 1.02rem;
   font-weight: 700;
-  color: #f5a7b8;
+  color: #FF2400;
   margin: 0 0 0.35rem;
+  text-shadow: 0 0 10px rgba(255, 36, 0, 0.4);
 }
 
 .payment-fail-detail {
@@ -311,6 +335,64 @@ body.modal-open {
   display: flex;
   gap: 0.6rem;
   justify-content: center;
+}
+
+/* Paid-but-pending state: money is confirmed, code is still being issued.
+   Deliberately amber, not red - this is a delay, not a failure. */
+.pay-support {
+  text-align: center;
+  padding: 0.9rem 0.2rem 0.4rem;
+}
+
+.pay-support-title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #fbbf24;
+  margin: 0 0 0.4rem;
+}
+
+.pay-support-body {
+  font-size: 0.79rem;
+  color: rgba(255, 255, 255, 0.68);
+  margin: 0 0 0.7rem;
+  line-height: 1.5;
+}
+
+.pay-support-ref {
+  font-size: 0.74rem;
+  color: rgba(255, 255, 255, 0.5);
+  margin: 0 0 0.8rem;
+  word-break: break-all;
+}
+
+.pay-support-ref strong {
+  color: rgba(255, 255, 255, 0.85);
+  font-weight: 600;
+}
+
+.pay-support-wa {
+  display: inline-block;
+  padding: 0.6rem 1.05rem;
+  border-radius: 0.6rem;
+  background: rgba(37, 211, 102, 0.14);
+  border: 1px solid rgba(37, 211, 102, 0.4);
+  color: #4ade80;
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 0.83rem;
+  text-decoration: none;
+  transition: all 0.2s ease;
+}
+
+.pay-support-wa:hover {
+  background: rgba(37, 211, 102, 0.22);
+  transform: translateY(-1px);
+}
+
+.pay-support-note {
+  font-size: 0.7rem;
+  color: rgba(255, 255, 255, 0.38);
+  margin: 0.7rem 0 0;
 }
 
 .payment-btn {
@@ -330,6 +412,8 @@ body.modal-open {
   background: linear-gradient(90deg, #ff00cc, #3333ff);
   color: #fff;
   box-shadow: 0 4px 18px rgba(255, 0, 204, 0.35);
+  font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  font-weight: 700;
 }
 
 .payment-btn--try:hover {
@@ -338,11 +422,787 @@ body.modal-open {
 }
 
 .payment-btn--close {
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.07);
   color: #cbd5e1;
   border-color: rgba(255, 255, 255, 0.14);
+  font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  font-weight: 700;
 }
 
 .payment-btn--close:hover {
   background: rgba(255, 255, 255, 0.12);
+}
+
+
+
+/* Payment method selectors (glass cards) */
+.pay-methods {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  border: none;
+  padding: 0;
+  margin: 0 0 0.85rem;
+}
+
+.pay-methods__legend {
+  font-size: 0.65rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--text-muted, #94a3b8);
+  margin-bottom: 0.5rem;
+  grid-column: 1 / -1;
+}
+
+.pay-method {
+  position: relative;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 100%;
+  height: 44px !important;
+  min-width: 0;
+  padding: 4px 8px !important;
+  margin: 0 !important;
+  box-sizing: border-box !important;
+  overflow: hidden !important;
+  border-radius: 8px !important;
+  background: rgba(255, 255, 255, 0.05) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  cursor: pointer;
+  line-height: 1;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+
+.pay-method:hover {
+  border-color: rgba(0, 204, 255, 0.4);
+}
+
+.pay-method__input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  pointer-events: none;
+}
+
+.pay-method:has(.pay-method__input:checked),
+.pay-method.selected,
+.pay-method.active {
+  background: rgba(0, 204, 255, 0.1) !important;
+  border: 1.5px solid #00ccff !important;
+  box-shadow: 0 0 15px rgba(0, 204, 255, 0.4), inset 0 0 10px rgba(0, 204, 255, 0.15) !important;
+}
+
+.pay-method:has(.pay-method__input:focus-visible) {
+  outline: 2px solid var(--cyan, #00d4ff);
+  outline-offset: 2px;
+}
+
+.pay-method__logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.pay-method__logo img {
+  max-height: 22px !important;
+  max-width: 85% !important;
+  width: auto !important;
+  height: auto !important;
+  object-fit: contain !important;
+  margin: 0 auto !important;
+  display: block !important;
+  vertical-align: middle !important;
+}
+
+.pay-method__logo img.innbucks-logo {
+  filter: brightness(0) invert(1) !important;
+}
+
+.pay-method__fallback {
+  font-family: var(--display, 'Bebas Neue', sans-serif);
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.pay-method__fallback .ecocash-eco { color: #0d6efd; }
+.pay-method__fallback .ecocash-cash { color: #f22b3a; }
+.pay-method__fallback .visa-mark { letter-spacing: 0.1em; color: #f8fafc; }
+
+.pay-method__fallback .mastercard-mark {
+  position: relative;
+  display: inline-block;
+  width: 26px;
+  height: 16px;
+}
+
+.pay-method__fallback .mastercard-mark i {
+  position: absolute;
+  top: 1px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+}
+
+.pay-method__fallback .mastercard-mark i:first-child { left: 0; background: #eb001b; opacity: 0.9; }
+.pay-method__fallback .mastercard-mark i:last-child { right: 0; background: #f79e1b; opacity: 0.9; }
+
+
+.pay-method__check {
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  position: relative;
+  transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+  font-weight: 900;
+  align-self: center;
+}
+
+.pay-method:has(.pay-method__input:checked) .pay-method__check,
+.pay-method.selected .pay-method__check {
+  border-color: transparent;
+  background: linear-gradient(135deg, #00d4ff, #ff00ff);
+  box-shadow: 0 0 20px rgba(0, 212, 255, 0.8), 0 0 40px rgba(255, 0, 204, 0.4);
+}
+
+.pay-method:has(.pay-method__input:checked) .pay-method__check::after,
+.pay-method.selected .pay-method__check::after {
+  content: '\2713';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 14px;
+  font-weight: 900;
+  color: #fff;
+  text-shadow: 0 0 8px rgba(255, 255, 255, 0.8);
+}
+
+.pay-method:has(.pay-method__input:disabled) {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+}
+
+@media (max-width: 480px) {
+  .pay-methods {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
+  }
+  .pay-method__logo img {
+    max-height: 20px !important;
+    max-width: 80% !important;
+  }
+}
+
+/* Second-step rails: InnBucks authorization code, O'mari PIN */
+.pay-auth {
+  margin: 0 0 1rem;
+}
+
+.pay-auth__code,
+.pay-auth__pin {
+  background: rgba(0, 212, 255, 0.055);
+  border: 1px solid rgba(0, 212, 255, 0.24);
+  border-radius: 14px;
+  padding: 0.95rem;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 0 22px rgba(0, 212, 255, 0.08);
+}
+
+.pay-auth__eyebrow {
+  display: block;
+  font-size: 0.64rem;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #22d3ee;
+  margin-bottom: 0.55rem;
+}
+
+.pay-auth__code-row {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+}
+
+.pay-auth__code-value {
+  flex: 1 1 150px;
+  min-width: 0;
+  display: block;
+  padding: 0.7rem 0.8rem;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid rgba(0, 212, 255, 0.22);
+  color: #e6fbff;
+  font-family: 'Courier New', monospace;
+  font-size: 1.3rem;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-align: center;
+  word-break: break-all;
+  user-select: all;
+  text-shadow: 0 0 16px rgba(0, 212, 255, 0.35);
+}
+
+.pay-auth__copy {
+  flex: 0 0 auto;
+  padding: 0.62rem 0.9rem;
+  border-radius: 10px;
+  border: 1px solid rgba(0, 212, 255, 0.5);
+  background: rgba(0, 212, 255, 0.12);
+  color: #67e8f9;
+  font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  font-size: 0.78rem;
+  font-weight: 800;
+  cursor: pointer;
+  transition: background 0.2s ease, box-shadow 0.2s ease, color 0.2s ease;
+}
+
+.pay-auth__copy:hover {
+  background: rgba(0, 212, 255, 0.22);
+  box-shadow: 0 0 18px rgba(0, 212, 255, 0.28);
+}
+
+.pay-auth__hint {
+  margin: 0.7rem 0 0;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.pay-auth__ref {
+  margin: 0.45rem 0 0;
+  color: rgba(255, 255, 255, 0.42);
+  font-size: 0.7rem;
+  word-break: break-all;
+}
+
+.pay-auth__pin label {
+  display: block;
+  text-align: left;
+  margin-bottom: 0.45rem;
+}
+
+.pay-auth__pin input[type="password"] {
+  width: 100%;
+  padding: 0.8rem 0.95rem;
+  border-radius: 10px;
+  border: 1px solid rgba(0, 212, 255, 0.22);
+  background: rgba(0, 0, 0, 0.24);
+  color: #fff;
+  font-family: 'Courier New', monospace;
+  font-size: 1.05rem;
+  letter-spacing: 0.2em;
+  text-align: center;
+  box-sizing: border-box;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.pay-auth__pin input[type="password"]:hover {
+  border-color: rgba(0, 212, 255, 0.42);
+}
+
+.pay-auth__pin input[type="password"]:focus {
+  outline: none;
+  border-color: #00ccff;
+  box-shadow: 0 0 0 2px rgba(0, 204, 255, 0.16), 0 0 20px rgba(0, 204, 255, 0.14);
+}
+
+.pay-auth__pin input.invalid {
+  border-color: #FF2400;
+  box-shadow: 0 0 0 2px rgba(255, 36, 0, 0.15);
+}
+
+.pay-auth__submit {
+  width: 100%;
+  margin-top: 0.8rem;
+  padding: 0.78rem 0.9rem;
+  border-radius: 10px;
+  border: 1px solid rgba(0, 212, 255, 0.45);
+  background: linear-gradient(135deg, rgba(0, 212, 255, 0.95), rgba(0, 153, 204, 0.95));
+  color: #041018;
+  font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  font-size: 0.9rem;
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: 0 0 20px rgba(0, 212, 255, 0.22);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease;
+}
+
+.pay-auth__submit:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 0 26px rgba(0, 212, 255, 0.32);
+}
+
+.pay-auth__submit:disabled {
+  opacity: 0.65;
+  cursor: wait;
+  transform: none;
+}
+
+.pay-auth__status {
+  margin-top: 0.7rem;
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 0.76rem;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.pay-auth__feedback {
+  min-height: 1rem;
+  margin-top: 0.35rem;
+  color: #4ade80;
+  font-size: 0.75rem;
+  text-align: center;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.pay-auth__pin .field-error {
+  text-align: left;
+}
+
+/* Payment success state (in-modal voucher) */
+.pay-success {
+  text-align: center;
+  padding: 0.5rem 0.25rem 0.25rem;
+}
+.pay-success-icon {
+  width: 56px;
+  height: 56px;
+  margin: 0 auto 0.85rem;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.6rem;
+  font-weight: 900;
+  color: #0a0f2e;
+  background: linear-gradient(135deg, #4ade80, #22d3ee);
+  box-shadow: 0 0 24px rgba(74, 222, 128, 0.45);
+}
+.pay-success-title {
+  margin: 0 0 0.35rem;
+  font-size: 1.2rem;
+  font-weight: 800;
+  color: #fff;
+}
+.pay-success-sub {
+  margin: 0 0 1.1rem;
+  font-size: 0.85rem;
+  color: rgba(255, 255, 255, 0.65);
+  line-height: 1.45;
+}
+.pay-success-codebox {
+  background: rgba(37, 211, 102, 0.06);
+  border: 1px solid rgba(74, 222, 128, 0.35);
+  border-radius: 14px;
+  padding: 1rem 1rem 0.85rem;
+  margin-bottom: 1rem;
+}
+.pay-success-codelabel {
+  display: block;
+  font-size: 0.68rem;
+  letter-spacing: 0.18em;
+  color: #22d3ee;
+  font-weight: 800;
+  margin-bottom: 0.55rem;
+}
+.pay-success-coderow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+.pay-success-code {
+  font-family: 'Courier New', monospace;
+  font-size: 1.5rem;
+  font-weight: 900;
+  color: #4ade80;
+  letter-spacing: 0.12em;
+  text-shadow: 0 0 16px rgba(74, 222, 128, 0.45);
+  user-select: all;
+  word-break: break-all;
+}
+.pay-success-copy {
+  padding: 0.5rem 1rem;
+  border-radius: 10px;
+  border: 1px solid rgba(74, 222, 128, 0.5);
+  background: rgba(74, 222, 128, 0.12);
+  color: #4ade80;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.pay-success-copy:hover {
+  background: linear-gradient(135deg, #4ade80, #22d3ee);
+  color: #0a0f2e;
+  border-color: transparent;
+}
+.pay-success-feedback {
+  display: block;
+  margin-top: 0.5rem;
+  font-size: 0.78rem;
+  color: #4ade80;
+  opacity: 0;
+  transition: opacity 0.3s;
+  min-height: 1rem;
+}
+.pay-success-hint {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+/* Modal responsive */
+@media (max-width: 480px) {
+  .payment-modal {
+    padding: 1.25rem;
+    border-radius: 16px;
+    max-width: 95vw;
+  }
+  .payment-modal h2 {
+    font-size: 1.2rem;
+  }
+  .modal-details p {
+    font-size: 0.8rem;
+  }
+}
+
+@media (max-width: 360px) {
+  .payment-modal {
+    padding: 1rem;
+  }
+}
+
+
+
+/* Selection persistence during processing */
+.pay-method.processing {
+  pointer-events: none;
+  opacity: 0.7;
+}
+
+.pay-method.processing:has(.pay-method__input:checked) {
+  opacity: 1;
+  border-color: rgba(0, 212, 255, 0.85);
+  box-shadow: 0 0 20px rgba(0, 212, 255, 0.5);
+}
+
+.pay-method.selected.processing {
+  opacity: 1;
+  border-color: rgba(0, 212, 255, 0.85);
+  box-shadow: 0 0 20px rgba(0, 212, 255, 0.5);
+}
+/* ═══════════════════════════════════════════════════════════════════════════
+   CONNECT NOW POPUP (#connect-form-modal)
+   Hidden by default; `is-open` is set by portal.js. Dark glassmorphism on the
+   Preyone palette: #0a0f1d base, neon cyan #00ccff accents, Plus Jakarta Sans.
+   Appended last in the cascade (see scripts/build-portal-css.mjs) so these
+   rules win over the generic responsive overrides.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+#connect-form-modal {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 9500;
+  align-items: center;
+  justify-content: center;
+  padding: clamp(0.75rem, 3vw, 2rem);
+  background: rgba(4, 7, 15, 0.62);
+  backdrop-filter: blur(12px) saturate(1.15);
+  -webkit-backdrop-filter: blur(12px) saturate(1.15);
+  animation: connectOverlayIn 0.22s ease;
+}
+
+#connect-form-modal.is-open {
+  display: flex;
+}
+
+.connect-modal-card {
+  position: relative;
+  width: 100%;
+  max-width: 400px;
+  max-height: 90vh;
+  overflow-y: auto;
+  padding: clamp(1.25rem, 3vw, 1.75rem);
+  border-radius: 22px;
+  background: rgba(10, 15, 29, 0.95);
+  border: 1px solid rgba(0, 204, 255, 0.3);
+  box-shadow:
+    0 24px 60px rgba(0, 0, 0, 0.62),
+    0 0 0 1px rgba(255, 255, 255, 0.05),
+    0 0 38px rgba(0, 204, 255, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(12px) saturate(1.4);
+  -webkit-backdrop-filter: blur(12px) saturate(1.4);
+  color: #e8f7ff;
+  font-family: 'Plus Jakarta Sans', var(--font);
+  animation: connectCardIn 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.connect-modal-close {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 1px solid rgba(0, 204, 255, 0.22);
+  background: rgba(0, 204, 255, 0.08);
+  color: #9fe6ff;
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.connect-modal-close:hover,
+.connect-modal-close:focus-visible {
+  border-color: rgba(0, 204, 255, 0.65);
+  color: #ffffff;
+  box-shadow: 0 0 16px rgba(0, 204, 255, 0.45);
+  outline: none;
+}
+
+.connect-modal-head {
+  margin: 0 0 1rem;
+  padding-right: 2rem;
+}
+
+.connect-modal-badge {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-bottom: 0.55rem;
+  border-radius: 50%;
+  background: #00ccff;
+  box-shadow: 0 0 12px rgba(0, 204, 255, 0.9);
+  animation: connectPulse 2s ease-in-out infinite;
+}
+
+.connect-modal-head h2 {
+  font-family: 'Plus Jakarta Sans', var(--font);
+  font-size: clamp(1.15rem, 2.4vw, 1.4rem);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: #ffffff;
+  margin: 0 0 0.35rem;
+}
+
+.connect-modal-sub {
+  font-size: 0.86rem;
+  line-height: 1.55;
+  color: #9db4cc;
+  margin: 0;
+}
+
+.connect-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 0.85rem;
+}
+
+.connect-field label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(0, 204, 255, 0.85);
+}
+
+.connect-field input {
+  width: 100%;
+  padding: 0.8rem 0.95rem;
+  border-radius: 12px;
+  border: 1px solid rgba(0, 204, 255, 0.28);
+  background: rgba(5, 10, 22, 0.85);
+  color: #ffffff;
+  font-family: 'Plus Jakarta Sans', var(--font);
+  font-size: 1.05rem;
+  letter-spacing: 0.12em;
+  /* Voucher PINs are minted lowercase (e.g. `vnq4wx`); never force caps or the
+     customer thinks their code is being rejected/mistyped. */
+  text-transform: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.connect-field input::placeholder {
+  color: rgba(157, 180, 204, 0.55);
+  letter-spacing: 0.06em;
+  text-transform: none;
+}
+
+.connect-field input:focus {
+  outline: none;
+  border-color: rgba(0, 204, 255, 0.85);
+  box-shadow: 0 0 0 3px rgba(0, 204, 255, 0.14), 0 0 22px rgba(0, 204, 255, 0.28);
+}
+
+.connect-field input.invalid {
+  border-color: rgba(255, 84, 112, 0.75);
+  box-shadow: 0 0 0 3px rgba(255, 84, 112, 0.12);
+}
+
+.connect-device {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin: 0 0 0.85rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: 10px;
+  border: 1px dashed rgba(0, 204, 255, 0.22);
+  background: rgba(0, 204, 255, 0.05);
+  font-size: 0.74rem;
+}
+
+.connect-device[hidden] { display: none; }
+
+.connect-device-label {
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(0, 204, 255, 0.75);
+}
+
+.connect-device-value {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: #d8f4ff;
+  overflow-wrap: anywhere;
+}
+
+.connect-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  margin-top: 0.35rem;
+}
+
+.connect-submit,
+.connect-cancel {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.85rem 1rem;
+  border-radius: 50px;
+  font-family: 'Plus Jakarta Sans', var(--font);
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease;
+}
+
+.connect-submit {
+  border: 1px solid rgba(0, 204, 255, 0.55);
+  background: linear-gradient(135deg, rgba(0, 204, 255, 0.9) 0%, rgba(0, 128, 200, 0.85) 100%);
+  color: #03121e;
+  box-shadow: 0 0 26px rgba(0, 204, 255, 0.35);
+}
+
+.connect-submit:hover:not(:disabled) {
+  transform: translateY(-2px);
+  filter: brightness(1.08);
+  box-shadow: 0 0 34px rgba(0, 204, 255, 0.55);
+}
+
+.connect-submit:disabled {
+  opacity: 0.7;
+  cursor: progress;
+}
+
+.connect-cancel {
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: transparent;
+  color: #b9cadb;
+}
+
+.connect-cancel:hover {
+  border-color: rgba(0, 204, 255, 0.45);
+  color: #ffffff;
+}
+
+.connect-help {
+  margin: 0.85rem 0 0;
+  font-size: 0.76rem;
+  line-height: 1.6;
+  text-align: center;
+  color: #8ba3ba;
+}
+
+.connect-help a,
+.connect-help .link-button {
+  color: #00ccff;
+  text-decoration: none;
+}
+
+.connect-help a:hover,
+.connect-help .link-button:hover {
+  text-decoration: underline;
+}
+
+/* The popup's request-level error slot (#form-error). It is a single
+   `.form-alert` (icon + one line of text) positioned directly above the
+   action row; the per-field hint under the input is #err-connectVoucherCode
+   and must never repeat the same sentence. */
+.connect-modal-card #form-error {
+  margin: 0 0 0.85rem;
+}
+
+/* The page behind the popup must not scroll while it is open. */
+body.connect-modal-open {
+  overflow: hidden;
+}
+
+@keyframes connectOverlayIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes connectCardIn {
+  from { opacity: 0; transform: translateY(18px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes connectPulse {
+  0%, 100% { opacity: 0.55; box-shadow: 0 0 8px rgba(0, 204, 255, 0.55); }
+  50% { opacity: 1; box-shadow: 0 0 18px rgba(0, 204, 255, 0.95); }
+}
+
+@media (max-width: 420px) {
+  .connect-modal-card {
+    max-width: none;
+    border-radius: 18px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #connect-form-modal,
+  .connect-modal-card,
+  .connect-modal-badge {
+    animation: none;
+  }
 }

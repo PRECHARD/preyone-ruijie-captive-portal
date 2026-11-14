@@ -83,8 +83,13 @@ function parsePesepayStatus(raw: unknown): { state: 'completed' | 'failed' | 're
   const upper = str.toUpperCase();
 
   if (PESEPAY_SUCCESS_STATUSES.includes(upper)) return { state: 'completed', label: upper };
-  if (upper === 'REFUNDED') return { state: 'refunded', label: upper };
+  if (upper === 'REFUNDED' || upper === 'REVERSED') return { state: 'refunded', label: upper };
   if (PESEPAY_FAILED_STATUSES.includes(upper)) return { state: 'failed', label: upper };
+  // Pesepay terminal states that are not in the shared lists. TIME_OUT is a
+  // dead checkout (the mobile-money prompt was never approved), TIMEOUT is the
+  // same state spelled differently. Treating these as pending is what left
+  // abandoned checkouts in the payments table forever.
+  if (upper === 'TIME_OUT' || upper === 'TIMEOUT') return { state: 'failed', label: upper };
   return { state: 'pending', label: str };
 }
 
@@ -1893,3 +1898,142 @@ paymentsRouter.post('/pese/checkout', requireStarlinkAuth, async (req: Request, 
     res.status(500).json({ error: 'Payment initiation failed' });
   }
 });
+
+// ── Abandoned-checkout reconciliation ───────────────────────────────────────
+//
+// /status only reconciles while the customer's browser is still polling. A
+// customer who closes the tab after approving (or abandoning) EcoCash leaves
+// the row `pending` forever: a paid customer gets no voucher, and reporting
+// shows phantom pending sales. This sweep re-checks old references directly
+// with Pesepay and applies the same terminal transitions as the webhook.
+//
+// Four PM2 workers load this module, so `pg_try_advisory_lock` elects a single
+// sweeper per tick; `completePayment` is double-mint-safe on its own as well.
+const RECONCILE_LOCK_KEY = 'preyone:payment_reconcile';
+const RECONCILE_MIN_AGE_MIN = Math.max(
+  5,
+  Number(process.env.PAYMENT_RECONCILE_MIN_AGE_MIN ?? 15)
+);
+const RECONCILE_INTERVAL_MIN = Math.max(
+  1,
+  Number(process.env.PAYMENT_RECONCILE_INTERVAL_MIN ?? 10)
+);
+const RECONCILE_BATCH = 100;
+
+export interface PaymentReconcileResult {
+  scanned: number;
+  completed: number;
+  failed: number;
+  refunded: number;
+  skipped: number;
+}
+
+export async function reconcilePendingPaymentsOnce(): Promise<PaymentReconcileResult> {
+  const result: PaymentReconcileResult = {
+    scanned: 0,
+    completed: 0,
+    failed: 0,
+    refunded: 0,
+    skipped: 0,
+  };
+  const lockClient = await pool.connect();
+  try {
+    const lock = await lockClient.query(
+      'SELECT pg_try_advisory_lock(hashtext($1)) AS locked',
+      [RECONCILE_LOCK_KEY]
+    );
+    if (!lock.rows[0]?.locked) return result;
+
+    const { rows } = await pool.query(
+      `SELECT id, pesepay_reference
+         FROM payments
+        WHERE status = 'pending'
+          AND pesepay_reference IS NOT NULL
+          AND created_at < now() - ($1 || ' minutes')::interval
+        ORDER BY created_at ASC
+        LIMIT ${RECONCILE_BATCH}`,
+      [String(RECONCILE_MIN_AGE_MIN)]
+    );
+
+    for (const row of rows) {
+      result.scanned += 1;
+      try {
+        const check = await verifyPaymentStatus(row.pesepay_reference);
+        // not_found means the gateway has no record yet; never fail on that.
+        if (!check.found) {
+          result.skipped += 1;
+        } else {
+          const parsed = parsePesepayStatus(check.status);
+          if (parsed.state === 'completed') {
+            // Safe: completePayment re-reads the row under FOR UPDATE and
+            // returns the existing code if a webhook won the race.
+            await completePayment(row.id);
+            result.completed += 1;
+            console.log(`[payments] reconciled ${row.id} -> completed (${parsed.label})`);
+          } else if (parsed.state === 'failed' || parsed.state === 'refunded') {
+            const updated = await pool.query(
+              `UPDATE payments
+                  SET status = $2, error_message = $3
+                WHERE id = $1 AND status = 'pending'`,
+              [row.id, parsed.state, `Gateway reported ${parsed.label} (reconciled)`]
+            );
+            if (updated.rowCount) {
+              if (parsed.state === 'failed') result.failed += 1;
+              else result.refunded += 1;
+              console.log(`[payments] reconciled ${row.id} -> ${parsed.state} (${parsed.label})`);
+            } else {
+              result.skipped += 1;
+            }
+          } else {
+            result.skipped += 1;
+          }
+        }
+      } catch (err) {
+        // A mint failure leaves the row pending with its support marker; the
+        // next sweep retries. Never let one payment abort the batch.
+        result.skipped += 1;
+        console.error(`[payments] reconcile failed for ${row.id}:`, err);
+      }
+      // Be polite to the gateway: at most ~5 checks per second.
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+  } finally {
+    try {
+      await lockClient.query('SELECT pg_advisory_unlock(hashtext($1))', [RECONCILE_LOCK_KEY]);
+    } catch (err) {
+      console.error('[payments] failed to release reconcile lock:', err);
+    }
+    lockClient.release();
+  }
+  return result;
+}
+
+let paymentReconcileTimer: ReturnType<typeof setInterval> | null = null;
+
+export function startPaymentReconciliation(): void {
+  if (process.env.ENABLE_PAYMENT_RECONCILE === 'false') return;
+  if (paymentReconcileTimer) return;
+
+  const run = () => {
+    reconcilePendingPaymentsOnce()
+      .then((r) => {
+        if (r.completed || r.failed || r.refunded) {
+          console.log(
+            `[payments] sweep: scanned=${r.scanned} completed=${r.completed} failed=${r.failed} refunded=${r.refunded} skipped=${r.skipped}`
+          );
+        }
+      })
+      .catch((err) => console.error('[payments] sweep failed:', err));
+  };
+
+  // One pass shortly after boot: webhooks may have been missed while down.
+  const firstRun = setTimeout(run, 90_000);
+  if (typeof firstRun.unref === 'function') firstRun.unref();
+
+  paymentReconcileTimer = setInterval(run, RECONCILE_INTERVAL_MIN * 60_000);
+  if (typeof paymentReconcileTimer.unref === 'function') paymentReconcileTimer.unref();
+
+  console.log(
+    `Payment reconciliation scheduled every ${RECONCILE_INTERVAL_MIN} minute(s) for pending older than ${RECONCILE_MIN_AGE_MIN} minute(s).`
+  );
+}

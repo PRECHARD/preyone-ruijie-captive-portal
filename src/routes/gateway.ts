@@ -53,7 +53,52 @@ function isOverQuota(row: any): boolean {
 
 export const gatewayRouter = Router();
 
-// ── RADIUS auth endpoint (called by FreeRADIUS rest module) ──
+/**
+ * Persist a RADIUS authentication decision so the dashboard's "Auth Success"
+ * card reports real accept/reject outcomes instead of a derived placeholder.
+ *
+ * Never throws: failing to record an auth decision must not change what
+ * FreeRADIUS is told. Awaited so tests and crash-dumps see the write.
+ */
+interface RadiusLogMeta {
+  requestMethod?: string;
+  requestUrl?: string;
+  httpStatus?: number;
+}
+
+async function recordRadiusAuth(
+  event: 'radius_accept' | 'radius_reject' | 'radius_stop',
+  detail: string,
+  mac: string,
+  userId?: string | null,
+  meta?: RadiusLogMeta
+): Promise<void> {
+  try {
+    await pool.query(
+      `INSERT INTO access_log
+         (user_id, event, mac_address, detail, request_method, request_url, http_status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [
+        userId ?? null,
+        event,
+        mac || null,
+        detail,
+        meta?.requestMethod ?? null,
+        meta?.requestUrl ?? null,
+        meta?.httpStatus ?? null,
+      ]
+    );
+  } catch (err) {
+    console.error('RADIUS auth log write failed:', (err as Error).message);
+  }
+}
+
+/** Request facts for the log row. `req.path` excludes query strings (MAC/PIN). */
+function radiusLogMeta(req: Request, httpStatus: number): RadiusLogMeta {
+  return { requestMethod: req.method, requestUrl: req.path, httpStatus };
+}
+
+// ΓöÇΓöÇ RADIUS auth endpoint (called by FreeRADIUS rest module) ΓöÇΓöÇ
 // FreeRADIUS sends GET /api/radius/auth?mac=<Calling-Station-Id>&username=<User-Name>
 // Returns JSON with Auth-Type and session attributes if active session found.
 gatewayRouter.get('/api/radius/auth', async (req: Request, res: Response) => {
@@ -72,7 +117,7 @@ gatewayRouter.get('/api/radius/auth', async (req: Request, res: Response) => {
     // Check sessions by mac address (format-agnostic) or username
     // Strip all non-hex chars from mac_address for comparison
     const { rows } = await pool.query(
-      `SELECT u.session_expires_at, u.mac_address, w.bandwidth_up_kbps, w.bandwidth_down_kbps,
+      `SELECT u.id AS user_id, u.session_expires_at, u.mac_address, w.bandwidth_up_kbps, w.bandwidth_down_kbps,
               w.data_quota_bytes, w.data_used_bytes, w.is_uncapped, w.session_end
        FROM users u
        LEFT JOIN wispr_profiles w ON w.user_id = u.id
@@ -93,9 +138,10 @@ gatewayRouter.get('/api/radius/auth', async (req: Request, res: Response) => {
 
       if (isOverQuota(row)) {
         console.warn(
-          `RADIUS: rejected ${macClean} — data quota exhausted ` +
+          `RADIUS: rejected ${macClean} ΓÇö data quota exhausted ` +
           `(${row.data_used_bytes}/${row.data_quota_bytes} bytes)`
         );
+        await recordRadiusAuth('radius_reject', 'quota_exhausted', rawMac || macClean, row.user_id, radiusLogMeta(req, 403));
         // 403 makes rlm_rest emit an explicit reject. 404 would mean "no such
         // session" and would be indistinguishable from an unknown MAC.
         return res.status(403).json({
@@ -104,10 +150,11 @@ gatewayRouter.get('/api/radius/auth', async (req: Request, res: Response) => {
         });
       }
 
+      await recordRadiusAuth('radius_accept', 'mac_session', rawMac || macClean, row.user_id, radiusLogMeta(req, 200));
       return res.json(buildRadAttrs(row));
     }
 
-    // ── Voucher-code branch ──────────────────────────────────────────────
+    // ΓöÇΓöÇ Voucher-code branch ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
     // The gateway sends User-Name = whatever the customer typed, and ext_login
     // puts the voucher code there (see buildRuijieSuccessUrl). A MAC that has no
     // session of its own can therefore present a code it already owns and bind
@@ -152,9 +199,10 @@ gatewayRouter.get('/api/radius/auth', async (req: Request, res: Response) => {
         if (outcome.ok) {
           if (isOverQuota(v)) {
             console.warn(
-              `RADIUS: rejected ${deviceMac} for voucher ${v.code} — ` +
+              `RADIUS: rejected ${deviceMac} for voucher ${v.code} ΓÇö ` +
               `data quota exhausted (${v.data_used_bytes}/${v.data_quota_bytes} bytes)`
             );
+            await recordRadiusAuth('radius_reject', 'quota_exhausted', rawMac || deviceMac, v.user_id, radiusLogMeta(req, 403));
             return res.status(403).json({
               error: 'data quota exhausted',
               'control:Auth-Type': 'Reject',
@@ -165,20 +213,23 @@ gatewayRouter.get('/api/radius/auth', async (req: Request, res: Response) => {
             `RADIUS: device ${deviceMac} authorized via voucher ${v.code} ` +
             `(${outcome.activeDevices}/${outcome.limit} devices${outcome.bound ? ', newly bound' : ''})`
           );
+          await recordRadiusAuth('radius_accept', 'voucher_code', rawMac || deviceMac, v.user_id, radiusLogMeta(req, 200));
           return res.json(buildRadAttrs(v));
         }
 
-        // Device limit reached — refuse rather than silently over-serve, since
+        // Device limit reached ΓÇö refuse rather than silently over-serve, since
         // Ruijie's own user group enforces the same number gateway-side.
         if (outcome.reason === 'device_limit_reached') {
           console.warn(
-            `RADIUS: rejected ${deviceMac} for voucher ${v.code} — ` +
+            `RADIUS: rejected ${deviceMac} for voucher ${v.code} ΓÇö ` +
             `device limit ${outcome.limit} reached`
           );
+          await recordRadiusAuth('radius_reject', 'device_limit', rawMac || deviceMac, v.user_id, radiusLogMeta(req, 404));
         }
       }
     }
 
+    await recordRadiusAuth('radius_reject', 'no_session', rawMac || macClean, null, radiusLogMeta(req, 404));
     return res.status(404).json({ error: 'session not found' });
   } catch (err) {
     console.error('RADIUS auth error:', err);
@@ -186,7 +237,7 @@ gatewayRouter.get('/api/radius/auth', async (req: Request, res: Response) => {
   }
 });
 
-// ── RADIUS accounting endpoint (called by FreeRADIUS rest module) ──
+// ΓöÇΓöÇ RADIUS accounting endpoint (called by FreeRADIUS rest module) ΓöÇΓöÇ
 // FreeRADIUS sends GET /api/radius/acct?mac=<Calling-Station-Id>&status=<Acct-Status-Type>&input=<Acct-Input-Octets>&output=<Acct-Output-Octets>&session=<Acct-Session-Id>
 // Updates data_used_bytes for the session matching the MAC address.
 gatewayRouter.get('/api/radius/acct', async (req: Request, res: Response) => {
@@ -231,6 +282,13 @@ gatewayRouter.get('/api/radius/acct', async (req: Request, res: Response) => {
            )`,
           [mac]
         );
+        await recordRadiusAuth(
+          'radius_stop',
+          `session=${sessionId || 'n/a'} in=${inputOctets} out=${outputOctets}`,
+          mac,
+          null,
+          radiusLogMeta(req, 200)
+        );
       }
     }
 
@@ -241,7 +299,7 @@ gatewayRouter.get('/api/radius/acct', async (req: Request, res: Response) => {
   }
 });
 
-// ── Client quota status (drives the "data finished" portal page) ──
+// ΓöÇΓöÇ Client quota status (drives the "data finished" portal page) ΓöÇΓöÇ
 // GET /api/gateway/quota?mac=<client_mac>
 // Called by the captive portal when a device lands on /connect, so an
 // exhausted client sees why it lost access instead of a bare voucher form.
@@ -299,7 +357,7 @@ gatewayRouter.get('/api/gateway/quota', async (req: Request, res: Response) => {
   }
 });
 
-// ── End-user device beacon (device-model extraction) ───────────────
+// ΓöÇΓöÇ End-user device beacon (device-model extraction) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 // The captive-portal page reports its browser User-Agent after a session is
 // live. We only record it onto an ACTIVE session for that MAC so a caller
 // cannot pollute arbitrary rows; the admin SPA parses it with ua-parser-js.
@@ -323,10 +381,12 @@ gatewayRouter.get('/report-ua', async (req: Request, res: Response) => {
   res.send('OK');
 });
 
-// ── Gateway health check ──
+// ΓöÇΓöÇ Gateway health check ΓöÇΓöÇ
 // The EG105G-P sends this every ~2 minutes to verify the auth server is alive
 // GET /ping/?gw_sn=<serial>&gw_id=<mac>&dev_model=<model>&dev_softversion=<fw>&sys_uptime=<seconds>
-gatewayRouter.get('/ping', async (req: Request, res: Response) => {
+// Exported because the firmware actually calls it under /connectAuth/ping/ ΓÇö
+// see connectAuthRouter at the bottom of this file.
+export async function handleGatewayPing(req: Request, res: Response): Promise<void> {
   const { gw_sn, gw_id, dev_model, dev_softversion, sys_uptime } = req.query;
 
   // Log gateway heartbeats for admin dashboard
@@ -347,12 +407,14 @@ gatewayRouter.get('/ping', async (req: Request, res: Response) => {
 
   res.set('Content-Type', 'text/plain');
   res.send('OK');
-});
+}
 
-// ── Session verification (called by gateway via WISPr / redirect) ──
-// GET /auth?token=<session_token>   — verify by session token
-// GET /auth?mac=<client_mac>        — verify by MAC address
-// GET /auth?token=<t>&mac=<m>       — verify both match
+gatewayRouter.get('/ping', handleGatewayPing);
+
+// ΓöÇΓöÇ Session verification (called by gateway via WISPr / redirect) ΓöÇΓöÇ
+// GET /auth?token=<session_token>   ΓÇö verify by session token
+// GET /auth?mac=<client_mac>        ΓÇö verify by MAC address
+// GET /auth?token=<t>&mac=<m>       ΓÇö verify both match
 // Returns Auth: 1 if session is valid, Auth: 0 otherwise
 gatewayRouter.get('/auth', async (req: Request, res: Response) => {
   const token = req.query.token as string | undefined;
@@ -390,7 +452,7 @@ gatewayRouter.get('/auth', async (req: Request, res: Response) => {
   }
 });
 
-// ── Gateway captive portal redirect handler ──
+// ΓöÇΓöÇ Gateway captive portal redirect handler ΓöÇΓöÇ
 // When the EG105G-P redirects a user here, preserve all params and serve portal
 // GET /portal?wlanuserip=<ip>&wlanacname=<name>&ssid=<ssid>&mac=<mac>&nasip=<gw_ip>&url=<original>
 gatewayRouter.get('/portal', (req: Request, res: Response) => {
@@ -400,3 +462,45 @@ gatewayRouter.get('/portal', (req: Request, res: Response) => {
   }
   res.redirect(`/?${queryString.toString()}`);
 });
+
+// ΓöÇΓöÇ /connectAuth ΓÇö the prefix the firmware actually uses ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+// The EG105G-P's auth-server base path is `/connectAuth` (WiFiDog-style), so it
+// calls `/connectAuth/ping/`, `/connectAuth`, and ΓÇö presumably once a client
+// asks for internet ΓÇö `/connectAuth/auth`, `/connectAuth/login`, etc. None of
+// that existed here: every request fell through to the SPA catch-all and
+// received index.html (plus a 502 whenever pm2 restarted). That is why
+// gateway_heartbeats stayed empty and no client was ever redirected to the
+// portal, and therefore why voucher_redemptions / voucher_devices never filled.
+//
+// This router is deliberately observational:
+//   * it logs every path and query so the real protocol can be wired up to
+//     what the firmware expects rather than guessed;
+//   * it serves the heartbeat, which already existed under /api/gateway/ping;
+//   * it never answers an auth question ΓÇö unmatched paths fall through
+//     unchanged, so no client's session state can be altered from here.
+export const connectAuthRouter = Router();
+
+// Session material must never reach the log; serials and MACs are the point of
+// the log, so they are kept.
+const SENSITIVE_QUERY_KEY = /^(password|pass|secret|jwt|token|pin|otp|access_?token|refresh_?token)$/i;
+
+function logConnectAuth(req: Request): void {
+  const query = Object.entries(req.query)
+    .map(([key, value]) => {
+      const rendered = Array.isArray(value) ? value.join(',') : String(value ?? '');
+      return `${key}=${SENSITIVE_QUERY_KEY.test(key) ? '[redacted]' : rendered}`;
+    })
+    .join('&');
+  console.info(
+    `[connectAuth] ${req.method} ${req.originalUrl.split('?')[0]}` +
+    `${query ? '?' + query : ''} from ${req.ip} ua=${req.get('user-agent') || '-'}`
+  );
+}
+
+connectAuthRouter.use((req, _res, next) => {
+  logConnectAuth(req);
+  next();
+});
+
+// express leaves strict routing off, so '/ping' also matches '/connectAuth/ping/'.
+connectAuthRouter.get('/ping', handleGatewayPing);

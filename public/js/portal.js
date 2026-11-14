@@ -1,9 +1,94 @@
-﻿(function () {
+(function () {
   'use strict';
   
   // --- PACKAGE PURCHASE FLOW (Pesepay / EcoCash) ---
   const packageButtons = document.querySelectorAll('.pkg-action');
   const ruijieParams = new URLSearchParams(location.search);
+
+  // The customer normally reaches the portal from the Ruijie-hosted page. Keep
+  // that exact page URL (including its per-captive-session sessionId) so the
+  // success page can send the customer back to the same Ruijie portal instead
+  // of a stale hard-coded session.
+  const RUIJIE_PORTAL_PATH_PREFIX = '/download/static/advertisement/maccauth/';
+  const RUIJIE_PORTAL_STORAGE_KEY = 'preyone_ruijie_portal';
+  const RUIJIE_PORTAL_CONTEXT_TTL_MS = 30 * 60 * 1000;
+  const ruijiePortalContext = (function () {
+    function isRuijiePortal(url) {
+      return /(^|\.)ruijienetworks\.com$/i.test(url.hostname) &&
+        url.pathname.indexOf(RUIJIE_PORTAL_PATH_PREFIX) === 0;
+    }
+    function timestampOf(url) {
+      var direct = url.searchParams.get('timestamp');
+      if (direct) return direct;
+      var match = url.search.match(/[?&]timestamp=?(\d+)/i);
+      return match ? match[1] : '';
+    }
+    function remember(context) {
+      try {
+        localStorage.setItem(RUIJIE_PORTAL_STORAGE_KEY, JSON.stringify({
+          portalUrl: context.portalUrl,
+          sessionId: context.sessionId,
+          timestamp: context.timestamp,
+          savedAt: Date.now(),
+        }));
+      } catch (_err) {
+        /* storage can be unavailable in private mode */
+      }
+    }
+    function restore() {
+      try {
+        var saved = JSON.parse(localStorage.getItem(RUIJIE_PORTAL_STORAGE_KEY) || 'null');
+        if (!saved || !saved.portalUrl) return null;
+        if (Date.now() - Number(saved.savedAt) > RUIJIE_PORTAL_CONTEXT_TTL_MS) return null;
+        var url = new URL(saved.portalUrl, location.href);
+        if (!isRuijiePortal(url)) return null;
+        return {
+          portalUrl: url.href,
+          sessionId: saved.sessionId || '',
+          timestamp: saved.timestamp || '',
+        };
+      } catch (_err) {
+        return null;
+      }
+    }
+    var candidates = [
+      document.referrer,
+      location.href,
+      ruijieParams.get('login_url'),
+      ruijieParams.get('loginUrl'),
+    ];
+    for (var i = 0; i < candidates.length; i++) {
+      var raw = candidates[i];
+      if (!raw) continue;
+      try {
+        var url = new URL(raw, location.href);
+        if (!isRuijiePortal(url)) continue;
+        var sessionId = url.searchParams.get('sessionId') ||
+          url.searchParams.get('session_id') ||
+          url.searchParams.get('sessionid') || '';
+        var timestamp = timestampOf(url);
+        if (!sessionId && !timestamp) continue;
+        var context = { portalUrl: url.href, sessionId: sessionId, timestamp: timestamp };
+        remember(context);
+        return context;
+      } catch (_err) {
+        /* not a usable URL */
+      }
+    }
+    return restore();
+  })();
+
+  const inboundRuijieSessionId =
+    ruijieParams.get('sessionId') ||
+    ruijieParams.get('session_id') ||
+    ruijieParams.get('sessionid') || '';
+  const inboundRuijieTimestamp = (function () {
+    var direct = ruijieParams.get('timestamp');
+    if (direct) return direct;
+    var match = location.search.match(/[?&]timestamp=?(\d+)/i);
+    return match ? match[1] : '';
+  })();
+
   let selectedPackage = null;
   let paymentPollTimer = null;
   // Set once /status reports supportRequired, so the give-up message stops
@@ -24,10 +109,13 @@
     // Create modal overlay
     const modal = document.createElement('div');
     modal.className = 'payment-modal-overlay';
+    var price = parseFloat(packageData['data-amount']);
+    var needsTierCapture = price >= 4.99;
+
     modal.innerHTML = `
       <div class="payment-modal">
         <button class="modal-close" aria-label="Close">&times;</button>
-        <h2>Make Preyone Payment: ${packageData['data-display-name']}</h2>
+        <h2>Make Preyone Payment</h2>
         <div class="modal-details">
           <p><strong>Package:</strong> ${packageData['data-tier']}</p>
           <p><strong>Price:</strong> $${packageData['data-amount']} USD (${packageData['data-period']})</p>
@@ -35,17 +123,73 @@
           <p><strong>Speed:</strong> ${packageData['data-bandwidth-down']} Mbps download</p>
         </div>
         <form class="modal-form" id="pesepay-form" novalidate>
+          <fieldset class="pay-methods" id="pay_methods">
+            <legend class="pay-methods__legend">Payment Method</legend>
+
+            <label class="pay-method" data-rail="ecocash" aria-label="EcoCash">
+              <input class="pay-method__input" type="radio" name="pay_method" value="ecocash" data-currency="USD" checked />
+              <span class="pay-method__logo" aria-hidden="true">
+                <img src="/img/pay/ecocash.png?v=41" alt="" onerror="this.remove()" />
+              </span>
+            </label>
+
+            <label class="pay-method" data-rail="innbucks" aria-label="InnBucks">
+              <input class="pay-method__input" type="radio" name="pay_method" value="innbucks" data-currency="USD" />
+              <span class="pay-method__logo" aria-hidden="true">
+                <img src="/img/pay/innbucks.png?v=41" alt="" class="innbucks-logo" onerror="this.remove()" />
+              </span>
+            </label>
+
+            <label class="pay-method" data-rail="omari" aria-label="O'mari">
+              <input class="pay-method__input" type="radio" name="pay_method" value="omari" data-currency="USD" />
+              <span class="pay-method__logo" aria-hidden="true">
+                <img src="/img/pay/omari.webp?v=41" alt="" onerror="this.remove()" />
+              </span>
+            </label>
+          </fieldset>
+          ${needsTierCapture ? `
+          <div class="field" id="field-fullName">
+            <label for="pesepay-fullName">Full Name / Company Name</label>
+            <input type="text" id="pesepay-fullName" placeholder="Full Name or Company Name" autocomplete="name" required />
+            <div class="field-error" id="pesepay-fullName-error"></div>
+          </div>
+          <div class="field" id="field-contactPhone">
+            <label for="pesepay-contactPhone">Primary Contact Number</label>
+            <input type="tel" id="pesepay-contactPhone" placeholder="e.g. 0771 327 202" autocomplete="tel" required />
+            <div class="field-error" id="pesepay-contactPhone-error"></div>
+          </div>
+          ` : ''}
           <div class="field">
-            <label for="pesepay-phone">Zimbabwe Phone Number</label>
+            <label for="pesepay-phone" id="rail-account-label">Zimbabwe Phone Number</label>
             <input type="tel" id="pesepay-phone" placeholder="e.g. 0771 327 202" autocomplete="tel" />
+            <div class="field-subtext" id="rail-instruction-text">Check your phone for the USSD prompt.</div>
             <div class="field-error" id="pesepay-phone-error"></div>
+          </div>
+          <div class="pay-auth" id="pay-auth" style="display:none">
+            <div class="pay-auth__code" id="pay-auth-code" style="display:none">
+              <span class="pay-auth__eyebrow">InnBucks Authorization Code</span>
+              <div class="pay-auth__code-row">
+                <code class="pay-auth__code-value" id="pay-auth-code-value"></code>
+                <button type="button" class="pay-auth__copy" id="pay-auth-copy">Copy</button>
+              </div>
+              <p class="pay-auth__hint" id="pay-auth-hint"></p>
+              <p class="pay-auth__ref" id="pay-auth-ref"></p>
+            </div>
+            <div class="pay-auth__pin" id="pay-auth-pin" style="display:none">
+              <label for="omari-auth-pin">O'mari Authorization PIN</label>
+              <input type="password" id="omari-auth-pin" inputmode="numeric" pattern="[0-9]*" maxlength="8" autocomplete="one-time-code" placeholder="Enter the PIN sent to your phone" />
+              <div class="field-error" id="omari-auth-pin-error"></div>
+              <button type="button" class="pay-auth__submit" id="omari-auth-submit">Authorize Payment</button>
+            </div>
+            <div class="pay-auth__status" id="pay-auth-status" role="status" aria-live="polite"></div>
+            <div class="pay-auth__feedback" id="pay-auth-feedback" role="status" aria-live="polite"></div>
           </div>
           <button type="submit" id="confirm-payment-btn">
             <span class="btn-text">Pay $${packageData['data-amount']} USD</span>
             <span class="btn-spinner" style="display:none"></span>
           </button>
           <div class="field-success" id="pesepay-result" style="display:none"></div>
-          <div class="modal-notice" id="pesepay-status">A payment request will be sent to your phone. Approve it with your EcoCash PIN.</div>
+          <div class="modal-notice" id="pesepay-status">Check your phone for the payment prompt.</div>
         </form>
       </div>
     `;
@@ -57,16 +201,130 @@
     const form = modal.querySelector('#pesepay-form');
     const phoneEl = form.querySelector('#pesepay-phone');
     const phoneErrorEl = form.querySelector('#pesepay-phone-error');
+    const railLabelEl = form.querySelector('#rail-account-label');
+    const railInstructionEl = form.querySelector('#rail-instruction-text');
     const payBtn = form.querySelector('#confirm-payment-btn');
     const btnText = payBtn.querySelector('.btn-text');
     const btnSpinner = payBtn.querySelector('.btn-spinner');
     const statusEl = form.querySelector('#pesepay-status');
     const resultEl = form.querySelector('#pesepay-result');
+    const authPanel = form.querySelector('#pay-auth');
+    const authCodeCard = form.querySelector('#pay-auth-code');
+    const authCodeValue = form.querySelector('#pay-auth-code-value');
+    const authCodeCopy = form.querySelector('#pay-auth-copy');
+    const authHint = form.querySelector('#pay-auth-hint');
+    const authRef = form.querySelector('#pay-auth-ref');
+    const authPinPanel = form.querySelector('#pay-auth-pin');
+    const authPinInput = form.querySelector('#omari-auth-pin');
+    const authPinError = form.querySelector('#omari-auth-pin-error');
+    const authSubmit = form.querySelector('#omari-auth-submit');
+    const authStatus = form.querySelector('#pay-auth-status');
+    const authFeedback = form.querySelector('#pay-auth-feedback');
+    let activeAuthorization = null;
+    const initialBtnLabel = btnText.textContent;
+    const railCards = Array.prototype.slice.call(form.querySelectorAll('.pay-method'));
+
+    // Rail selection config
+    var railConfig = {
+      ecocash: {
+        label: 'EcoCash Phone Number',
+        shortName: 'EcoCash',
+        subtext: 'Check your phone for the USSD prompt.',
+        placeholder: 'e.g. 0771 327 202',
+        notice: 'A payment request will be sent to your phone. Approve it with your EcoCash PIN.',
+        sent: 'A payment request has been sent to your phone. Approve it with your EcoCash PIN. (Keep this page open)',
+        currency: 'USD',
+        requiresPhone: true,
+        requiresIdentifier: true,
+      },
+      innbucks: {
+        label: 'InnBucks Phone Number',
+        shortName: 'InnBucks',
+        subtext: 'Enter your registered InnBucks phone number to generate your authorization code.',
+        placeholder: 'e.g. 0771 327 202',
+        notice: 'A payment request will be sent to your phone. Approve it with your InnBucks PIN.',
+        sent: 'A payment request has been sent to your phone. Approve it with your InnBucks PIN. (Keep this page open)',
+        currency: 'USD',
+        requiresPhone: false,
+        requiresIdentifier: true,
+      },
+      omari: {
+        label: "O'mari Phone Number",
+        shortName: "O'mari",
+        subtext: "Enter your registered O'mari phone number to receive the payment authorization PIN.",
+        placeholder: "263771327202",
+        notice: "A payment request will be sent to your phone. Approve it with your O'mari PIN.",
+        sent: "A payment request has been sent to your phone. Approve it with your O'mari PIN. (Keep this page open)",
+        currency: 'USD',
+        requiresPhone: true,
+        requiresIdentifier: true,
+      },
+    };
+
+    function getRailKey() {
+      var checked = form.querySelector('input[name="pay_method"]:checked');
+      if (!checked) return 'ecocash';
+      return checked.value;
+    }
+
+    function syncRailSelection() {
+      var key = getRailKey();
+      railCards.forEach(function (card) {
+        var selected = card.getAttribute('data-rail') === key;
+        card.classList.toggle('selected', selected);
+        card.setAttribute('aria-checked', selected ? 'true' : 'false');
+      });
+    }
+
+    function updateRailUI() {
+      var key = getRailKey();
+      var cfg = railConfig[key] || railConfig.ecocash;
+      if (!cfg) return;
+      railLabelEl.textContent = cfg.label;
+      railInstructionEl.textContent = cfg.subtext;
+      phoneEl.placeholder = cfg.placeholder || 'e.g. 0771 327 202';
+      phoneErrorEl.textContent = '';
+      phoneEl.classList.remove('invalid');
+      phoneEl.removeAttribute('aria-invalid');
+      if (statusEl && !payBtn.disabled) statusEl.textContent = cfg.notice;
+      syncRailSelection();
+    }
+
+    function handleRailChange(event) {
+      if (!event || !event.target || event.target.name !== 'pay_method') return;
+      updateRailUI();
+    }
+
+    var payMethodsEl = form.querySelector('#pay_methods');
+    if (payMethodsEl) {
+      payMethodsEl.addEventListener('change', handleRailChange);
+      payMethodsEl.addEventListener('click', function (event) {
+        var card = event.target.closest ? event.target.closest('.pay-method') : null;
+        if (!card) return;
+        // The radio is checked during click activation; defer so the label and
+        // helper notice always reflect the newly selected rail.
+        setTimeout(updateRailUI, 0);
+      });
+    }
+    updateRailUI();
+
+    function setRailsLocked(locked) {
+      railCards.forEach(function (card) {
+        card.classList.toggle('processing', locked);
+        var input = card.querySelector('input[name="pay_method"]');
+        if (input) input.disabled = locked;
+      });
+      syncRailSelection();
+    }
 
     function setLoading(loading, label) {
       payBtn.disabled = loading;
+      payBtn.setAttribute('aria-busy', loading ? 'true' : 'false');
       btnSpinner.style.display = loading ? 'inline-block' : 'none';
-      btnText.textContent = loading ? (label || 'Processing\u2026') : `Pay $${packageData['data-amount']} USD`;
+      btnText.textContent = loading ? (label || 'Processing\u2026') : initialBtnLabel;
+      // Lock the chosen rail while a payment is in flight, but never clear or
+      // dim it: .processing keeps the selected card's border and glow.
+      setRailsLocked(loading);
     }
 
     function setStatus(msg) {
@@ -86,11 +344,145 @@
         .replace(/"/g, '&quot;');
     }
 
+    function hideAuthPanel() {
+      activeAuthorization = null;
+      if (!authPanel) return;
+      authPanel.style.display = 'none';
+      authCodeCard.style.display = 'none';
+      authPinPanel.style.display = 'none';
+      authStatus.textContent = '';
+      authFeedback.textContent = '';
+      authPinError.textContent = '';
+      authPinInput.value = '';
+      authPinInput.classList.remove('invalid');
+      authPinInput.removeAttribute('aria-invalid');
+      authSubmit.disabled = false;
+      authSubmit.textContent = 'Authorize Payment';
+    }
+
+    function copyText(text, feedbackEl, successMessage) {
+      function done(ok) {
+        if (!feedbackEl) return;
+        feedbackEl.textContent = ok ? successMessage + ' \u2713' : 'Copy failed \u2014 select and copy manually';
+        feedbackEl.style.opacity = '1';
+        setTimeout(function () { feedbackEl.style.opacity = '0'; }, 2500);
+      }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(function () { done(true); }).catch(function () { done(false); });
+        return;
+      }
+      var ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand('copy'); done(true); } catch (e) { done(false); }
+      document.body.removeChild(ta);
+    }
+
+    function hideCheckoutFields() {
+      form.querySelectorAll('.field').forEach(function (f) { f.style.display = 'none'; });
+      phoneEl.style.display = 'none';
+      payBtn.style.display = 'none';
+    }
+
+    function showAuthCode(data) {
+      activeAuthorization = {
+        paymentId: data.paymentId || data.transaction_id,
+        statusToken: data.statusToken,
+        referenceNumber: data.referenceNumber || null,
+      };
+      hideCheckoutFields();
+      statusEl.style.display = 'none';
+      resultEl.style.display = 'none';
+      authPanel.style.display = 'block';
+      authCodeCard.style.display = 'block';
+      authPinPanel.style.display = 'none';
+      var code = data.authorizationCode || '';
+      authCodeValue.textContent = code;
+      authCodeValue.style.display = code ? '' : 'none';
+      authCodeCopy.style.display = code ? '' : 'none';
+      authHint.textContent = data.instructions || (code
+        ? 'Open your InnBucks app and enter this code to authorize the payment.'
+        : 'Open your InnBucks app and approve the payment request.');
+      authRef.textContent = data.referenceNumber ? 'Payment reference: ' + data.referenceNumber : '';
+      authStatus.textContent = 'Waiting for InnBucks to confirm the payment\u2026 Keep this page open.';
+    }
+
+    function showAuthPin(data) {
+      activeAuthorization = {
+        paymentId: data.paymentId || data.transaction_id,
+        statusToken: data.statusToken,
+        referenceNumber: data.referenceNumber || null,
+      };
+      hideCheckoutFields();
+      statusEl.style.display = 'none';
+      resultEl.style.display = 'none';
+      authPanel.style.display = 'block';
+      authCodeCard.style.display = 'none';
+      authPinPanel.style.display = 'block';
+      authStatus.textContent = data.message || 'Enter the authorization PIN sent to your phone.';
+      authPinError.textContent = '';
+      authPinInput.value = '';
+      authPinInput.classList.remove('invalid');
+      authPinInput.removeAttribute('aria-invalid');
+      setTimeout(function () { authPinInput.focus(); }, 50);
+    }
+
+    function showPaymentSuccess(data) {
+      hideAuthPanel();
+      stopPolling();
+      setLoading(false);
+
+      var qs = new URLSearchParams();
+      var gatewayKeys = [
+        'mac', 'client_mac', 'clientMac', 'ip', 'client_ip', 'wlanuserip', 'res', 'userurl',
+        'url', 'origUrl', 'login_url', 'loginUrl', 'nas_ip', 'nasip', 'nas_mac', 'ssid', 'gw_id', 'gw_sn',
+      ];
+      gatewayKeys.forEach(function (key) {
+        var value = ruijieParams.get(key);
+        if (value) qs.set(key, value);
+      });
+      if (ruijiePortalContext) {
+        qs.set('ruijiePortal', ruijiePortalContext.portalUrl);
+      }
+      var sessionId = (ruijiePortalContext && ruijiePortalContext.sessionId) || inboundRuijieSessionId;
+      var ruijieTimestamp = (ruijiePortalContext && ruijiePortalContext.timestamp) || inboundRuijieTimestamp;
+      if (sessionId) qs.set('sessionId', sessionId);
+      if (ruijieTimestamp) qs.set('timestamp', ruijieTimestamp);
+
+      var pkg = selectedPackage || {};
+      var packageName = data.packageName || data.tier || pkg['data-tier'] || 'Prepaid';
+      var durationMin = data.durationMin != null ? data.durationMin : parseInt(pkg['data-period'], 10);
+      var dataLimitGb = data.dataLimitGb != null ? data.dataLimitGb : parseFloat(pkg['data-data-limit']);
+      var isUncapped = data.isUncapped === true || pkg['data-is-uncapped'] === 'true';
+      var bandwidthUp = data.bandwidthMbpsUp != null ? data.bandwidthMbpsUp : parseInt(pkg['data-bandwidth-up'], 10);
+      var bandwidthDown = data.bandwidthMbpsDown != null ? data.bandwidthMbpsDown : parseInt(pkg['data-bandwidth-down'], 10);
+
+      qs.set('voucher', data.voucherCode || '');
+      qs.set('pkg', packageName);
+      if (Number.isFinite(durationMin) && durationMin > 0) qs.set('dur', String(durationMin));
+      if (Number.isFinite(dataLimitGb)) qs.set('dataLimit', String(dataLimitGb));
+      if (isUncapped) qs.set('uncapped', 'true');
+      if (Number.isFinite(bandwidthUp) && bandwidthUp > 0) qs.set('bwUp', String(bandwidthUp));
+      if (Number.isFinite(bandwidthDown) && bandwidthDown > 0) qs.set('bwDown', String(bandwidthDown));
+      if (data.amount != null) qs.set('amount', String(data.amount));
+      if (data.currency) qs.set('currency', data.currency);
+      if (data.reference || data.referenceNumber) qs.set('ref', data.reference || data.referenceNumber);
+      if (data.clientName) qs.set('name', data.clientName);
+      if (data.clientPhone) qs.set('phone', data.clientPhone);
+      if (data.paymentId || data.transaction_id) qs.set('paymentId', data.paymentId || data.transaction_id);
+
+      location.assign('/success.html?' + qs.toString());
+    }
+
     // The customer has paid, but Ruijie Cloud could not issue the code yet
     // (outage, or the tier has no mapped group). We must never imply their money
     // is lost, and must never show a voucher that does not exist. Polling
     // continues, so this state can resolve itself into a real code.
     function showSupportPending(reference, attemptsLeft) {
+      hideAuthPanel();
       const ref = reference ? escapeHtml(reference) : 'not recorded yet';
       const waText = encodeURIComponent(
         'Hi Preyone, my payment went through but my WiFi code has not arrived yet. ' +
@@ -116,23 +508,27 @@
 
     function showPaymentFailure(detail) {
       stopPolling();
+      hideAuthPanel();
       setLoading(false);
       form.querySelectorAll('.field').forEach((f) => { f.style.display = 'none'; });
       payBtn.style.display = 'none';
       statusEl.style.display = 'none';
+      // Keep the failed rail visibly selected; only Try Again unlocks it.
+      setRailsLocked(true);
       resultEl.removeAttribute('style');
       resultEl.className = 'field-success payment-fail';
       resultEl.style.display = 'block';
+      resultEl.setAttribute('role', 'alert');
       resultEl.innerHTML = [
         '<svg class="payment-fail-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">' +
-          '<path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" stroke="#ef476f" stroke-width="1.8" stroke-linejoin="round"/>' +
-          '<path d="M12 9v4" stroke="#ef476f" stroke-width="2" stroke-linecap="round"/>' +
-          '<path d="M12 17h.01" stroke="#ef476f" stroke-width="2" stroke-linecap="round"/>' +
+          '<path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" stroke="#FF2400" stroke-width="1.8" stroke-linejoin="round"/>' +
+          '<path d="M12 9v4" stroke="#FF2400" stroke-width="2" stroke-linecap="round"/>' +
+          '<path d="M12 17h.01" stroke="#FF2400" stroke-width="2" stroke-linecap="round"/>' +
         '</svg>',
         '<p class="payment-fail-title">Payment was not successful.</p>',
         typeof detail === 'string' && detail ? '<p class="payment-fail-detail">' + detail + '</p>' : '',
         '<div class="payment-fail-actions">' +
-          '<button type="button" class="payment-btn payment-btn--try">Try again</button>' +
+          '<button type="button" class="payment-btn payment-btn--try">Try Again</button>' +
           '<button type="button" class="payment-btn payment-btn--close">Close</button>' +
         '</div>'
       ].join('');
@@ -141,16 +537,46 @@
     }
 
     function resetPaymentForm() {
-      form.querySelectorAll('.field').forEach((f) => { f.style.display = ''; });
+      stopPolling();
+      hideAuthPanel();
+      paymentSupportPending = false;
+      lastPaymentReference = null;
+
+      // Retry keeps the modal open; only the failure panel and form state reset.
+      modal.classList.remove('hidden');
+      modal.style.display = '';
+
+      // Restore every control the failure/processing state touched.
+      form.querySelectorAll('.field').forEach(function (f) { f.style.display = ''; });
+      phoneEl.style.display = '';
       payBtn.style.display = '';
       statusEl.style.display = '';
       resultEl.className = 'field-success';
       resultEl.innerHTML = '';
       resultEl.style.display = 'none';
+      resultEl.removeAttribute('role');
+
+      form.querySelectorAll('.field-error').forEach(function (f) { f.textContent = ''; });
+      form.querySelectorAll('.invalid').forEach(function (f) { f.classList.remove('invalid'); });
+      form.querySelectorAll('[aria-invalid="true"]').forEach(function (f) { f.removeAttribute('aria-invalid'); });
+
+      form.querySelectorAll('input, select, textarea, button').forEach(function (el) {
+        el.disabled = false;
+      });
+
       phoneEl.value = '';
-      paymentSupportPending = false;
-      lastPaymentReference = null;
+      var nameInput = document.getElementById('pesepay-fullName');
+      var contactInput = document.getElementById('pesepay-contactPhone');
+      if (nameInput) nameInput.value = '';
+      if (contactInput) contactInput.value = '';
+
+      // Retry starts from the default rail; the customer can immediately pick
+      // a different one and submit again without the modal closing.
+      var firstRail = form.querySelector('input[name="pay_method"]');
+      if (firstRail) firstRail.checked = true;
+
       setLoading(false);
+      updateRailUI();
       phoneEl.focus();
     }
 
@@ -177,10 +603,19 @@
       }
     }
 
-    function pollPaymentStatus(paymentId, statusToken, attemptsLeft) {
+    function pollPaymentStatus(paymentId, statusToken, attemptsLeft, options) {
       stopPolling();
+      options = options || {};
+      var intervalMs = options.intervalMs || 1000;
+      var referenceNumber = options.referenceNumber || null;
+      var authFlow = Boolean(options.authFlow);
+
       if (attemptsLeft <= 0) {
         setLoading(false);
+        if (authFlow) {
+          showPaymentFailure('We did not receive confirmation within 90 seconds. If you approved the payment, contact support with your reference.');
+          return;
+        }
         // Never tell a customer whose money is confirmed that we have not
         // received it. Fall back to the support panel instead.
         if (paymentSupportPending) {
@@ -191,7 +626,11 @@
         return;
       }
 
-      fetch(`/api/payments/status/${paymentId}?token=${encodeURIComponent(statusToken)}`)
+      var statusUrl = referenceNumber
+        ? `/api/payments/status?referenceNumber=${encodeURIComponent(referenceNumber)}&token=${encodeURIComponent(statusToken)}`
+        : `/api/payments/status?id=${encodeURIComponent(paymentId)}&token=${encodeURIComponent(statusToken)}`;
+
+      fetch(statusUrl)
         .then((r) => {
           if (r.status === 401 || r.status === 403) {
             throw Object.assign(new Error('Payment session expired'), { fatal: true });
@@ -200,35 +639,28 @@
         })
         .then((data) => {
           if (data.status === 'completed') {
-            stopPolling();
-            setLoading(false);
-            form.querySelectorAll('.field').forEach((f) => { f.style.display = 'none'; });
-            phoneEl.style.display = 'none';
-            payBtn.style.display = 'none';
-            statusEl.style.display = 'none';
-            resultEl.style.display = 'block';
-            resultEl.innerHTML = [
-              '<strong style="font-size:1rem">Payment complete!</strong>',
-              '<span style="display:block;margin:.6rem 0 .4rem;color:rgba(255,255,255,.75)">Your voucher code:</span>',
-              '<code style="display:inline-block;font-size:1.25rem;letter-spacing:.12em;padding:.5rem .9rem;border-radius:10px;background:rgba(37,211,102,.12);border:1px solid rgba(37,211,102,.35);color:#4ade80;user-select:all">' + data.voucherCode + '</code>',
-              '<span style="display:block;margin-top:.7rem;font-size:.85rem;line-height:1.5">A login page will open automatically — enter this code there to connect to the internet. If it does not open, visit <strong>www.preyone.com</strong> on your device.</span>'
-            ].join('');
+            showPaymentSuccess(data);
             return;
           }
-          if (data.status === 'failed') {
-            showPaymentFailure('Your payment was declined. Check your balance and try again.');
+          if (data.status === 'failed' || data.status === 'refunded') {
+            showPaymentFailure(data.message || 'Payment was declined. Check your balance and try again.');
             return;
           }
           // Paid, but no code yet. Reassure, surface the reference for support,
-          // and keep polling — a later poll may still mint successfully.
+          // and keep polling: a later poll may still mint successfully.
           if (data.supportRequired) {
             paymentSupportPending = true;
             lastPaymentReference = data.reference || null;
             showSupportPending(data.reference, attemptsLeft);
+          } else if (authFlow) {
+            authStatus.textContent = 'Waiting for payment confirmation\u2026 Keep this page open.';
           } else {
-            setStatus('Waiting for payment confirmation\u2026 Check your phone for the PIN prompt. (Keep this page open)');
+            setStatus('Waiting for payment confirmation\u2026 Approve the prompt on your phone. (Keep this page open)');
           }
-          paymentPollTimer = setTimeout(() => pollPaymentStatus(paymentId, statusToken, attemptsLeft - 1), 3000);
+          paymentPollTimer = setTimeout(
+            () => pollPaymentStatus(paymentId, statusToken, attemptsLeft - 1, options),
+            intervalMs
+          );
         })
         .catch((err) => {
           if (err && err.fatal) {
@@ -237,7 +669,10 @@
             showPaymentFailure('Your payment session expired. If you were charged, contact support with your reference.');
             return;
           }
-          paymentPollTimer = setTimeout(() => pollPaymentStatus(paymentId, statusToken, attemptsLeft - 1), 3000);
+          paymentPollTimer = setTimeout(
+            () => pollPaymentStatus(paymentId, statusToken, attemptsLeft - 1, options),
+            intervalMs
+          );
         });
     }
 
@@ -245,15 +680,118 @@
       phoneErrorEl.textContent = '';
     });
 
+    authCodeCopy.addEventListener('click', function () {
+      copyText(authCodeValue.textContent || '', authFeedback, 'Authorization code copied!');
+    });
+
+    authPinInput.addEventListener('input', function () {
+      authPinError.textContent = '';
+      authPinInput.classList.remove('invalid');
+      authPinInput.removeAttribute('aria-invalid');
+    });
+
+    authPinInput.addEventListener('keydown', function (event) {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        authSubmit.click();
+      }
+    });
+
+    authSubmit.addEventListener('click', async function () {
+      if (!activeAuthorization) {
+        showPaymentFailure('Your payment session expired. Please try again.');
+        return;
+      }
+      var pin = authPinInput.value.trim();
+      if (!/^\d{4,8}$/.test(pin)) {
+        authPinError.textContent = 'Enter the numeric PIN sent to your phone.';
+        authPinInput.classList.add('invalid');
+        authPinInput.setAttribute('aria-invalid', 'true');
+        authPinInput.focus();
+        return;
+      }
+
+      authSubmit.disabled = true;
+      authSubmit.textContent = 'Authorizing\u2026';
+      authStatus.textContent = 'Checking your authorization PIN\u2026';
+      authPinError.textContent = '';
+
+      var authorization = activeAuthorization;
+      try {
+        var response = await fetch('/api/payments/authorize', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            transaction_id: authorization.paymentId,
+            pin: pin,
+            token: authorization.statusToken,
+          }),
+        });
+        var data = {};
+        try { data = await response.json(); } catch (e) { data = {}; }
+        if (!response.ok || data.success === false) {
+          showPaymentFailure(data.error || 'The authorization PIN was not accepted. Please try again.');
+          return;
+        }
+        if (data.status === 'completed' && data.voucherCode) {
+          showPaymentSuccess(data);
+          return;
+        }
+
+        authSubmit.textContent = 'Authorized';
+        authPinPanel.style.display = 'none';
+        authStatus.textContent = 'PIN accepted. Waiting for O\'mari to confirm the payment\u2026';
+        setLoading(true, 'Waiting for approval\u2026');
+        pollPaymentStatus(authorization.paymentId, authorization.statusToken, 36, {
+          intervalMs: 1000,
+          referenceNumber: authorization.referenceNumber,
+          authFlow: true,
+        });
+      } catch (err) {
+        authSubmit.disabled = false;
+        authSubmit.textContent = 'Authorize Payment';
+        authStatus.textContent = 'We could not reach the payment provider. Please try again.';
+      }
+    });
+
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       const phone = phoneEl.value.trim();
-      if (!/^(\+?263|0)?7\d{8}$/.test(phone.replace(/[\s-]/g, ''))) {
+      var checked = form.querySelector('input[name="pay_method"]:checked');
+      var railKey = checked ? getRailKey() : 'ecocash';
+      var cfg = railConfig[railKey] || railConfig.ecocash;
+      var requiresPhone = cfg ? cfg.requiresPhone : true;
+      var requiresIdentifier = cfg ? cfg.requiresIdentifier !== false : true;
+      phoneErrorEl.textContent = '';
+
+
+      // Tier capture for $4.99+
+      var price = parseFloat(packageData['data-amount']);
+      if (price >= 4.99) {
+        var nameInput = document.getElementById('pesepay-fullName');
+        var contactInput = document.getElementById('pesepay-contactPhone');
+        if (nameInput && !nameInput.value.trim()) {
+          phoneErrorEl.textContent = 'Full name is required.';
+          return;
+        }
+        if (contactInput && !contactInput.value.trim()) {
+          phoneErrorEl.textContent = 'Contact number is required.';
+          return;
+        }
+      }
+
+      if (requiresIdentifier && !phone) {
+        phoneErrorEl.textContent = cfg.label + ' is required.';
+        return;
+      }
+
+      if (requiresPhone && !/^(\+?263|0)?7\d{8}$/.test(phone.replace(/[\s-]/g, ''))) {
         phoneErrorEl.textContent = 'Enter a valid Zimbabwe mobile number, e.g. 0771 327 202.';
         return;
       }
       resultEl.className = 'field-success';
       resultEl.style.display = 'none';
+      resultEl.removeAttribute('role');
       resultEl.style.color = '';
       resultEl.style.background = '';
       resultEl.style.border = '';
@@ -271,14 +809,34 @@
         // pesepayPollUrl we get back is a JSON status endpoint that must NOT be
         // shown in a browser. Poll our own status endpoint from here instead.
         if (!result.paymentId || !result.statusToken) {
-          showPaymentFailure('We could not reach EcoCash. Please try again in a moment.');
+          showPaymentFailure('We could not reach ' + (cfg.shortName || railKey) + '. Please try again in a moment.');
           return;
         }
+
+        if (railKey === 'omari' && result.requires_pin) {
+          setLoading(true, 'Waiting for authorization\u2026');
+          showAuthPin(result);
+          return;
+        }
+
+        if (railKey === 'innbucks') {
+          setLoading(true, 'Waiting for approval\u2026');
+          showAuthCode(result);
+          pollPaymentStatus(result.paymentId, result.statusToken, 36, {
+            intervalMs: 1000,
+            referenceNumber: result.referenceNumber || null,
+            authFlow: true,
+          });
+          return;
+        }
+
+        // EcoCash sends the USSD prompt straight to the customer's phone. The
+        // response arrives before Pesepay has a reference, so poll by payment id.
         form.querySelectorAll('.field').forEach((f) => { f.style.display = 'none'; });
         phoneEl.style.display = 'none';
         payBtn.style.display = 'none';
         setLoading(true, 'Waiting for approval\u2026');
-        setStatus('A payment request has been sent to your phone. Approve it with your EcoCash PIN. (Keep this page open)');
+        setStatus(cfg.sent);
         pollPaymentStatus(result.paymentId, result.statusToken, 300);
       } catch (err) {
         console.error('Payment error:', err);
@@ -308,16 +866,24 @@
   }
 
   async function initiatePackagePayment(packageData, phone) {
-    const fullName = document.getElementById('fullName')?.value.trim() || 'Guest User';
+    const fullNameInput = document.getElementById('pesepay-fullName');
+    const contactPhoneInput = document.getElementById('pesepay-contactPhone');
+    const fullName = (fullNameInput ? fullNameInput.value.trim() : '') || 'Guest User';
+    const contactPhone = contactPhoneInput ? contactPhoneInput.value.trim() : phone;
     const macAddress = ruijieParams.get('mac') || ruijieParams.get('clientMac');
 
+    var checked = document.querySelector('input[name="pay_method"]:checked');
+    var paymentRail = checked ? checked.value : 'ecocash';
+
     const paymentData = {
-      tier: packageData['data-tier'],
+      payment_rail: paymentRail,
+      account_identifier: phone || contactPhone,
+      client_name: fullName,
+      client_phone: contactPhone || phone,
       amount: parseFloat(packageData['data-amount']),
+      package_id: packageData['data-tier'],
       currency: packageData['data-currency'],
-      phone,
-      fullName,
-      macAddress,
+      macAddress: macAddress,
     };
 
     const response = await fetch('/api/payments/initiate', {
@@ -383,7 +949,7 @@
     }
     if (!paymentId || !token) return;
 
-    fetch('/api/payments/status/' + encodeURIComponent(paymentId) + '?token=' + encodeURIComponent(token))
+    fetch('/api/payments/status?id=' + encodeURIComponent(paymentId) + '&token=' + encodeURIComponent(token))
       .then(function (r) { return r.ok ? r.json() : Promise.reject(new Error('lookup failed')); })
       .then(function (data) {
         pendingReturn = { paymentId: paymentId, token: token };
@@ -422,11 +988,11 @@
   }
 
   function showDataFinished(status) {
-    var connectCard = document.querySelector('#quick-form');
-    if (connectCard) {
-      var card = connectCard.closest('.hero-card');
-      if (card) card.hidden = true;
-    }
+    // The redemption form now lives in the Connect Now popup, so there is no
+    // inline card to swap out — hide the trigger instead, otherwise the guest
+    // is offered a voucher box they cannot use.
+    var connectBtn = document.getElementById('connect-now-btn');
+    if (connectBtn) connectBtn.hidden = true;
     dataFinishedCard.hidden = false;
 
     if (status.uncapped || !status.quotaBytes) return;
@@ -471,7 +1037,10 @@
   function redirectToSuccess(json) {
     // Navigate directly to the ext_login URL (or success.html fallback) returned by the server.
     // Do NOT re-encode or add extra params — the server already built the correct URL.
-    location.href = json.redirectUrl || '/success.html';
+    // `authUrl` covers deployments that return the Ruijie authorization endpoint
+    // separately; the path is passed through verbatim either way.
+    var data = json || {};
+    location.href = data.redirectUrl || data.authUrl || '/success.html';
   }
 
   async function submitForm(data, errorEl) {
@@ -512,30 +1081,290 @@
     }
   }
 
-  // --- QUICK CONNECT FORM (voucher only) ---
-  var quickForm = document.getElementById('quick-form');
-  var quickBtn = document.getElementById('quick-submit-btn');
-  var quickBtnText = document.getElementById('quick-btn-text');
-  var quickBtnSpinner = document.getElementById('quick-btn-spinner');
+  // --- VOUCHER REDEMPTION (shared by the Connect Now popup) ---
 
-  function setQuickLoading(loading) {
-    if (quickBtn) quickBtn.disabled = loading;
-    if (quickBtnText) quickBtnText.textContent = loading ? 'Connecting\u2026' : 'Connect';
-    if (quickBtnSpinner) quickBtnSpinner.classList.toggle('hidden', !loading);
+  // The account-registration endpoint is the last resort. It is rate limited to
+  // 10 requests / 15 min PER IP, and every guest on a hotspot shares one NAT IP,
+  // so it is only used when the local route genuinely is not deployed.
+  async function legacyRedeem(code) {
+    var res = await fetch('/api/auth/signup?' + voucherParams.toString(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ voucherCode: code, fullName: 'Voucher Guest', acceptedTos: true }),
+    });
+    var json = await res.json().catch(function () { return {}; });
+    if (!res.ok) throw new Error(json.error || 'Could not activate that voucher.');
+    return json;
   }
 
-  if (quickForm) {
-    quickForm.addEventListener('submit', function (e) {
-      var code = document.getElementById('accessCode').value.trim();
+  /**
+   * Redeem against the LOCAL `vouchers` table: POST /api/portal/redeem.
+   *
+   * One round-trip, no account, no password and no Ruijie Cloud call, so paying
+   * customers queued behind one NAT IP can never throttle each other out.
+   * The legacy signup POST is used only when this deployment does not have the
+   * route (404/405) or a proxy in front of it is down (501/502/503/504) — a
+   * plain 500 is reported to the customer instead of silently retried, because
+   * retrying a possibly-committed redemption could burn a second allocation.
+   */
+  async function redeemVoucher(code, queryOverride, payloadOverride) {
+    var query = queryOverride != null ? queryOverride : voucherParams.toString();
+    var payload = payloadOverride || {
+      voucherCode: code,
+      fullName: 'Voucher Guest',
+      acceptedTos: true,
+    };
+    var res;
+    try {
+      res = await fetch('/api/portal/redeem?' + query, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify(payload),
+      });
+    } catch (_networkErr) {
+      return legacyRedeem(code);
+    }
+
+    if (res.status === 404 || res.status === 405 || [501, 502, 503, 504].indexOf(res.status) !== -1) {
+      return legacyRedeem(code);
+    }
+
+    var json = await res.json().catch(function () { return {}; });
+    if (!res.ok) {
+      throw new Error(json.error || 'Could not activate that voucher. Please check the code and try again.');
+    }
+    return json;
+  }
+
+  // --- GATEWAY CONTEXT (client MAC / IP from the redirected URL) ------------
+  // The EG105G-P (and the Ruijie AP models in front of it) name the station
+  // differently: client_mac, mac, clientMac, sta_mac ... and for the address
+  // ip, client_ip, wlanuserip. Normalising the key means one lookup serves every
+  // model instead of a per-model branch. `nas_ip` is the GATEWAY address, so it
+  // is deliberately never treated as the client IP.
+  var GATEWAY_MAC_KEYS = ['clientmac', 'mac', 'macaddress', 'stamac', 'usermac', 'devicemac', 'clienthwaddr'];
+  var GATEWAY_IP_KEYS = ['clientip', 'ip', 'ipaddress', 'wlanuserip', 'userip', 'staip', 'deviceip'];
+
+  function normalizeGatewayKey(key) {
+    return String(key == null ? '' : key).toLowerCase().replace(/[^a-z0-9]/g, '');
+  }
+
+  function extractGatewayContext(search) {
+    var context = { mac: '', ip: '' };
+    var params;
+    try {
+      params = new URLSearchParams(search || '');
+    } catch (_err) {
+      return context;
+    }
+    params.forEach(function (value, key) {
+      var name = normalizeGatewayKey(key);
+      var raw = String(value == null ? '' : value).trim();
+      if (!raw) return;
+      if (!context.mac && GATEWAY_MAC_KEYS.indexOf(name) !== -1) context.mac = raw;
+      if (!context.ip && GATEWAY_IP_KEYS.indexOf(name) !== -1) context.ip = raw;
+    });
+    return context;
+  }
+
+  var gatewayContext = extractGatewayContext(location.search);
+
+  // The gateway params must travel in the QUERY STRING (AGENTS.md: a POST body
+  // loses them). location.search is already forwarded verbatim; this only adds
+  // the aliases we resolved, and never overrides what the gateway sent.
+  function connectQueryString() {
+    var qs;
+    try {
+      qs = new URLSearchParams(location.search);
+    } catch (_err) {
+      return voucherParams.toString();
+    }
+    if (gatewayContext.mac && !qs.get('client_mac')) qs.set('client_mac', gatewayContext.mac);
+    if (gatewayContext.ip && !qs.get('client_ip') && !qs.get('ip')) qs.set('client_ip', gatewayContext.ip);
+    return qs.toString();
+  }
+
+  // --- CONNECT NOW POPUP ---------------------------------------------------
+  // Hidden by default (`display: none` in _modal.css); toggled here. Cancel,
+  // the ✕ button, Escape and a click on the backdrop all close it, and focus
+  // returns to the button that opened it.
+  var connectModal = document.getElementById('connect-form-modal');
+  var connectOpenBtn = document.getElementById('connect-now-btn') || document.getElementById('connectNowBtn');
+  var connectForm = document.getElementById('connect-form');
+  var connectInput = document.getElementById('connectVoucherCode');
+  var connectError = document.getElementById('form-error') || document.getElementById('connect-form-error');
+  var connectErrorText = document.getElementById('form-error-text');
+  var connectSubmitBtn = document.getElementById('quick-submit-btn') || document.getElementById('connect-submit-btn');
+  var connectSubmitText = document.getElementById('connect-btn-text');
+  var connectSubmitSpinner = document.getElementById('connect-btn-spinner');
+  var connectReturnFocus = null;
+
+  function isConnectOpen() {
+    return !!connectModal && connectModal.classList.contains('is-open');
+  }
+
+  function setConnectOpen(open) {
+    if (!connectModal) return;
+    connectModal.classList.toggle('is-open', !!open);
+    connectModal.setAttribute('aria-hidden', open ? 'false' : 'true');
+    if (connectOpenBtn) connectOpenBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    document.body.classList.toggle('connect-modal-open', !!open);
+    if (!open) {
+      if (connectReturnFocus && typeof connectReturnFocus.focus === 'function') connectReturnFocus.focus();
+      return;
+    }
+    var deviceRow = document.getElementById('connect-device');
+    var deviceMac = document.getElementById('connect-device-mac');
+    if (deviceRow && deviceMac) {
+      if (gatewayContext.mac) {
+        deviceMac.textContent = gatewayContext.mac;
+        deviceRow.hidden = false;
+      } else {
+        deviceRow.hidden = true;
+      }
+    }
+    if (connectError) {
+      // Clears the text span only; the warning glyph must survive the reset.
+      showConnectError('');
+    }
+    setFieldError('connectVoucherCode', '');
+    var resetInput = connectInput || document.getElementById('connectVoucherCode');
+    if (resetInput) resetInput.classList.remove('invalid');
+    var input = connectInput || document.getElementById('connectVoucherCode');
+    if (input) setTimeout(function () { input.focus(); }, 60);
+  }
+
+  function setConnectLoading(loading) {
+    if (connectSubmitBtn) connectSubmitBtn.disabled = loading;
+    if (connectSubmitText) connectSubmitText.textContent = loading ? 'Connecting\u2026' : 'Connect';
+    if (connectSubmitSpinner) connectSubmitSpinner.classList.toggle('hidden', !loading);
+  }
+
+  function showConnectError(message) {
+    if (!connectError) return;
+    var text = String(message == null ? '' : message);
+
+    // The alert row now has an inline warning glyph, so text must land in the
+    // span inside it — writing to the container would delete the icon.
+    if (connectErrorText) connectErrorText.textContent = text;
+    else connectError.textContent = text;
+
+    if (!text) {
+      connectError.classList.add('hidden');
+      connectError.classList.remove('is-shaking');
+      return;
+    }
+
+    connectError.classList.remove('hidden');
+    // Repeat failures keep the element mounted, so the entrance animation has
+    // already played: restart the shake (a reflow is required between the two
+    // class toggles or the browser ignores the change).
+    connectError.classList.remove('is-shaking');
+    void connectError.offsetWidth;
+    connectError.classList.add('is-shaking');
+  }
+
+  if (connectOpenBtn) {
+    connectOpenBtn.addEventListener('click', function () {
+      connectReturnFocus = connectOpenBtn;
+      setConnectOpen(true);
+    });
+  }
+
+  // Preyone voucher PINs are minted lowercase (`vnq4wx`), but phone keyboards
+  // still auto-capitalise despite autocapitalize="none". Normalise as the
+  // customer types so what they see matches what is stored and submitted.
+  var lowercaseVoucherInput = connectInput || document.getElementById('connectVoucherCode');
+  if (lowercaseVoucherInput) {
+    lowercaseVoucherInput.addEventListener('input', function () {
+      var lowered = String(this.value || '').toLowerCase();
+      if (this.value === lowered) return;
+      var caret = this.selectionStart;
+      this.value = lowered;
+      // Keep the caret where the customer left it instead of jumping to the end.
+      if (caret != null) {
+        try { this.setSelectionRange(caret, caret); } catch (_err) { /* unsupported */ }
+      }
+    });
+  }
+
+  ['connect-form-close', 'connect-cancel-btn'].forEach(function (id) {
+    var btn = document.getElementById(id);
+    if (btn) {
+      btn.addEventListener('click', function () { setConnectOpen(false); });
+    }
+  });
+
+  if (connectModal) {
+    // Click-outside-to-close: only a click on the overlay itself counts, so
+    // selecting text inside the card never dismisses the form.
+    connectModal.addEventListener('click', function (event) {
+      if (event.target === connectModal) setConnectOpen(false);
+    });
+  }
+
+  document.addEventListener('keydown', function (event) {
+    if ((event.key === 'Escape' || event.key === 'Esc') && isConnectOpen()) {
+      event.preventDefault();
+      setConnectOpen(false);
+    }
+  });
+
+  var connectBuyBtn = document.getElementById('connect-buy-btn');
+  if (connectBuyBtn) {
+    connectBuyBtn.addEventListener('click', function () {
+      setConnectOpen(false);
+      var target = document.getElementById('packages-heading');
+      if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  }
+
+  if (connectForm) {
+    connectForm.addEventListener('submit', async function (event) {
+      event.preventDefault();
+
+      var input = connectInput || document.getElementById('connectVoucherCode');
+      // PINs are minted lowercase (`vnq4wx`). Strip the separators people type
+      // when reading a printed card and normalise the case before the request.
+      var code = (input && input.value ? input.value : '').replace(/\s+/g, '').toLowerCase().trim();
+      showConnectError('');
+      setFieldError('connectVoucherCode', '');
+      if (input) input.classList.remove('invalid');
       if (!code) {
-        e.preventDefault();
-        setFieldError('accessCode', 'Access code is required.');
+        setFieldError('connectVoucherCode', 'Voucher code is required.');
+        if (input) {
+          input.classList.add('invalid');
+          input.focus();
+        }
         return;
       }
-      // Set form action to include original gateway params (client_mac, nas_ip, etc.)
-      quickForm.action = '/api/auth/signup?' + voucherParams.toString();
-      // Submit naturally — browser POSTs to server, server returns 302 redirect to ext_login,
-      // browser follows as top-level navigation, no JS dependency for the redirect.
+
+      setConnectLoading(true);
+      try {
+        var json = await redeemVoucher(code, connectQueryString(), {
+          voucherCode: code,
+          fullName: 'Voucher Guest',
+          acceptedTos: true,
+          clientMac: gatewayContext.mac || undefined,
+          clientIp: gatewayContext.ip || undefined,
+        });
+        // Success state: keep the button spinner spinning while the gateway
+        // handshake navigates away, so the popup never flashes idle controls.
+        if (connectSubmitText) connectSubmitText.textContent = 'Connected! Redirecting\u2026';
+        redirectToSuccess(json);
+      } catch (err) {
+        setConnectLoading(false);
+        var message = (err && err.message) || 'Could not activate that voucher. Please try again.';
+        // One message, one place: the alert. The field hint stays empty so the
+        // same sentence is never stacked twice inside the popup.
+        setFieldError('connectVoucherCode', '');
+        showConnectError(message);
+        if (input) {
+          input.classList.add('invalid');
+          input.focus();
+        }
+      }
     });
   }
 
@@ -634,11 +1463,19 @@ function setFieldError(fieldName, message) {
 }
 
 function clearErrors() {
-  ['fullName', 'phone', 'email', 'voucherCode', 'acceptedTos', 'suVoucherCode', 'accessCode', 'login-email', 'login-phone', 'login-password', 'suPassword', 'suPasswordConfirm'].forEach(function (f) {
+  ['fullName', 'phone', 'email', 'voucherCode', 'acceptedTos', 'suVoucherCode', 'connectVoucherCode', 'login-email', 'login-phone', 'login-password', 'suPassword', 'suPasswordConfirm'].forEach(function (f) {
     setFieldError(f, '');
   });
   var fe = document.getElementById('form-error');
-  if (fe) { fe.textContent = ''; fe.classList.add('hidden'); }
+  if (fe) {
+    // Only blank the message span — clearing the container would delete the
+    // inline warning glyph that ships in the markup.
+    var feText = document.getElementById('form-error-text');
+    if (feText) feText.textContent = '';
+    else fe.textContent = '';
+    fe.classList.add('hidden');
+    fe.classList.remove('is-shaking');
+  }
   var se = document.getElementById('signup-form-error');
   if (se) { se.textContent = ''; se.classList.add('hidden'); }
 }
@@ -665,32 +1502,17 @@ document.addEventListener('DOMContentLoaded', function () {
   if (loadingEl) loadingEl.classList.add('hidden');
 });
 
-// Connect Now button — scroll to quick form and highlight access code
-document.addEventListener('DOMContentLoaded', function () {
-  var btn = document.getElementById('connectNowBtn');
-  if (btn) {
-    btn.addEventListener('click', function () {
-      var card = document.querySelector('.hero-card');
-      if (card) {
-        card.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      }
-      var input = document.getElementById('accessCode');
-      if (input) {
-        setTimeout(function () { input.focus(); }, 500);
-        input.classList.add('voucher-highlight');
-        setTimeout(function () {
-          input.classList.remove('voucher-highlight');
-        }, 2600);
-      }
-    });
-  }
-});
+// NOTE: "Connect Now" is wired inside the main portal IIFE above
+// (open/close/backdrop/Escape + AJAX redemption). The old scroll-to-quick-form
+// handler that lived here is gone: the button now opens the popup card instead.
 
 // --- PORTAL LOGIN + INLINE DASHBOARD (account-login.html) ---
 function showDashboard() {
   var loginSection = document.getElementById('login-section');
   var dashboard = document.getElementById('ma-dashboard');
+  var loadingCard = document.getElementById('ma-loading');
   if (loginSection) loginSection.classList.add('hidden');
+  if (loadingCard) loadingCard.classList.add('hidden');
   if (dashboard) dashboard.classList.remove('hidden');
   loadDashboardData();
 }
@@ -1039,7 +1861,7 @@ document.addEventListener('DOMContentLoaded', function () {
     window.location.href = '/login';
     return;
   }
-  loadDashboardData();
+  showDashboard();
 });
 
 // Sign Up button — toggle signup section visibility with reveal animation
