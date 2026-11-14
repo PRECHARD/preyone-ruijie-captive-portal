@@ -156,14 +156,22 @@ const SQL = `
   CREATE INDEX IF NOT EXISTS idx_wispr_mac_address ON wispr_profiles (mac_address);
 
   CREATE TABLE IF NOT EXISTS access_log (
-    id          BIGSERIAL PRIMARY KEY,
-    user_id     UUID REFERENCES users(id) ON DELETE SET NULL,
-    event       TEXT NOT NULL,
-    mac_address TEXT,
-    ip_address  INET,
-    detail      TEXT,
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    id             BIGSERIAL PRIMARY KEY,
+    user_id        UUID REFERENCES users(id) ON DELETE SET NULL,
+    event          TEXT NOT NULL,
+    mac_address    TEXT,
+    ip_address     INET,
+    detail         TEXT,
+    request_method TEXT,
+    request_url    TEXT,
+    http_status    INTEGER,
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
+
+  -- RADIUS accept/reject logging (recordRadiusAuth) needs these on existing DBs.
+  ALTER TABLE access_log ADD COLUMN IF NOT EXISTS request_method TEXT;
+  ALTER TABLE access_log ADD COLUMN IF NOT EXISTS request_url TEXT;
+  ALTER TABLE access_log ADD COLUMN IF NOT EXISTS http_status INTEGER;
 
   CREATE TABLE IF NOT EXISTS voucher_redemptions (
     id            BIGSERIAL PRIMARY KEY,

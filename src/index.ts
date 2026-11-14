@@ -3,12 +3,12 @@ import path from 'path';
 dotenv.config({ path: path.resolve(__dirname, '../.env') });
 import 'express-async-errors';
 import express from 'express';
-import helmet from 'helmet';
 import cors from 'cors';
 import compression from 'compression';
 import cookieParser from 'cookie-parser';
 import morgan from 'morgan';
 import fs from 'fs';
+import { createServer } from 'http';
 
 import { authRouter } from './routes/auth';
 import { adminRouter } from './routes/admin';
@@ -17,16 +17,19 @@ import { adminAuthRouter } from './routes/adminAuth';
 import { paymentsRouter } from './routes/payments';
 import { subscriptionRouter } from './routes/subscription';
 import { siteInvoicesRouter } from './routes/siteInvoices';
-import { gatewayRouter } from './routes/gateway';
+import { gatewayRouter, connectAuthRouter } from './routes/gateway';
 import { transitRouter } from './routes/transit';
 import { transitWebRouter } from './routes/transitWeb';
 import { systemAdminRouter } from './routes/systemAdmin';
 import { starlinkRouter } from './routes/starlink';
+import { homeAutomateRouter } from './routes/homeautomate';
+import { marketingRouter } from './routes/marketing';
 import { ruijieRouter } from './routes/ruijie';
 import { currencyRouter } from './routes/currency';
 import { accountingRouter } from './routes/accounting';
 import { portalRouter } from './routes/portal';
 import { alertsRouter } from './routes/alerts';
+import { usageRouter } from './routes/usage';
 import { voucherAnalyticsRouter } from './routes/voucherAnalytics';
 import { reportsRouter } from './routes/reports';
 import { startVoucherMonitor } from './services/voucherMonitorService';
@@ -34,36 +37,33 @@ import { startVoucherPoolWorker } from './services/voucherPool';
 import { startRuijieVoucherStatusWorker } from './services/ruijieVoucherStatusSync';
 import { startReportScheduler } from './services/scheduler';
 import { ensureStarlinkSchema } from './db/starlink';
+import { serveSpaBundle, spaDistDir } from './utils/spaHost';
 import { errorHandler } from './middleware/errorHandler';
 import { maintenanceCheck } from './middleware/maintenanceMode';
 import { scheduleSessionCleanup } from './services/sessionCleanup';
 import { ensureVoucherRuijieSchema, startRuijieAccountingPolling } from './services/ruijieService';
 import { scheduleAccessLogCleanup } from './services/accessLogCleanup';
 import { scheduleHandoverReminders } from './services/handoverReminder';
+import { attachHomeAutomationSocket } from './services/iotHub';
 import { scheduleSubscriptionCron } from './jobs/subscriptionCron';
+import {
+  adminApiRateLimit,
+  apiRateLimit,
+  helmetMiddleware,
+  sanitizeRequest,
+  securityHeaders,
+} from './middleware/security';
 
 const app = express();
 const PORT = process.env.PORT ?? 3000;
 
 app.set('trust proxy', 1);
 
-app.use(
-  helmet({
-    crossOriginResourcePolicy: { policy: 'cross-origin' },
-    contentSecurityPolicy: {
-      directives: {
-        defaultSrc: ["'self'"],
-        styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
-        fontSrc: ["'self'", 'https://fonts.gstatic.com'],
-        scriptSrc: ["'self'", "'unsafe-inline'"],
-        imgSrc: ["'self'", 'data:'],
-        formAction: ["*"],
-        connectSrc: ["'self'", 'http://192.168.1.216:2060', 'http://192.168.100.1:2060'],
-        upgradeInsecureRequests: null,
-      },
-    },
-  })
-);
+// Security headers (CSP + HSTS/nosniff/frameguard) live in one audited module:
+// src/middleware/security.ts. `formAction: ['*']` MUST stay — the captive
+// portal posts to the Ruijie gateway on a private LAN address.
+app.use(helmetMiddleware);
+app.use(securityHeaders);
 // Cross-subdomain CORS: reflect only Preyone origins so the SSO cookie can be
 // sent (credentials) without opening the API up to third-party sites.
 const PREYONE_ORIGIN_RE = /^https:\/\/(?:[a-z0-9-]+\.)*preyone\.com(\/|$)/i;
@@ -95,8 +95,20 @@ app.use(
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
+// Recursive input sanitisation (control chars, prototype pollution) and the
+// baseline API rate limit. Captive-portal guest traffic and payment webhooks are
+// exempt — see src/middleware/security.ts.
+app.use(sanitizeRequest);
+app.use('/api', apiRateLimit);
+app.use('/api/admin', adminApiRateLimit);
+
 // ── Gateway routes (work on any host, registered before subdomain routing) ──
 app.use(gatewayRouter);
+
+// The firmware's own base path. Observational: logs what it calls and answers
+// only the heartbeat, so everything else still falls through to the SPA below.
+// Must stay above the app.get('*') catch-all or the log would never fire.
+app.use('/connectAuth', connectAuthRouter);
 
 // WISPr XML helper — tells Apple/iOS that this is a captive portal
 function wisprXml(loginUrl: string): string {
@@ -115,9 +127,28 @@ function escapeXml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
 }
 
+const IMAGE_MIME: Record<string, string> = {
+  '.avif': 'image/avif',
+  '.webp': 'image/webp',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.ico': 'image/x-icon',
+  '.bmp': 'image/bmp',
+  '.tif': 'image/tiff',
+  '.tiff': 'image/tiff',
+};
+
 const optimizedImageStaticOptions = {
   setHeaders: (res: express.Response, filePath: string) => {
-    if (/\.(png|jpe?g|gif|webp|avif|ico|svg|bmp|tiff?)$/i.test(filePath)) {
+    const ext = path.extname(filePath).toLowerCase();
+    const type = IMAGE_MIME[ext];
+    if (type) {
+      // Express's bundled mime table predates .avif/.webp in some installs; be
+      // explicit so `nosniff` browsers still decode modern formats.
+      res.setHeader('Content-Type', type);
       res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
     }
   },
@@ -152,6 +183,21 @@ app.get('/robots.txt', (_req, res) => {
   res.send('User-agent: *\nAllow: /\n\nSitemap: https://preyone.com/sitemap.xml\n');
 });
 
+// PWA usage portal. Registered BEFORE the subdomain middleware so it resolves
+// on every host — the wifi.preyone.com branch ends in a sendFile fallback that
+// never calls next(), which would shadow a later route and serve the captive
+// landing page at /data instead of the usage page.
+//
+// It must not carry X-Captive-Portal: that header makes browsers treat the
+// page as a portal interstitial and suppress beforeinstallprompt, so the
+// install button would never appear. Cache-Control is no-cache (not no-store)
+// because the service worker is allowed to cache the shell; only the usage
+// payload is live.
+app.get('/data', (_req, res) => {
+  res.setHeader('Cache-Control', 'no-cache');
+  res.sendFile(path.join(__dirname, '..', 'public', 'data.html'));
+});
+
 // Advertise /connect (voucher form) rather than /login (account sign-in), so OS
 // captive-portal detection drops a phone straight onto the redemption page.
 const portalLoginUrl = 'http://wifi.preyone.com/connect?gw=true';
@@ -177,6 +223,39 @@ app.get('/connecttest.txt', (_req, res) => {
 app.get('/wispr', (_req, res) => {
   res.set('Content-Type', 'text/xml');
   res.send(wisprXml(portalLoginUrl));
+});
+
+// ── Shared brand assets ───────────────────────────────────────
+// Company logos, invoice marks and email artwork all live in
+// `public/images` and are referenced as `/images/<file>` from every SPA. Only
+// the captive portal + main site ever mounted a static tree, so on invoice /
+// POS / home-automate a missing `/images` mount fell through to that host's SPA
+// fallback and answered `200 text/html` — the browser then rendered a broken
+// image (and the Settings preview looked empty). Serve the real files from
+// every host, and answer a real 404 (never index.html) when one is absent.
+//
+// Each SPA also ships its own design artwork in `<app>/dist/images`, so the
+// roots are layered in order: company uploads first, then the bundles' own
+// images. `express.static` calls `next()` on a miss, so the next root gets a
+// turn and the traversal/range/mime handling stays stock.
+const imageRoots = [
+  path.join(__dirname, '..', 'public', 'images'),
+  path.join(__dirname, '..', 'admin', 'dist', 'images'),
+  path.join(__dirname, '..', 'site', 'dist', 'images'),
+  path.join(__dirname, '..', 'homeautomate', 'dist', 'images'),
+];
+for (const root of imageRoots) {
+  app.use(
+    '/images',
+    express.static(root, {
+      dotfiles: 'ignore',
+      index: false,
+      ...optimizedImageStaticOptions,
+    })
+  );
+}
+app.use('/images', (_req, res) => {
+  res.status(404).type('text/plain').send('Image not found');
 });
 
 // ── Subdomain-based routing ──
@@ -262,7 +341,7 @@ app.use((req, res, next) => {
     res.setHeader('X-Captive-Portal', 'true');
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
     // Let known non-static routes pass through to their route handlers
-    if (['/login', '/account', '/forgot-password', '/reset-password', '/connect'].includes(req.path)) {
+    if (['/login', '/account', '/manage-account', '/forgot-password', '/reset-password', '/connect'].includes(req.path)) {
       return next();
     }
     // Strip Range header — the gateway preserves original request headers (e.g. from video streaming)
@@ -347,6 +426,15 @@ app.use((req, res, next) => {
     return res.status(503).send('Gateway build not found. Run `cd app && npm run build`.');
   }
 
+  // homeautomate.preyone.com → Home Automation / IoT dashboard SPA. Same
+  // contract as the other hosts: built bundle, env override, clear 503.
+  if (host === 'homeautomate.preyone.com') {
+    if (serveSpaBundle(req, res, spaDistDir('HOMEAUTOMATE_DIST', path.join('homeautomate', 'dist')))) return;
+    return res
+      .status(503)
+      .send('Home Automation build not found. Run `cd homeautomate && npm run build` or set HOMEAUTOMATE_DIST to an external bundle.');
+  }
+
   // Any IP or unknown host → captive portal (with proper static file serving)
   res.setHeader('X-Captive-Portal', 'true');
   res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
@@ -378,9 +466,20 @@ app.use('/api/pos', posRouter);
 app.use('/api/accounting', accountingRouter);
 app.use('/api/portal', portalRouter);
 app.use('/api/alerts', alertsRouter);
+// PWA usage portal (/data) — public, rate-limited, reads only the caller's own
+// voucher. Mounted at the exact /api/check-usage path the portal fetches.
+app.use('/api/check-usage', usageRouter);
 app.use('/api/admin/voucher-analytics', voucherAnalyticsRouter);
 app.use('/api/admin/reports', reportsRouter);
 app.use('/api/starlink', starlinkRouter);
+// Home automation (homeautomate.preyone.com): device CRUD, telemetry, triggers
+// and the StarLink uptime feed. The live push channel is the WebSocket upgrade
+// handler attached to the HTTP server below (/api/homeautomate/stream).
+app.use('/api/homeautomate', homeAutomateRouter);
+// Public marketing copy for the Home Automation SPA pages (/platform, /scenes,
+// /solutions/*, /how-it-works, /contact). Read-only static JSON; mounted with an
+// exact path list so it cannot shadow any other /api route.
+app.use('/api', marketingRouter);
 // Ruijie Cloud maint-API proxy — admin-auth guarded inside the router.
 // Mounted under /api/ so the subdomain middleware (line ~169) is bypassed and
 // it cannot collide with gatewayRouter's /api/radius + /api/gateway paths.
@@ -391,6 +490,7 @@ app.use('/api/currency', currencyRouter);
 // Standard route aliases
 app.get('/login', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'account-login.html')));
 app.get('/account', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'manage-account.html')));
+app.get('/manage-account', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'manage-account.html')));
 app.get('/forgot-password', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'forgot-password.html')));
 app.get('/reset-password', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'reset-password.html')));
 
@@ -452,8 +552,17 @@ if (!process.env.JWT_SECRET || process.env.JWT_SECRET === 'preyone-jwt-secret-ch
   console.warn('WARNING: JWT_SECRET not set or using the insecure default. Set a strong JWT_SECRET in .env.');
 }
 
-// Start server
-app.listen(PORT, () => {
+// Start server. A plain `app.listen` cannot be upgraded to a WebSocket, so the
+// Express app is wrapped in an http.Server and the home-automation hub attaches
+// its /api/homeautomate/stream upgrade handler to it.
+const server = createServer(app);
+try {
+  attachHomeAutomationSocket(server);
+} catch (err) {
+  console.error('Home automation socket failed to attach:', err);
+}
+
+server.listen(PORT, () => {
   console.log(`Captive portal running on http://0.0.0.0:${PORT}`);
 
   // Starlink customer portal: create its additive tables (IF NOT EXISTS) at
@@ -503,13 +612,22 @@ app.listen(PORT, () => {
     console.log(`Handover reminders scheduled every ${intervalMinutes} minute(s).`);
   }
 
+  // Hybrid multi-tier voucher alerts (80% / 95%). In-process timer; the
+  // (voucher, tier) claim in the DB makes it exactly-once across clusters.
+  startVoucherMonitor();
+
+  // Keep a small pre-minted Ruijie stock per active tier. The advisory lock
+  // makes the sweep safe across all PM2 cluster workers.
+  startVoucherPoolWorker();
+
+  // Month-End / Staff report email: 3rd of every month at 08:00 (previous
+  // month), with an hourly catch-up so a restart cannot skip a month.
+  startReportScheduler();
+
   // 3-tier subscription dunning: 3-day warning, 1-day urgent notice and
   // suspension on expiry, every day at midnight.
   if (process.env.ENABLE_SUBSCRIPTION_CRON !== 'false') {
-      startVoucherMonitor();
-  startVoucherPoolWorker();
-  startReportScheduler();
-  scheduleSubscriptionCron();
+    scheduleSubscriptionCron();
     console.log('Subscription dunning scheduled daily at midnight.');
   }
 });
