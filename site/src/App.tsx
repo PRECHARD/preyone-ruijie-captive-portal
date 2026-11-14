@@ -4,11 +4,17 @@ import { Route, Routes, useLocation } from 'react-router-dom'
 import { Background } from './components/Background'
 import { Footer } from './components/Footer'
 import { Nav } from './components/Nav'
+import { WhatsAppFab } from './components/WhatsAppFab'
 import { AboutPage } from './pages/AboutPage'
+import { BusinessAppsPage } from './pages/BusinessAppsPage'
 import { HomePage } from './pages/HomePage'
+import { PartnersPage } from './pages/PartnersPage'
 import { PaymentPage } from './pages/PaymentPage'
 import { PortfolioPage } from './pages/PortfolioPage'
+import { PricingPage } from './pages/PricingPage'
+import { ProductPage } from './pages/ProductPage'
 import { ServicesPage } from './pages/ServicesPage'
+import { I18nProvider } from './lib/i18n'
 
 function ScrollManager() {
   const { pathname, hash } = useLocation()
@@ -33,7 +39,8 @@ export default function App() {
   const location = useLocation()
 
   return (
-    <div className="relative min-h-dvh">
+    <I18nProvider>
+      <div className="relative min-h-dvh">
       <Background />
       <ScrollManager />
       <Nav />
@@ -51,6 +58,10 @@ export default function App() {
               <Route path="/" element={<HomePage />} />
               <Route path="/about" element={<AboutPage />} />
               <Route path="/services" element={<ServicesPage />} />
+              <Route path="/business-apps" element={<BusinessAppsPage />} />
+              <Route path="/business-apps/:slug" element={<ProductPage />} />
+              <Route path="/pricing" element={<PricingPage />} />
+              <Route path="/partners" element={<PartnersPage />} />
               <Route path="/portfolio" element={<PortfolioPage />} />
               <Route path="/payment" element={<PaymentPage />} />
               <Route path="*" element={<HomePage />} />
@@ -60,6 +71,8 @@ export default function App() {
       </main>
 
       <Footer />
-    </div>
+      <WhatsAppFab />
+      </div>
+    </I18nProvider>
   )
 }
