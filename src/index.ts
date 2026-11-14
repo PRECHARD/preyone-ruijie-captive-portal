@@ -14,7 +14,7 @@ import { authRouter } from './routes/auth';
 import { adminRouter } from './routes/admin';
 import { posRouter } from './routes/pos';
 import { adminAuthRouter } from './routes/adminAuth';
-import { paymentsRouter } from './routes/payments';
+import { paymentsRouter, startPaymentReconciliation } from './routes/payments';
 import { subscriptionRouter } from './routes/subscription';
 import { siteInvoicesRouter } from './routes/siteInvoices';
 import { gatewayRouter, connectAuthRouter } from './routes/gateway';
@@ -623,6 +623,14 @@ server.listen(PORT, () => {
   // Month-End / Staff report email: 3rd of every month at 08:00 (previous
   // month), with an hourly catch-up so a restart cannot skip a month.
   startReportScheduler();
+
+  // Re-check abandoned Pesepay checkouts so a paid customer still gets their
+  // voucher when both the webhook and the browser tab went away.
+  try {
+    startPaymentReconciliation();
+  } catch (err) {
+    console.error('Payment reconciliation failed to start:', err);
+  }
 
   // 3-tier subscription dunning: 3-day warning, 1-day urgent notice and
   // suspension on expiry, every day at midnight.
