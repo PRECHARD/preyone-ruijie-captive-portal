@@ -336,4 +336,41 @@ export const api = {
   subscriptionCheckout: (payload: { tier: string; currencyCode?: string; paymentMethod?: string; phone?: string }) =>
     root<CheckoutSession>('/subscription/checkout', { method: 'POST', body: JSON.stringify(payload) }),
   currencyRates: () => root<{ rates: CurrencyRate[]; fallback: boolean }>('/currency/rates'),
+
+  /** Settings & Branding palette — applies --pos-* CSS vars across the till. */
+  theme: () => req<{ theme: { id: number; name: string }; css: Record<string, string> }>('/theme'),
+};
+
+/** Enterprise accounting endpoints — same PIN Bearer token as POS. */
+export const accountingApi = {
+  overview: (params?: { from?: string; to?: string }) => {
+    const qs = new URLSearchParams();
+    if (params?.from) qs.set('from', params.from);
+    if (params?.to) qs.set('to', params.to);
+    const q = qs.toString();
+    return root<any>(`/accounting/overview${q ? `?${q}` : ''}`);
+  },
+  ledger: (params?: { from?: string; to?: string; rail?: string; type?: string; limit?: number }) => {
+    const qs = new URLSearchParams();
+    if (params?.from) qs.set('from', params.from);
+    if (params?.to) qs.set('to', params.to);
+    if (params?.rail) qs.set('rail', params.rail);
+    if (params?.type) qs.set('type', params.type);
+    if (params?.limit) qs.set('limit', String(params.limit));
+    return root<{ rows: any[]; total: number }>(`/accounting/ledger?${qs}`);
+  },
+  pnl: (params?: { from?: string; to?: string }) => {
+    const qs = new URLSearchParams();
+    if (params?.from) qs.set('from', params.from);
+    if (params?.to) qs.set('to', params.to);
+    const q = qs.toString();
+    return root<any>(`/accounting/pnl${q ? `?${q}` : ''}`);
+  },
+  taxSummary: (params?: { from?: string; to?: string }) => {
+    const qs = new URLSearchParams();
+    if (params?.from) qs.set('from', params.from);
+    if (params?.to) qs.set('to', params.to);
+    const q = qs.toString();
+    return root<any>(`/accounting/tax-summary${q ? `?${q}` : ''}`);
+  },
 };

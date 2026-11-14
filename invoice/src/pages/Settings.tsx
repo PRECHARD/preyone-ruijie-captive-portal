@@ -7,6 +7,8 @@ import {
   type ReactNode,
 } from 'react';
 import { api, getToken, type Catalog, type Company } from '../api';
+import UpgradeModal from '../components/UpgradeModal';
+import { mergePlanTiers } from '../plans';
 import '../settings.css';
 
 /**
@@ -18,7 +20,7 @@ import '../settings.css';
  * this surface reads as the control room, not another invoice list.
  */
 
-type TabKey = 'company' | 'numbering' | 'tax' | 'payments' | 'team';
+type TabKey = 'company' | 'numbering' | 'tax' | 'payments' | 'billing' | 'team' | 'security';
 type RoleKey = 'CEO' | 'Staff' | 'Cashier';
 type SettingsIconName =
   | 'building'
@@ -28,7 +30,9 @@ type SettingsIconName =
   | 'team'
   | 'gear'
   | 'lock'
-  | 'info';
+  | 'info'
+  | 'spark'
+  | 'shield';
 
 interface NumberingRule {
   prefix: string;
@@ -74,7 +78,9 @@ const TABS: Array<{ key: TabKey; label: string; icon: SettingsIconName; caption:
   { key: 'numbering', label: 'Document Prefixes', icon: 'hash', caption: 'Prefixes and next document numbers' },
   { key: 'tax', label: 'Taxes & Currency', icon: 'percent', caption: 'Ledger currency and VAT defaults' },
   { key: 'payments', label: 'Payment Rails', icon: 'card', caption: 'Pesepay, mobile money and auto-ledger' },
+  { key: 'billing', label: 'Upgrade & Billing', icon: 'spark', caption: 'POS / invoicing subscription tiers' },
   { key: 'team', label: 'Team & Roles', icon: 'team', caption: 'Permissions for CEO, Staff and Cashier' },
+  { key: 'security', label: 'Sign-in security', icon: 'shield', caption: 'Optional email OTP for your account' },
 ];
 
 /** Inline icons keep the tabs crisp without depending on an emoji font. */
@@ -109,6 +115,12 @@ const SETTINGS_ICONS: Record<SettingsIconName, ReactNode> = {
       <path d="M17 19a5.2 5.2 0 0 0-2-4.1" />
     </>
   ),
+  shield: (
+    <>
+      <path d="M12 3 5 6v5c0 4.2 2.7 7.9 7 9 4.3-1.1 7-4.8 7-9V6l-7-3Z" />
+      <path d="m9.5 12 1.8 1.8L14.8 10" />
+    </>
+  ),
   gear: (
     <>
       <circle cx="12" cy="12" r="3.1" />
@@ -126,6 +138,13 @@ const SETTINGS_ICONS: Record<SettingsIconName, ReactNode> = {
       <circle cx="12" cy="12" r="9" />
       <path d="M12 11v5" />
       <path d="M12 8h.01" />
+    </>
+  ),
+  spark: (
+    <>
+      <path d="M12 3v4M12 17v4M3 12h4M17 12h4" />
+      <path d="m6.5 6.5 2.5 2.5M15 15l2.5 2.5M17.5 6.5 15 9M9 15l-2.5 2.5" />
+      <circle cx="12" cy="12" r="2.4" />
     </>
   ),
 };
@@ -297,6 +316,14 @@ export default function SettingsPage({
 
   const [tab, setTab] = useState<TabKey>(initialTab);
   const [role, setRole] = useState<string | null>(null);
+  const [showUpgrade, setShowUpgrade] = useState(false);
+  const [billing, setBilling] = useState<{
+    plan_type: string;
+    max_devices: number;
+    subscription_status: string;
+    subscription_expires_at: string | null;
+  } | null>(null);
+  const [billingErr, setBillingErr] = useState('');
 
   const [legalName, setLegalName] = useState(company.name ?? '');
   const [address, setAddress] = useState(company.address ?? '');
@@ -326,13 +353,49 @@ export default function SettingsPage({
   const [teamLoading, setTeamLoading] = useState(false);
   const [teamError, setTeamError] = useState<string | null>(null);
 
+  const [twoFactorEnabled, setTwoFactorEnabled] = useState(false);
+  const [twoFactorLoading, setTwoFactorLoading] = useState(false);
+  const [twoFactorBusy, setTwoFactorBusy] = useState(false);
+  const [twoFactorChallenge, setTwoFactorChallenge] = useState<string | null>(null);
+  const [twoFactorMasked, setTwoFactorMasked] = useState('');
+  const [twoFactorCode, setTwoFactorCode] = useState('');
+  const [disablePassword, setDisablePassword] = useState('');
+
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
+  const authHeaders = useCallback((): HeadersInit => {
+    const token = getToken();
+    return {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    };
+  }, []);
+
+  const loadTwoFactor = useCallback(async () => {
+    setTwoFactorLoading(true);
+    try {
+      const res = await fetch('/api/admin/auth/2fa', {
+        credentials: 'include',
+        headers: authHeaders(),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) setTwoFactorEnabled(data.enabled === true);
+    } catch {
+      /* keep previous */
+    } finally {
+      setTwoFactorLoading(false);
+    }
+  }, [authHeaders]);
+
   const normalizedRole = (role ?? '').toUpperCase();
   const isCeo = normalizedRole === 'CEO';
   const isManager = isCeo || normalizedRole === 'MANAGER';
+
+  useEffect(() => {
+    if (tab === 'security') void loadTwoFactor();
+  }, [tab, loadTwoFactor]);
 
   // Identify the session so CEO-only fields can be locked without a second
   // permissions endpoint. `/me` also works through the wildcard SSO cookie.
@@ -345,7 +408,11 @@ export default function SettingsPage({
     })
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
-        if (alive) setRole(typeof data?.role === 'string' ? data.role : null);
+        if (!alive) return;
+        setRole(typeof data?.role === 'string' ? data.role : null);
+        if (typeof data?.two_factor_enabled === 'boolean') {
+          setTwoFactorEnabled(data.two_factor_enabled);
+        }
       })
       .catch(() => {
         if (alive) setRole('');
@@ -375,6 +442,32 @@ export default function SettingsPage({
       alive = false;
     };
   }, [tab, team, isManager]);
+
+  useEffect(() => {
+    if (tab !== 'billing') return;
+    let alive = true;
+    api
+      .get<{
+        current: {
+          plan_type: string;
+          max_devices: number;
+          subscription_status: string;
+          subscription_expires_at: string | null;
+        } | null;
+        tiers: Array<{ id: string; name: string; price: number; devices: number; tagline: string }>;
+      }>('/api/subscription/plans')
+      .then((res) => {
+        if (!alive) return;
+        setBilling(res.current);
+        setBillingErr('');
+      })
+      .catch((err) => {
+        if (alive) setBillingErr(errorText(err));
+      });
+    return () => {
+      alive = false;
+    };
+  }, [tab, showUpgrade]);
 
   const taxValue = Number(taxPct) || 0;
   const sampleSubtotal = 1000;
@@ -522,6 +615,87 @@ export default function SettingsPage({
       else current.add(permission);
       return { ...prev, [roleKey]: ALL_PERMISSION_KEYS.filter((key) => current.has(key)) };
     });
+  };
+
+  const requestEnable2fa = async () => {
+    setTwoFactorBusy(true);
+    setNotice(null);
+    try {
+      const res = await fetch('/api/admin/auth/2fa/enable-request', {
+        method: 'POST',
+        credentials: 'include',
+        headers: authHeaders(),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Could not start two-factor setup');
+      if (data.enabled) {
+        setTwoFactorEnabled(true);
+        setNotice({ kind: 'ok', text: data.message || 'Two-factor authentication is already enabled.' });
+        return;
+      }
+      setTwoFactorChallenge(data.challengeToken || null);
+      setTwoFactorMasked(data.maskedEmail || '');
+      setTwoFactorCode('');
+      setNotice({ kind: 'ok', text: 'We emailed a 6-digit code. Enter it below to finish enabling 2FA.' });
+    } catch (err) {
+      setNotice({ kind: 'error', text: errorText(err) });
+    } finally {
+      setTwoFactorBusy(false);
+    }
+  };
+
+  const confirmEnable2fa = async () => {
+    if (!twoFactorChallenge || !/^\d{6}$/.test(twoFactorCode)) {
+      setNotice({ kind: 'error', text: 'Enter the 6-digit code from the email.' });
+      return;
+    }
+    setTwoFactorBusy(true);
+    setNotice(null);
+    try {
+      const res = await fetch('/api/admin/auth/2fa/enable-confirm', {
+        method: 'POST',
+        credentials: 'include',
+        headers: authHeaders(),
+        body: JSON.stringify({ challengeToken: twoFactorChallenge, code: twoFactorCode }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Could not verify the code');
+      setTwoFactorEnabled(true);
+      setTwoFactorChallenge(null);
+      setTwoFactorCode('');
+      setNotice({ kind: 'ok', text: data.message || 'Two-factor authentication enabled.' });
+    } catch (err) {
+      setNotice({ kind: 'error', text: errorText(err) });
+    } finally {
+      setTwoFactorBusy(false);
+    }
+  };
+
+  const disable2fa = async () => {
+    if (!disablePassword) {
+      setNotice({ kind: 'error', text: 'Enter your password to turn off two-factor authentication.' });
+      return;
+    }
+    setTwoFactorBusy(true);
+    setNotice(null);
+    try {
+      const res = await fetch('/api/admin/auth/2fa/disable', {
+        method: 'POST',
+        credentials: 'include',
+        headers: authHeaders(),
+        body: JSON.stringify({ password: disablePassword }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Could not disable two-factor authentication');
+      setTwoFactorEnabled(false);
+      setDisablePassword('');
+      setTwoFactorChallenge(null);
+      setNotice({ kind: 'ok', text: data.message || 'Two-factor authentication turned off.' });
+    } catch (err) {
+      setNotice({ kind: 'error', text: errorText(err) });
+    } finally {
+      setTwoFactorBusy(false);
+    }
   };
 
   const enabledRails = [
@@ -1003,6 +1177,68 @@ export default function SettingsPage({
         </section>
       )}
 
+      {tab === 'billing' && (
+        <section
+          className="settings-panel"
+          id="settings-panel-billing"
+          role="tabpanel"
+          aria-labelledby="settings-tab-billing"
+        >
+          <header className="settings-section-head">
+            <span className="settings-eyebrow">05 · Subscription</span>
+            <h3>Upgrade &amp; billing</h3>
+            <p>$10 POS Only · $15 / $20 POS + Invoicing · $30 Unlimited — Pesepay checkout.</p>
+          </header>
+
+          {billingErr && <div className="banner error">{billingErr}</div>}
+
+          <div className="settings-billing-card">
+            <div>
+              <div className="settings-billing-name">
+                {billing
+                  ? mergePlanTiers().find((t) => t.id === billing.plan_type)?.name ?? billing.plan_type
+                  : '—'}
+              </div>
+              <div className="settings-billing-meta">
+                <span>{billing?.subscription_status ?? 'unknown'}</span>
+                <span>
+                  {billing
+                    ? billing.max_devices >= 9999
+                      ? 'Unlimited devices'
+                      : `Up to ${billing.max_devices} devices`
+                    : '—'}
+                </span>
+                <span>
+                  Renews{' '}
+                  {billing?.subscription_expires_at
+                    ? new Date(billing.subscription_expires_at).toLocaleDateString()
+                    : '—'}
+                </span>
+              </div>
+            </div>
+            <button className="btn primary" type="button" onClick={() => setShowUpgrade(true)}>
+              Upgrade my plan
+            </button>
+          </div>
+
+          <div className="tier-grid static">
+            {mergePlanTiers().map((t) => (
+              <div key={t.id} className="tier-card">
+                <span className="tier-name">{t.name}</span>
+                <span className="tier-price">
+                  ${t.price}
+                  <small>/mo</small>
+                </span>
+                <span className="tier-devices">
+                  {t.devices >= 9999 ? 'Unlimited devices' : `Up to ${t.devices} devices`}
+                </span>
+                <span className="tier-tag">{t.tagline}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
       {tab === 'team' && (
         <section
           className="settings-panel"
@@ -1011,7 +1247,7 @@ export default function SettingsPage({
           aria-labelledby="settings-tab-team"
         >
           <header className="settings-section-head">
-            <span className="settings-eyebrow">05 · Access</span>
+            <span className="settings-eyebrow">06 · Access</span>
             <h3>Team &amp; roles</h3>
             <p>Capabilities are mapped to the three active invoice roles: CEO, Staff and Cashier.</p>
           </header>
@@ -1114,30 +1350,144 @@ export default function SettingsPage({
         </section>
       )}
 
-      <div className="settings-savebar">
-        <div className="settings-savebar-copy">
-          <strong>{busy ? 'Saving configuration…' : 'Changes apply to new documents'}</strong>
-          <span>
-            {role !== null && !isManager
-              ? 'Saving requires a CEO or Manager account.'
-              : 'Existing issued documents keep their original numbering and tax.'}
-          </span>
+      {tab === 'security' && (
+        <section
+          className="settings-panel"
+          id="settings-panel-security"
+          role="tabpanel"
+          aria-labelledby="settings-tab-security"
+        >
+          <header className="settings-section-head">
+            <span className="settings-eyebrow">07 · Sign-in</span>
+            <h3>Optional email OTP</h3>
+            <p>
+              Two-factor codes are optional for invoicing and POS. The admin console still requires a
+              code on every sign-in.
+            </p>
+          </header>
+
+          {twoFactorLoading ? (
+            <div className="settings-empty">
+              <span className="spinner" aria-hidden /> Loading security settings…
+            </div>
+          ) : (
+            <div className="settings-fields" style={{ maxWidth: 520 }}>
+              <div className="settings-note">
+                <SettingsIcon name="shield" className="settings-lock-icon" />
+                Status:{' '}
+                <strong>{twoFactorEnabled ? 'Enabled for invoice & POS' : 'Off — password only'}</strong>
+              </div>
+
+              {!twoFactorEnabled && !twoFactorChallenge && (
+                <button
+                  className="btn primary"
+                  type="button"
+                  disabled={twoFactorBusy}
+                  onClick={() => void requestEnable2fa()}
+                >
+                  {twoFactorBusy ? 'Sending code…' : 'Enable email OTP'}
+                </button>
+              )}
+
+              {!twoFactorEnabled && twoFactorChallenge && (
+                <>
+                  <label className="settings-field settings-field--wide">
+                    <span>Code sent to {twoFactorMasked || 'your email'}</span>
+                    <input
+                      className="input"
+                      inputMode="numeric"
+                      autoComplete="one-time-code"
+                      maxLength={6}
+                      value={twoFactorCode}
+                      onChange={(e) => setTwoFactorCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                      placeholder="6-digit code"
+                    />
+                  </label>
+                  <div className="settings-savebar-actions" style={{ justifyContent: 'flex-start', gap: 8 }}>
+                    <button
+                      className="btn primary"
+                      type="button"
+                      disabled={twoFactorBusy}
+                      onClick={() => void confirmEnable2fa()}
+                    >
+                      {twoFactorBusy ? 'Verifying…' : 'Confirm & enable'}
+                    </button>
+                    <button
+                      className="btn ghost"
+                      type="button"
+                      disabled={twoFactorBusy}
+                      onClick={() => void requestEnable2fa()}
+                    >
+                      Resend code
+                    </button>
+                  </div>
+                </>
+              )}
+
+              {twoFactorEnabled && (
+                <>
+                  <label className="settings-field settings-field--wide">
+                    <span>Password (required to disable)</span>
+                    <input
+                      className="input"
+                      type="password"
+                      autoComplete="current-password"
+                      value={disablePassword}
+                      onChange={(e) => setDisablePassword(e.target.value)}
+                      placeholder="Your account password"
+                    />
+                  </label>
+                  <button
+                    className="btn ghost"
+                    type="button"
+                    disabled={twoFactorBusy || !disablePassword}
+                    onClick={() => void disable2fa()}
+                  >
+                    {twoFactorBusy ? 'Updating…' : 'Turn off email OTP'}
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+        </section>
+      )}
+
+      {tab !== 'billing' && tab !== 'security' && (
+        <div className="settings-savebar">
+          <div className="settings-savebar-copy">
+            <strong>{busy ? 'Saving configuration…' : 'Changes apply to new documents'}</strong>
+            <span>
+              {role !== null && !isManager
+                ? 'Saving requires a CEO or Manager account.'
+                : 'Existing issued documents keep their original numbering and tax.'}
+            </span>
+          </div>
+          <div className="settings-savebar-actions">
+            <button className="btn ghost" type="button" onClick={reset} disabled={busy}>
+              Reset
+            </button>
+            <button
+              className="btn primary"
+              type="button"
+              onClick={() => void save()}
+              disabled={busy || (role !== null && !isManager)}
+            >
+              {busy && <span className="spinner" aria-hidden />}
+              {busy ? 'Saving…' : 'Save changes'}
+            </button>
+          </div>
         </div>
-        <div className="settings-savebar-actions">
-          <button className="btn ghost" type="button" onClick={reset} disabled={busy}>
-            Reset
-          </button>
-          <button
-            className="btn primary"
-            type="button"
-            onClick={() => void save()}
-            disabled={busy || (role !== null && !isManager)}
-          >
-            {busy && <span className="spinner" aria-hidden />}
-            {busy ? 'Saving…' : 'Save changes'}
-          </button>
-        </div>
-      </div>
+      )}
+
+      {showUpgrade && (
+        <UpgradeModal
+          onClose={() => setShowUpgrade(false)}
+          onUpgraded={() => {
+            setShowUpgrade(false);
+            setNotice({ kind: 'ok', text: 'Plan upgraded — billing will refresh shortly.' });
+          }}
+        />
+      )}
     </div>
   );
 }

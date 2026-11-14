@@ -1,0 +1,1152 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Data Usage — Preyone UltraNet Wi-Fi</title>
+  <link rel="icon" type="image/png" href="/favicon/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="/favicon/favicon.svg" />
+  <link rel="shortcut icon" href="/favicon/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/favicon/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-title" content="Preyone" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="theme-color" content="#0066ff" />
+  <meta name="description" content="Check your Preyone UltraNet WiFi data usage, remaining bundle and session status." />
+  <link rel="manifest" href="/manifest.json" />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Montserrat:wght@500;700&family=Satisfy&display=swap"
+    rel="stylesheet">
+  <link rel="stylesheet" href="/css/portal.css?v=52" />
+  <style>
+    /* PWA-specific additions only. Every colour below reuses the portal.css
+       tokens so this page stays on the same design language as success.html. */
+    .usage-metric-value {
+      font-family: 'Courier New', monospace;
+      font-size: 1.35rem;
+      font-weight: 800;
+      letter-spacing: 1px;
+      color: var(--cyan);
+      text-shadow: 0 0 15px rgba(0, 212, 255, 0.35);
+      word-break: break-word;
+    }
+
+    .usage-metric-value--warn { color: var(--orange); text-shadow: 0 0 15px rgba(245, 166, 35, 0.35); }
+    .usage-metric-value--over { color: #ef4444; text-shadow: 0 0 15px rgba(239, 68, 68, 0.4); }
+
+    .usage-meta-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem 1rem;
+      justify-content: center;
+      align-items: center;
+      margin: 0 0 1rem;
+      font-size: 0.7rem;
+      letter-spacing: 1px;
+      color: var(--text-muted);
+    }
+
+    .usage-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.25rem 0.6rem;
+      border-radius: 999px;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      background: rgba(255, 255, 255, 0.04);
+    }
+
+    .usage-badge--offline { border-color: rgba(239, 68, 68, 0.5); color: #f87171; }
+    .usage-badge--online { border-color: rgba(37, 211, 102, 0.5); color: #25D366; }
+
+    .usage-install-row { margin-top: 1.5rem; }
+
+    .usage-manual {
+      text-align: left;
+      margin-top: 1.5rem;
+      padding-top: 1.5rem;
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .usage-manual h2 {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 1.15rem;
+      letter-spacing: 1px;
+      margin: 0 0 0.35rem;
+    }
+
+    .usage-manual p.hint {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      margin: 0 0 1rem;
+    }
+
+    .usage-manual .field input {
+      width: 100%;
+      padding: 0.75rem 0.9rem;
+      border-radius: var(--radius, 12px);
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      background: rgba(255, 255, 255, 0.04);
+      color: var(--text);
+      font-family: var(--font), sans-serif;
+      font-size: 0.95rem;
+      /* deliberately NOT text-transform:uppercase -- voucher PINs are issued
+         lowercase (see the migrate that ran lower(voucher_code) across every
+         table), and a forced-uppercase display made a correct PIN look wrong
+         and a paste of one fail the lookup. */
+      text-transform: none;
+    }
+
+    .usage-manual .field input:focus {
+      outline: none;
+      border-color: var(--cyan);
+      box-shadow: 0 0 0 2px rgba(0, 212, 255, 0.18);
+    }
+
+    .usage-actions { display: flex; flex-wrap: wrap; gap: 0.75rem; justify-content: center; margin-top: 1.5rem; }
+
+    /* ── Advisory banner: exhausted / low / expired ───────────────────── */
+    .usage-alert {
+      position: relative;
+      margin: 0 0 1rem;
+      padding: 1rem 1rem 0.95rem 1.15rem;
+      border-radius: var(--radius, 14px);
+      border: 1px solid rgba(0, 212, 255, 0.4);
+      background:
+        linear-gradient(160deg, rgba(10, 13, 23, 0.92), rgba(5, 5, 5, 0.92)),
+        radial-gradient(120% 80% at 0% 0%, rgba(106, 13, 173, 0.28), transparent 60%);
+      box-shadow: 0 0 22px rgba(0, 212, 255, 0.16), inset 0 0 30px rgba(106, 13, 173, 0.12);
+      text-align: left;
+      overflow: hidden;
+      animation: usage-alert-in 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    /* Neon rail down the left edge — the Preyone signal stripe. */
+    .usage-alert::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: 0;
+      width: 3px;
+      background: linear-gradient(180deg, #00d4ff, #ff00ff);
+    }
+
+    .usage-alert--warn { border-color: rgba(245, 166, 35, 0.5); box-shadow: 0 0 22px rgba(245, 166, 35, 0.16), inset 0 0 30px rgba(245, 166, 35, 0.06); }
+    .usage-alert--over { border-color: rgba(239, 68, 68, 0.55); box-shadow: 0 0 22px rgba(239, 68, 68, 0.2), inset 0 0 30px rgba(239, 68, 68, 0.07); }
+    .usage-alert--over::before, .usage-toast--over::before { background: linear-gradient(180deg, #ff5f6d, #ff1744); }
+    .usage-alert--warn::before, .usage-toast--warn::before { background: linear-gradient(180deg, #ffd700, #f5a623); }
+
+    .usage-alert__eyebrow {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 0.68rem;
+      letter-spacing: 0.32em;
+      color: var(--cyan);
+      margin: 0 0 0.3rem;
+    }
+
+    .usage-alert--warn .usage-alert__eyebrow, .usage-toast--warn .usage-alert__eyebrow { color: #f5a623; }
+    .usage-alert--over .usage-alert__eyebrow, .usage-toast--over .usage-alert__eyebrow { color: #ff6b81; }
+
+    .usage-alert__title {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 1.2rem;
+      letter-spacing: 0.07em;
+      color: #f8fbff;
+      margin: 0 0 0.35rem;
+    }
+
+    .usage-alert__body {
+      font-size: 0.78rem;
+      line-height: 1.55;
+      color: var(--text-muted);
+      margin: 0 0 0.8rem;
+    }
+
+    .usage-alert__actions { display: flex; flex-wrap: wrap; gap: 0.6rem; }
+    .usage-alert__btn { font-size: 0.76rem; padding: 0.55rem 1.05rem; letter-spacing: 0.05em; }
+
+    @keyframes usage-alert-in {
+      from { opacity: 0; transform: translateY(-8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ── Transient threshold toast (glass + glow, futuristic genre) ───── */
+    .usage-toast {
+      position: fixed;
+      left: 50%;
+      bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
+      transform: translateX(-50%);
+      width: min(92vw, 430px);
+      z-index: 60;
+      padding: 0.85rem 2.7rem 0.9rem 1.1rem;
+      border-radius: 14px;
+      border: 1px solid rgba(0, 212, 255, 0.5);
+      background: linear-gradient(135deg, rgba(10, 13, 23, 0.97), rgba(5, 5, 5, 0.97));
+      box-shadow: 0 0 30px rgba(0, 212, 255, 0.28), 0 14px 44px rgba(0, 0, 0, 0.6), inset 0 0 26px rgba(106, 13, 173, 0.16);
+      text-align: left;
+      overflow: hidden;
+      animation: usage-toast-in 0.45s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .usage-toast::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: 0;
+      width: 3px;
+      background: linear-gradient(180deg, #00d4ff, #ff00ff);
+    }
+
+    .usage-toast--warn { border-color: rgba(245, 166, 35, 0.55); }
+    .usage-toast--over { border-color: rgba(239, 68, 68, 0.6); }
+
+    .usage-toast__close {
+      position: absolute;
+      top: 0.35rem;
+      right: 0.45rem;
+      width: 2rem;
+      height: 2rem;
+      border: none;
+      background: transparent;
+      color: var(--text-muted);
+      font-size: 1.3rem;
+      line-height: 1;
+      cursor: pointer;
+    }
+
+    .usage-toast__close:hover { color: #f8fbff; }
+
+    @keyframes usage-toast-in {
+      from { opacity: 0; transform: translate(-50%, 16px); }
+      to { opacity: 1; transform: translate(-50%, 0); }
+    }
+
+    /* ── Unlimited bundles: a flowing signal, never a "full" bar ──────── */
+    .data-bar-fill--unlimited {
+      width: 100% !important;
+      background: linear-gradient(90deg, #00d4ff, #ff00ff, #00d4ff);
+      background-size: 200% 100%;
+      animation: usage-flow 3.2s linear infinite;
+      box-shadow: 0 0 14px rgba(255, 0, 255, 0.35);
+    }
+
+    @keyframes usage-flow { to { background-position: -200% 0; } }
+
+    .data-usage-pct--unlimited {
+      color: var(--cyan);
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-shadow: 0 0 12px rgba(0, 212, 255, 0.4);
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .usage-toast, .usage-alert { animation: none; }
+      .data-bar-fill--unlimited { animation: none; }
+    }
+
+    @media (max-width: 480px) {
+      .status-grid { grid-template-columns: 1fr; gap: 0.75rem; padding: 1rem; }
+      .usage-metric-value { font-size: 1.2rem; }
+    }
+  </style>
+</head>
+
+<body class="portal-body">
+  <style>#bootLoading{animation:boot-failsafe .4s ease 8s forwards}@keyframes boot-failsafe{to{opacity:0;visibility:hidden;pointer-events:none}}</style>
+  <div class="body-loading" id="bootLoading" role="status" aria-live="polite">
+    <div class="loading-spinner">
+      <div class="loading-spinner-inner">
+        <img src="/images/faviconloading-80.png" alt="Preyone" width="72" height="72" decoding="async" fetchpriority="high" />
+      </div>
+    </div>
+    <div class="loading-text">Loading data usage…</div>
+  </div>
+  <svg aria-hidden="true" style="position:absolute;width:0;height:0">
+    <defs>
+      <linearGradient id="ring-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#71ff2f" />
+        <stop offset="50%" stop-color="#13d8ff" />
+        <stop offset="100%" stop-color="#367cff" />
+      </linearGradient>
+    </defs>
+  </svg>
+
+  <!-- Sticky Header -->
+  <header class="portal-header">
+    <div class="brand-banner">
+      <img src="/images/preyonenoneglow-logo-optimized.png" alt="Preyone" class="brand-logo-img" width="1200"
+        height="600" decoding="async" />
+    </div>
+    <div class="brand-eyebrow">
+      <span class="brand-signature">Fadaya nePreyone UltraNet Wifi</span>
+    </div>
+  </header>
+
+  <main class="portal-shell">
+
+    <!-- Header card -->
+    <div class="card card--success">
+      <div class="brand">
+        <div class="success-icon-wrapper">
+          <svg class="wifi-icon--success" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <path d="M5 12.55a11 11 0 0 1 14.08 0" />
+            <path d="M1.42 9a16 16 0 0 1 21.16 0" />
+            <path d="M8.53 16.11a6 6 0 0 1 6.95 0" />
+            <line x1="12" y1="20" x2="12.01" y2="20" />
+          </svg>
+        </div>
+        <h1>DATA USAGE</h1>
+        <p class="subtitle">Live bundle balance for your Preyone UltraNet session.</p>
+      </div>
+
+      <div class="usage-meta-row">
+        <span class="usage-badge" id="netBadge">CONNECTING…</span>
+        <span id="metaVoucher" style="display:none">VOUCHER ••••<span id="metaVoucherTail"></span></span>
+        <span id="metaTier" style="display:none"></span>
+      </div>
+
+      <!-- Advisory banner: exhausted / low / expired, with the buy path -->
+      <section id="usageAlert" class="usage-alert" hidden aria-live="polite">
+        <p class="usage-alert__eyebrow">ULTRANET ALERT</p>
+        <h2 class="usage-alert__title" id="alertTitle"></h2>
+        <p class="usage-alert__body" id="alertBody"></p>
+        <div class="usage-alert__actions">
+          <a class="btn-primary usage-alert__btn" id="alertBuy" href="/#packages-section">BUY NEW VOUCHER</a>
+          <button type="button" class="btn-secondary usage-alert__btn" id="alertEnter" hidden>ENTER NEW PIN</button>
+        </div>
+      </section>
+
+      <!-- Metric cards: Used / Remaining / Total -->
+      <div class="status-grid">
+        <div class="status-item">
+          <span class="label">USED</span>
+          <span class="value usage-metric-value" id="metricUsed">—</span>
+        </div>
+        <div class="status-item">
+          <span class="label">REMAINING</span>
+          <span class="value usage-metric-value" id="metricRemaining">—</span>
+        </div>
+        <div class="status-item">
+          <span class="label">TOTAL MB</span>
+          <span class="value usage-metric-value" id="metricTotal">—</span>
+        </div>
+      </div>
+
+      <!-- Progress bar -->
+      <div class="data-usage-section">
+        <div class="data-usage-header">
+          <span class="data-usage-label">BUNDLE CONSUMED</span>
+          <span class="data-usage-numbers" id="dataUsageNumbers">— / —</span>
+        </div>
+        <div class="data-bar-track">
+          <div class="data-bar-fill" id="dataBarFill" style="width:0%"></div>
+        </div>
+        <div class="data-usage-footer">
+          <span id="dataUsagePct">0%</span>
+          <span id="dataUsageRemaining">— remaining</span>
+        </div>
+      </div>
+
+      <!-- Session details -->
+      <div class="session-details">
+        <div class="detail-row">
+          <span class="detail-label">Status</span>
+          <span class="detail-value" id="detailStatus">—</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">Session Expires</span>
+          <span class="detail-value" id="detailExpires">—</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">Network</span>
+          <span class="detail-value">Preyone UltraNet Wi-Fi</span>
+        </div>
+      </div>
+
+      <!-- Install App -->
+      <div class="usage-install-row">
+        <button type="button" id="installBtn" class="btn-primary" hidden>INSTALL APP</button>
+        <p id="installHint" class="subtitle" style="margin:0.75rem 0 0;display:none">
+          Add Preyone WiFi to your home screen for one-tap usage checks.
+        </p>
+      </div>
+
+      <!-- Manual fallback (shown when no mac/voucher available) -->
+      <section id="manualSection" class="usage-manual" hidden>
+        <h2>ENTER YOUR VOUCHER</h2>
+        <p class="hint">We couldn't detect your session. Type the voucher PIN from your SMS or receipt to see your
+          balance.</p>
+        <form id="manualForm" novalidate>
+          <div class="field">
+            <label for="manualVoucher">Voucher PIN</label>
+            <input id="manualVoucher" name="voucher" type="text" inputmode="text" autocomplete="off"
+              autocapitalize="none" spellcheck="false" placeholder="e.g. preyone-abcd1234" required />
+            <span class="field-error" id="manualError"></span>
+          </div>
+          <div class="field">
+            <label for="manualMac">Device MAC <span style="opacity:.6">(optional)</span></label>
+            <input id="manualMac" name="mac" type="text" inputmode="text" autocomplete="off" spellcheck="false"
+              placeholder="AA:BB:CC:DD:EE:FF" />
+          </div>
+          <button type="submit" class="btn-primary" style="width:100%">CHECK USAGE</button>
+        </form>
+      </section>
+
+      <div class="usage-actions">
+        <button type="button" id="refreshBtn" class="btn-secondary">REFRESH</button>
+        <button type="button" id="alertsBtn" class="btn-secondary" hidden>ENABLE DATA ALERTS</button>
+        <a href="/" class="btn-secondary">BACK TO PORTAL</a>
+      </div>
+    </div>
+
+  </main>
+
+  <div class="portal-shell">
+    <footer class="portal-footer main-footer">
+            <div class="footer-grid">
+              <div class="footer-col brand-col">
+                <a aria-label="Preyone — home" href="https://wifi.preyone.com/" target="_blank" rel="noopener noreferrer">
+                  <img
+                    src="/images/preyonelogomainzw.png"
+                    alt="Preyone"
+                    class="footer-brand-mark"
+                    width="2048"
+                    height="1140"
+                    loading="lazy"
+                    decoding="async"
+                  />
+                </a>
+                <p class="footer-tagline">
+                  High-speed satellite connectivity across Zimbabwe. Powered by Starlink Business
+                  Priority infrastructure.
+                </p>
+              </div>
+
+              <div class="footer-col">
+                <h3>GET IN TOUCH</h3>
+                <div class="footer-contact-cards">
+                  <a href="mailto:support@preyone.com" class="footer-card glass">
+                    <span class="footer-card-icon footer-card-icon--cyan">
+                      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="m22 7-8.991 5.727a2 2 0 0 1-2.009 0L2 7"></path>
+                        <rect x="2" y="4" width="20" height="16" rx="2"></rect>
+                      </svg>
+                    </span>
+                    <span class="footer-card-text">
+                      <span class="footer-card-label">Email</span>
+                      <span class="footer-card-value">support@preyone.com</span>
+                    </span>
+                  </a>
+                  <a href="tel:+263771327202" class="footer-card glass">
+                    <span class="footer-card-icon footer-card-icon--cyan">
+                      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M13.832 16.568a1 1 0 0 0 1.213-.303l.355-.465A2 2 0 0 1 17 15h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2A18 18 0 0 1 2 4a2 2 0 0 1 2-2h3a2 2 0 0 1 2 2v3a2 2 0 0 1-.8 1.6l-.468.351a1 1 0 0 0-.292 1.233 14 14 0 0 0 6.392 6.384"></path>
+                      </svg>
+                    </span>
+                    <span class="footer-card-text">
+                      <span class="footer-card-label">Call Us</span>
+                      <span class="footer-card-value">+263 771 327 202</span>
+                    </span>
+                  </a>
+
+                  <div class="footer-card glass">
+                    <span class="footer-card-icon footer-card-icon--violet">
+                      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0"></path>
+                        <circle cx="12" cy="10" r="3"></circle>
+                      </svg>
+                    </span>
+                    <span class="footer-card-text">
+                      <span class="footer-card-label">Location</span>
+                      <span class="footer-card-value">Harare, Zimbabwe</span>
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="footer-col footer-col--links">
+                <h3>QUICK LINKS</h3>
+                <ul class="footer-links">
+                  <li>
+                    <a href="https://wifi.preyone.com/data">
+                      <svg class="icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M21 12a9 9 0 1 1-9-9" />
+                        <polyline points="21 3 21 9 15 9" />
+                        <path d="M12 7v5l3 3" />
+                      </svg>
+                      Check My Data
+                    </a>
+                  </li>
+                  <li>
+                    <a href="https://wifi.preyone.com/site/" target="_blank" rel="noopener">
+                      <svg class="icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <circle cx="12" cy="12" r="10" />
+                        <line x1="2" y1="12" x2="22" y2="12" />
+                        <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+                      </svg>
+                      Main Website
+                    </a>
+                  </li>
+                  <li>
+                    <a href="https://wifi.preyone.com/terms.html" target="_blank" rel="noopener">
+                      <svg class="icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                        <polyline points="14 2 14 8 20 8" />
+                        <line x1="16" y1="13" x2="8" y2="13" />
+                        <line x1="16" y1="17" x2="8" y2="17" />
+                      </svg>
+                      Terms of Service
+                    </a>
+                  </li>
+                  <li>
+                    <a href="https://wifi.preyone.com/#packages-heading">
+                      <svg class="icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <rect x="3" y="3" width="7" height="7" rx="1" />
+                        <rect x="14" y="3" width="7" height="7" rx="1" />
+                        <rect x="3" y="14" width="7" height="7" rx="1" />
+                        <rect x="14" y="14" width="7" height="7" rx="1" />
+                      </svg>
+                      View Packages
+                    </a>
+                  </li>
+                </ul>
+              </div>
+
+              <div class="footer-col">
+                <h3>FOLLOW US</h3>
+                <div class="footer-follow-panel glass">
+                  <div class="footer-follow-links">
+
+                    <a href="https://www.facebook.com/preyoneenterprise" class="social-icon social-icon-facebook" title="Facebook" target="_blank" rel="noopener">
+                      <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+                        <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
+                      </svg>
+                    </a>
+                    <a href="https://www.instagram.com/preyoneenterprise" class="social-icon social-icon-instagram" title="Instagram" target="_blank" rel="noopener">
+                      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="2" y="2" width="20" height="20" rx="5" ry="5" />
+                        <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z" />
+                        <line x1="17.5" y1="6.5" x2="17.51" y2="6.5" />
+                      </svg>
+                    </a>
+                    <a href="https://x.com/preyonetech" class="social-icon social-icon-x" title="X (Twitter)" target="_blank" rel="noopener">
+                      <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+                        <path d="M18.901 1.153h3.68l-8.04 9.19L24 22.846h-7.406l-5.8-7.584-6.638 7.584H.474l8.6-9.83L0 1.154h7.594l5.243 6.932 6.064-6.932zm-1.292 19.494h2.039L6.486 3.24H4.298l13.311 17.407z" />
+                      </svg>
+                    </a>
+                    <a href="https://youtube.com/@preyonenterprises" class="social-icon social-icon-youtube" title="YouTube" target="_blank" rel="noopener">
+                      <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+                        <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0.502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" />
+                      </svg>
+                    </a>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="footer-bottom">
+              <div class="legal-row">
+                <p>&copy; <span id="current-year"></span> Preyone Enterprises. All Rights Reserved.</p>
+                <div class="payment-badges">
+                  <span class="secure-pay-label">Secure Payments</span>
+                  <span class="pay-logos pay-logos--footer">
+
+                    <span class="pay-logo pay-logo--img">
+                      <img src="/img/pay/ecocash.png?v=41" alt="EcoCash" loading="eager"
+                        decoding="async" width="1329" height="244" />
+                    </span>
+                    <span class="pay-logo pay-logo--img">
+                      <img src="/img/pay/innbucks.png?v=41" alt="InnBucks" loading="eager"
+                        decoding="async" width="631" height="134" />
+                    </span>
+                    <span class="pay-logo pay-logo--img">
+                      <img src="/img/pay/omari.webp?v=41" alt="O'mari" loading="eager"
+                        decoding="async" />
+                    </span>
+                  </span>
+                </div>
+              </div>
+            </div>
+    </footer>
+  </div>
+
+  <!-- Transient threshold toast — mirrored as a system notification when
+       the customer has granted alert permission (registered from sw.js). -->
+  <div id="usageToast" class="usage-toast" hidden role="status" aria-live="polite">
+    <button type="button" class="usage-toast__close" id="toastClose" aria-label="Dismiss">&times;</button>
+    <p class="usage-alert__eyebrow" id="toastEyebrow">ULTRANET ALERT</p>
+    <p class="usage-alert__title" id="toastTitle" style="font-size:1.02rem"></p>
+    <p class="usage-alert__body" id="toastBody" style="margin-bottom:0"></p>
+  </div>
+
+  <script>
+    (function () {
+      'use strict';
+
+      var LS_MAC = 'user_mac';
+      var LS_VOUCHER = 'user_voucher';
+      var POLL_MS = 15000;
+
+      var $ = function (id) { return document.getElementById(id); };
+
+      // ── Query params → localStorage, with client_mac / clientMac aliases ──
+      var params = new URLSearchParams(location.search);
+      var qMac = params.get('mac') || params.get('client_mac') || params.get('clientMac') || '';
+      var qVoucher = params.get('voucher') || params.get('code') || '';
+
+      if (qMac) { try { localStorage.setItem(LS_MAC, qMac); } catch (e) {} }
+      // Voucher PINs are stored and issued lowercase (the migrate that
+      // normalised every table did `UPDATE ... SET voucher_code = lower(...)`),
+      // so normalise here too -- and never let a phone's autocapitalisation
+      // turn a valid PIN into a failed lookup.
+      if (qVoucher) { try { localStorage.setItem(LS_VOUCHER, qVoucher.toLowerCase()); } catch (e) {} }
+
+      function lsGet(k) { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } }
+
+      var state = {
+        mac: qMac || lsGet(LS_MAC),
+        voucher: (qVoucher || lsGet(LS_VOUCHER)).toLowerCase(),
+        timer: null,
+        deferredPrompt: null,
+        // Where the current PIN came from: 'stored' (link/localStorage, i.e.
+        // possibly a dead PIN) or 'manual' (they just typed it — a 404 may be
+        // a typo, so we keep their input instead of blanking it).
+        lastEntry: 'stored',
+      };
+
+      // ── Formatting ──
+      function fmtMB(bytes) {
+        if (bytes == null || isNaN(bytes)) return '—';
+        var mb = bytes / 1048576;
+        if (mb >= 1024) return (mb / 1024).toFixed(2) + ' GB';
+        if (mb >= 1) return mb.toFixed(mb < 10 ? 1 : 0) + ' MB';
+        return (bytes / 1024).toFixed(1) + ' KB';
+      }
+
+      function fmtMBOnly(bytes) {
+        if (bytes == null || isNaN(bytes)) return '—';
+        var mb = bytes / 1048576;
+        return mb >= 1 ? mb.toFixed(mb < 10 ? 1 : 0) + ' MB' : (bytes / 1024).toFixed(1) + ' KB';
+      }
+
+      function setNetBadge(text, cls) {
+        var b = $('netBadge');
+        b.textContent = text;
+        b.className = 'usage-badge' + (cls ? ' ' + cls : '');
+      }
+
+      // ── Advisory banner, toast and threshold alerting ──────────────────
+      var WARN_PCT = 80;
+      var CRIT_PCT = 95;
+      var toastTimer = null;
+
+      function seen(kind) {
+        try { return localStorage.getItem('preyone_seen_' + kind + '_' + state.voucher) === '1'; }
+        catch (e) { return false; }
+      }
+
+      function markSeen(kind) {
+        try { localStorage.setItem('preyone_seen_' + kind + '_' + state.voucher, '1'); }
+        catch (e) {}
+      }
+
+      function setAlert(kind, title, body) {
+        var el = $('usageAlert');
+        el.hidden = false;
+        el.className = 'usage-alert usage-alert--' + kind;
+        $('alertTitle').textContent = title;
+        $('alertBody').textContent = body;
+        $('alertEnter').hidden = false;
+      }
+
+      function clearAlert() { $('usageAlert').hidden = true; }
+
+      function pushToast(kind, title, body) {
+        var t = $('usageToast');
+        $('toastTitle').textContent = title;
+        $('toastBody').textContent = body;
+        t.className = 'usage-toast' + (kind ? ' usage-toast--' + kind : '');
+        t.hidden = false;
+        // restart the entry animation for repeat alerts
+        t.style.animation = 'none';
+        void t.offsetWidth;
+        t.style.animation = '';
+        if (toastTimer) clearTimeout(toastTimer);
+        toastTimer = setTimeout(function () { t.hidden = true; }, 14000);
+      }
+
+      // One alert per voucher per threshold: the toast is in-page and always
+      // works; the system notification is the push channel once permission
+      // was granted (ENABLE DATA ALERTS button, or a previous grant).
+      function notify(kind, title, body, alertKind) {
+        if (seen(kind)) return;
+        markSeen(kind);
+        pushToast(alertKind, title, body);
+        if (typeof Notification !== 'undefined' &&
+            Notification.permission === 'granted' &&
+            navigator.serviceWorker) {
+          navigator.serviceWorker.ready.then(function (reg) {
+            return reg.showNotification(title, {
+              body: body,
+              tag: 'preyone-' + kind + '-' + state.voucher,
+              icon: '/favicon/web-app-manifest-192x192.png',
+              badge: '/favicon/web-app-manifest-192x192.png',
+              data: { url: '/data' },
+            });
+          }).catch(function () { /* no SW here — the toast already landed */ });
+        }
+      }
+
+      function refreshAlertsBtn() {
+        var b = $('alertsBtn');
+        b.hidden = false;
+        if (typeof Notification === 'undefined') {
+          b.disabled = true;
+          b.textContent = 'ALERTS UNSUPPORTED';
+          b.title = 'This browser does not support notifications.';
+          return;
+        }
+        if (Notification.permission === 'granted') {
+          b.disabled = true;
+          b.textContent = 'DATA ALERTS: ON';
+          b.title = 'Data alerts are enabled.';
+        } else if (Notification.permission === 'denied') {
+          b.disabled = false;
+          b.textContent = 'ALERTS BLOCKED';
+          b.title = 'Allow notifications for this site in your browser settings.';
+        } else {
+          b.disabled = false;
+          b.textContent = 'ENABLE DATA ALERTS';
+          b.title = 'Allow alerts';
+        }
+      }
+
+      function startPolling() {
+        if (state.timer) clearInterval(state.timer);
+        state.timer = setInterval(checkUsage, POLL_MS);
+      }
+
+      function stopPolling() {
+        if (state.timer) { clearInterval(state.timer); state.timer = null; }
+      }
+
+      // ── Hybrid channel: server-pending alerts + Web Push subscribe ─────
+      // The backend sweep (voucherMonitorService) records every 80/95
+      // crossing; /api/alerts/pending serves the ones this PIN has not
+      // acknowledged yet, so a customer who was offline when the threshold
+      // fell still sees the banner on their next visit. Web Push is the
+      // other half: subscribe only ever happens inside a click handler
+      // (iOS/Android require a user gesture for Notification.requestPermission).
+
+      function urlBase64ToUint8Array(base64String) {
+        var padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+        var base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+        var raw = atob(base64);
+        var output = new Uint8Array(raw.length);
+        for (var i = 0; i < raw.length; i++) output[i] = raw.charCodeAt(i);
+        return output;
+      }
+
+      function ensurePushSubscription() {
+        if (!('serviceWorker' in navigator) || typeof Notification === 'undefined') return;
+        if (Notification.permission !== 'granted' || !state.voucher) return;
+        navigator.serviceWorker.ready.then(function (reg) {
+          return fetch('/api/alerts/public-key', { credentials: 'same-origin' })
+            .then(function (r) { return r.json(); })
+            .then(function (j) {
+              if (!j.publicKey) return null;
+              return reg.pushManager.subscribe({
+                userVisibleOnly: true,
+                applicationServerKey: urlBase64ToUint8Array(j.publicKey),
+              });
+            })
+            .then(function (sub) {
+              if (!sub) return;
+              return fetch('/api/alerts/subscribe', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'same-origin',
+                body: JSON.stringify({ voucher: state.voucher, subscription: sub.toJSON() }),
+              });
+            });
+        }).catch(function () { /* banner channel still works */ });
+      }
+
+      function ackAlert(id) {
+        fetch('/api/alerts/ack', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({ id: id, voucher: state.voucher }),
+        }).catch(function () { /* local dismiss already happened */ });
+      }
+
+      function fetchPendingAlerts() {
+        if (!state.voucher) return;
+        fetch('/api/alerts/pending?voucher=' + encodeURIComponent(state.voucher), { credentials: 'same-origin' })
+          .then(function (r) { return r.ok ? r.json() : { alerts: [] }; })
+          .then(function (j) {
+            var list = j.alerts || [];
+            if (!list.length) return;
+            var top = list[0]; // newest first
+            var key = 'preyone_evt_' + top.id;
+            if (lsGet(key) === '1') return;
+            try { localStorage.setItem(key, '1'); } catch (e) {}
+            var kind = top.tier >= 95 ? 'over' : 'warn';
+            setAlert(kind,
+              top.tier >= 95 ? 'ALMOST OUT OF DATA' : 'DATA RUNNING LOW',
+              top.body);
+            pushToast(kind, top.title, top.body);
+          })
+          .catch(function () { /* alerts are best-effort */ });
+      }
+
+      // ── Render ──
+      function render(j) {
+        var used = j.bytesUsed;
+        var total = j.bytesTotal;
+        var isUncapped = !!j.isUncapped;
+
+        var remaining = null;
+        if (used != null && total != null) remaining = Math.max(total - used, 0);
+
+        $('metricUsed').textContent = fmtMBOnly(used);
+        $('metricRemaining').textContent = isUncapped ? 'Unlimited' : fmtMBOnly(remaining);
+        $('metricTotal').textContent = isUncapped ? 'Unlimited' : fmtMBOnly(total);
+
+        $('dataUsageNumbers').textContent = fmtMB(used) + ' / ' + (isUncapped ? 'Unlimited' : fmtMB(total));
+
+        var pct = 0;
+        if (used != null && total != null && total > 0) {
+          pct = Math.min((used / total) * 100, 100);
+        }
+        // Exhausted = capped bundle whose allowance is fully consumed.
+        var exhausted = !isUncapped && used != null && total != null && total > 0 && used >= total;
+
+        // Unlimited bundles: no percentage semantics — a flowing signal bar
+        // and an explicit UNLIMITED readout instead of a misleading "0.0%".
+        var bar = $('dataBarFill');
+        bar.className = isUncapped ? 'data-bar-fill data-bar-fill--unlimited' : 'data-bar-fill';
+        bar.style.width = isUncapped ? '100%' : pct + '%';
+        $('dataUsagePct').textContent = isUncapped ? 'UNLIMITED' : pct.toFixed(1) + '%';
+        $('dataUsagePct').className = isUncapped ? 'data-usage-pct--unlimited' : '';
+        $('dataUsageRemaining').textContent = isUncapped ? 'Unlimited remaining' : fmtMB(remaining) + ' remaining';
+
+        // Colour the remaining metric as the bundle runs down.
+        var remEl = $('metricRemaining');
+        remEl.className = 'value usage-metric-value';
+        if (!isUncapped && total > 0) {
+          var ratio = remaining / total;
+          if (ratio <= 0) remEl.classList.add('usage-metric-value--over');
+          else if (ratio <= 0.15) remEl.classList.add('usage-metric-value--warn');
+        }
+
+        $('detailStatus').textContent = j.active ? '● ACTIVE' : 'EXPIRED';
+        $('detailStatus').style.color = j.active ? '#25D366' : '#f87171';
+
+        if (j.expiresAt) {
+          var d = new Date(j.expiresAt);
+          $('detailExpires').textContent = isNaN(d) ? '—'
+            : d.toLocaleString([], { hour12: false, dateStyle: 'medium', timeStyle: 'short' });
+        }
+
+        if (j.voucherCode) {
+          $('metaVoucher').style.display = '';
+          $('metaVoucherTail').textContent = String(j.voucherCode).slice(-4).toLowerCase();
+        }
+        if (j.packageTier) {
+          $('metaTier').style.display = '';
+          $('metaTier').textContent = String(j.packageTier).toUpperCase();
+        }
+
+        // ── Advisory + threshold alerting ──
+        if (exhausted) {
+          setAlert('over', 'BUNDLE EXHAUSTED',
+            'Your data has run out and the gateway has paused your connection. Buy a fresh bundle to get back online.');
+          notify('exhaust', 'ULTRANET // BUNDLE EXHAUSTED',
+            'Data used up. Buy a new voucher to reconnect.', 'over');
+        } else if (!isUncapped && pct >= CRIT_PCT) {
+          setAlert('over', 'ALMOST OUT OF DATA',
+            'You have used ' + Math.round(pct) + '% of your bundle. Buy a new one now or the gateway cuts you off.');
+          notify('low95', 'ULTRANET // RUNNING DRY - ' + CRIT_PCT + '%',
+            'Almost out of data - buy a new bundle to stay online.', 'over');
+        } else if (!isUncapped && pct >= WARN_PCT) {
+          setAlert('warn', 'DATA RUNNING LOW',
+            'You have used ' + Math.round(pct) + '% of your bundle. Top up now so you never drop off.');
+          notify('low80', 'ULTRANET // DATA THRESHOLD ' + WARN_PCT + '%',
+            'Bundle at ' + WARN_PCT + '% - top up now to stay online.', 'warn');
+        } else {
+          clearAlert();
+        }
+
+        setNetBadge(j.active ? '● ONLINE' : '● SESSION ENDED', j.active ? 'usage-badge--online' : 'usage-badge--offline');
+      }
+
+      function renderError(msg) {
+        setNetBadge('● OFFLINE', 'usage-badge--offline');
+        if (msg) {
+          $('detailStatus').textContent = 'UNAVAILABLE';
+          $('detailStatus').style.color = '#f87171';
+        }
+      }
+
+      // ── API ──
+      function checkUsage() {
+        if (!state.voucher && !state.mac) { showManual(); return; }
+        var qs = new URLSearchParams();
+        if (state.voucher) qs.set('voucher', state.voucher);
+        if (state.mac) qs.set('mac', state.mac);
+
+        setNetBadge('UPDATING…');
+
+        fetch('/api/check-usage?' + qs.toString(), { credentials: 'same-origin' })
+          .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, body: j }; }); })
+          .then(function (res) {
+            if (!res.ok || res.body.error) {
+              if (res.body && res.body.error === 'not_found') handleNotFound();
+              else renderError(true);
+              return;
+            }
+            hideManual();
+            render(res.body);
+          })
+          .catch(function () { renderError(true); });
+      }
+
+      // The PIN is dead: expired, fully used, disabled, or a typo. The API
+      // deliberately cannot tell us which (uniform 404 — see usage.ts), so we
+      // say all of them, blank every stale figure so old numbers never sit
+      // next to the new-PIN form, stop polling the corpse, and offer the two
+      // ways forward: enter the voucher just bought, or buy one.
+      function handleNotFound() {
+        stopPolling();
+
+        $('metricUsed').textContent = '—';
+        $('metricRemaining').textContent = '—';
+        $('metricTotal').textContent = '—';
+        $('dataUsageNumbers').textContent = '— / —';
+        var bar = $('dataBarFill');
+        bar.className = 'data-bar-fill';
+        bar.style.width = '0%';
+        $('dataUsagePct').textContent = '—';
+        $('dataUsagePct').className = '';
+        $('dataUsageRemaining').textContent = '— remaining';
+        $('detailStatus').textContent = 'EXPIRED';
+        $('detailStatus').style.color = '#f87171';
+
+        setAlert('over', 'VOUCHER EXPIRED OR USED UP',
+          'That voucher has ended — it expired, was fully used, or was disabled. Enter the PIN of a bundle you just bought, or grab a new one.');
+
+        var msg = 'This voucher has expired or been used up. Enter your new PIN to check another bundle.';
+        // Only pull up the keyboard the first time the form appears — later
+        // refreshes (visibilitychange, RESTORE) must not re-focus mid-typing.
+        var firstTime = $('manualSection').hidden;
+        showManual(msg);
+        if (state.lastEntry === 'manual') {
+          // They just typed this PIN — a typo, not necessarily a dead voucher.
+          // Keep it so one character can be fixed instead of retyped.
+          $('manualVoucher').value = state.voucher;
+        } else {
+          $('manualVoucher').value = '';
+        }
+        if (firstTime) $('manualVoucher').focus({ preventScroll: true });
+
+        setNetBadge('● VOUCHER ENDED', 'usage-badge--offline');
+        notify('expired', 'ULTRANET // VOUCHER ENDED',
+          'That voucher has expired or been used up. Enter your new PIN or buy a fresh bundle.', 'over');
+      }
+
+      // ── Manual fallback ──
+      function showManual(msg) {
+        $('manualSection').hidden = false;
+        if (state.voucher) $('manualVoucher').value = state.voucher;
+        if (state.mac) $('manualMac').value = state.mac;
+        if (msg) $('manualError').textContent = msg;
+      }
+
+      function hideManual() { $('manualSection').hidden = true; }
+
+      $('manualForm').addEventListener('submit', function (e) {
+        e.preventDefault();
+        var v = $('manualVoucher').value.trim().toLowerCase();
+        var m = $('manualMac').value.trim();
+        if (!v) { $('manualError').textContent = 'Enter your voucher PIN.'; return; }
+        $('manualError').textContent = '';
+        state.voucher = v;
+        state.mac = m;
+        // Fresh manual entry: a 404 from here is as likely a typo as a dead
+        // voucher, so handleNotFound keeps this input for editing.
+        state.lastEntry = 'manual';
+        try {
+          localStorage.setItem(LS_VOUCHER, v);
+          if (m) localStorage.setItem(LS_MAC, m);
+        } catch (err) {}
+        checkUsage();
+        // Restart the 15s cadence for the newly entered voucher (a dead PIN
+        // had stopped it in handleNotFound).
+        startPolling();
+      });
+
+      $('alertEnter').addEventListener('click', function () {
+        showManual('');
+        $('manualVoucher').value = '';
+        state.lastEntry = 'manual';
+        $('manualVoucher').focus({ preventScroll: false });
+        $('manualSection').scrollIntoView({ behavior: 'smooth', block: 'center' });
+      });
+
+      $('toastClose').addEventListener('click', function () {
+        $('usageToast').hidden = true;
+        if (toastTimer) clearTimeout(toastTimer);
+      });
+
+      $('alertsBtn').addEventListener('click', function () {
+        if (typeof Notification === 'undefined') {
+          pushToast('', 'ALERTS UNSUPPORTED',
+            'This browser does not support notifications. You will still see data warnings here.');
+          return;
+        }
+        if (Notification.permission === 'denied') {
+          pushToast('', 'ALERTS BLOCKED',
+            'Open this site in your browser settings and allow notifications, then tap ENABLE DATA ALERTS again.');
+          return;
+        }
+        var asked = Notification.requestPermission
+          ? Notification.requestPermission()
+          : Promise.resolve(Notification.permission);
+        Promise.resolve(asked).then(function (p) {
+          refreshAlertsBtn();
+          if (p === 'granted') {
+            pushToast('', 'ALERTS ARMED',
+              'We will ping you at 80% and 95% used, and the moment your bundle runs dry.');
+            // iOS/Android: the subscription must be created inside this same
+            // click (permission + subscribe ride one user gesture).
+            ensurePushSubscription();
+          } else if (p === 'denied') {
+            pushToast('', 'ALERTS BLOCKED',
+              'Allow notifications for this site in your browser settings to receive data alerts.');
+          }
+        });
+      });
+
+      $('refreshBtn').addEventListener('click', checkUsage);
+
+      // ── Install prompt ──
+      // Android/Chrome fires beforeinstallprompt; iOS Safari NEVER does, so
+      // on iPhone/iPad the button is shown up front and guides the manual
+      // Share → Add to Home Screen route (the only install path iOS allows).
+      var isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) ||
+        (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+      var IOS_STEPS = 'On iPhone: tap the Share button (square with the up arrow), ' +
+        'scroll down and tap "Add to Home Screen".';
+
+      function isStandalone() {
+        if (navigator.standalone === true) return true;
+        try {
+          return !!(window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
+        } catch (e) { return false; }
+      }
+
+      function showInstall(label, hint) {
+        $('installBtn').textContent = label;
+        $('installBtn').hidden = false;
+        $('installHint').textContent = hint;
+        $('installHint').style.display = '';
+      }
+
+      function hideInstall() {
+        $('installBtn').hidden = true;
+        $('installHint').style.display = 'none';
+      }
+
+      if (isIOS && !isStandalone()) {
+        showInstall('INSTALL APP', IOS_STEPS);
+      }
+
+      window.addEventListener('beforeinstallprompt', function (e) {
+        e.preventDefault();
+        state.deferredPrompt = e;
+        showInstall('INSTALL APP', 'Add Preyone WiFi to your home screen for one-tap usage checks.');
+      });
+
+      $('installBtn').addEventListener('click', function () {
+        var prompt = state.deferredPrompt;
+        if (prompt) {
+          prompt.prompt();
+          prompt.userChoice.then(function (choice) {
+            state.deferredPrompt = null;
+            if (choice && choice.outcome === 'accepted') hideInstall();
+          }).catch(function () { /* dismissed */ });
+          return;
+        }
+        // iOS: there is no programmatic install — restate the manual steps.
+        if (isIOS) showInstall('HOW TO INSTALL', IOS_STEPS);
+      });
+
+      window.addEventListener('appinstalled', function () {
+        hideInstall();
+      });
+
+      // ── Service worker ──
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', function () {
+          navigator.serviceWorker.register('/sw.js').catch(function () { /* non-fatal */ });
+        });
+      }
+
+      // ── Boot ──
+      $('currentYear').textContent = new Date().getFullYear();
+      refreshAlertsBtn();
+      // Re-arm the push subscription on every visit (idempotent server-side)
+      // and surface any alert the backend fired while this device was away.
+      ensurePushSubscription();
+      fetchPendingAlerts();
+      setInterval(fetchPendingAlerts, 5 * 60 * 1000);
+
+      if (!state.voucher && !state.mac) {
+        showManual();
+        setNetBadge('ENTER VOUCHER');
+      } else {
+        checkUsage();
+        startPolling();
+      }
+
+      // Refresh when the app returns to the foreground.
+      document.addEventListener('visibilitychange', function () {
+        if (!document.hidden && (state.voucher || state.mac)) {
+          checkUsage();
+          fetchPendingAlerts();
+        }
+      });
+    })();
+  </script>
+  <!-- WhatsApp FAB -->
+  <a
+    href="https://wa.me/263771327202"
+    class="whatsapp-fab"
+    target="_blank"
+    rel="noopener noreferrer"
+    aria-label="Chat with us on WhatsApp"
+    title="Chat on WhatsApp"
+  >
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L0 24l6.335-1.662c1.72.938 3.659 1.434 5.631 1.434h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z" />
+    </svg>
+  </a>
+
+  <!-- Footer parity: the copyright year is also filled by portal.js on pages
+       that load it; these two pages have no portal.js, so fill it here. -->
+  <script>
+    (function () {
+      var els = document.querySelectorAll('#current-year');
+      var year = String(new Date().getFullYear());
+      for (var i = 0; i < els.length; i += 1) els[i].textContent = year;
+    })();
+  </script>
+  <script>(function(){var e=document.getElementById('bootLoading');if(!e)return;var h=function(){e.classList.add('is-hidden')};if(document.readyState==='complete')h();else window.addEventListener('load',h);setTimeout(h,8e3)})();</script>
+</body>
+
+</html>
