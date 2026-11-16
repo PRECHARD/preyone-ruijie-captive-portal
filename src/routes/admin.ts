@@ -5,7 +5,12 @@ import { pool } from '../db/pool';
 import { requireAdminAuth, requireRole } from '../middleware/adminAuth';
 import { PERMISSIONS, requirePermission, scopeUserVoucherCodeCondition, scopeVoucherCondition } from '../middleware/rbac';
 import { recordAuditLog } from './adminAuth';
-import { sendAdminApprovedNotification, sendAdminRejectedNotification } from '../services/notificationService';
+import {
+  sendAdminApprovedNotification,
+  sendAdminRejectedNotification,
+  sendCashHandoverDecisionEmail,
+  sendCashHandoverSubmittedEmail,
+} from '../services/notificationService';
 import { isRuijieCloudConfigured, mintRuijieVoucherForTier } from '../services/ruijieMint';
 import { TIER_CATALOG } from './subscription';
 import {
@@ -2419,6 +2424,59 @@ adminRouter.get('/staff/stats', async (req: Request, res: Response) => {
 // Cash Handover Routes (Staff → Manager/CEO)
 // ═══════════════════════════════════════════════════════
 
+const HANDOVER_EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+
+/**
+ * Who receives a handover email: the staff member (confirmation / decision)
+ * plus the management reviewers. CASH_HANDOVER_RECIPIENTS overrides the
+ * management side with an explicit comma/semicolon separated list; otherwise
+ * every approved CEO/Manager account is used. Falls back to admin@preyone.com
+ * so a production with no manager account still notifies someone.
+ */
+async function cashHandoverRecipients(staffEmail?: string | null): Promise<string[]> {
+  const out = new Set<string>();
+  const configured = (process.env.CASH_HANDOVER_RECIPIENTS || '')
+    .split(/[,;]/)
+    .map((email) => email.trim().toLowerCase())
+    .filter((email) => HANDOVER_EMAIL_RE.test(email));
+
+  for (const email of configured) out.add(email);
+
+  if (configured.length === 0) {
+    try {
+      const { rows } = await pool.query(
+        `SELECT email FROM admin_users
+          WHERE role IN ('CEO', 'Manager') AND approved = TRUE
+            AND deleted_at IS NULL AND email IS NOT NULL`
+      );
+      for (const row of rows) {
+        const email = String(row.email || '').trim().toLowerCase();
+        if (HANDOVER_EMAIL_RE.test(email)) out.add(email);
+      }
+    } catch (err) {
+      console.error('Handover recipient lookup failed:', err);
+    }
+  }
+
+  if (out.size === 0) out.add('admin@preyone.com');
+  if (staffEmail && HANDOVER_EMAIL_RE.test(staffEmail.trim().toLowerCase())) {
+    out.add(staffEmail.trim().toLowerCase());
+  }
+  return [...out];
+}
+
+async function staffEmailFor(staffId: string): Promise<string | null> {
+  try {
+    const { rows } = await pool.query(
+      `SELECT email FROM admin_users WHERE id = $1 AND deleted_at IS NULL`,
+      [staffId]
+    );
+    return rows[0]?.email ?? null;
+  } catch {
+    return null;
+  }
+}
+
 // Get sales available for handover (Staff's unhanded sales)
 adminRouter.get('/cash-handovers/available-sales', async (req: Request, res: Response) => {
   const { rows } = await pool.query(
@@ -2493,6 +2551,16 @@ adminRouter.post('/cash-handovers', async (req: Request, res: Response) => {
       );
     } catch (_) { /* best-effort */ }
 
+    void cashHandoverRecipients(req.adminUser!.email)
+      .then((recipients) => sendCashHandoverSubmittedEmail(recipients, {
+        handoverId: handover.id,
+        staffName: req.adminUser!.fullName,
+        amount: totalAmount,
+        saleCount: sales.length,
+        submittedAt: handover.created_at,
+      }))
+      .catch((err) => console.error('Handover submitted email failed:', err));
+
     res.status(201).json({ message: `Handover of $${totalAmount.toFixed(2)} submitted for approval`, handover });
   } catch (err) {
     await client.query('ROLLBACK');
@@ -2562,6 +2630,20 @@ adminRouter.post('/cash-handovers/:id/approve', requirePermission(PERMISSIONS.CO
       ? `Your handover of $${parseFloat(existing[0].total_amount).toFixed(2)} was approved by ${req.adminUser!.fullName}. You still have ${remaining} pending cash sale(s) ($${remainingTotal.toFixed(2)}) to hand over before you can clock out.`
       : `Your handover of $${parseFloat(existing[0].total_amount).toFixed(2)} was approved by ${req.adminUser!.fullName}. Your sales are fully handed over — you can now clock out.`;
     await insertAlert('cash_handover_approved', 'success', 'Handover Approved', msg, 'cash_handover', id, existing[0].staff_id);
+
+    const staffEmail = await staffEmailFor(existing[0].staff_id);
+    void cashHandoverRecipients(staffEmail)
+      .then((recipients) => sendCashHandoverDecisionEmail(recipients, 'approved', {
+        handoverId: id,
+        staffName: existing[0].staff_name,
+        amount: parseFloat(existing[0].total_amount),
+        saleCount: existing[0].sale_count,
+        submittedAt: existing[0].created_at,
+        decidedBy: req.adminUser!.fullName,
+        remainingCount: remaining,
+        remainingAmount: remainingTotal,
+      }))
+      .catch((err) => console.error('Handover approved email failed:', err));
   }
 
   res.json({ message: 'Cash handover approved' });
@@ -2605,6 +2687,20 @@ adminRouter.post('/cash-handovers/:id/reject', requirePermission(PERMISSIONS.COM
       await insertAlert('cash_handover_rejected', 'warning', 'Handover Rejected',
         `Your handover of $${parseFloat(existing[0].total_amount).toFixed(2)} was rejected by ${req.adminUser!.fullName}. The ${existing[0].sale_count} sale(s) are back to pending — submit a new handover before clocking out.`,
         'cash_handover', id, existing[0].staff_id);
+
+      const staffEmail = await staffEmailFor(existing[0].staff_id);
+      void cashHandoverRecipients(staffEmail)
+        .then((recipients) => sendCashHandoverDecisionEmail(recipients, 'rejected', {
+          handoverId: id,
+          staffName: existing[0].staff_name,
+          amount: parseFloat(existing[0].total_amount),
+          saleCount: existing[0].sale_count,
+          submittedAt: existing[0].created_at,
+          decidedBy: req.adminUser!.fullName,
+          remainingCount: existing[0].sale_count,
+          remainingAmount: parseFloat(existing[0].total_amount),
+        }))
+        .catch((err) => console.error('Handover rejected email failed:', err));
     }
 
     res.json({ message: 'Cash handover rejected. Sales returned to pending.' });
