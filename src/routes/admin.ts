@@ -2427,41 +2427,46 @@ adminRouter.get('/staff/stats', async (req: Request, res: Response) => {
 const HANDOVER_EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
 /**
- * Who receives a handover email: the staff member (confirmation / decision)
- * plus the management reviewers. CASH_HANDOVER_RECIPIENTS overrides the
- * management side with an explicit comma/semicolon separated list; otherwise
- * every approved CEO/Manager account is used. Falls back to admin@preyone.com
- * so a production with no manager account still notifies someone.
+ * Who receives a handover email. Both sides are ALWAYS notified:
+ *  - every approved CEO/Manager account (the reviewers), and
+ *  - the staff member involved (submitter confirmation / decision recipient).
+ *
+ * CASH_HANDOVER_RECIPIENTS is additive, never a replacement, so an extra
+ * mailbox (e.g. accounts@) can be copied without dropping the managers.
+ * Falls back to admin@preyone.com so a production with no manager account
+ * still notifies someone.
  */
 async function cashHandoverRecipients(staffEmail?: string | null): Promise<string[]> {
   const out = new Set<string>();
+
+  // Management reviewers (CEO + Manager) are always included.
+  try {
+    const result = await pool.query(
+      `SELECT email FROM admin_users
+        WHERE role IN ('CEO', 'Manager') AND approved = TRUE
+          AND deleted_at IS NULL AND email IS NOT NULL`
+    );
+    for (const row of result?.rows ?? []) {
+      const email = String(row.email || '').trim().toLowerCase();
+      if (HANDOVER_EMAIL_RE.test(email)) out.add(email);
+    }
+  } catch (err) {
+    console.error('Handover recipient lookup failed:', err);
+  }
+
+  // Optional extra recipients are added on top of the reviewers.
   const configured = (process.env.CASH_HANDOVER_RECIPIENTS || '')
     .split(/[,;]/)
     .map((email) => email.trim().toLowerCase())
     .filter((email) => HANDOVER_EMAIL_RE.test(email));
-
   for (const email of configured) out.add(email);
 
-  if (configured.length === 0) {
-    try {
-      const { rows } = await pool.query(
-        `SELECT email FROM admin_users
-          WHERE role IN ('CEO', 'Manager') AND approved = TRUE
-            AND deleted_at IS NULL AND email IS NOT NULL`
-      );
-      for (const row of rows) {
-        const email = String(row.email || '').trim().toLowerCase();
-        if (HANDOVER_EMAIL_RE.test(email)) out.add(email);
-      }
-    } catch (err) {
-      console.error('Handover recipient lookup failed:', err);
-    }
-  }
-
-  if (out.size === 0) out.add('admin@preyone.com');
+  // The staff member involved always gets a copy.
   if (staffEmail && HANDOVER_EMAIL_RE.test(staffEmail.trim().toLowerCase())) {
     out.add(staffEmail.trim().toLowerCase());
   }
+
+  if (out.size === 0) out.add('admin@preyone.com');
   return [...out];
 }
 
