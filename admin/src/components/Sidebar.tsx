@@ -13,7 +13,7 @@ import {
 } from 'react-icons/fi';
 
 const POS_URL = import.meta.env.VITE_POS_URL || 'https://pos.preyone.com';
-const INVOICE_URL = import.meta.env.VITE_INVOICE_URL || 'https://invoices.preyone.com';
+const INVOICE_URL = import.meta.env.VITE_INVOICE_URL || 'https://invoice.preyone.com';
 
 interface SidebarLink {
   label: string;

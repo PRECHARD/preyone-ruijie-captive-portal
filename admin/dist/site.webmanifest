@@ -1,7 +1,32 @@
 {
+  "id": "/",
   "name": "Preyone Admin Console",
-  "short_name": "Preyone",
+  "short_name": "Preyone Admin",
+  "description": "Preyone UltraNet operations console for WiFi vouchers, captive portal, transit and POS.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "orientation": "any",
+  "theme_color": "#6a0dad",
+  "background_color": "#08080e",
+  "lang": "en",
+  "dir": "ltr",
+  "categories": ["business", "productivity", "utilities"],
+  "prefer_related_applications": false,
   "icons": [
+    {
+      "src": "/web-app-manifest-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/web-app-manifest-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
     {
       "src": "/web-app-manifest-192x192.png",
       "sizes": "192x192",
@@ -15,7 +40,27 @@
       "purpose": "maskable"
     }
   ],
-  "theme_color": "#6a0dad",
-  "background_color": "#08080e",
-  "display": "standalone"
+  "shortcuts": [
+    {
+      "name": "Vouchers",
+      "short_name": "Vouchers",
+      "description": "Issue, renew and audit WiFi vouchers",
+      "url": "/#/ultranet/vouchers",
+      "icons": [{ "src": "/web-app-manifest-192x192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Reports",
+      "short_name": "Reports",
+      "description": "Sales, handovers and Ruijie sync reports",
+      "url": "/#/ultranet/reports",
+      "icons": [{ "src": "/web-app-manifest-192x192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "POS Sales",
+      "short_name": "POS",
+      "description": "Open the POS sales and invoices view",
+      "url": "/#/pos/pos-sales",
+      "icons": [{ "src": "/web-app-manifest-192x192.png", "sizes": "192x192" }]
+    }
+  ]
 }

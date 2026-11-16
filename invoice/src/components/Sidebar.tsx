@@ -25,7 +25,6 @@ type IconName =
   | 'types'
   | 'chevron'
   | 'pos'
-  | 'wifi'
   | 'external';
 
 const ICONS: Record<IconName, ReactNode> = {
@@ -95,14 +94,6 @@ const ICONS: Record<IconName, ReactNode> = {
       <path d="M16.5 10.5h.01" />
     </>
   ),
-  wifi: (
-    <>
-      <path d="M3.75 9a12.5 12.5 0 0 1 16.5 0" />
-      <path d="M6.9 12.45a8.2 8.2 0 0 1 10.2 0" />
-      <path d="M10 15.85a4 4 0 0 1 4 0" />
-      <circle cx="12" cy="19" r="1" fill="currentColor" stroke="none" />
-    </>
-  ),
   external: (
     <>
       <path d="M14 4h6v6" />
@@ -133,7 +124,6 @@ function Icon({ name, className }: { name: IconName; className?: string }) {
 /** Lightweight app switcher; every target pre-exists on its own subdomain. */
 const CORE_APPS: Array<{ host: string; label: string; icon: IconName }> = [
   { host: 'pos.preyone.com', label: 'POS', icon: 'pos' },
-  { host: 'wifi.preyone.com', label: 'WiFi portal', icon: 'wifi' },
 ];
 
 /**
@@ -224,7 +214,7 @@ export default function Sidebar({
   onStatus = noop,
   onNewDocument = noop,
 }: SidebarProps) {
-  const [typesOpen, setTypesOpen] = useState(true);
+  const [typesOpen, setTypesOpen] = useState(false);
   const typesPanelId = useId();
 
   const [user, setUser] = useState<SessionUser | null>(null);

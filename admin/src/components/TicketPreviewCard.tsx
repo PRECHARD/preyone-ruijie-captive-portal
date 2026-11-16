@@ -29,7 +29,7 @@ const paymentMethodLabel = (method: string) => {
 /** Normalizes a Zim short code to +263... exactly like the app's formatZimPhone. */
 const formatZimPhone = (raw: string): string => {
   let v = (raw || '').trim();
-  if (!v) return 'N/A';
+  if (!v) return '—';
   v = v.replace(/[^0-9+]/g, '');
   if (v.startsWith('+363')) v = '+263' + v.substring(4);
   if (/^07/.test(v) || /^08/.test(v)) v = '+263' + v.substring(1);
@@ -164,12 +164,12 @@ export default function TicketPreviewCard({ data }: { data: TicketPreviewData })
       <div className="tx-card-preview-strip" />
       <div className="tx-card-preview-body" style={{ display: 'flex', flexDirection: 'column' }}>
         <div style={{ textAlign: 'center', fontSize: 21, fontWeight: 800, color: NAVY, letterSpacing: 0.5, lineHeight: 1.2 }}>{company}</div>
-        {((data.customerCare.trim() !== '' && care !== 'N/A') || address !== '') && (
+        {((data.customerCare.trim() !== '' && care !== '—') || address !== '') && (
           <div style={{ marginTop: 6 }}>
             {address !== '' && (
               <div style={{ textAlign: 'center', fontSize: 10.5, fontWeight: 500, color: MUTED, lineHeight: 1.35 }}>{address}</div>
             )}
-            {care !== 'N/A' && (
+            {care !== '—' && (
               <div style={{ textAlign: 'center', fontSize: 10.5, fontWeight: 600, color: MUTED, lineHeight: 1.3 }}>CUSTOMER CARE&nbsp;&nbsp;{care}</div>
             )}
           </div>

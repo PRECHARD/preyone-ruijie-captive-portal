@@ -6,6 +6,7 @@ import './styles/theme.css'
 import { AuthProvider } from './context/AuthContext'
 import App from './App'
 import StarlinkApp from './starlink/StarlinkApp'
+import { registerServiceWorker } from './pwa'
 
 /**
  * The Starlink customer portal ships inside this bundle but has its own shell
@@ -30,3 +31,5 @@ createRoot(document.getElementById('root')!).render(
     </StrictMode>
   ),
 )
+
+registerServiceWorker()
