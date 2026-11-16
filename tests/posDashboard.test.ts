@@ -21,9 +21,18 @@ const session = vi.hoisted(() => ({
 
 vi.mock('../src/middleware/company', () => ({
   requireCompany: (req: any, _res: any, next: any) => {
-    req.company = { id: session.companyId, name: 'Test Co', modules: ['pos'] };
+    req.company = {
+      id: session.companyId,
+      name: 'Test Co',
+      modules: ['pos', 'invoice'],
+      plan_type: 'growth_20',
+      plan_name: 'PrePro',
+      subscription_status: 'active',
+      subscription_expires_at: null,
+    };
     next();
   },
+  moduleAccess: () => (_req: any, _res: any, next: any) => next(),
 }));
 
 const COMPANY_A = 'company-a';

@@ -9,28 +9,12 @@ import {
   normalizeGatewayCurrency,
 } from '../services/pesepayService';
 import type { PesepayCurrency, PesepayRail } from '../services/pesepayService';
+import { PLAN_TIERS, TIER_CATALOG, canonicalPlanId, planNameFor, type PlanTier } from '../plans/entitlements';
 
 export const subscriptionRouter = Router();
 
-// Purchasable tiers. Prices are USD/month and must stay in lockstep with the
-// Upgrade modals (pos + invoice) and companies.plan_type CHECK constraint.
-export const PLAN_TIERS = ['standard_10', 'invoicing_15', 'growth_20', 'unlimited_30'] as const;
-export type PlanTier = (typeof PLAN_TIERS)[number];
-
-export const TIER_CATALOG: Array<{
-  id: PlanTier;
-  name: string;
-  price: number;
-  devices: number;
-  tagline: string;
-}> = [
-  { id: 'standard_10', name: 'POS Only', price: 10, devices: 1, tagline: 'Till only — one registered device.' },
-  { id: 'invoicing_15', name: 'POS + Invoicing', price: 15, devices: 3, tagline: 'POS and invoicing — up to 3 devices.' },
-  { id: 'growth_20', name: 'POS + Invoicing', price: 20, devices: 6, tagline: 'POS and invoicing — up to 6 devices.' },
-  { id: 'unlimited_30', name: 'Unlimited', price: 30, devices: 9999, tagline: 'Unlimited devices, priority support.' },
-];
-
-const isPlanTier = (v: unknown): v is PlanTier => PLAN_TIERS.includes(v as PlanTier);
+// Re-exported so admin catalogues and the Pesepay webhook keep a single import.
+export { PLAN_TIERS, TIER_CATALOG, type PlanTier };
 
 const str = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
 
@@ -76,6 +60,7 @@ subscriptionRouter.get('/plans', requireAdminAuth, async (req: Request, res: Res
       current: company
         ? {
             plan_type: company.plan_type,
+            plan_name: planNameFor(company.plan_type),
             max_devices: Number(company.max_devices),
             subscription_status: company.subscription_status,
             subscription_expires_at: company.subscription_expires_at,
@@ -95,8 +80,8 @@ subscriptionRouter.get('/plans', requireAdminAuth, async (req: Request, res: Res
 // fulfilment happens server-to-server in /api/payments/pesepay/webhook, which
 // applies plan_tier to companies.plan_type (device cap follows via trigger).
 subscriptionRouter.post('/checkout', requireAdminAuth, async (req: Request, res: Response) => {
-  const tierId = str(req.body?.tier);
-  if (!isPlanTier(tierId)) {
+  const tierId = canonicalPlanId(str(req.body?.tier));
+  if (!tierId) {
     res.status(400).json({ error: `tier must be one of: ${PLAN_TIERS.join(', ')}` });
     return;
   }

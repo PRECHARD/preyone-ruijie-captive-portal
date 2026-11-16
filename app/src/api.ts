@@ -6,6 +6,8 @@ export interface GatewayUser {
   company_id?: string | null;
   tenant_id?: string | null;
   subscribed_modules?: string[] | null;
+  plan_type?: string | null;
+  plan_name?: string | null;
 }
 
 export interface CompanyProfile {
@@ -83,6 +85,8 @@ export async function company(): Promise<CompanyProfile | null> {
 
 export interface CompanyAccess {
   company: { id: string; name: string };
+  plan_type?: string | null;
+  plan_name?: string | null;
   plan_tier?: string | null;
   modules: string[];
 }

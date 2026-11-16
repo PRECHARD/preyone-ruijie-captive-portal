@@ -89,18 +89,20 @@ describe('POS Devices API', () => {
     });
   });
 
-  describe('auto-registration quota enforcement', () => {
-    it('enforces quota: 1 phone + 1 tablet + 1 desktop per company', () => {
-      const quota = { phone: 1, tablet: 1, desktop: 1 };
-      const maxDevices = Object.values(quota).reduce((a, b) => a + b, 0);
-      expect(maxDevices).toBe(3);
+  describe('plan device cap', () => {
+    it('caps devices by the paid plan, not one of each device shape', async () => {
+      const { TIER_CATALOG } = await import('../src/plans/entitlements');
+      const byId = Object.fromEntries(TIER_CATALOG.map((t) => [t.id, t.devices]));
+      expect(byId.standard_10).toBe(1);
+      expect(byId.pos_invoice_15).toBe(3);
+      expect(byId.growth_20).toBe(6);
+      expect(byId.unlimited_30).toBe(9999);
     });
 
-    it('rejects registration when quota exceeded', () => {
-      const quota = { phone: 1, tablet: 1, desktop: 1 };
+    it('rejects registration when the plan cap is already full', () => {
+      const maxDevices = 1;
       const activeCount = 1;
-      const maxQuota = quota.tablet;
-      expect(activeCount).toBeGreaterThanOrEqual(maxQuota);
+      expect(activeCount).toBeGreaterThanOrEqual(maxDevices);
     });
 
     it('allows re-registration of same device_uuid (idempotent)', () => {
@@ -123,13 +125,12 @@ describe('POS Devices API', () => {
       expect(valid.test('has spaces here')).toBe(false);
     });
 
-    it('validates device_type against allowed list', () => {
-      const allowed = ['phone', 'tablet', 'desktop'];
+    it('validates device_type against the auto-register list', () => {
+      const allowed = ['phone', 'tablet', 'desktop', 'electron'];
       expect(allowed).toContain('phone');
       expect(allowed).toContain('tablet');
       expect(allowed).toContain('desktop');
-      expect(allowed).not.toContain('android');
-      expect(allowed).not.toContain('electron');
+      expect(allowed).toContain('electron');
     });
   });
 

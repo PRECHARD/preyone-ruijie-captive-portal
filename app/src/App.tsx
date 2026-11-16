@@ -26,18 +26,16 @@ const MODULES: Module[] = [
   {
     key: 'pos',
     title: 'Preyone POS',
-    desc: 'Web terminal — sales, shifts and stock from any browser.',
+    desc: 'Sales, shifts and stock.',
     prodUrl: '//pos.preyone.com',
     devUrl: 'http://localhost:5174',
-    hint: 'LAN',
   },
   {
     key: 'invoice',
     title: 'Invoice & Quotation',
-    desc: 'Desktop suite — invoices, quotes and PDF documents.',
+    desc: 'Invoices, quotations and PDF documents.',
     prodUrl: '//invoice.preyone.com',
     devUrl: 'http://localhost:5173',
-    phase: 'Desktop',
   },
   {
     key: 'wifi',
@@ -144,7 +142,7 @@ function GatewayHome({ user, company, plan, modules }: { user: GatewayUser; comp
     if (m.key === 'admin') return isAdminAccount(user.role)
     return modules === null || modules.includes(m.key)
   })
-  const planLabel = plan ? plan.charAt(0).toUpperCase() + plan.slice(1) : null
+  const planLabel = plan || null
 
   return (
     <div className="gw-shell">
@@ -221,6 +219,7 @@ export default function App() {
           if (u) {
             setUser(u)
             setModules(u.subscribed_modules ?? null)
+            setPlan(u.plan_name ?? null)
           }
         })
         .finally(() => setLoading(false))
@@ -231,7 +230,7 @@ export default function App() {
         setUser(u)
         return fetchSubscriptions(token).then((acc) => {
           setModules(acc ? acc.modules : [])
-          setPlan(acc ? acc.plan_tier ?? null : null)
+          setPlan(acc ? acc.plan_name ?? acc.plan_tier ?? null : null)
         })
       })
       .catch(() => setModules(null))
@@ -246,7 +245,7 @@ export default function App() {
       try {
         const acc = await fetchSubscriptions(token)
         setModules(acc ? acc.modules : [])
-        setPlan(acc ? acc.plan_tier ?? null : null)
+        setPlan(acc ? acc.plan_name ?? acc.plan_tier ?? null : null)
       } catch {
         setModules(null)
       }

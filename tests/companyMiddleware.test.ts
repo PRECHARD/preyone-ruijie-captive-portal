@@ -131,16 +131,24 @@ describe('loadCompany', () => {
     vi.clearAllMocks();
   });
 
-  it('selects modules and plan tier for the assigned company', async () => {
+  it('selects modules from plan_type and keeps wifi from subscriptions', async () => {
     (pool.query as any).mockImplementation(async () => ({
-      rows: [{ id: COMPANY, name: 'Preyone', plan_tier: 'Pro', modules: ['pos', 'invoice'] }],
+      rows: [{
+        id: COMPANY,
+        name: 'Preyone',
+        plan_type: 'unlimited_30',
+        subscription_status: 'active',
+        subscription_expires_at: null,
+        extra_modules: ['wifi'],
+      }],
       rowCount: 1,
     }));
 
     const company = await loadCompany(COMPANY, {} as any);
     expect(company?.id).toBe(COMPANY);
-    expect(company?.modules).toEqual(['pos', 'invoice']);
-    expect(company?.plan_tier).toBe('Pro');
+    expect(company?.modules).toEqual(['pos', 'invoice', 'wifi']);
+    expect(company?.plan_name).toBe('PreUnlimited');
+    expect(company?.plan_tier).toBe('PreUnlimited');
   });
 
   it('returns null when the company does not exist', async () => {

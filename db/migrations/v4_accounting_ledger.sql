@@ -4,11 +4,14 @@
 ALTER TABLE pos_documents
   ADD COLUMN IF NOT EXISTS stock_applied BOOLEAN NOT NULL DEFAULT FALSE;
 
--- Backfill: documents that already have items with products are treated as stock-applied
--- so we do not double-decrement live inventory on first Pesepay replay after upgrade.
+-- Till and online checkout decrement stock while writing the lines, so those
+-- rows are already applied. Office checkout can do the same and sets the flag
+-- itself. This file runs on every migrate, so it must not flag unpaid office
+-- drafts and must not clear a flag the checkout path already set.
 UPDATE pos_documents d
    SET stock_applied = TRUE
  WHERE stock_applied = FALSE
+   AND d.channel IN ('till', 'online')
    AND EXISTS (
      SELECT 1 FROM pos_document_items i
       WHERE i.document_id = d.id AND i.product_id IS NOT NULL

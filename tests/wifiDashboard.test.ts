@@ -9,6 +9,7 @@ vi.mock('../src/middleware/adminAuth', () => ({
     (_req as any).adminUser = { id: 'test', email: 'test@test', role: 'CEO', fullName: 'Test' };
     next();
   }),
+  requireAdminAuthAllowLocked: vi.fn((_req: any, _res: any, next: any) => next()),
   requireRole: () => vi.fn((_req: any, _res: any, next: any) => next()),
 }));
 

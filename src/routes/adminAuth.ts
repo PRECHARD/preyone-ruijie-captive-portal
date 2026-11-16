@@ -3,10 +3,12 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import rateLimit from 'express-rate-limit';
 import { pool } from '../db/pool';
+import { loadCompany } from '../middleware/company';
 import { loadPermissions } from '../middleware/rbac';
 import {
   requireAdminAuth,
   requireAdminAuthAllowLocked,
+  isAdminSessionPayload,
   INACTIVITY_TIMEOUT_SEC,
   SESSION_EXPIRED_CODE,
   SESSION_LOCKED_CODE,
@@ -86,11 +88,6 @@ function signTwoFaChallenge(adminId: string, purpose: '2fa' | '2fa-enable' = '2f
   return jwt.sign({ id: adminId, purpose }, getJwtSecret(), {
     expiresIn: `${TWO_FA_TTL_MINUTES}m`,
   });
-}
-
-/** Invoice/POS may opt into email OTP; admin console always requires it. */
-function isOptionalAuthClient(client: unknown): boolean {
-  return client === 'invoice' || client === 'pos';
 }
 
 /** SHA-256 of the 6-digit code, peppered with the JWT secret. Cheap by design:
@@ -433,10 +430,9 @@ adminAuthRouter.post('/signup', authLimiter, async (req: Request, res: Response)
 });
 
 adminAuthRouter.post('/login', authLimiter, async (req: Request, res: Response) => {
-  const { email, password, client } = req.body as {
+  const { email, password } = req.body as {
     email: string;
     password: string;
-    client?: string;
   };
 
   if (!email || !password) {
@@ -481,10 +477,9 @@ adminAuthRouter.post('/login', authLimiter, async (req: Request, res: Response) 
     return;
   }
 
-  // Admin console: email OTP is mandatory whenever an address is on file.
-  // Invoice/POS: only challenge when the staff member opted in (settings).
-  const optionalClient = isOptionalAuthClient(client);
-  const requireOtp = !!user.email && (!optionalClient || user.two_factor_enabled === true);
+  // A password alone never mints a session when the account has an email.
+  // The request body cannot name a client that skips the emailed code.
+  const requireOtp = !!user.email;
 
   if (requireOtp) {
     const challenge = await prepareTwoFaChallenge(user.id);
@@ -515,7 +510,7 @@ adminAuthRouter.post('/login', authLimiter, async (req: Request, res: Response) 
     return;
   }
 
-  // Password-only: no email, or invoice/POS without optional 2FA enabled.
+  // Password-only is limited to accounts with no email address on file.
   await recordAuditLog(user.id, user.full_name, 'login', 'admin_user', user.id);
   await startAdminSession(req, res, user);
 });
@@ -768,9 +763,8 @@ adminAuthRouter.get('/policy', (_req: Request, res: Response) => {
 });
 
 /**
- * Self-serve optional 2FA for invoice/POS. Admin console login remains
- * mandatory regardless of this flag; these endpoints only control whether
- * invoice/pos clients (body.client) challenge after password.
+ * The emailed sign-in code is required whenever the account has an email.
+ * These endpoints keep the preference flag; they do not waive that code.
  */
 adminAuthRouter.get('/2fa', requireAdminAuth, async (req: Request, res: Response) => {
   const { rows } = await pool.query(
@@ -780,7 +774,7 @@ adminAuthRouter.get('/2fa', requireAdminAuth, async (req: Request, res: Response
   res.json({
     enabled: rows[0]?.two_factor_enabled === true,
     mandatoryOnAdmin: true,
-    optionalOnClients: ['invoice', 'pos'],
+    optionalOnClients: [],
   });
 });
 
@@ -933,8 +927,8 @@ adminAuthRouter.post('/logout', async (req: Request, res: Response) => {
   try {
     const token = resolveAuthToken(req);
     if (token) {
-      const decoded = jwt.verify(token, getJwtSecret()) as any;
-      if (decoded?.id) {
+      const decoded = jwt.verify(token, getJwtSecret()) as { id?: string; sid?: string; purpose?: string; type?: string };
+      if (decoded?.id && isAdminSessionPayload(decoded)) {
         if (decoded.sid) {
           await pool.query('DELETE FROM admin_user_sessions WHERE sid = $1 AND admin_user_id = $2', [decoded.sid, decoded.id]);
         }
@@ -969,7 +963,11 @@ adminAuthRouter.get('/me', async (req: Request, res: Response) => {
   }
 
   try {
-    const decoded = jwt.verify(token, getJwtSecret()) as any;
+    const decoded = jwt.verify(token, getJwtSecret()) as { id?: string; sid?: string; purpose?: string; type?: string };
+    if (!isAdminSessionPayload(decoded)) {
+      res.status(401).json({ error: 'Invalid or expired token' });
+      return;
+    }
     const { rows } = await pool.query(
       `SELECT u.id, u.full_name, u.email, u.phone, u.role, u.company_id, u.portal_company_id, u.created_at,
               u.email_verified, u.approved, u.last_activity, u.auth_time, u.active_sid, u.two_factor_enabled,
@@ -1043,11 +1041,10 @@ adminAuthRouter.get('/me', async (req: Request, res: Response) => {
       const { rows: companyRows } = await pool.query('SELECT id FROM companies ORDER BY created_at LIMIT 1');
       tenantId = companyRows[0]?.id ?? null;
     }
-    const { rows: moduleRows } = await pool.query(
-      `SELECT module FROM subscriptions WHERE company_id = $1 AND status = 'active' ORDER BY module`,
-      [companyId ?? tenantId]
-    );
-    const subscribed_modules = moduleRows.map((r) => r.module);
+    const entitlement = tenantId ? await loadCompany(tenantId, req) : null;
+    const subscribed_modules = entitlement?.modules ?? [];
+    const plan_type = entitlement?.plan_type ?? null;
+    const plan_name = entitlement?.plan_name ?? null;
 
     // The admin console gates navigation on this array, so it must be the SAME
 // effective set requireAdminAuth builds (role_permissions + user_permissions
@@ -1074,6 +1071,8 @@ res.json({
   ...publicUser,
   tenant_id: tenantId,
   subscribed_modules,
+  plan_type,
+  plan_name,
   permissions,
   session: sessionState,
   sessionPolicy: SESSION_POLICY,
