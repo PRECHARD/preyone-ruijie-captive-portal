@@ -23,7 +23,7 @@
     return d.toLocaleDateString('en-ZW', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
   }
 
-  window.drawVoucherCanvas = async function (c, data, issuedByName) {
+  window.drawVoucherCanvas = async function (c, data, soldByName) {
     var code = (data.code || 'PREYONE-XXXX').toLowerCase();
     voucherCode = code;
     var tierText = data.package_tier || 'Custom';
@@ -33,6 +33,7 @@
     var dataVal = data.is_uncapped ? 'UNLIMITED DATA' : (data.data_limit_gb != null ? data.data_limit_gb + ' GB' : 'UNLIMITED');
     var bwVal = data.bandwidth_mbps_up ? data.bandwidth_mbps_up + ' Mbps' : '—';
     var serial = voucherSerial(code);
+    var holderName = String(data.holder_name || data.customer_name || '').trim() || '—';
 
     var W = 800, H = 450;
     c.width = W;
@@ -146,16 +147,19 @@
 
     var fy = 296;
     ctx.fillStyle = 'rgba(255,255,255,0.45)'; ctx.font = '600 8px Montserrat, sans-serif'; ctx.textAlign = 'left';
-    ctx.fillText('Issued By', 38, fy);
+    ctx.fillText('Sold By', 38, fy);
     ctx.fillStyle = '#ffffff'; ctx.font = '600 13px Montserrat, sans-serif';
-    var iv = issuedByName;
+    var iv = soldByName;
     while (ctx.measureText(iv).width > 140 && iv.length > 2) { iv = iv.slice(0, -1); }
-    if (iv !== issuedByName) iv += '..';
+    if (iv !== soldByName) iv += '..';
     ctx.fillText(iv, 38, fy + 18);
     ctx.fillStyle = 'rgba(255,255,255,0.45)'; ctx.font = '600 8px Montserrat, sans-serif';
-    ctx.fillText('Location', 220, fy);
+    ctx.fillText('Holder', 220, fy);
     ctx.fillStyle = '#ffffff'; ctx.font = '600 13px Montserrat, sans-serif';
-    ctx.fillText('Chitungwiza', 220, fy + 18);
+    var hv = holderName;
+    while (ctx.measureText(hv).width > 140 && hv.length > 2) { hv = hv.slice(0, -1); }
+    if (hv !== holderName) hv += '..';
+    ctx.fillText(hv, 220, fy + 18);
     ctx.fillStyle = 'rgba(255,255,255,0.45)'; ctx.font = '600 8px Montserrat, sans-serif';
     ctx.fillText('Valid Until', 380, fy);
     ctx.fillStyle = '#ffffff'; ctx.font = '600 13px Montserrat, sans-serif';
@@ -211,7 +215,7 @@
 
   window.downloadVoucherPNG = async function (data) {
     var c = document.createElement('canvas');
-    await window.drawVoucherCanvas(c, data, 'Preyone Enterprises');
+    await window.drawVoucherCanvas(c, data, data.sold_by_name || 'Prechard Muvirimi');
     var link = document.createElement('a');
     link.download = 'preyone-voucher-' + (data.code || '').toLowerCase() + '.png';
     link.href = c.toDataURL('image/png');
@@ -226,7 +230,7 @@
     c.style.maxWidth = '800px';
     c.style.height = 'auto';
     c.style.borderRadius = '12px';
-    await window.drawVoucherCanvas(c, data, 'Preyone Enterprises');
+    await window.drawVoucherCanvas(c, data, data.sold_by_name || 'Prechard Muvirimi');
     container.innerHTML = '';
     container.appendChild(c);
   };

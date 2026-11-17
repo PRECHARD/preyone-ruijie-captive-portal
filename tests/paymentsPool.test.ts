@@ -79,6 +79,8 @@ const PAY_ROW = {
   bandwidth_mbps_up: 5,
   bandwidth_mbps_down: 5,
   max_devices: 1,
+  customer_name: 'Tendai Moyo',
+  phone_number: '263771234567',
 };
 
 describe('payments voucher pool', () => {
@@ -126,6 +128,14 @@ describe('payments voucher pool', () => {
     expect(res.body.voucherCode).toBe('POOL123');
     expect(claimPooledVoucher).toHaveBeenCalledWith(client, 'PreLite', 'pay-pool');
     expect(mintRuijieVoucherForTier).not.toHaveBeenCalled();
+    const voucherInsert = (client.query as any).mock.calls.find(
+      (c: any[]) => typeof c[0] === 'string' && c[0].includes('INSERT INTO vouchers')
+    );
+    expect(voucherInsert).toBeTruthy();
+    expect(voucherInsert![0]).toContain('holder_name');
+    expect(voucherInsert![0]).toContain('holder_phone');
+    expect(voucherInsert![1]).toContain('Tendai Moyo');
+    expect(voucherInsert![1]).toContain('263771234567');
   });
 
   it('falls back to a Ruijie mint only when the pool is empty', async () => {

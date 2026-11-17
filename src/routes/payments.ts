@@ -167,7 +167,22 @@ function parsePesepayStatus(raw: unknown): { state: 'completed' | 'failed' | 're
 
 async function getOrCreateUserByPhone(phone: string, fullName?: string): Promise<{ id: string }> {
   const existing = await pool.query('SELECT id FROM users WHERE phone = $1 LIMIT 1', [phone]);
-  if (existing.rows.length > 0) return existing.rows[0];
+  if (existing.rows.length > 0) {
+    // Repeat buyers reuse the row from their first checkout, which may still be
+    // the placeholder "Guest User" (or the phone itself). Refresh it with the
+    // name they just entered so the account and downloaded voucher stay
+    // accurate; never overwrite a real name with a placeholder.
+    const trimmed = (fullName || '').trim();
+    if (trimmed && trimmed !== 'Guest User') {
+      await pool.query(
+        `UPDATE users SET full_name = $2
+          WHERE id = $1
+            AND (full_name IS NULL OR full_name = '' OR full_name = 'Guest User' OR full_name = phone)`,
+        [existing.rows[0].id, trimmed]
+      );
+    }
+    return existing.rows[0];
+  }
 
   const name = (fullName && fullName.trim()) || phone;
   const created = await pool.query(
@@ -195,6 +210,8 @@ interface LegacyMintContext {
   amount: number | string;
   tier_name: string;
   max_devices: number | null;
+  customer_name: string | null;
+  phone_number: string | null;
 }
 
 // Legacy local voucher mint, used only while Ruijie Cloud is not configured.
@@ -207,9 +224,10 @@ async function mintLegacyVoucher(client: PoolClient, pay: LegacyMintContext): Pr
       const voucher = await client.query(
         `INSERT INTO vouchers
           (code, duration_min, max_uses, expires_at, data_limit_gb, is_uncapped,
-           bandwidth_mbps_up, bandwidth_mbps_down, sold_by, price_amount, package_tier, max_devices)
+           bandwidth_mbps_up, bandwidth_mbps_down, sold_by, price_amount, package_tier, max_devices,
+           holder_name, holder_phone)
          VALUES ($1::text, $2::int, 1, NULL, $3::numeric, $4::boolean,
-                 $5::int, $6::int, NULL, $7::numeric, $8::text, $9::int)
+                 $5::int, $6::int, NULL, $7::numeric, $8::text, $9::int, $10::text, $11::text)
          RETURNING id, code`,
         [
           uniqueVoucherCode(),
@@ -221,6 +239,8 @@ async function mintLegacyVoucher(client: PoolClient, pay: LegacyMintContext): Pr
           pay.amount,
           pay.tier_name,
           pay.max_devices,
+          (pay.customer_name && String(pay.customer_name).trim()) || null,
+          pay.phone_number || null,
         ]
       );
       const code = voucher.rows[0].code;
@@ -487,10 +507,10 @@ async function completePayment(paymentId: string): Promise<string> {
       `INSERT INTO vouchers
          (code, duration_min, max_uses, expires_at, data_limit_gb, is_uncapped,
           bandwidth_mbps_up, bandwidth_mbps_down, sold_by, price_amount, package_tier,
-          max_devices, created_at)
+          max_devices, holder_name, holder_phone, created_at)
        SELECT $1::text, $2::int, 1, NULL, $3::numeric, $4::boolean,
               $5::int, $6::int, $7::uuid, $8::numeric, $9::text, $10::int,
-              $11::timestamptz
+              $11::text, $12::text, $13::timestamptz
        WHERE NOT EXISTS (SELECT 1 FROM vouchers WHERE code = $1)`,
       [
         code,
@@ -503,6 +523,8 @@ async function completePayment(paymentId: string): Promise<string> {
         pay.amount,
         pay.tier_name,
         pay.max_devices,
+        (pay.customer_name && String(pay.customer_name).trim()) || null,
+        pay.phone_number || null,
         completedAt,
       ]
     );
@@ -648,8 +670,8 @@ paymentsRouter.post('/initiate', async (req: Request, res: Response) => {
   const paymentInsert = await pool.query(
     `INSERT INTO payments
       (user_id, package_id, phone_number, amount, currency, payment_method,
-       merchant_reference, client_mac, webhook_token, status)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending')
+       merchant_reference, client_mac, webhook_token, customer_name, status)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::text, 'pending')
      RETURNING id`,
     [
       user.id,
@@ -661,6 +683,7 @@ paymentsRouter.post('/initiate', async (req: Request, res: Response) => {
       merchantReference,
       macAddress,
       webhookToken,
+      (fullName || '').trim() || null,
     ]
   );
   const paymentId = paymentInsert.rows[0].id;
@@ -970,8 +993,17 @@ async function sendPaymentStatus(req: Request, res: Response, paymentIdParam: st
     }
 
     const { rows } = await pool.query(
-      `SELECT p.id, p.status, p.amount, p.completed_at, p.voucher_code, p.pesepay_reference, p.error_message, p.created_at, pk.tier_name
-       FROM payments p JOIN packages pk ON pk.id = p.package_id
+      `SELECT p.id, p.status, p.amount, p.completed_at, p.voucher_code, p.pesepay_reference,
+              p.error_message, p.created_at, p.customer_name, pk.tier_name,
+              s.sold_by_name
+       FROM payments p
+       JOIN packages pk ON pk.id = p.package_id
+       LEFT JOIN LATERAL (
+         SELECT sold_by_name FROM sales
+          WHERE voucher_code = p.voucher_code
+          ORDER BY sold_at DESC
+          LIMIT 1
+       ) s ON TRUE
        WHERE p.id = $1`,
       [paymentId]
     );
@@ -1085,6 +1117,10 @@ async function sendPaymentStatus(req: Request, res: Response, paymentIdParam: st
       supportRequired: String(pay.error_message || '').startsWith('ruijie_mint_pending: '),
       // Shown to the customer as proof of purchase in support conversations.
       reference: pay.pesepay_reference ?? null,
+      // Printed on the success page and the downloaded JPEG so the buyer and
+      // seller are both explicit, not inferred from the linked user row.
+      holderName: pay.customer_name ?? null,
+      soldByName: pay.sold_by_name ?? null,
     });
   } catch (err) {
     res.status(500).json({ error: 'Status lookup failed' });

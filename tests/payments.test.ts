@@ -181,7 +181,8 @@ describe('Payments routes', () => {
       (pool.query as any)
         .mockResolvedValueOnce({ rows: [PKG] })                                // 1: package lookup
         .mockResolvedValueOnce({ rows: [{ id: 'existing-user' }] })            // 2: existing user
-        .mockResolvedValueOnce({ rows: [{ id: 'pay-alias' }] })                // 3: INSERT payments
+        .mockResolvedValueOnce({ rows: [] })                                   // 3: refresh repeat buyer's name
+        .mockResolvedValueOnce({ rows: [{ id: 'pay-alias' }] })                // 4: INSERT payments
         .mockResolvedValueOnce(undefined);                                    // 4: UPDATE pesepay_reference
       (initiateEcoCashPayment as any).mockResolvedValue({
         success: true,
@@ -207,6 +208,7 @@ describe('Payments routes', () => {
       (pool.query as any)
         .mockResolvedValueOnce({ rows: [PKG] })
         .mockResolvedValueOnce({ rows: [{ id: 'existing-user' }] })
+        .mockResolvedValueOnce({ rows: [] })
         .mockResolvedValueOnce({ rows: [{ id: 'pay-2630' }] })
         .mockResolvedValueOnce(undefined);
       (initiateEcoCashPayment as any).mockResolvedValue({
@@ -237,7 +239,8 @@ describe('Payments routes', () => {
       (pool.query as any)
         .mockResolvedValueOnce({ rows: [PKG] })                                // 1: package lookup
         .mockResolvedValueOnce({ rows: [{ id: 'existing-user' }] })            // 2: existing user
-        .mockResolvedValueOnce({ rows: [{ id: 'pay-1' }] })                    // 3: INSERT payments
+        .mockResolvedValueOnce({ rows: [] })                                   // 3: refresh repeat buyer's name
+        .mockResolvedValueOnce({ rows: [{ id: 'pay-1' }] })                    // 4: INSERT payments
         .mockResolvedValueOnce(undefined);                                    // 4: UPDATE pesepay_reference
       (initiateEcoCashPayment as any).mockResolvedValue({
         success: true,
@@ -286,7 +289,8 @@ describe('Payments routes', () => {
       (pool.query as any)
         .mockResolvedValueOnce({ rows: [PKG] })                                // 1: package lookup
         .mockResolvedValueOnce({ rows: [{ id: 'user-1' }] })                   // 2: existing user
-        .mockResolvedValueOnce({ rows: [{ id: 'pay-3' }] })                    // 3: INSERT payments
+        .mockResolvedValueOnce({ rows: [] })                                   // 3: refresh repeat buyer's name
+        .mockResolvedValueOnce({ rows: [{ id: 'pay-3' }] })                    // 4: INSERT payments
         .mockResolvedValueOnce(undefined);                                    // 4: UPDATE status=failed
       (initiateEcoCashPayment as any).mockResolvedValue({
         success: false,

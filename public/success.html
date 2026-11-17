@@ -124,6 +124,10 @@
             <span class="success-detail-value success-detail-value--ref" id="detail-reference">&mdash;</span>
           </div>
           <div class="success-detail">
+            <span class="success-detail-label">Sold By</span>
+            <span class="success-detail-value" id="detail-soldby">&mdash;</span>
+          </div>
+          <div class="success-detail">
             <span class="success-detail-label">Customer</span>
             <span class="success-detail-value" id="detail-customer">&mdash;</span>
           </div>
@@ -336,6 +340,7 @@
       var reference = params.get('ref') || '';
       var clientName = params.get('name') || '';
       var clientPhone = params.get('phone') || '';
+      var soldByName = params.get('soldby') || 'Prechard Muvirimi';
       var paymentId = params.get('paymentId') || '';
       var gatewayKeys = [
         'mac', 'client_mac', 'clientMac', 'ip', 'client_ip', 'wlanuserip', 'res', 'userurl',
@@ -360,6 +365,8 @@
         code: voucherCode || 'PREYONE',
         package_tier: packageName,
         client_name: clientName || 'Preyone Customer',
+        holder_name: clientName || 'Preyone Customer',
+        sold_by_name: soldByName,
         price_amount: amount,
         duration_min: durationMin || 0,
         data_limit_gb: dataLimitGb,
@@ -485,12 +492,14 @@
         var referenceEl = document.getElementById('detail-reference');
         var customerEl = document.getElementById('detail-customer');
         var contactEl = document.getElementById('detail-contact');
+        var soldByEl = document.getElementById('detail-soldby');
 
         if (packageEl) packageEl.textContent = packageName;
         if (dataEl) dataEl.textContent = isUncapped ? 'Unlimited' : (dataLimitGb ? dataLimitGb + ' GB' : '\u2014');
         if (durationEl) durationEl.textContent = formatDuration(durationMin);
         if (amountEl) amountEl.textContent = formatAmount(amount, currency);
         if (referenceEl) referenceEl.textContent = reference || paymentId || '\u2014';
+        if (soldByEl) soldByEl.textContent = soldByName || '\u2014';
         if (customerEl) customerEl.textContent = clientName || '\u2014';
         if (contactEl) contactEl.textContent = clientPhone || '\u2014';
       }
@@ -498,7 +507,7 @@
       async function renderVoucher() {
         if (!voucherCode || !canvas || !preview || !window.drawVoucherCanvas) return;
         try {
-          await window.drawVoucherCanvas(canvas, voucherData, 'Preyone Enterprises');
+          await window.drawVoucherCanvas(canvas, voucherData, soldByName);
           var jpeg = canvas.toDataURL('image/jpeg', 0.92);
           preview.src = jpeg;
           preview.hidden = false;

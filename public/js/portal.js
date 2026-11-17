@@ -470,7 +470,12 @@
       if (data.amount != null) qs.set('amount', String(data.amount));
       if (data.currency) qs.set('currency', data.currency);
       if (data.reference || data.referenceNumber) qs.set('ref', data.reference || data.referenceNumber);
-      if (data.clientName) qs.set('name', data.clientName);
+      var enteredName = '';
+      var nameInputAtSuccess = document.getElementById('pesepay-fullName');
+      if (nameInputAtSuccess) enteredName = nameInputAtSuccess.value.trim();
+      var resolvedName = data.holderName || data.clientName || enteredName;
+      if (resolvedName) qs.set('name', resolvedName);
+      if (data.soldByName) qs.set('soldby', data.soldByName);
       if (data.clientPhone) qs.set('phone', data.clientPhone);
       if (data.paymentId || data.transaction_id) qs.set('paymentId', data.paymentId || data.transaction_id);
 

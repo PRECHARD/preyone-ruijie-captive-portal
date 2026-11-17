@@ -16,6 +16,8 @@ export interface VoucherCardData {
   bandwidth_mbps_up?: number | null;
   bandwidth_mbps_down?: number | null;
   holder_name?: string | null;
+  /** Sold-by display name for online/staff sales. */
+  sold_by_name?: string | null;
   /** Widened beyond `string`: Ruijie's roster reports epoch ms (sometimes s). */
   expires_at?: VoucherDateInput;
   activated_at?: VoucherDateInput;
@@ -64,6 +66,7 @@ export const drawVoucherCanvas = async (c: HTMLCanvasElement, data: VoucherCardD
   const dataVal = data.is_uncapped ? 'UNCAPPED DATA' : (data.data_limit_gb != null ? data.data_limit_gb + ' GB' : 'UNLIMITED');
   const bwVal = data.bandwidth_mbps_up ? data.bandwidth_mbps_up + ' Mbps' : '—';
   const serial = voucherSerial(code);
+  const soldByName = String(data.sold_by_name || issuedByName || 'Prechard Muvirimi');
 
   const W = 800, H = 450;
   c.width = W;
@@ -116,7 +119,7 @@ export const drawVoucherCanvas = async (c: HTMLCanvasElement, data: VoucherCardD
   const holderName = String(data.holder_name || '').trim();
   if (holderName) {
     ctx.fillStyle = 'rgba(255,255,255,0.45)'; ctx.font = '600 8px Montserrat, sans-serif'; ctx.textAlign = 'left';
-    ctx.fillText('ISSUED FOR', 115, 152);
+    ctx.fillText('HOLDER', 115, 152);
     ctx.fillStyle = '#ffffff'; ctx.font = '700 14px Montserrat, sans-serif';
     let hn = holderName;
     while (ctx.measureText(hn).width > 232 && hn.length > 2) { hn = hn.slice(0, -1); }
@@ -200,11 +203,11 @@ export const drawVoucherCanvas = async (c: HTMLCanvasElement, data: VoucherCardD
   // ── Info row ──
   const fy = 296;
   ctx.fillStyle = 'rgba(255,255,255,0.45)'; ctx.font = '600 8px Montserrat, sans-serif'; ctx.textAlign = 'left';
-  ctx.fillText('Issued By', 38, fy);
+  ctx.fillText('Sold By', 38, fy);
   ctx.fillStyle = '#ffffff'; ctx.font = '600 13px Montserrat, sans-serif';
-  let iv = issuedByName;
+  let iv = soldByName;
   while (ctx.measureText(iv).width > 140 && iv.length > 2) { iv = iv.slice(0, -1); }
-  if (iv !== issuedByName) iv += '..';
+  if (iv !== soldByName) iv += '..';
   ctx.fillText(iv, 38, fy + 18);
   ctx.fillStyle = 'rgba(255,255,255,0.45)'; ctx.font = '600 8px Montserrat, sans-serif';
   ctx.fillText('Location', 220, fy);

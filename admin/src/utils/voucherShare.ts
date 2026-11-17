@@ -52,7 +52,7 @@ export async function renderVoucherJpeg(
   issuedByName: string
 ): Promise<Blob> {
   const canvas = document.createElement('canvas');
-  await drawVoucherCanvas(canvas, data, issuedByName);
+  await drawVoucherCanvas(canvas, data, data.sold_by_name || issuedByName);
   const blob = await new Promise<Blob | null>((resolve) => {
     try {
       canvas.toBlob(resolve, 'image/jpeg', 0.95);

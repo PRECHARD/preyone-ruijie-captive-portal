@@ -122,6 +122,12 @@ const SQL = `
   -- to in order to approve the EcoCash push; it is written on every initiate.
   ALTER TABLE payments ADD COLUMN IF NOT EXISTS pesepay_poll_url TEXT;
 
+  -- Buyer name captured on the portal checkout ("Full Name / Company Name").
+  -- Kept on the payment itself because a repeat phone number reuses the users
+  -- row, which must never erase the name this customer just entered. The
+  -- success page and downloaded voucher read it back as the voucher holder.
+  ALTER TABLE payments ADD COLUMN IF NOT EXISTS customer_name TEXT;
+
   CREATE INDEX IF NOT EXISTS idx_payments_user_id ON payments (user_id);
   CREATE INDEX IF NOT EXISTS idx_payments_status ON payments (status);
   CREATE INDEX IF NOT EXISTS idx_payments_pesepay_ref ON payments (pesepay_reference);

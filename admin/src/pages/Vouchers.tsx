@@ -82,6 +82,8 @@ interface Package {
     // PATCH /vouchers/:id. Rendered on the voucher canvas when present.
     holder_name?: string | null;
     holder_phone?: string | null;
+    // Sold-by display name returned by the voucher list query's admin_users join.
+    sold_by_name?: string | null;
     // Returned by the list query (admin.ts SELECT) and /vouchers/:id/renew.
     is_disabled?: boolean;
     deleted_at?: string | null;
@@ -842,7 +844,7 @@ const codes = a.voucher_data?.codes;
 
   const downloadVoucherJPEG = () => {
     if (!voucherCardData) return;
-    renderVoucherJPEG(voucherCardData, user?.fullName || 'Preyone UltraNet');
+    renderVoucherJPEG(voucherCardData, voucherCardData.sold_by_name || user?.fullName || 'Prechard Muvirimi');
   };
 
   const renderVoucherJPEG = async (data: any, issuedByName: string) => {
@@ -1332,7 +1334,7 @@ const codes = a.voucher_data?.codes;
                 </button>
                 <button className="btn-action btn-action--download" onClick={() => {
                   bulkResults.forEach((v: any, i: number) => {
-                    setTimeout(() => renderVoucherJPEG(v, user?.fullName || 'Preyone UltraNet'), i * 500);
+                    setTimeout(() => renderVoucherJPEG(v, v.sold_by_name || user?.fullName || 'Prechard Muvirimi'), i * 500);
                   });
                   setBulkStatus({ type: 'success', msg: 'Downloading ' + bulkResults.length + ' vouchers...' });
                 }}>
@@ -1476,7 +1478,7 @@ const codes = a.voucher_data?.codes;
                                       bandwidth_mbps_down: pkg?.bandwidth_mbps_down || 5,
                                       data_limit_gb: pkg?.data_limit_gb ?? null,
                                       is_uncapped: pkg?.is_uncapped ?? false,
-                                    }, user?.fullName || 'Preyone UltraNet'), i * 500);
+                                    }, user?.fullName || 'Prechard Muvirimi'), i * 500);
                                   });
                                   showToast({ title: 'Downloading', message: 'Downloading ' + codes.length + ' voucher(s)...', type: 'success' });
                                 }}>
