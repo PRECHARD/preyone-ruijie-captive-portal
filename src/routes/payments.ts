@@ -22,6 +22,7 @@ import {
 import type { PesepayCurrency, PesepayRail } from '../services/pesepayService';
 import { RuijieApiError } from '../services/ruijieCloud';
 import { isRuijieCloudConfigured, findRuijieProfile, mintRuijieVoucherForTier } from '../services/ruijieMint';
+import { claimPooledVoucher } from '../services/voucherPool';
 import { requireStarlinkAuth } from '../middleware/starlinkAuth';
 import { createStarlinkInvoice, applyStarlinkPayment, getStarlinkKit } from '../db/starlink';
 import { syncSaleToLedgerAndStock } from '../db/accounting';
@@ -207,7 +208,8 @@ async function mintLegacyVoucher(client: PoolClient, pay: LegacyMintContext): Pr
         `INSERT INTO vouchers
           (code, duration_min, max_uses, expires_at, data_limit_gb, is_uncapped,
            bandwidth_mbps_up, bandwidth_mbps_down, sold_by, price_amount, package_tier, max_devices)
-         VALUES ($1, $2, 1, NULL, $3, $4, $5, $6, NULL, $7, $8, $9)
+         VALUES ($1::text, $2::int, 1, NULL, $3::numeric, $4::boolean,
+                 $5::int, $6::int, NULL, $7::numeric, $8::text, $9::int)
          RETURNING id, code`,
         [
           uniqueVoucherCode(),
@@ -404,23 +406,37 @@ async function completePayment(paymentId: string): Promise<string> {
     // access: when configured, the code MUST come from Ruijie (never a locally
     // fabricated placeholder) and an unmapped tier fails loudly so the paid
     // customer is never handed a code that cannot grant internet.
+    //
+    // Prefer the pre-minted stock pool: those codes already exist in Ruijie, so
+    // claiming one costs no API call and cannot fail because background sync
+    // exhausted the minute quota. Minting is the fallback only when the pool has
+    // no usable code for this tier.
     let code: string;
+    let usedPool = false;
     let ruijieSource: { ruijie_expiry: number | null; user_group_id: string; profile_uuid: string; comment: string } | null = null;
     if (isRuijieCloudConfigured()) {
-      try {
-        const minted = await mintRuijieVoucherForTier(pay.tier_name, `Payment ${paymentId}`);
-        code = minted.codeNo;
-        ruijieSource = {
-          ruijie_expiry: minted.expiryTime ?? null,
-          user_group_id: minted.userGroupId,
-          profile_uuid: minted.profile,
-          comment: minted.comment,
-        };
-      } catch (err) {
-        // Remember why so the catch below can raise an operations alert once the
-        // transaction is safely rolled back.
-        ruijieMintError = err;
-        throw err;
+      const pooled = await claimPooledVoucher(client, pay.tier_name, paymentId);
+      if (pooled) {
+        code = pooled.code_no;
+        usedPool = true;
+        console.log(`[payments] claimed pooled voucher ${code} for ${paymentId} (${pay.tier_name})`);
+      } else {
+        console.warn(`[payments] voucher pool empty for ${pay.tier_name}; minting for ${paymentId}`);
+        try {
+          const minted = await mintRuijieVoucherForTier(pay.tier_name, `Payment ${paymentId}`);
+          code = minted.codeNo;
+          ruijieSource = {
+            ruijie_expiry: minted.expiryTime ?? null,
+            user_group_id: minted.userGroupId,
+            profile_uuid: minted.profile,
+            comment: minted.comment,
+          };
+        } catch (err) {
+          // Remember why so the catch below can raise an operations alert once the
+          // transaction is safely rolled back.
+          ruijieMintError = err;
+          throw err;
+        }
       }
     } else {
       // Legacy local mint — only reachable while Ruijie Cloud is not configured.
@@ -428,8 +444,10 @@ async function completePayment(paymentId: string): Promise<string> {
     }
 
     // Record the Ruijie issuance for audit/reconciliation regardless of which
-    // path minted it (null fields for the legacy local path).
-    if (ruijieSource) {
+    // path minted it (null fields for the legacy local path). A pooled code is
+    // already in ruijie_vouchers (claimPooledVoucher set payment_id/source), so
+    // there is nothing to insert.
+    if (ruijieSource && !usedPool) {
       await client.query(
         `INSERT INTO ruijie_vouchers
           (code_no, tier_name, user_group_id, profile_uuid, ruijie_expiry, payment_id, source, comment)
@@ -453,7 +471,7 @@ async function completePayment(paymentId: string): Promise<string> {
     await client.query(
       `INSERT INTO transactions
         (payment_id, user_id, package_tier, amount, currency, payment_method, voucher_code, status, completed_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'completed', NOW())`,
+       VALUES ($1::uuid, $2::uuid, $3::text, $4::numeric, $5::text, $6::text, $7::text, 'completed', NOW())`,
       [paymentId, pay.user_id, pay.tier_name, pay.amount, pay.currency, pay.payment_method, code]
     );
 
@@ -470,7 +488,9 @@ async function completePayment(paymentId: string): Promise<string> {
          (code, duration_min, max_uses, expires_at, data_limit_gb, is_uncapped,
           bandwidth_mbps_up, bandwidth_mbps_down, sold_by, price_amount, package_tier,
           max_devices, created_at)
-       SELECT $1, $2, 1, NULL, $3, $4, $5, $6, $7, $8, $9, $10, $11
+       SELECT $1::text, $2::int, 1, NULL, $3::numeric, $4::boolean,
+              $5::int, $6::int, $7::uuid, $8::numeric, $9::text, $10::int,
+              $11::timestamptz
        WHERE NOT EXISTS (SELECT 1 FROM vouchers WHERE code = $1)`,
       [
         code,
@@ -499,7 +519,8 @@ async function completePayment(paymentId: string): Promise<string> {
       `INSERT INTO sales
          (voucher_id, voucher_code, sold_by, sold_by_name, amount, currency,
           payment_method, payment_reference, sold_at)
-       SELECT v.id, v.code, $2, $3, $4, $5, $6, $7, $8
+       SELECT v.id, v.code, $2::uuid, $3::text, $4::numeric, $5::text,
+              $6::text, $7::text, $8::timestamptz
        FROM vouchers v
        WHERE v.code = $1
          AND NOT EXISTS (SELECT 1 FROM sales WHERE voucher_code = $1)`,
