@@ -451,7 +451,7 @@ async function completePayment(paymentId: string): Promise<string> {
       await client.query(
         `INSERT INTO ruijie_vouchers
           (code_no, tier_name, user_group_id, profile_uuid, ruijie_expiry, payment_id, source, comment)
-         VALUES ($1, $2, $3, $4, $5, $6, 'online', $7)`,
+         VALUES ($1::text, $2::text, $3::text, $4::text, $5::bigint, $6::uuid, 'online', $7::text)`,
         [code, pay.tier_name, ruijieSource.user_group_id, ruijieSource.profile_uuid, ruijieSource.ruijie_expiry, paymentId, ruijieSource.comment]
       );
     }
@@ -510,8 +510,8 @@ async function completePayment(paymentId: string): Promise<string> {
     // The legacy local mint already inserted the row with sold_by NULL; the
     // statement above skips it, so attribute it here instead.
     await client.query(
-      `UPDATE vouchers SET sold_by = $2
-       WHERE code = $1 AND sold_by IS NULL AND $2 IS NOT NULL`,
+      `UPDATE vouchers SET sold_by = $2::uuid
+       WHERE code = $1 AND sold_by IS NULL AND $2::uuid IS NOT NULL`,
       [code, owner?.id ?? null]
     );
 
