@@ -84,7 +84,7 @@ vi.mock('../src/utils/wisprTransformer', () => ({
 }));
 
 import { pool } from '../src/db/pool';
-import { paymentsRouter } from '../src/routes/payments';
+import { paymentsRouter, reconcilePendingPaymentsOnce } from '../src/routes/payments';
 import {
   initiateEcoCashPayment,
   initiatePesepayPayment,
@@ -1296,5 +1296,74 @@ describe('Payments routes', () => {
       expect(res.body).not.toHaveProperty('reason_for_payment');
       expect(res.body).not.toHaveProperty('target_id');
     });
+  });
+});
+
+describe('reconcilePendingPaymentsOnce', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('completes a locally expired payment when the gateway now reports success', async () => {
+    (verifyPaymentStatus as any).mockResolvedValue({ found: true, status: 'SUCCESS' });
+
+    (pool.query as any).mockReset();
+    (pool.query as any).mockResolvedValueOnce({
+      rows: [
+        {
+          id: 'pay-late',
+          status: 'failed',
+          error_message: 'Payment window expired after 15 minutes without confirmation.',
+          pesepay_reference: 'REF-LATE',
+          created_at: new Date(Date.now() - 40 * 60 * 1000).toISOString(),
+        },
+      ],
+    });
+
+    const client = await (pool as any).connect();
+    (client.query as any).mockReset();
+    client.query
+      .mockResolvedValueOnce({ rows: [{ locked: true }] })                        // 1: advisory lock
+      .mockResolvedValueOnce(undefined)                                           // 2: BEGIN
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            id: 'pay-late',
+            user_id: 'user-1',
+            tier_name: 'PreLITE',
+            amount: 10,
+            currency: 'USD',
+            payment_method: 'EcoCash (Pesepay)',
+            status: 'failed',
+            error_message: 'Payment window expired after 15 minutes without confirmation.',
+            duration_min: 1440,
+            data_limit_gb: 100,
+            is_uncapped: false,
+            bandwidth_mbps_up: 10,
+            bandwidth_mbps_down: 10,
+            max_devices: 1,
+          },
+        ],
+      })                                                                          // 3: SELECT FOR UPDATE
+      .mockResolvedValueOnce(undefined)                                           // 4: SAVEPOINT
+      .mockResolvedValueOnce({ rows: [{ id: 'v-late', code: 'CT-LATESWEEP' }] })  // 5: INSERT vouchers
+      .mockResolvedValueOnce(undefined)                                           // 6: RELEASE
+      .mockResolvedValueOnce({ rows: [{ completed_at: new Date('2026-11-17T00:00:00Z') }] }) // 7: UPDATE payments
+      .mockResolvedValueOnce(undefined)                                           // 8: INSERT transactions
+      .mockResolvedValueOnce({ rows: [] })                                        // 9: resolveOnlineSaleOwner
+      .mockResolvedValueOnce({ rows: [] })                                        // 10: INSERT vouchers (sale)
+      .mockResolvedValueOnce({ rows: [] })                                        // 11: UPDATE vouchers sold_by
+      .mockResolvedValueOnce({ rows: [] })                                        // 12: INSERT sales
+      .mockResolvedValueOnce(undefined)                                           // 13: COMMIT
+      .mockResolvedValueOnce({ rows: [] });                                       // 14: advisory unlock
+
+    const result = await reconcilePendingPaymentsOnce();
+
+    expect(result.scanned).toBe(1);
+    expect(result.completed).toBe(1);
+    const completion = (client.query as any).mock.calls.find(
+      (c: any[]) => typeof c[0] === 'string' && c[0].includes("status = 'completed'")
+    );
+    expect(completion).toBeTruthy();
   });
 });

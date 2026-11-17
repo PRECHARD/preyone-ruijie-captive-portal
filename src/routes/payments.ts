@@ -2146,9 +2146,16 @@ export async function reconcilePendingPaymentsOnce(): Promise<PaymentReconcileRe
     if (!lock.rows[0]?.locked) return result;
 
     const { rows } = await pool.query(
-      `SELECT id, pesepay_reference, created_at
+      `SELECT id, status, error_message, pesepay_reference, created_at
          FROM payments
-        WHERE status = 'pending'
+        WHERE (
+                status = 'pending'
+                OR (
+                  status = 'failed'
+                  AND error_message LIKE 'Payment window expired%'
+                  AND created_at > now() - interval '24 hours'
+                )
+              )
           AND pesepay_reference IS NOT NULL
           AND created_at < now() - ($1 || ' minutes')::interval
         ORDER BY created_at ASC
@@ -2162,9 +2169,23 @@ export async function reconcilePendingPaymentsOnce(): Promise<PaymentReconcileRe
       const expired = ageMin >= PAYMENT_EXPIRY_MIN;
       try {
         const check = await verifyPaymentStatus(row.pesepay_reference);
-        // not_found means the gateway has no record yet; never fail on that
-        // until the payment window has fully elapsed.
-        if (!check.found) {
+
+        // A row we closed locally on the payment window is only ever moved
+        // forward by a gateway-confirmed success: the customer's money arrived
+        // after our timeout, so honour it. Anything else leaves the row failed
+        // (never re-expired or downgraded) so reporting stays stable.
+        if (isLocallyExpired(row)) {
+          const parsed = check.found ? parsePesepayStatus(check.status) : null;
+          if (parsed?.state === 'completed') {
+            await completePayment(row.id);
+            result.completed += 1;
+            console.log(`[payments] late approval completed ${row.id} (${parsed.label})`);
+          } else {
+            result.skipped += 1;
+          }
+        } else if (!check.found) {
+          // not_found means the gateway has no record yet; never fail on that
+          // until the payment window has fully elapsed.
           if (expired) {
             const updated = await pool.query(
               `UPDATE payments SET status = 'failed', error_message = $2
