@@ -127,6 +127,27 @@ const SQL = `
   CREATE INDEX IF NOT EXISTS idx_payments_pesepay_ref ON payments (pesepay_reference);
   CREATE INDEX IF NOT EXISTS idx_payments_merchant_ref ON payments (merchant_reference);
 
+  -- Checkouts that were rejected before a payments row could be created
+  -- (invalid phone, unknown tier, gateway not configured, missing Ruijie
+  -- profile). Without this the customer sees an error and the admin console
+  -- has no trace of the attempt — the 2026-11-16 black-hole.
+  CREATE TABLE IF NOT EXISTS payment_attempts (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    stage           TEXT NOT NULL,
+    reason          TEXT NOT NULL,
+    raw_phone       TEXT,
+    package_tier    TEXT,
+    amount          NUMERIC(10,2),
+    currency        TEXT NOT NULL DEFAULT 'USD',
+    payment_method  TEXT NOT NULL DEFAULT 'EcoCash (Pesepay)',
+    client_mac      TEXT,
+    ip_address      TEXT,
+    user_agent      TEXT,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+  CREATE INDEX IF NOT EXISTS idx_payment_attempts_created_at
+    ON payment_attempts (created_at DESC);
+
   -- Online purchases: the minted voucher is attached to the completed payment
   ALTER TABLE payments ADD COLUMN IF NOT EXISTS voucher_code TEXT;
 

@@ -42,14 +42,25 @@ describe('Admin routes', () => {
   });
 
   describe('GET /api/admin/revenue', () => {
-    it('returns revenue stats and transaction breakdown', async () => {
+    it('returns revenue stats and the unified EcoCash ledger', async () => {
       (pool.query as any)
         .mockResolvedValueOnce({ rows: [{ total_revenue: 1234.50 }] })
         .mockResolvedValueOnce({ rows: [{ total_pending: 99.99 }] })
         .mockResolvedValueOnce({ rows: [{ total_sales: 500 }] })
         .mockResolvedValueOnce({ rows: [{ total_pending: 0 }] })
         .mockResolvedValueOnce({ rows: [{ total_approved: 200 }] })
-        .mockResolvedValueOnce({ rows: [{ package_tier: 'PreMAX', count: 5, total: 500 }] })
+        .mockResolvedValueOnce({
+          rows: [
+            { source: 'transaction', id: 'tx-1', tier: 'PreMAX', amount: 34.99, currency: 'USD', status: 'completed', voucher_code: 'CT-AAA', client_name: 'Alice' },
+            { source: 'rejected', id: 'at-1', tier: 'PreLite', amount: 1, currency: 'USD', status: 'rejected', phone_number: '0771327202', reason: 'Please enter a valid Zimbabwe phone number' },
+          ],
+        })
+        .mockResolvedValueOnce({
+          rows: [
+            { status: 'completed', count: 1, amount: 34.99 },
+            { status: 'rejected', count: 1, amount: 0 },
+          ],
+        })
         .mockResolvedValueOnce({ rows: [{ id: 'tx-1', package_tier: 'PreMAX', amount: 34.99, currency: 'USD', status: 'completed', user_name: 'Alice' }] });
 
       const res = await request(createApp()).get('/api/admin/revenue');
@@ -60,8 +71,36 @@ describe('Admin routes', () => {
       expect(res.body.combinedRevenue).toBe(1434.50);
       expect(res.body.handoverApproved).toBe(200);
       expect(res.body.handoverPending).toBe(0);
-      expect(res.body.byTier).toHaveLength(1);
+      expect(res.body.byTier).toBeUndefined();
+      expect(res.body.ledger).toHaveLength(2);
+      expect(res.body.ledger[1].status).toBe('rejected');
+      expect(res.body.summary.completed).toEqual({ count: 1, amount: 34.99 });
+      expect(res.body.summary.rejected.count).toBe(1);
       expect(res.body.recentTransactions).toHaveLength(1);
+    });
+  });
+
+  describe('GET /api/admin/staff-sales', () => {
+    it('includes CEO sales and returns commission totals', async () => {
+      (pool.query as any)
+        .mockResolvedValueOnce({
+          rows: [
+            { id: 'ceo', full_name: 'Prechard', role: 'CEO', total_sales: 204, total_amount: 512.14, commission_pct: 0, commission_due: 0 },
+            { id: 'mgr', full_name: 'Lesly', role: 'Manager', total_sales: 101, total_amount: 104.48, commission_pct: 5, commission_due: 5.22 },
+          ],
+        })
+        .mockResolvedValueOnce({ rows: [{ id: 'v1', code: 'CT-AAA', sold_by_name: 'Prechard', sold_by_role: 'CEO' }] })
+        .mockResolvedValueOnce({ rows: [{ sale_date: '2026-11-16', full_name: 'Prechard', role: 'CEO', sales_count: 204, total_amount: 512.14 }] });
+
+      const res = await request(createApp()).get('/api/admin/staff-sales');
+
+      expect(res.status).toBe(200);
+      expect(res.body.staffSummary).toHaveLength(2);
+      expect(res.body.staffSummary[0].role).toBe('CEO');
+      expect(res.body.totals.sales).toBe(305);
+      expect(res.body.totals.amount).toBeCloseTo(616.62);
+      expect(res.body.totals.commissionDue).toBeCloseTo(5.22);
+      expect(res.body.allSales[0].sold_by_role).toBe('CEO');
     });
   });
 

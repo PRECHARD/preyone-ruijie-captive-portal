@@ -877,6 +877,11 @@
 
     const paymentData = {
       payment_rail: paymentRail,
+      // Canonical contract (tier/phone/fullName) plus the rail-era aliases so
+      // old and new API builds both understand the checkout.
+      tier: packageData['data-tier'],
+      phone: contactPhone || phone,
+      fullName: fullName,
       account_identifier: phone || contactPhone,
       client_name: fullName,
       client_phone: contactPhone || phone,

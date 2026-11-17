@@ -19,6 +19,9 @@ export default function Reports({ onNavigate, canPeakHours }: Props = {}) {
   const [staffSales, setStaffSales] = useState<any>(null);
   const [pending, setPending] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
+  const [ledgerFilter, setLedgerFilter] = useState<'all' | 'completed' | 'pending' | 'failed'>('all');
+  const [ledgerQuery, setLedgerQuery] = useState('');
 
   // ── Ruijie accounting sub-tab ──
   const [acctStatus, setAcctStatus] = useState<any>(null);
@@ -98,10 +101,19 @@ export default function Reports({ onNavigate, canPeakHours }: Props = {}) {
     try { setStaffSales(await api.get('/staff-sales')); } catch { /* ignore */ }
     try { setPending(await api.get('/cash-handovers/pending')); } catch { /* ignore */ }
     try { setMonthEnd(await api.get('/reports/month-end')); } catch { /* ignore */ }
+    setLastRefresh(new Date());
     setLoading(false);
   }, []);
 
-  useEffect(() => { loadData(); const t = setInterval(loadData, 30000); return () => clearInterval(t); }, [loadData]);
+  // Live EcoCash ledger: refresh every 15s, and immediately when the operator
+  // returns to the tab so a just-completed payment is never stale on screen.
+  useEffect(() => {
+    loadData();
+    const t = setInterval(loadData, 15000);
+    const onVisible = () => { if (!document.hidden) loadData(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => { clearInterval(t); document.removeEventListener('visibilitychange', onVisible); };
+  }, [loadData]);
 
   /** Stream an authenticated report file (Excel/CSV) to the device. */
   const downloadReport = async (path: string, fileName: string) => {
@@ -263,6 +275,37 @@ export default function Reports({ onNavigate, canPeakHours }: Props = {}) {
 
   if (loading) return <Spinner />;
 
+  // ── Live EcoCash ledger derivations (Revenue tab) ──
+  const revenueSummary = revenue?.summary || {};
+  const ledgerStatus = (s: any) => String(s || '').toLowerCase();
+  const ledgerRows = ((revenue?.ledger || []) as any[]).filter((r) => {
+    const st = ledgerStatus(r.status);
+    if (ledgerFilter === 'completed' && st !== 'completed') return false;
+    if (ledgerFilter === 'pending' && st !== 'pending') return false;
+    if (ledgerFilter === 'failed' && !['failed', 'rejected', 'cancelled', 'error'].includes(st)) return false;
+    const q = ledgerQuery.trim().toLowerCase();
+    if (!q) return true;
+    return [r.voucher_code, r.reference, r.phone_number, r.client_name, r.sold_by_name, r.tier, r.method]
+      .some((v) => String(v ?? '').toLowerCase().includes(q));
+  });
+  const ledgerSourceLabel = (source: any) => {
+    switch (String(source || '')) {
+      case 'transaction': return 'Voucher sale';
+      case 'payment': return 'Gateway';
+      case 'intent': return 'Pesepay';
+      case 'rejected': return 'Rejected checkout';
+      default: return String(source || '—');
+    }
+  };
+  const statusBadge = (s: any) => {
+    const st = ledgerStatus(s);
+    if (st === 'completed') return <Badge variant="approved">Completed</Badge>;
+    if (st === 'pending') return <Badge variant="pending">Pending</Badge>;
+    if (st === 'rejected') return <Badge variant="rejected">Rejected</Badge>;
+    if (st === 'failed' || st === 'cancelled' || st === 'error') return <Badge variant="rejected">{st}</Badge>;
+    return <Badge variant="default">{st || '—'}</Badge>;
+  };
+
   return (
     <div className="page">
       <div className="page-header">
@@ -287,7 +330,11 @@ export default function Reports({ onNavigate, canPeakHours }: Props = {}) {
 
       {tab === 'revenue' && revenue && (
         <>
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
+            <div className="muted" style={{ fontSize: 12 }}>
+              <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: 'var(--green)', marginRight: 6 }} />
+              Live EcoCash ledger · {lastRefresh ? `refreshed ${lastRefresh.toLocaleTimeString()}` : 'loading…'} · auto-refresh 15s
+            </div>
             <button className="btn-sm" onClick={exportRevenueCsv} disabled={exporting === 'revenue'} title="Download completed transactions as CSV">
               {exporting === 'revenue' ? 'Exporting…' : 'Export Revenue CSV'}
             </button>
@@ -315,47 +362,87 @@ export default function Reports({ onNavigate, canPeakHours }: Props = {}) {
             </div>
           </div>
 
-          {revenue.byTier && (
-            <div className="card" style={{ marginBottom: 20 }}>
-              <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', fontWeight: 600, fontSize: 13 }}>Revenue by Package Tier</div>
-              <div style={{ padding: 16 }}>
-                {Object.entries(revenue.byTier).map(([tier, amount]: any) => (
-                  <div key={tier} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
-                    <span style={{ fontWeight: 600 }}>{tier}</span>
-                    <span className="money">${Number(amount).toFixed(2)} USD</span>
-                  </div>
+          <div className="glass-stats" style={{ marginTop: 12 }}>
+            <div className="glass-stat glass-stat--green">
+              <span className="glass-stat__label">Completed</span>
+              <span className="glass-stat__value glass-stat__value--green">${Number(revenueSummary.completed?.amount || 0).toFixed(2)}</span>
+              <span className="glass-stat__meta">{revenueSummary.completed?.count || 0} record(s)</span>
+            </div>
+            <div className="glass-stat">
+              <span className="glass-stat__label">Pending</span>
+              <span className="glass-stat__value glass-stat__value--cyan">${Number(revenueSummary.pending?.amount || 0).toFixed(2)}</span>
+              <span className="glass-stat__meta">{revenueSummary.pending?.count || 0} record(s)</span>
+            </div>
+            <div className="glass-stat glass-stat--violet">
+              <span className="glass-stat__label">Failed</span>
+              <span className="glass-stat__value" style={{ color: 'var(--red)' }}>${Number(revenueSummary.failed?.amount || 0).toFixed(2)}</span>
+              <span className="glass-stat__meta">{revenueSummary.failed?.count || 0} record(s)</span>
+            </div>
+            <div className="glass-stat">
+              <span className="glass-stat__label">Rejected Checkouts</span>
+              <span className="glass-stat__value" style={{ color: 'var(--orange)' }}>{revenueSummary.rejected?.count || 0}</span>
+              <span className="glass-stat__meta">Blocked before payment</span>
+            </div>
+          </div>
+
+          <div className="card" style={{ marginTop: 20 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap', padding: '12px 16px', borderBottom: '1px solid var(--border)' }}>
+              <div style={{ fontWeight: 600, fontSize: 13 }}>EcoCash &amp; Payment Ledger</div>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                <input
+                  value={ledgerQuery}
+                  onChange={(e) => setLedgerQuery(e.target.value)}
+                  placeholder="Search phone, code, ref, client…"
+                  style={{ minWidth: 220, padding: '6px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'transparent', color: 'inherit', fontSize: 12 }}
+                />
+                {([
+                  ['all', `All (${revenue.ledger?.length || 0})`],
+                  ['completed', `Completed (${revenueSummary.completed?.count || 0})`],
+                  ['pending', `Pending (${revenueSummary.pending?.count || 0})`],
+                  ['failed', `Failed / Rejected (${(revenueSummary.failed?.count || 0) + (revenueSummary.rejected?.count || 0)})`],
+                ] as const).map(([key, label]) => (
+                  <button
+                    key={key}
+                    type="button"
+                    className="btn-sm"
+                    onClick={() => setLedgerFilter(key)}
+                    style={ledgerFilter === key ? { background: 'linear-gradient(135deg, var(--purple), var(--pink))', border: 'none', color: '#fff' } : undefined}
+                  >
+                    {label}
+                  </button>
                 ))}
               </div>
             </div>
-          )}
-
-          {revenue.recentTransactions?.length > 0 && (
-            <div className="card">
-              <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', fontWeight: 600, fontSize: 13 }}>Recent Transactions</div>
-              <div className="card-table">
-                <table className="data-table">
-<thead><tr><th>Date</th><th>Voucher</th><th>Client</th><th>Package</th><th>Amount</th><th>Method</th><th>Sold By</th><th>Status</th></tr></thead>
-                  <tbody>
-                    {revenue.recentTransactions.map((t: any, i: number) => (
-                      <tr key={i}>
-                        <td>{t.created_at ? new Date(t.created_at).toLocaleString() : '-'}</td>
-                        <td><span className="code-cell">{t.code || t.voucher_code || '-'}</span></td>
-                        <td>
-                          <div style={{ fontWeight: 600 }}>{t.user_name || '—'}</div>
-                          {t.user_phone && <div className="muted">{t.user_phone}</div>}
-                        </td>
-                        <td>{t.package_tier || t.tier || '-'}</td>
-                        <td><span className="money money--sm">${Number(t.price_amount || t.amount || 0).toFixed(2)} {t.currency || 'USD'}</span></td>
-                        <td>{t.payment_method || '-'}{t.payment_reference ? <div className="muted">{t.payment_reference}</div> : null}</td>
-                        <td>{t.sold_by_name || t.sold_by || '-'}</td>
-                        <td>{t.status === 'completed' ? <Badge variant="approved">Completed</Badge> : t.status === 'pending' ? <Badge variant="pending">Pending</Badge> : <Badge variant="default">{t.status || '-'}</Badge>}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+            <div className="card-table" style={{ maxHeight: 560, overflowY: 'auto' }}>
+              <table className="data-table">
+                <thead><tr><th>Date</th><th>Source</th><th>Voucher / Ref</th><th>Client</th><th>Package</th><th>Amount</th><th>Method</th><th>Sold By</th><th>Status</th></tr></thead>
+                <tbody>
+                  {ledgerRows.length === 0 && (
+                    <tr><td colSpan={9} className="muted">No payment records match this filter.</td></tr>
+                  )}
+                  {ledgerRows.map((t: any, i: number) => (
+                    <tr key={`${t.source}-${t.id}-${i}`}>
+                      <td>{t.created_at ? new Date(t.created_at).toLocaleString() : '-'}</td>
+                      <td><Badge variant={t.source === 'rejected' ? 'warning' : 'default'}>{ledgerSourceLabel(t.source)}</Badge></td>
+                      <td><span className="code-cell">{t.voucher_code || t.reference || '-'}</span></td>
+                      <td>
+                        <div style={{ fontWeight: 600 }}>{t.client_name || '—'}</div>
+                        {t.phone_number && <div className="muted">{t.phone_number}</div>}
+                      </td>
+                      <td>{t.tier || '-'}</td>
+                      <td><span className="money money--sm">${Number(t.amount || 0).toFixed(2)} {t.currency || 'USD'}</span></td>
+                      <td>{t.method || '-'}</td>
+                      <td>{t.sold_by_name || '-'}</td>
+                      <td>
+                        {statusBadge(t.status)}
+                        {t.reason && <div className="muted" style={{ marginTop: 4, maxWidth: 240 }}>{t.reason}</div>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-          )}
+          </div>
         </>
       )}
 

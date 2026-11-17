@@ -153,8 +153,12 @@ describe('Payments routes', () => {
 
       expect(res.status).toBe(422);
       expect(res.body.error).toMatch(/not configured/i);
-      // Must not touch the DB before refusing the charge.
-      expect(pool.query as any).not.toHaveBeenCalled();
+      // No charge is attempted, but the rejection must be auditable in admin.
+      const attempt = (pool.query as any).mock.calls.find(
+        (c: any[]) => String(c[0]).includes('INSERT INTO payment_attempts')
+      );
+      expect(attempt).toBeTruthy();
+      expect(attempt[1][0]).toBe('config');
     });
 
     it('returns 422 for an invalid Zimbabwe phone number', async () => {
@@ -164,7 +168,58 @@ describe('Payments routes', () => {
 
       expect(res.status).toBe(422);
       expect(res.body.error).toMatch(/valid Zimbabwe phone/i);
-      expect(pool.query as any).not.toHaveBeenCalled();
+      // The attempt is logged so the admin ledger can show the rejected checkout.
+      const attempt = (pool.query as any).mock.calls.find(
+        (c: any[]) => String(c[0]).includes('INSERT INTO payment_attempts')
+      );
+      expect(attempt).toBeTruthy();
+      expect(attempt[1][0]).toBe('validation');
+      expect(attempt[1][2]).toBe('12345');
+    });
+
+    it('accepts the portal rail aliases (package_id/client_phone/client_name)', async () => {
+      (pool.query as any)
+        .mockResolvedValueOnce({ rows: [PKG] })                                // 1: package lookup
+        .mockResolvedValueOnce({ rows: [{ id: 'existing-user' }] })            // 2: existing user
+        .mockResolvedValueOnce({ rows: [{ id: 'pay-alias' }] })                // 3: INSERT payments
+        .mockResolvedValueOnce(undefined);                                    // 4: UPDATE pesepay_reference
+      (initiateEcoCashPayment as any).mockResolvedValue({
+        success: true,
+        pollUrl: 'https://pay.pesepay.com/poll',
+      });
+
+      const res = await request(createApp())
+        .post('/api/payments/initiate')
+        .send({
+          payment_rail: 'ecocash',
+          package_id: 'PreMAX',
+          client_phone: '0771 327 202',
+          client_name: 'Portal Client',
+          amount: 34.99,
+          currency: 'USD',
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.body.phone).toBe('263771327202');
+    });
+
+    it('normalizes 2630-prefixed phone numbers', async () => {
+      (pool.query as any)
+        .mockResolvedValueOnce({ rows: [PKG] })
+        .mockResolvedValueOnce({ rows: [{ id: 'existing-user' }] })
+        .mockResolvedValueOnce({ rows: [{ id: 'pay-2630' }] })
+        .mockResolvedValueOnce(undefined);
+      (initiateEcoCashPayment as any).mockResolvedValue({
+        success: true,
+        pollUrl: 'https://pay.pesepay.com/poll',
+      });
+
+      const res = await request(createApp())
+        .post('/api/payments/initiate')
+        .send({ ...validBody, phone: '+263 0771 327 202' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.phone).toBe('263771327202');
     });
 
     it('returns 422 for an unknown package tier', async () => {

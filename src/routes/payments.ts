@@ -63,15 +63,65 @@ const PHONE_RE = /^2637\d{8}$/;
 const RUIJIE_MINT_PENDING_PREFIX = 'ruijie_mint_pending: ';
 
 function normalizeZwPhone(input: string): string {
-  let p = String(input || '').replace(/[^\d+]/g, '');
+  let p = String(input ?? '').replace(/[^\d+]/g, '');
   p = p.replace(/^\+/, '');
   if (p.startsWith('00')) p = p.slice(2);
-  if (p.startsWith('0')) p = '263' + p.slice(1);
+  // 263 0 771... (country code with the local trunk 0 still attached)
+  if (p.startsWith('2630')) p = '263' + p.slice(4);
+  else if (p.startsWith('0')) p = '263' + p.slice(1);
+  // Bare national significant number, e.g. 771 327 202
+  else if (/^7\d{8}$/.test(p)) p = '263' + p;
   return p;
 }
 
 function isValidZwPhone(phone: string): boolean {
   return PHONE_RE.test(phone);
+}
+
+/**
+ * Persist a checkout that was rejected before it could become a `payments` row
+ * (bad phone, unknown tier, unconfigured gateway). Without this the customer
+ * sees an error and the admin console has no record of the attempt at all —
+ * which is exactly what happened on 2026-11-16 (six 422s, zero rows).
+ */
+async function recordRejectedAttempt(opts: {
+  stage: string;
+  reason: string;
+  rawPhone?: unknown;
+  tier?: unknown;
+  amount?: unknown;
+  currency?: unknown;
+  paymentMethod?: string;
+  macAddress?: string | null;
+  req?: Request;
+}): Promise<void> {
+  try {
+    const forwarded = String(opts.req?.headers['x-forwarded-for'] || '')
+      .split(',')[0]
+      .trim();
+    const amount = Number(opts.amount);
+    await pool.query(
+      `INSERT INTO payment_attempts
+        (stage, reason, raw_phone, package_tier, amount, currency, payment_method,
+         client_mac, ip_address, user_agent)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+      [
+        opts.stage,
+        opts.reason,
+        opts.rawPhone == null ? null : String(opts.rawPhone).slice(0, 64),
+        opts.tier == null ? null : String(opts.tier).slice(0, 80),
+        Number.isFinite(amount) ? amount : null,
+        opts.currency ? String(opts.currency).toUpperCase().slice(0, 8) : 'USD',
+        opts.paymentMethod ?? 'EcoCash (Pesepay)',
+        opts.macAddress ?? null,
+        forwarded || opts.req?.ip || null,
+        String(opts.req?.headers['user-agent'] || '').slice(0, 300) || null,
+      ]
+    );
+  } catch (err) {
+    // Never let audit logging block a customer's checkout.
+    console.error('payment_attempts insert failed:', err);
+  }
 }
 
 // Pesepay reports transaction status as a string, not a numeric code. Anything we
@@ -460,19 +510,45 @@ async function completePayment(paymentId: string): Promise<string> {
  * Body: { tier, phone, currency?, fullName?, macAddress? }
  */
 paymentsRouter.post('/initiate', async (req: Request, res: Response) => {
-  const { tier, phone, fullName, currency } = req.body || {};
-  const macAddress = req.body?.macAddress ?? null;
+  const body = req.body || {};
+  // The portal posts rail-era aliases (account_identifier / client_phone /
+  // package_id) while older cached clients post tier / phone. Accept both: a
+  // mismatch here is what silently black-holed every checkout on 2026-11-16.
+  const tier = body.tier ?? body.package_id ?? body.packageTier ?? body.tier_name;
+  const rawPhone = body.phone ?? body.account_identifier ?? body.client_phone ?? body.contactPhone;
+  const fullName = body.fullName ?? body.client_name ?? body.name;
+  const currency = body.currency;
+  const macAddress = body.macAddress ?? body.mac ?? body.client_mac ?? null;
+  const railMethod = body.payment_rail === 'omari' ? "O'mari (Pesepay)" : 'EcoCash (Pesepay)';
+  const attemptBase = {
+    rawPhone,
+    tier,
+    amount: body.amount,
+    currency,
+    macAddress,
+    paymentMethod: railMethod,
+    req,
+  };
 
   if (!isPesepayConfigured()) {
-    res.status(422).json({
-      error: 'Online payments are not configured yet. Please buy your voucher at the Preyone shop.',
-    });
+    const reason = 'Online payments are not configured yet. Please buy your voucher at the Preyone shop.';
+    await recordRejectedAttempt({ ...attemptBase, stage: 'config', reason });
+    res.status(422).json({ error: reason });
     return;
   }
 
-  const normalizedPhone = normalizeZwPhone(phone);
+  const normalizedPhone = normalizeZwPhone(rawPhone);
   if (!isValidZwPhone(normalizedPhone)) {
-    res.status(422).json({ error: 'Please enter a valid Zimbabwe phone number (e.g. 0771 327 202).' });
+    const reason = 'Please enter a valid Zimbabwe phone number (e.g. 0771 327 202).';
+    await recordRejectedAttempt({ ...attemptBase, stage: 'validation', reason });
+    res.status(422).json({ error: reason });
+    return;
+  }
+
+  if (!tier) {
+    const reason = 'Unknown package tier.';
+    await recordRejectedAttempt({ ...attemptBase, stage: 'validation', reason });
+    res.status(422).json({ error: reason });
     return;
   }
 
@@ -483,7 +559,9 @@ paymentsRouter.post('/initiate', async (req: Request, res: Response) => {
     [tier]
   );
   if (pkgResult.rows.length === 0) {
-    res.status(422).json({ error: 'Unknown package tier.' });
+    const reason = 'Unknown package tier.';
+    await recordRejectedAttempt({ ...attemptBase, stage: 'validation', reason });
+    res.status(422).json({ error: reason });
     return;
   }
   const pkg = pkgResult.rows[0];
@@ -494,9 +572,9 @@ paymentsRouter.post('/initiate', async (req: Request, res: Response) => {
   if (isRuijieCloudConfigured()) {
     const profile = await findRuijieProfile(pkg.tier_name);
     if (!profile) {
-      res.status(502).json({
-        error: `Package '${pkg.tier_name}' is not currently available online (no Ruijie Cloud profile mapping). Please buy at the Preyone shop.`,
-      });
+      const reason = `Package '${pkg.tier_name}' is not currently available online (no Ruijie Cloud profile mapping). Please buy at the Preyone shop.`;
+      await recordRejectedAttempt({ ...attemptBase, stage: 'ruijie_profile', reason });
+      res.status(502).json({ error: reason });
       return;
     }
   }

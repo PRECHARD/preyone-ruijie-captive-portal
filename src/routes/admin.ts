@@ -961,32 +961,60 @@ adminRouter.get('/my-sales/export', async (req: Request, res: Response) => {
 });
 
 // ── Staff Sales Aggregated (CEO/Manager only) ──
+//
+// Sales are attributed by `vouchers.sold_by`, which can be any admin account —
+// including the CEO and company admins. The earlier `role IN ('Staff','Manager')`
+// filter silently dropped every CEO sale (204 vouchers / $512.14 in production),
+// so every role that can sell is included here.
+
+const SELLING_ROLES = `('Staff', 'Manager', 'CEO', 'COMPANY_ADMIN', 'SUPER_ADMIN')`;
 
 adminRouter.get('/staff-sales', requirePermission(PERMISSIONS.COMPANY_ADMIN), async (_req: Request, res: Response) => {
   const { rows: staffSummary } = await pool.query(`
-    SELECT a.id, a.full_name, a.role, COUNT(v.id)::int AS total_sales, COALESCE(SUM(v.price_amount), 0)::float AS total_amount
+    SELECT a.id, a.full_name, a.role,
+           COUNT(v.id)::int AS total_sales,
+           COALESCE(SUM(v.price_amount), 0)::float AS total_amount,
+           COALESCE(sc.commission_pct, 0)::float AS commission_pct,
+           ROUND(COALESCE(SUM(v.price_amount), 0) * COALESCE(sc.commission_pct, 0) / 100.0, 2)::float AS commission_due
     FROM admin_users a
     INNER JOIN vouchers v ON v.sold_by = a.id
-    WHERE a.role IN ('Staff', 'Manager') AND a.deleted_at IS NULL
-    GROUP BY a.id, a.full_name, a.role
+    LEFT JOIN staff_commissions sc ON sc.staff_id = a.id
+    WHERE a.role IN ${SELLING_ROLES} AND a.deleted_at IS NULL
+    GROUP BY a.id, a.full_name, a.role, sc.commission_pct
     ORDER BY total_amount DESC
   `);
   const { rows: allSales } = await pool.query(`
-    SELECT v.*, a.full_name AS sold_by_name
+    SELECT v.id, v.code, v.package_tier, v.price_amount, v.used_count, v.max_uses,
+           v.created_at, v.sold_by, a.full_name AS sold_by_name, a.role AS sold_by_role,
+           s.payment_method, s.payment_reference
     FROM vouchers v
     LEFT JOIN admin_users a ON a.id = v.sold_by AND a.deleted_at IS NULL
+    LEFT JOIN sales s ON s.voucher_id = v.id
     WHERE v.sold_by IS NOT NULL
     ORDER BY v.created_at DESC
+    LIMIT 500
   `);
   const { rows: dailyBreakdown } = await pool.query(`
     SELECT DATE(v.created_at) AS sale_date, a.full_name, a.role, COUNT(v.id)::int AS sales_count, COALESCE(SUM(v.price_amount), 0)::float AS total_amount
     FROM vouchers v
     INNER JOIN admin_users a ON a.id = v.sold_by AND a.deleted_at IS NULL
-    WHERE a.role IN ('Staff', 'Manager')
+    WHERE a.role IN ${SELLING_ROLES}
     GROUP BY DATE(v.created_at), a.full_name, a.role
     ORDER BY sale_date DESC, a.full_name ASC
+    LIMIT 365
   `);
-  res.json({ staffSummary, allSales, dailyBreakdown });
+
+  const totals = staffSummary.reduce(
+    (acc: { sales: number; amount: number; commissionDue: number }, row: any) => {
+      acc.sales += Number(row.total_sales) || 0;
+      acc.amount += Number(row.total_amount) || 0;
+      acc.commissionDue += Number(row.commission_due) || 0;
+      return acc;
+    },
+    { sales: 0, amount: 0, commissionDue: 0 }
+  );
+
+  res.json({ staffSummary, allSales, dailyBreakdown, totals });
 });
 
 // ── All Staff Sales Export (Excel, CEO/Manager only) ──
@@ -1246,6 +1274,69 @@ adminRouter.get('/dashboard/wifi', async (_req: Request, res: Response) => {
   }
 });
 
+// Unified EcoCash ledger: one row per money movement, whatever table it landed
+// in. Revenue used to read `transactions` only, so rejected checkouts (which
+// never create a transaction) and gateway failures were invisible.
+const ECO_LEDGER_CTE = `
+  WITH eco_ledger AS (
+    -- Voucher purchases that made it as far as a transaction row.
+    SELECT
+      'transaction'::text          AS source,
+      t.id::text                   AS id,
+      t.created_at                 AS created_at,
+      t.completed_at               AS completed_at,
+      t.package_tier               AS tier,
+      t.amount::float              AS amount,
+      t.currency                   AS currency,
+      t.payment_method             AS method,
+      t.status::text               AS status,
+      t.voucher_code               AS voucher_code,
+      COALESCE(p.pesepay_reference, p.merchant_reference) AS reference,
+      p.phone_number               AS phone_number,
+      u.full_name                  AS client_name,
+      t.sold_by_name               AS sold_by_name,
+      NULL::text                   AS reason
+    FROM transactions t
+    LEFT JOIN payments p ON p.id = t.payment_id
+    LEFT JOIN users u ON u.id = t.user_id
+
+    UNION ALL
+
+    -- Payments that never produced a transaction (gateway rejected/failed).
+    SELECT
+      'payment', p.id::text, p.created_at, p.completed_at,
+      pk.tier_name, p.amount::float, p.currency, p.payment_method, p.status::text,
+      p.voucher_code,
+      COALESCE(p.pesepay_reference, p.merchant_reference),
+      p.phone_number, u.full_name, NULL,
+      p.error_message
+    FROM payments p
+    LEFT JOIN packages pk ON pk.id = p.package_id
+    LEFT JOIN users u ON u.id = p.user_id
+    WHERE NOT EXISTS (SELECT 1 FROM transactions t2 WHERE t2.payment_id = p.id)
+
+    UNION ALL
+
+    -- Pesepay intents (POS / invoice / starlink rails).
+    SELECT
+      'intent', i.id::text, i.created_at, i.completed_at,
+      COALESCE(i.plan_tier, i.purpose), i.amount::float, i.currency, i.payment_method, i.status::text,
+      NULL, COALESCE(i.provider_reference, i.reference), NULL, NULL, NULL,
+      i.reason_for_payment
+    FROM pesepay_intents i
+
+    UNION ALL
+
+    -- Checkouts rejected before they became payments (the 422 black-hole).
+    SELECT
+      'rejected', a.id::text, a.created_at, NULL::timestamptz,
+      a.package_tier, a.amount::float, a.currency, a.payment_method, 'rejected'::text,
+      NULL, NULL, a.raw_phone, NULL, NULL,
+      a.reason
+    FROM payment_attempts a
+  )
+`;
+
 adminRouter.get('/revenue', requirePermission(PERMISSIONS.COMPANY_ADMIN), async (_req: Request, res: Response) => {
   const { rows: revenue } = await pool.query(`
     SELECT COALESCE(SUM(amount), 0)::float AS total_revenue
@@ -1267,18 +1358,34 @@ adminRouter.get('/revenue', requirePermission(PERMISSIONS.COMPANY_ADMIN), async 
     SELECT COALESCE(SUM(total_amount), 0)::float AS total_approved
     FROM cash_handovers WHERE status = 'approved'
   `);
-  const { rows: byTier } = await pool.query(`
-    SELECT package_tier, COUNT(*)::int AS count, COALESCE(SUM(price_amount), 0)::float AS total
-    FROM vouchers WHERE package_tier IS NOT NULL AND price_amount > 0
-    GROUP BY package_tier ORDER BY total DESC
+  const { rows: ledger } = await pool.query(`
+    ${ECO_LEDGER_CTE}
+    SELECT * FROM eco_ledger ORDER BY created_at DESC LIMIT 250
+  `);
+  const { rows: ledgerSummary } = await pool.query(`
+    ${ECO_LEDGER_CTE}
+    SELECT status,
+           COUNT(*)::int AS count,
+           COALESCE(SUM(amount), 0)::float AS amount
+    FROM eco_ledger
+    GROUP BY status
   `);
   const { rows: recentTx } = await pool.query(`
     SELECT t.id, t.package_tier, t.amount, t.currency, t.status, t.created_at, t.completed_at,
-           u.full_name AS user_name
+           t.voucher_code AS code, t.sold_by_name, t.payment_method,
+           p.phone_number, p.pesepay_reference AS payment_reference,
+           u.full_name AS user_name, u.phone AS user_phone
     FROM transactions t
+    LEFT JOIN payments p ON p.id = t.payment_id
     LEFT JOIN users u ON u.id = t.user_id
     ORDER BY t.created_at DESC LIMIT 100
   `);
+
+  const summary: Record<string, { count: number; amount: number }> = {};
+  for (const row of ledgerSummary) {
+    summary[row.status] = { count: row.count, amount: row.amount };
+  }
+
   res.json({
     totalRevenue: revenue[0].total_revenue + handoverApproved[0].total_approved,
     salesRevenue: salesRev[0].total_sales,
@@ -1286,7 +1393,8 @@ adminRouter.get('/revenue', requirePermission(PERMISSIONS.COMPANY_ADMIN), async 
     pendingRevenue: pending[0].total_pending + handoverPending[0].total_pending,
     handoverPending: handoverPending[0].total_pending,
     handoverApproved: handoverApproved[0].total_approved,
-    byTier,
+    ledger,
+    summary,
     recentTransactions: recentTx,
   });
 });
