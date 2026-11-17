@@ -621,14 +621,16 @@
         if (paymentSupportPending) {
           showSupportPending(lastPaymentReference, 0);
         } else {
-          setStatus('We haven\'t received confirmation yet. Check your phone for a pending prompt, then try again.');
+          setStatus('No payment confirmation was received within 5 minutes. You were not charged \u2014 check your connection and try again.');
         }
         return;
       }
 
-      var statusUrl = referenceNumber
+      // Canonical path route. The old query-string form 404'd against the
+      // backend, so every poll failed and checkout spun forever.
+      var statusUrl = (!paymentId && referenceNumber)
         ? `/api/payments/status?referenceNumber=${encodeURIComponent(referenceNumber)}&token=${encodeURIComponent(statusToken)}`
-        : `/api/payments/status?id=${encodeURIComponent(paymentId)}&token=${encodeURIComponent(statusToken)}`;
+        : `/api/payments/status/${encodeURIComponent(paymentId)}?token=${encodeURIComponent(statusToken)}`;
 
       fetch(statusUrl)
         .then((r) => {
@@ -742,7 +744,7 @@
         authPinPanel.style.display = 'none';
         authStatus.textContent = 'PIN accepted. Waiting for O\'mari to confirm the payment\u2026';
         setLoading(true, 'Waiting for approval\u2026');
-        pollPaymentStatus(authorization.paymentId, authorization.statusToken, 36, {
+        pollPaymentStatus(authorization.paymentId, authorization.statusToken, 90, {
           intervalMs: 1000,
           referenceNumber: authorization.referenceNumber,
           authFlow: true,
@@ -822,7 +824,7 @@
         if (railKey === 'innbucks') {
           setLoading(true, 'Waiting for approval\u2026');
           showAuthCode(result);
-          pollPaymentStatus(result.paymentId, result.statusToken, 36, {
+          pollPaymentStatus(result.paymentId, result.statusToken, 90, {
             intervalMs: 1000,
             referenceNumber: result.referenceNumber || null,
             authFlow: true,
@@ -954,7 +956,7 @@
     }
     if (!paymentId || !token) return;
 
-    fetch('/api/payments/status?id=' + encodeURIComponent(paymentId) + '&token=' + encodeURIComponent(token))
+    fetch('/api/payments/status/' + encodeURIComponent(paymentId) + '?token=' + encodeURIComponent(token))
       .then(function (r) { return r.ok ? r.json() : Promise.reject(new Error('lookup failed')); })
       .then(function (data) {
         pendingReturn = { paymentId: paymentId, token: token };

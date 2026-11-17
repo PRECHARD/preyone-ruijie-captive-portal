@@ -527,6 +527,69 @@ describe('Payments routes', () => {
       expect(res.body.supportRequired).toBe(false);
     });
 
+    it('accepts the legacy query alias used by cached portal builds', async () => {
+      (pool.query as any).mockResolvedValue({
+        rows: [
+          {
+            id: 'pay-1',
+            status: 'completed',
+            pesepay_reference: 'REF-1',
+            amount: 34.99,
+            completed_at: new Date().toISOString(),
+            voucher_code: 'CT-ABCD2345',
+            tier_name: 'PreMAX',
+            error_message: null,
+            created_at: new Date().toISOString(),
+          },
+        ],
+      });
+
+      const res = await request(createApp()).get(
+        `/api/payments/status?id=pay-1&token=${encodeURIComponent(statusToken('pay-1'))}`
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe('completed');
+      expect(res.body.voucherCode).toBe('CT-ABCD2345');
+    });
+
+    it('expires a pending payment once the payment window has elapsed', async () => {
+      const old = new Date(Date.now() - 20 * 60 * 1000).toISOString();
+      (pool.query as any)
+        .mockResolvedValueOnce({
+          rows: [
+            {
+              id: 'pay-old',
+              status: 'pending',
+              pesepay_reference: 'REF-OLD',
+              amount: 1,
+              completed_at: null,
+              voucher_code: null,
+              tier_name: 'PreLite',
+              error_message: null,
+              created_at: old,
+            },
+          ],
+        })
+        .mockResolvedValueOnce({ rows: [] })          // fresh read after reconcile
+        .mockResolvedValueOnce({ rows: [], rowCount: 1 }) // expiry UPDATE
+        .mockResolvedValueOnce({
+          rows: [{ status: 'failed', completed_at: null, voucher_code: null, error_message: 'Payment window expired' }],
+        });
+      (verifyPaymentStatus as any).mockResolvedValue({ found: true, status: 'PENDING' });
+
+      const res = await request(createApp()).get(
+        `/api/payments/status/pay-old?token=${encodeURIComponent(statusToken('pay-old'))}`
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe('failed');
+      const expiryUpdate = (pool.query as any).mock.calls.find(
+        (c: any[]) => String(c[0]).includes("status = 'failed'")
+      );
+      expect(expiryUpdate).toBeTruthy();
+    });
+
     it('returns 404 for unknown payment', async () => {
       (pool.query as any).mockResolvedValue({ rows: [] });
 

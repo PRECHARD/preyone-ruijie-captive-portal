@@ -51,6 +51,12 @@ export const paymentsRouter = Router();
 // Keeps a minimum 10s gap between check-payment calls for the same payment and
 // lets only one in-flight at a time (reset on process restart is harmless).
 const RECONCILE_GAP_MS = 10_000;
+// A checkout must never remain pending forever when the customer's mobile-money
+// line never delivers the approval prompt (observed live 2026-11-17: EcoCash
+// prompt never arrived, gateway reported FAILED, our row stayed pending). After
+// this window the payment is closed locally after one final gateway check, so
+// the portal stops spinning and reporting stops showing phantom pending sales.
+const PAYMENT_EXPIRY_MIN = Math.max(3, Number(process.env.PAYMENT_EXPIRY_MIN ?? 10));
 const lastReconcileAt = new Map<string, number>();
 const reconciling = new Set<string>();
 
@@ -886,10 +892,18 @@ paymentsRouter.get('/return', async (req: Request, res: Response) => {
 
 /**
  * GET /api/payments/status/:paymentId — polling endpoint for the portal.
+ *
+ * GET /api/payments/status?id=… (and ?referenceNumber=…) is kept as an alias:
+ * field portal builds still poll the query form, and when only the path form
+ * existed every poll 404'd, so checkout could never resolve and hung forever.
  */
-paymentsRouter.get('/status/:paymentId', async (req: Request, res: Response) => {
+async function sendPaymentStatus(req: Request, res: Response, paymentIdParam: string) {
   try {
-    const { paymentId } = req.params;
+    const paymentId = String(paymentIdParam || '');
+    if (!paymentId) {
+      res.status(404).json({ error: 'Payment not found' });
+      return;
+    }
 
     // Require a signed status token or valid session JWT to prevent payment ID enumeration
     const authHeader = req.headers.authorization;
@@ -912,7 +926,7 @@ paymentsRouter.get('/status/:paymentId', async (req: Request, res: Response) => 
     }
 
     const { rows } = await pool.query(
-      `SELECT p.id, p.status, p.amount, p.completed_at, p.voucher_code, p.pesepay_reference, p.error_message, pk.tier_name
+      `SELECT p.id, p.status, p.amount, p.completed_at, p.voucher_code, p.pesepay_reference, p.error_message, p.created_at, pk.tier_name
        FROM payments p JOIN packages pk ON pk.id = p.package_id
        WHERE p.id = $1`,
       [paymentId]
@@ -965,6 +979,53 @@ paymentsRouter.get('/status/:paymentId', async (req: Request, res: Response) => 
       if (fresh.rows.length > 0) pay = { ...pay, ...fresh.rows[0] };
     }
 
+    // Hard expiry: close a checkout that has outlived the payment window even
+    // when the gateway never returns a terminal state. One final gateway check
+    // guards against ever failing a customer who actually paid.
+    if (pay.status === 'pending' && pay.created_at) {
+      const ageMin = (Date.now() - new Date(pay.created_at).getTime()) / 60_000;
+      if (ageMin >= PAYMENT_EXPIRY_MIN) {
+        let settled = false;
+        if (pay.pesepay_reference) {
+          try {
+            const finalCheck = await verifyPaymentStatus(pay.pesepay_reference);
+            const finalParsed = parsePesepayStatus(finalCheck.status);
+            if (finalCheck.found && finalParsed.state === 'completed') {
+              await completePayment(paymentId);
+              settled = true;
+            } else if (finalCheck.found && (finalParsed.state === 'failed' || finalParsed.state === 'refunded')) {
+              await pool.query(
+                `UPDATE payments SET status = $2, error_message = $3
+                 WHERE id = $1 AND status = 'pending'`,
+                [paymentId, finalParsed.state, `Gateway reported ${finalParsed.label} (expiry check)`]
+              );
+            }
+          } catch (err) {
+            // Gateway unreachable: local expiry still applies.
+            console.error('Expiry gateway check failed', err);
+          }
+        }
+        if (!settled) {
+          await pool.query(
+            `UPDATE payments
+                SET status = 'failed',
+                    error_message = COALESCE(error_message, $2)
+              WHERE id = $1 AND status = 'pending'`,
+            [
+              paymentId,
+              `Payment window expired after ${PAYMENT_EXPIRY_MIN} minutes without confirmation. ` +
+                `If EcoCash deducted you, contact support with reference ${pay.pesepay_reference ?? paymentId}.`,
+            ]
+          );
+        }
+        const expired = await pool.query(
+          'SELECT status, completed_at, voucher_code, error_message FROM payments WHERE id = $1',
+          [paymentId]
+        );
+        if (expired.rows.length > 0) pay = { ...pay, ...expired.rows[0] };
+      }
+    }
+
     res.json({
       paymentId: pay.id,
       status: pay.status,
@@ -981,6 +1042,33 @@ paymentsRouter.get('/status/:paymentId', async (req: Request, res: Response) => 
       // Shown to the customer as proof of purchase in support conversations.
       reference: pay.pesepay_reference ?? null,
     });
+  } catch (err) {
+    res.status(500).json({ error: 'Status lookup failed' });
+  }
+}
+
+// Canonical route (used by current portal builds).
+paymentsRouter.get('/status/:paymentId', (req: Request, res: Response) =>
+  sendPaymentStatus(req, res, String(req.params.paymentId || ''))
+);
+
+// Compatibility alias for cached portal builds that poll the query form.
+paymentsRouter.get('/status', async (req: Request, res: Response) => {
+  try {
+    let id = typeof req.query.id === 'string' ? req.query.id : '';
+    if (!id) {
+      const ref = typeof req.query.referenceNumber === 'string' ? req.query.referenceNumber : '';
+      if (ref) {
+        const { rows } = await pool.query(
+          `SELECT id FROM payments
+            WHERE merchant_reference = $1 OR pesepay_reference = $1
+            ORDER BY created_at DESC LIMIT 1`,
+          [ref]
+        );
+        id = rows[0]?.id ?? '';
+      }
+    }
+    await sendPaymentStatus(req, res, id);
   } catch (err) {
     res.status(500).json({ error: 'Status lookup failed' });
   }
@@ -2035,7 +2123,7 @@ export async function reconcilePendingPaymentsOnce(): Promise<PaymentReconcileRe
     if (!lock.rows[0]?.locked) return result;
 
     const { rows } = await pool.query(
-      `SELECT id, pesepay_reference
+      `SELECT id, pesepay_reference, created_at
          FROM payments
         WHERE status = 'pending'
           AND pesepay_reference IS NOT NULL
@@ -2047,11 +2135,28 @@ export async function reconcilePendingPaymentsOnce(): Promise<PaymentReconcileRe
 
     for (const row of rows) {
       result.scanned += 1;
+      const ageMin = (Date.now() - new Date(row.created_at).getTime()) / 60_000;
+      const expired = ageMin >= PAYMENT_EXPIRY_MIN;
       try {
         const check = await verifyPaymentStatus(row.pesepay_reference);
-        // not_found means the gateway has no record yet; never fail on that.
+        // not_found means the gateway has no record yet; never fail on that
+        // until the payment window has fully elapsed.
         if (!check.found) {
-          result.skipped += 1;
+          if (expired) {
+            const updated = await pool.query(
+              `UPDATE payments SET status = 'failed', error_message = $2
+                WHERE id = $1 AND status = 'pending'`,
+              [row.id, `Payment window expired after ${PAYMENT_EXPIRY_MIN} minutes; the gateway has no record of this checkout.`]
+            );
+            if (updated.rowCount) {
+              result.failed += 1;
+              console.log(`[payments] expired ${row.id} (gateway not found)`);
+            } else {
+              result.skipped += 1;
+            }
+          } else {
+            result.skipped += 1;
+          }
         } else {
           const parsed = parsePesepayStatus(check.status);
           if (parsed.state === 'completed') {
@@ -2071,6 +2176,24 @@ export async function reconcilePendingPaymentsOnce(): Promise<PaymentReconcileRe
               if (parsed.state === 'failed') result.failed += 1;
               else result.refunded += 1;
               console.log(`[payments] reconciled ${row.id} -> ${parsed.state} (${parsed.label})`);
+            } else {
+              result.skipped += 1;
+            }
+          } else if (expired) {
+            // Gateway still reports pending after the payment window: close it
+            // locally so the portal and reporting do not hang indefinitely.
+            const updated = await pool.query(
+              `UPDATE payments SET status = 'failed', error_message = $2
+                WHERE id = $1 AND status = 'pending'`,
+              [
+                row.id,
+                `Payment window expired after ${PAYMENT_EXPIRY_MIN} minutes without confirmation ` +
+                  `(gateway: ${parsed.label}). If EcoCash deducted you, contact support with reference ${row.pesepay_reference}.`,
+              ]
+            );
+            if (updated.rowCount) {
+              result.failed += 1;
+              console.log(`[payments] expired ${row.id} after ${PAYMENT_EXPIRY_MIN}m (gateway ${parsed.label})`);
             } else {
               result.skipped += 1;
             }
