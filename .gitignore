@@ -113,3 +113,11 @@ bus-ticket-app/.dart_tool/
 bus-ticket-app/android/.gradle/
 bus-ticket-app/android/app/build/
 bus-ticket-app/android/local.properties
+
+# Deployment / ops artifacts (never source)
+backups/
+*.bak
+*.bak-*
+*.tgz
+dist.rollback*/
+*.rollback-*
