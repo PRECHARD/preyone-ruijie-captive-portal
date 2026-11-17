@@ -2427,16 +2427,18 @@ adminRouter.get('/staff/stats', async (req: Request, res: Response) => {
 const HANDOVER_EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
 /**
- * Who receives a handover email. Both sides are ALWAYS notified:
+ * Who receives a handover email. Exactly two audiences, never a staff blast:
  *  - every approved CEO/Manager account (the reviewers), and
- *  - the staff member involved (submitter confirmation / decision recipient).
+ *  - ONLY the one staff member the handover belongs to (the submitter on
+ *    submit; the handover's owner on approve/reject).
  *
- * CASH_HANDOVER_RECIPIENTS is additive, never a replacement, so an extra
- * mailbox (e.g. accounts@) can be copied without dropping the managers.
+ * Other staff accounts are never included. CASH_HANDOVER_RECIPIENTS is
+ * additive, so an extra mailbox (e.g. accounts@) can be copied without
+ * dropping the managers or widening the staff audience.
  * Falls back to admin@preyone.com so a production with no manager account
  * still notifies someone.
  */
-async function cashHandoverRecipients(staffEmail?: string | null): Promise<string[]> {
+export async function cashHandoverRecipients(relatedStaffEmail?: string | null): Promise<string[]> {
   const out = new Set<string>();
 
   // Management reviewers (CEO + Manager) are always included.
@@ -2461,9 +2463,9 @@ async function cashHandoverRecipients(staffEmail?: string | null): Promise<strin
     .filter((email) => HANDOVER_EMAIL_RE.test(email));
   for (const email of configured) out.add(email);
 
-  // The staff member involved always gets a copy.
-  if (staffEmail && HANDOVER_EMAIL_RE.test(staffEmail.trim().toLowerCase())) {
-    out.add(staffEmail.trim().toLowerCase());
+  // Only the staff member this handover belongs to gets the staff copy.
+  if (relatedStaffEmail && HANDOVER_EMAIL_RE.test(relatedStaffEmail.trim().toLowerCase())) {
+    out.add(relatedStaffEmail.trim().toLowerCase());
   }
 
   if (out.size === 0) out.add('admin@preyone.com');
@@ -3377,9 +3379,11 @@ adminRouter.delete('/devices/:id', requireRole('CEO'), async (req: Request, res:
 adminRouter.get('/dashboard/ultranet/sales-summary', async (req: Request, res: Response) => {
   try {
     const user = req.adminUser!;
-    const isStaff = user.role === 'Staff';
+    // "My Sales (Today)" is personal for every role — Staff, Manager and CEO
+    // all sell vouchers, so the card must reflect the signed-in user's own
+    // vouchers rather than being pinned to 0 for supervisors.
     const [mySales, platformDaily, platformYesterday, weekly, monthly, target, matrix, velocity, activity] = await Promise.all([
-      isStaff ? getStaffDailyRevenue(user.id) : Promise.resolve(0),
+      getStaffDailyRevenue(user.id),
       getPlatformDailyRevenue(),
       getPlatformYesterdayRevenue(),
       getPlatformWeeklyRevenue(),
@@ -3389,8 +3393,9 @@ adminRouter.get('/dashboard/ultranet/sales-summary', async (req: Request, res: R
       getHourlySalesVelocity(1),
       getRecentActivity(20),
     ]);
+    // Package breakdown: Staff see their own, supervisors see the team's.
     const [itemized] = await Promise.all([
-      isStaff ? getStaffDailySalesItemized(user.id) : getPlatformDailySalesItemized(),
+      user.role === 'Staff' ? getStaffDailySalesItemized(user.id) : getPlatformDailySalesItemized(),
     ]);
     res.json({ mySales, platformDaily, platformYesterday, weekly, monthly, target, matrix, velocity, activity, itemized });
   } catch (e: any) {
