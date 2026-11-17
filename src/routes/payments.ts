@@ -44,6 +44,21 @@ const VALID_TRANSITIONS: Record<string, string[]> = {
   refunded: [],
 };
 
+// Marker written when WE closed a checkout on the payment window (never when the
+// gateway itself reported a failure). A row carrying it may still be completed
+// if the gateway later confirms the money: the customer was charged, so the
+// voucher must be delivered even though the portal already showed a timeout.
+const LOCAL_EXPIRY_PREFIX = 'Payment window expired';
+
+function isLocallyExpired(pay: { status?: string | null; error_message?: string | null }): boolean {
+  return pay.status === 'failed' && String(pay.error_message ?? '').startsWith(LOCAL_EXPIRY_PREFIX);
+}
+
+/** Gateway-confirmed success may complete a pending row, or one we expired locally. */
+function canComplete(pay: { status?: string | null; error_message?: string | null }): boolean {
+  return VALID_TRANSITIONS[String(pay.status)]?.includes('completed') || isLocallyExpired(pay);
+}
+
 export const paymentsRouter = Router();
 
 // Throttle gateway reconciliation per payment while the portal polls /status:
@@ -372,9 +387,17 @@ async function completePayment(paymentId: string): Promise<string> {
       throw new Error('Payment already completed but no voucher code recorded');
     }
 
-    if (!VALID_TRANSITIONS[pay.status]?.includes('completed')) {
+    if (!canComplete(pay)) {
       await client.query('ROLLBACK');
       throw new Error(`Payment cannot be completed from status '${pay.status}'`);
+    }
+    if (isLocallyExpired(pay)) {
+      // Late approval after our local timeout: honour the money and raise it
+      // for finance review instead of silently keeping the customer's cash.
+      console.warn(
+        `[payments] gateway confirmed locally expired payment ${paymentId} ` +
+          `(${pay.pesepay_reference ?? 'no reference'}); completing late`
+      );
     }
 
     // Pick the voucher source. Ruijie Cloud is the network's single source of
@@ -739,7 +762,7 @@ paymentsRouter.post('/webhook', async (req: Request, res: Response) => {
   }
 
   const { rows } = await pool.query(
-    `SELECT p.id, p.status, p.voucher_code, p.amount, p.currency, p.phone_number, p.webhook_token
+    `SELECT p.id, p.status, p.voucher_code, p.amount, p.currency, p.phone_number, p.webhook_token, p.error_message
      FROM payments p
      WHERE p.merchant_reference = $1
      LIMIT 1`,
@@ -779,7 +802,7 @@ paymentsRouter.post('/webhook', async (req: Request, res: Response) => {
   }
 
   if (parsed.state === 'completed') {
-    if (!VALID_TRANSITIONS[pay.status]?.includes('completed')) {
+    if (!canComplete(pay)) {
       res.json({ status: 'ok', state: pay.status });
       return;
     }

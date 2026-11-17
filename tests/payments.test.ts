@@ -417,6 +417,69 @@ describe('Payments routes', () => {
       expect(res.body.voucherCode).toBe('CT-TESTCODE1');
     });
 
+    it('completes a payment we expired locally when the gateway later confirms success', async () => {
+      (decryptResponse as any).mockReturnValue({
+        merchantReference: 'REF-LATE',
+        transactionStatus: 'SUCCESS',
+        amount: 10,
+      });
+
+      (pool.query as any).mockResolvedValueOnce({
+        rows: [
+          {
+            id: 'pay-late',
+            status: 'failed',
+            voucher_code: null,
+            amount: 10,
+            webhook_token: null,
+            error_message: 'Payment window expired after 15 minutes without confirmation.',
+          },
+        ],
+      });
+
+      const client = await (pool as any).connect();
+      client.query
+        .mockResolvedValueOnce(undefined)                                    // 1: BEGIN
+        .mockResolvedValueOnce({
+          rows: [
+            {
+              id: 'pay-late',
+              user_id: 'user-1',
+              tier_name: 'PreLITE',
+              amount: 10,
+              currency: 'USD',
+              payment_method: 'EcoCash (Pesepay)',
+              status: 'failed',
+              error_message: 'Payment window expired after 15 minutes without confirmation.',
+              duration_min: 1440,
+              data_limit_gb: 100,
+              is_uncapped: false,
+              bandwidth_mbps_up: 10,
+              bandwidth_mbps_down: 10,
+              max_devices: 1,
+            },
+          ],
+        })                                                                   // 2: SELECT payment FOR UPDATE
+        .mockResolvedValueOnce(undefined)                                    // 3: SAVEPOINT mint_voucher
+        .mockResolvedValueOnce({ rows: [{ id: 'v-late', code: 'CT-LATECODE1' }] }) // 4: INSERT INTO vouchers
+        .mockResolvedValueOnce(undefined)                                    // 5: RELEASE SAVEPOINT
+        .mockResolvedValueOnce({ rows: [{ completed_at: new Date('2026-11-17T00:00:00Z') }] }) // 6: UPDATE payments RETURNING
+        .mockResolvedValueOnce(undefined)                                    // 7: INSERT INTO transactions
+        .mockResolvedValueOnce({ rows: [] })                                 // 8: resolveOnlineSaleOwner (CEO lookup)
+        .mockResolvedValueOnce({ rows: [] })                                 // 9: INSERT INTO vouchers (sale accounting)
+        .mockResolvedValueOnce({ rows: [] })                                 // 10: UPDATE vouchers SET sold_by
+        .mockResolvedValueOnce({ rows: [] })                                 // 11: INSERT INTO sales
+        .mockResolvedValueOnce(undefined);                                   // 12: COMMIT
+
+      const res = await request(createApp())
+        .post('/api/payments/webhook')
+        .send({ payload: 'encrypted-string' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.state).toBe('completed');
+      expect(res.body.voucherCode).toBe('CT-LATECODE1');
+    });
+
     it('marks a gateway failure as failed without minting a voucher', async () => {
       (decryptResponse as any).mockReturnValue({
         merchantReference: 'REF-002',
