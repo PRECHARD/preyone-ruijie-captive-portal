@@ -22,6 +22,7 @@ import { transitRouter } from './routes/transit';
 import { transitWebRouter } from './routes/transitWeb';
 import { systemAdminRouter } from './routes/systemAdmin';
 import { starlinkRouter } from './routes/starlink';
+import { starlinkAdminRouter } from './routes/starlinkAdmin';
 import { homeAutomateRouter } from './routes/homeautomate';
 import { marketingRouter } from './routes/marketing';
 import { ruijieRouter } from './routes/ruijie';
@@ -46,6 +47,7 @@ import { scheduleAccessLogCleanup } from './services/accessLogCleanup';
 import { scheduleHandoverReminders } from './services/handoverReminder';
 import { attachHomeAutomationSocket } from './services/iotHub';
 import { scheduleSubscriptionCron } from './jobs/subscriptionCron';
+import { scheduleStarlinkRenewals } from './jobs/starlinkRenewals';
 import {
   adminApiRateLimit,
   apiRateLimit,
@@ -603,6 +605,7 @@ app.use('/api/alerts', alertsRouter);
 app.use('/api/check-usage', usageRouter);
 app.use('/api/admin/voucher-analytics', voucherAnalyticsRouter);
 app.use('/api/admin/reports', reportsRouter);
+app.use('/api/admin/starlink', starlinkAdminRouter);
 app.use('/api/starlink', starlinkRouter);
 // Home automation (homeautomate.preyone.com): device CRUD, telemetry, triggers
 // and the StarLink uptime feed. The live push channel is the WebSocket upgrade
@@ -769,6 +772,11 @@ server.listen(PORT, () => {
   if (process.env.ENABLE_SUBSCRIPTION_CRON !== 'false') {
     scheduleSubscriptionCron();
     console.log('Subscription dunning scheduled daily at midnight.');
+  }
+
+  // Starlink plan renewals: issue renewal invoices 3 days before each due date.
+  if (process.env.ENABLE_SUBSCRIPTION_CRON !== 'false') {
+    scheduleStarlinkRenewals();
   }
 });
 

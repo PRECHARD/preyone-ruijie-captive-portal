@@ -30,6 +30,7 @@
   text-decoration: none;
   white-space: nowrap;
   flex-shrink: 0;
+  cursor: pointer;
   transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
 .navbar-portal:hover {

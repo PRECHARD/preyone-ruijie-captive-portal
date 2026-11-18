@@ -16,12 +16,27 @@ Ruijie captive portal system for Preyone UltraNet Wi-Fi. Voucher-based internet 
 - **Invoice system** (`invoice.preyone.com`)
 - **POS** (`pos.preyone.com`, `pos/` SPA, thermal printing, till)
 
+### Starlink Customer Portal — UNLOCKED (2026-11-17)
+
+- The Starlink customer portal (`starlink.preyone.com`, `/starlink/*`) is unlocked for a full revamp.
+  Scope: `admin/src/starlink/*`, `admin/src/styles/StarlinkPortal.css`, `src/routes/starlink.ts`,
+  `src/db/starlink.ts`, and the `/api/starlink/*` backend.
+- Keep the dark neon Starlink palette (cyan `#00e5ff` / purple `#a855f7`).
+- Packages (USD, monthly, source of truth `src/plans/starlinkPlans.ts`): Residential Lite $45,
+  Residential Standard $65, Residential $77, Business Priority Lite $110, Business Priority $135,
+  Business Priority Plus $235.
+- Customer-facing copy must never name the payment gateway. Use "Preyone Payment". Internal identifiers
+  and API paths (`/api/payments/pese/checkout`, `pese_reference`) are not user-visible copy.
+- Payments use the same Pesepay gateway as the WiFi portal, with EcoCash, InnBucks and Omari.
+- Still frozen: admin auth screens, sign-in/sign-up/2FA, and `Login.css`.
+
 ### Credentials (prod)
 - **Web POS** `https://pos.preyone.com` — Prechard Muvirimi PIN `2468`; Lesly `1122`; Praise `3344`.
 - **Invoice** `https://invoice.preyone.com` — `admin@preyone.com` / `Preyone2026!`.
 
 ### Host routing (`src/index.ts`)
-- `admin.preyone.com` / `starlink.preyone.com` → `admin/dist` (LOCKED)
+- `admin.preyone.com` → `admin/dist` (LOCKED)
+- `starlink.preyone.com` → `admin/dist` Starlink portal (UNLOCKED, see Starlink section)
 - `app.preyone.com` → `app/dist` gateway (LOCKED)
 - `pos.preyone.com` → `pos/dist` (POS till SPA — ACTIVE)
 - `invoice.preyone.com` → invoice app (ACTIVE)

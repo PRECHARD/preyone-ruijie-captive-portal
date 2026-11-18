@@ -29,6 +29,7 @@ import AuditLog from './pages/AuditLog';
 import Backup from './pages/Backup';
 import Settings from './pages/Settings';
 import GlobalSettingsHub from './pages/GlobalSettingsHub';
+import StarlinkAdmin from './pages/StarlinkAdmin';
 import SystemHealth from './pages/SystemHealth';
 import Tenants from './pages/Tenants';
 import GlobalRevenue from './pages/GlobalRevenue';
@@ -85,6 +86,7 @@ const sectionRoles: Record<string, string[]> = {
   'pos-devices': ['Manager', 'CEO'],
   'pos-company': ['CEO'],
   accounting: ['CEO', 'Manager', 'Cashier'],
+  starlink: ['Manager', 'CEO'],
 };
 
 /** Platform (Level 0) sections — CEO operators with no company binding only. */
@@ -301,6 +303,7 @@ export default function App() {
       {safeSection === 'pos-devices' && <PosDevices />}
       {safeSection === 'pos-company' && <PosCompanyProfile />}
       {safeSection === 'accounting' && <Accounting />}
+      {safeSection === 'starlink' && <StarlinkAdmin />}
       </Layout>
     </>
   );

@@ -5,8 +5,11 @@ import crypto from 'crypto';
 import rateLimit from 'express-rate-limit';
 import { pool } from '../db/pool';
 import { requireStarlinkAuth } from '../middleware/starlinkAuth';
-import { sendStarlinkPasswordReset } from '../services/notificationService';
+import { sendStarlinkPasswordReset, sendStarlinkVerificationEmail } from '../services/notificationService';
+import { starlinkBaseUrl } from '../services/starlinkEmailTemplates';
 import { formatZimPhone } from '../utils/phone';
+import { STARLINK_PLANS } from '../plans/starlinkPlans';
+import { submitPlanApplication, PlanApplicationError } from '../services/starlinkPlanApplications';
 import {
   createStarlinkCustomer,
   findStarlinkCustomerByIdentifier,
@@ -15,6 +18,8 @@ import {
   updateStarlinkPassword,
   setStarlinkResetToken,
   consumeStarlinkResetToken,
+  setStarlinkVerificationToken,
+  consumeStarlinkVerificationToken,
   listStarlinkKits,
   getStarlinkKit,
   registerStarlinkKit,
@@ -22,6 +27,7 @@ import {
   getKitUsageHistory,
   listStarlinkInvoices,
   getStarlinkInvoice,
+  listPlanApplications,
   getBalanceDue,
 } from '../db/starlink';
 
@@ -41,19 +47,43 @@ function signCustomerToken(id: string): string {
   return jwt.sign({ id, type: 'starlink-customer' }, JWT_SECRET, { algorithm: 'HS256', expiresIn: '7d' });
 }
 
-function publicCustomer(c: { id: string; full_name: string; email: string; phone: string; wallet_balance: unknown; created_at: unknown }) {
+const VERIFY_TTL_MS = 24 * 60 * 60 * 1000;
+
+function hashToken(raw: string): string {
+  return crypto.createHash('sha256').update(raw).digest('hex');
+}
+
+/** Issues a fresh 24-hour verification token and emails the link. Only the hash is stored. */
+async function issueEmailVerification(customer: { id: string; email: string; full_name: string }): Promise<void> {
+  const raw = crypto.randomBytes(32).toString('hex');
+  await setStarlinkVerificationToken(customer.id, hashToken(raw), new Date(Date.now() + VERIFY_TTL_MS));
+  const verifyUrl = `${starlinkBaseUrl()}/api/starlink/auth/verify-email?token=${raw}`;
+  const sent = await sendStarlinkVerificationEmail(customer.email, customer.full_name, verifyUrl);
+  if (!sent) console.error('Starlink verification email not delivered to', customer.email);
+}
+
+function publicCustomer(c: { id: string; full_name: string; email: string; phone: string; wallet_balance: unknown; plan_code?: string | null; email_verified_at?: unknown; created_at: unknown }) {
   return {
     id: c.id,
     fullName: c.full_name,
     email: c.email,
     phone: c.phone,
     walletBalance: Number(c.wallet_balance ?? 0),
+    planCode: c.plan_code ?? null,
+    emailVerified: Boolean(c.email_verified_at),
     createdAt: c.created_at,
   };
 }
 
 const PHONE_LIKE = /^[+0-9()\s-]{7,20}$/;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// ---------------------------------------------------------------------------
+// GET /api/starlink/plans — public catalog (USD / month)
+// ---------------------------------------------------------------------------
+starlinkRouter.get('/plans', (_req: Request, res: Response) => {
+  res.json({ plans: STARLINK_PLANS });
+});
 
 // ---------------------------------------------------------------------------
 // POST /api/starlink/auth/signup
@@ -69,7 +99,7 @@ starlinkRouter.post('/auth/signup', authLimiter, async (req: Request, res: Respo
     if (!fullName || fullName.length < 2) { res.status(400).json({ error: 'Full name is required' }); return; }
     if (!EMAIL_RE.test(email)) { res.status(400).json({ error: 'A valid email address is required' }); return; }
     const phone = formatZimPhone(phoneRaw);
-    if (!phone || !PHONE_LIKE.test(phone)) { res.status(400).json({ error: 'A valid phone number is required for Pese billing alerts' }); return; }
+    if (!phone || !PHONE_LIKE.test(phone)) { res.status(400).json({ error: 'A valid phone number is required for payment alerts' }); return; }
     if (password.length < 8) { res.status(400).json({ error: 'Password must be at least 8 characters' }); return; }
 
     const existing = await findStarlinkCustomerByIdentifier(email);
@@ -77,6 +107,7 @@ starlinkRouter.post('/auth/signup', authLimiter, async (req: Request, res: Respo
 
     const passwordHash = await bcrypt.hash(password, 10);
     const customer = await createStarlinkCustomer({ fullName, email, phone, passwordHash, kitSerial });
+    issueEmailVerification(customer).catch((err) => console.error('Starlink verification issue failed:', err));
     res.status(201).json({ token: signCustomerToken(customer.id), customer: publicCustomer(customer) });
   } catch (err: any) {
     if (err?.code === '23505') { res.status(409).json({ error: 'An account with this email already exists' }); return; }
@@ -145,6 +176,38 @@ starlinkRouter.post('/auth/reset-password', authLimiter, async (req: Request, re
   } catch (err) {
     console.error('Starlink reset-password error:', err);
     res.status(500).json({ error: 'Could not reset the password' });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/starlink/auth/verify-email?token=…  (link from the welcome email)
+// ---------------------------------------------------------------------------
+starlinkRouter.get('/auth/verify-email', async (req: Request, res: Response) => {
+  const raw = typeof req.query.token === 'string' ? req.query.token.trim() : '';
+  const base = starlinkBaseUrl();
+  if (!/^[a-f0-9]{64}$/.test(raw)) { res.redirect(`${base}/starlink/auth?mode=verify-error`); return; }
+  try {
+    const customer = await consumeStarlinkVerificationToken(hashToken(raw));
+    if (!customer) { res.redirect(`${base}/starlink/auth?mode=verify-error`); return; }
+    res.redirect(`${base}/starlink/auth?mode=verified`);
+  } catch (err) {
+    console.error('Starlink verify-email error:', err);
+    res.redirect(`${base}/starlink/auth?mode=verify-error`);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/starlink/auth/resend-verification
+// ---------------------------------------------------------------------------
+starlinkRouter.post('/auth/resend-verification', authLimiter, requireStarlinkAuth, async (req: Request, res: Response) => {
+  try {
+    const customer = req.starlinkCustomer!;
+    if (customer.email_verified_at) { res.status(400).json({ error: 'Your email is already verified' }); return; }
+    await issueEmailVerification(customer);
+    res.json({ message: `A new verification link was sent to ${customer.email}.` });
+  } catch (err) {
+    console.error('Starlink resend-verification error:', err);
+    res.status(500).json({ error: 'Could not send the verification email' });
   }
 });
 
@@ -228,6 +291,25 @@ starlinkRouter.get('/dashboard', requireStarlinkAuth, async (req: Request, res: 
   } catch (err) {
     console.error('Starlink dashboard error:', err);
     res.status(500).json({ error: 'Could not load dashboard' });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Plan switch applications
+// ---------------------------------------------------------------------------
+starlinkRouter.get('/plan-applications', requireStarlinkAuth, async (req: Request, res: Response) => {
+  const applications = await listPlanApplications(req.starlinkCustomer!.id);
+  res.json({ applications });
+});
+
+starlinkRouter.post('/plan-applications', requireStarlinkAuth, async (req: Request, res: Response) => {
+  try {
+    const application = await submitPlanApplication(req.starlinkCustomer!, String(req.body?.planCode ?? ''));
+    res.status(201).json({ application });
+  } catch (err) {
+    if (err instanceof PlanApplicationError) { res.status(err.status).json({ error: err.message }); return; }
+    console.error('Starlink plan application error:', err);
+    res.status(500).json({ error: 'Could not submit your application' });
   }
 });
 

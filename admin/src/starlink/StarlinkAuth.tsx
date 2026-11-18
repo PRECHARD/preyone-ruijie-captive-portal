@@ -1,8 +1,9 @@
 import { useState, type FormEvent } from 'react';
 import {
-  FiCheck, FiLock, FiMail, FiPhone, FiRadio, FiShield, FiUser, FiWifi,
+  FiCheck, FiLock, FiMail, FiPhone, FiRadio, FiShield, FiUser, FiUserPlus, FiWifi,
 } from 'react-icons/fi';
 import { sfetch, setToken, ApiError } from './api';
+import SlFooter from './SlFooter';
 
 type View = 'signin' | 'signup' | 'forgot' | 'reset';
 
@@ -20,7 +21,11 @@ export default function StarlinkAuth({
   onAuthed: () => void;
 }) {
   const [view, setView] = useState<View>(resetToken ? 'reset' : initialView);
-  const [error, setError] = useState('');
+  const [error, setError] = useState(() =>
+    new URLSearchParams(window.location.search).get('mode') === 'verify-error'
+      ? 'This verification link is invalid or has expired. Sign in and request a new one from your dashboard.'
+      : ''
+  );
   const [info, setInfo] = useState(verified ? 'Email verified. Sign in to continue.' : '');
   const [busy, setBusy] = useState(false);
 
@@ -105,13 +110,15 @@ export default function StarlinkAuth({
           : 'Enter a new password for your account.';
 
   return (
+    <>
     <div className="sp-root sp-auth">
       {/* ── Brand panel ── */}
       <aside className="sp-auth-brand">
         <div>
+          <img src="/images/preyone-logo-starlink.png" alt="Preyone" className="sp-auth-logo" />
           <span className="sp-badge">
             <span className="sp-badge-dot" />
-            Preyone · Starlink Portal
+            Starlink Portal
           </span>
           <h1 className="sp-auth-title">
             Your satellite
@@ -129,7 +136,7 @@ export default function StarlinkAuth({
             </li>
             <li>
               <FiLock />
-              <span><b>Pay with Pese</b> — EcoCash, InnBucks and Omari, settled in USD.</span>
+              <span><b>Pay with Preyone Payment</b> — EcoCash, InnBucks and Omari, settled in USD.</span>
             </li>
             <li>
               <FiRadio />
@@ -228,7 +235,7 @@ export default function StarlinkAuth({
                 </div>
               </div>
               <div className="sp-field">
-                <label htmlFor="sl-phone">Phone (Pese billing alerts)</label>
+                <label htmlFor="sl-phone">Phone (payment alerts)</label>
                 <div style={{ position: 'relative' }}>
                   <input
                     id="sl-phone"
@@ -326,10 +333,12 @@ export default function StarlinkAuth({
 
           <div className="sp-auth-switch">
             {view === 'signin' && (
-              <>
-                New to Preyone Starlink?{' '}
-                <button type="button" className="sp-link" onClick={() => go('signup')}>Create account</button>
-              </>
+              <div className="sp-create-cta">
+                <span>New to Preyone Starlink?</span>
+                <button type="button" className="sp-btn sp-btn--ghost" onClick={() => go('signup')}>
+                  <FiUserPlus /> Create account
+                </button>
+              </div>
             )}
             {view === 'signup' && (
               <>
@@ -350,5 +359,7 @@ export default function StarlinkAuth({
         </form>
       </main>
     </div>
+    <SlFooter />
+    </>
   );
 }

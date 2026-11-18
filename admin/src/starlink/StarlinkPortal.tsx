@@ -3,14 +3,16 @@ import {
   FiActivity, FiCreditCard, FiDollarSign, FiDownload, FiExternalLink,
   FiGrid, FiHeadphones, FiLogOut, FiMail, FiMessageSquare, FiPackage, FiPhone,
   FiPlus, FiRefreshCw, FiRadio, FiSearch, FiSettings, FiShield,
-  FiWifi, FiX, FiCheck, FiChevronDown, FiLock,
+  FiWifi, FiX, FiCheck, FiChevronDown, FiLock, FiCpu, FiLayers, FiHelpCircle,
 } from 'react-icons/fi';
+import type { IconType } from 'react-icons';
 import {
-  fmtMoney, fmtDate, monthLabel, sfetch, slPaymentStatus, clearToken,
+  fmtMoney, fmtDate, monthLabel, sfetch, slPaymentStatus, clearToken, ApiError,
   SL_TABS, type SlTab, type SlDashboard, type SlCustomer, type SlInvoice,
-  type SlKit, type SlCheckoutResult,
+  type SlKit, type SlCheckoutResult, type SlPlanApplication,
 } from './api';
 import InvoicesView from './InvoicesView';
+import SlFooter from './SlFooter';
 import PeseCheckoutModal, { type CheckoutKind } from './PeseCheckoutModal';
 
 const PENDING_KEY = 'starlink_pending_payment';
@@ -19,37 +21,25 @@ type Toast = { id: number; kind: 'ok' | 'err' | 'info'; title: string; body?: st
 
 type ProfileState = { fullName: string; phone: string };
 
-const PLANS = [
-  {
-    name: 'Residential Standard',
-    price: '$50',
-    cadence: '/ month',
-    perks: ['Unlimited data', 'Standard speeds at home', 'Self-service portal access', 'Pese mobile-money billing'],
-    cta: 'data' as const,
-  },
-  {
-    name: 'Residential Priority',
-    price: '$150',
-    cadence: '/ month',
-    perks: ['Higher speeds in congested areas', 'Unlimited data', 'Priority support queue', 'Ideal for remote work'],
-    cta: 'data' as const,
-  },
-  {
-    name: 'Starlink Business',
-    price: '$250',
-    cadence: '/ month',
-    perks: ['Performance for teams', 'Multi-site kit management', 'Dedicated account contact', 'USD invoicing via Pese'],
-    cta: 'kit' as const,
-  },
-];
+type SlPlan = { code: string; name: string; priceUsd: number; cadence: string; perks: string[] };
+
+const TAB_ICONS: Record<SlTab, IconType> = {
+  Home: FiActivity,
+  Subscriptions: FiLayers,
+  Billing: FiCreditCard,
+  Devices: FiCpu,
+  Orders: FiPackage,
+  Support: FiHeadphones,
+  FAQs: FiHelpCircle,
+};
 
 const FAQS = [
-  { q: 'How do I pay for my Starlink service?', a: 'Use the Wallet Top Up or Data Top Up action on the Home tab. Payments run through the Pese gateway (EcoCash, InnBucks or Omari) and settle in USD — your invoice is marked paid automatically once the payment completes.' },
-  { q: 'What happens after I complete a Pese payment?', a: 'Pese returns you to this portal. We poll the payment status, mark the invoice PAID and credit your wallet, data bundle or kit order — no manual confirmation needed.' },
+  { q: 'How do I pay for my Starlink service?', a: 'Use the Wallet Top Up or Data Top Up action on the Home tab. Payments run through the Preyone Payment gateway (EcoCash, InnBucks or Omari) and settle in USD — your invoice is marked paid automatically once the payment completes.' },
+  { q: 'What happens after I complete a Preyone Payment payment?', a: 'Preyone Payment returns you to this portal. We poll the payment status, mark the invoice PAID and credit your wallet, data bundle or kit order — no manual confirmation needed.' },
   { q: 'How is data usage tracked per kit?', a: 'Each registered kit keeps a rolling four-month history of monthly consumption (GB). Register your kit from the Devices tab with the serial number printed on the box.' },
   { q: 'Can I download invoices for accounting?', a: 'Yes. Open Billing, click View on any invoice for the full document, then Download PDF. The Statement button exports everything on screen as a single account statement PDF.' },
   { q: 'I forgot my password — what now?', a: 'Click "Forgot password" on the sign-in screen. A reset link valid for one hour is emailed to you; open it and choose a new password (minimum 8 characters).' },
-  { q: 'Which payment methods are supported?', a: 'EcoCash, InnBucks and Omari through Pese. All portal prices and balances are shown in USD.' },
+  { q: 'Which payment methods are supported?', a: 'EcoCash, InnBucks and Omari through Preyone Payment. All portal prices and balances are shown in USD.' },
 ];
 
 export default function StarlinkPortal({ onSignOut }: { onSignOut: () => void }) {
@@ -57,9 +47,82 @@ export default function StarlinkPortal({ onSignOut }: { onSignOut: () => void })
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [tab, setTab] = useState<SlTab>('Home');
+  const [plans, setPlans] = useState<SlPlan[]>([]);
+
+  useEffect(() => {
+    fetch('/api/starlink/plans')
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error('plans'))))
+      .then((body: { plans: SlPlan[] }) => setPlans(body.plans))
+      .catch(() => setPlans([]));
+  }, []);
   const [kitId, setKitId] = useState('');
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [checkout, setCheckout] = useState<CheckoutKind | null>(null);
+  const [planTarget] = useState<SlPlan | null>(null);
+  const [renewalPayId, setRenewalPayId] = useState<string | undefined>(undefined);
+  const [planGroup, setPlanGroup] = useState<'residential' | 'business'>('residential');
+  const [switchTarget, setSwitchTarget] = useState<SlPlan | null>(null);
+  const [switchOn, setSwitchOn] = useState(false);
+  const [switchBusy, setSwitchBusy] = useState(false);
+  const [switchError, setSwitchError] = useState('');
+  const [switchDone, setSwitchDone] = useState('');
+  const [applications, setApplications] = useState<SlPlanApplication[]>([]);
+
+  const loadApplications = useCallback(async () => {
+    try {
+      const r = await sfetch<{ applications: SlPlanApplication[] }>('/plan-applications');
+      setApplications(r.applications);
+    } catch {
+      setApplications([]);
+    }
+  }, []);
+
+  const nextMonthLabel = () => {
+    const d = new Date();
+    return new Date(d.getFullYear(), d.getMonth() + 1, 1).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+  };
+
+  const closeSwitch = () => {
+    setSwitchTarget(null);
+    setSwitchOn(false);
+    setSwitchError('');
+    setSwitchDone('');
+  };
+
+  const submitSwitch = async () => {
+    if (!switchTarget || !switchOn) return;
+    setSwitchBusy(true);
+    setSwitchError('');
+    try {
+      await sfetch('/plan-applications', { method: 'POST', body: JSON.stringify({ planCode: switchTarget.code }) });
+      setSwitchDone(nextMonthLabel());
+      await loadApplications();
+    } catch (err) {
+      setSwitchError(err instanceof ApiError ? err.message : 'Could not submit your application. Please try again.');
+    } finally {
+      setSwitchBusy(false);
+    }
+  };
+
+  const [resending, setResending] = useState(false);
+  const [verifyNotice, setVerifyNotice] = useState('');
+
+  const resendVerification = async () => {
+    setResending(true);
+    setVerifyNotice('');
+    try {
+      const r = await sfetch<{ message: string }>('/auth/resend-verification', { method: 'POST' });
+      setVerifyNotice(r.message);
+    } catch (err) {
+      setVerifyNotice(err instanceof ApiError ? err.message : 'Could not send the verification email.');
+    } finally {
+      setResending(false);
+    }
+  };
+  const renewalInvoice = useMemo(
+    () => data?.invoices.find((i) => i.kind === 'plan_renewal' && i.status === 'PENDING') ?? null,
+    [data]
+  );
   const [profileOpen, setProfileOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -144,7 +207,7 @@ export default function StarlinkPortal({ onSignOut }: { onSignOut: () => void })
     else setPaletteQuery('');
   }, [paletteOpen]);
 
-  /* ── pending Pese payment (set before redirect, settled on return) ── */
+  /* ── pending Preyone Payment payment (set before redirect, settled on return) ── */
   useEffect(() => {
     let cancelled = false;
     const raw = (() => { try { return sessionStorage.getItem(PENDING_KEY); } catch { return null; } })();
@@ -189,6 +252,11 @@ export default function StarlinkPortal({ onSignOut }: { onSignOut: () => void })
 
   /* ── derived ── */
   const customer: SlCustomer | null = data?.customer ?? null;
+  const customerId = customer?.id;
+
+  useEffect(() => {
+    if (customerId) loadApplications();
+  }, [customerId, loadApplications]);
   const kits: SlKit[] = useMemo(() => data?.kits ?? [], [data]);
   const invoices: SlInvoice[] = useMemo(() => data?.invoices ?? [], [data]);
   const activeKit = useMemo(() => kits.find((k) => k.id === kitId) || kits[0] || null, [kits, kitId]);
@@ -345,7 +413,7 @@ export default function StarlinkPortal({ onSignOut }: { onSignOut: () => void })
       {/* ── Header ── */}
       <header className="sp-topbar">
         <div className="sp-brand">
-          <img src="/images/preyonenoneglow-logo-zoom.png" alt="Preyone" />
+          <img src="/images/preyone-logo-starlink.png" alt="Preyone" className="sp-logo-img" />
           <span className="sp-brand-txt">
             <b>STARLINK</b>
             <span>Customer Portal</span>
@@ -360,7 +428,8 @@ export default function StarlinkPortal({ onSignOut }: { onSignOut: () => void })
               className={'sp-tab' + (tab === t ? ' is-active' : '')}
               onClick={() => goto(t)}
             >
-              {t}
+              {(() => { const Icon = TAB_ICONS[t]; return <Icon aria-hidden="true" />; })()}
+              <span>{t}</span>
             </button>
           ))}
         </nav>
@@ -421,6 +490,44 @@ export default function StarlinkPortal({ onSignOut }: { onSignOut: () => void })
                 <FiRefreshCw /> Refresh
               </button>
             </div>
+            {customer.emailVerified === false && (
+              <>
+                <div className="sp-alert sp-alert--ok sp-renewal-banner" role="status">
+                  <div>
+                    <b>Verify your email.</b> We sent a confirmation link to {customer.email}. It expires in 24 hours.
+                  </div>
+                  <button type="button" className="sp-btn sp-btn--ghost" disabled={resending} onClick={resendVerification}>
+                    {resending ? 'Sending…' : 'Resend email'}
+                  </button>
+                </div>
+                {verifyNotice && <p className="sp-hint" style={{ margin: '-8px 0 14px' }}>{verifyNotice}</p>}
+              </>
+            )}
+            {!customer.planCode && (
+              <div className="sp-alert sp-alert--ok sp-renewal-banner" role="status">
+                <div>
+                  <b>Welcome to Preyone Starlink.</b> Choose a plan to activate your service.
+                </div>
+                <button type="button" className="sp-btn sp-btn--primary" onClick={() => goto('Subscriptions')}>
+                  View plans
+                </button>
+              </div>
+            )}
+            {renewalInvoice && (
+              <div className="sp-alert sp-alert--ok sp-renewal-banner" role="status">
+                <div>
+                  <b>Plan renewal due</b> — {renewalInvoice.description} for {fmtMoney(Number(renewalInvoice.amount))}
+                  {renewalInvoice.due_date ? ` (renews ${fmtDate(renewalInvoice.due_date)})` : ''}.
+                </div>
+                <button
+                  type="button"
+                  className="sp-btn sp-btn--primary"
+                  onClick={() => { setRenewalPayId(renewalInvoice.id); setCheckout('plan_renewal'); }}
+                >
+                  Pay renewal
+                </button>
+              </div>
+            )}
 
             {/* Wallet & financial overview */}
             <section className="sp-wallet">
@@ -561,7 +668,7 @@ export default function StarlinkPortal({ onSignOut }: { onSignOut: () => void })
               <div className="sp-panel-head">
                 <div>
                   <h3 className="sp-panel-title">Recent Invoices</h3>
-                  <p className="sp-panel-sub">Native Preyone billing · Pese settlement</p>
+                  <p className="sp-panel-sub">Native Preyone billing · Preyone Payment settlement</p>
                 </div>
                 <button type="button" className="sp-icon-btn" onClick={() => goto('Billing')}>
                   <FiExternalLink /> View all
@@ -602,26 +709,101 @@ export default function StarlinkPortal({ onSignOut }: { onSignOut: () => void })
                 <p>Indicative Starlink plans — final quotes confirmed by Preyone support.</p>
               </div>
             </div>
-            <div className="sp-cards">
-              {PLANS.map((p) => (
-                <div className="sp-panel sp-plan" key={p.name}>
-                  <h4>{p.name}</h4>
-                  <div className="sp-plan-price">{p.price}<small>{p.cadence}</small></div>
-                  <ul>
-                    {p.perks.map((perk) => (
-                      <li key={perk}><FiCheck size={14} /> {perk}</li>
-                    ))}
-                  </ul>
+            <section className="sp-panel sp-plans-panel">
+              <div className="sp-panel-head">
+                <div>
+                  <h3 className="sp-panel-title">Service plans</h3>
+                  <p className="sp-panel-sub">Switches start on the 1st of next month, subject to capacity.</p>
+                </div>
+                <div className="sp-seg" role="tablist" aria-label="Plan group">
                   <button
                     type="button"
-                    className="sp-btn sp-btn--primary"
-                    onClick={() => setCheckout(p.cta === 'kit' ? 'kit_purchase' : 'data_topup')}
+                    role="tab"
+                    aria-selected={planGroup === 'residential'}
+                    className={planGroup === 'residential' ? 'is-active' : ''}
+                    onClick={() => setPlanGroup('residential')}
                   >
-                    {p.cta === 'kit' ? 'Order a Kit' : 'Top Up Data'}
+                    Residential
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={planGroup === 'business'}
+                    className={planGroup === 'business' ? 'is-active' : ''}
+                    onClick={() => setPlanGroup('business')}
+                  >
+                    Business
                   </button>
                 </div>
-              ))}
-            </div>
+              </div>
+              <div className="sp-plan-grid">
+                {plans
+                  .filter((p) => (planGroup === 'business') === p.code.startsWith('business'))
+                  .map((p) => {
+                    const isCurrent = customer?.planCode === p.code;
+                    const isPending = applications.some((a) => a.status === 'PENDING' && a.to_plan_code === p.code);
+                    return (
+                      <div className={'sp-panel sp-plan' + (isCurrent ? ' is-current' : '')} key={p.code}>
+                        <div className="sp-plan-top">
+                          <h4>{p.name}</h4>
+                          {isCurrent && <span className="sp-badge-pill sp-badge-pill--paid">Active</span>}
+                        </div>
+                        <div className="sp-plan-price">${p.priceUsd}<small>/ {p.cadence}</small></div>
+                        <ul>
+                          {p.perks.map((perk) => (
+                            <li key={perk}><FiCheck size={14} /> {perk}</li>
+                          ))}
+                        </ul>
+                        {isCurrent ? (
+                          <button type="button" className="sp-btn sp-btn--ghost" disabled>Current package</button>
+                        ) : isPending ? (
+                          <button type="button" className="sp-btn sp-btn--ghost" disabled>Application under review</button>
+                        ) : (
+                          <button
+                            type="button"
+                            className="sp-btn sp-btn--primary"
+                            onClick={() => { setSwitchTarget(p); setSwitchOn(false); setSwitchError(''); setSwitchDone(''); }}
+                          >
+                            Choose plan
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+              </div>
+            </section>
+
+            {applications.length > 0 && (
+              <section className="sp-panel" style={{ marginTop: 16 }}>
+                <div className="sp-panel-head">
+                  <div>
+                    <h3 className="sp-panel-title">Plan applications</h3>
+                    <p className="sp-panel-sub">Status of your plan switch requests</p>
+                  </div>
+                </div>
+                <div className="sp-table-wrap">
+                  <table className="sp-table">
+                    <thead>
+                      <tr><th>Requested package</th><th>Start</th><th>Submitted</th><th>Status</th></tr>
+                    </thead>
+                    <tbody>
+                      {applications.map((a) => (
+                        <tr key={a.id}>
+                          <td><b>{plans.find((p) => p.code === a.to_plan_code)?.name ?? a.to_plan_code}</b></td>
+                          <td className="is-muted">{fmtDate(a.requested_start)}</td>
+                          <td className="is-muted">{fmtDate(a.created_at)}</td>
+                          <td>
+                            <span className={`sp-badge-pill ${a.status === 'APPROVED' ? 'sp-badge-pill--paid' : a.status === 'REJECTED' ? 'sp-badge-pill--failed' : 'sp-badge-pill--pending'}`}>
+                              {a.status === 'PENDING' ? 'Under review' : a.status === 'APPROVED' ? 'Confirmed' : 'Not confirmed'}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            )}
             <section className="sp-panel" style={{ marginTop: 16 }}>
               <div className="sp-panel-head">
                 <div>
@@ -631,7 +813,7 @@ export default function StarlinkPortal({ onSignOut }: { onSignOut: () => void })
               </div>
               <p style={{ color: 'var(--sp-mut)', fontSize: 13.5, margin: 0, lineHeight: 1.7 }}>
                 Every plan on this portal is billed in <b style={{ color: 'var(--sp-cyan)' }}>USD</b> through the
-                Pese gateway (EcoCash, InnBucks, Omari). Data top-ups are credited to the kit you choose at
+                Preyone Payment gateway (EcoCash, InnBucks, Omari). Data top-ups are credited to the kit you choose at
                 checkout, wallet top-ups land in your portal balance, and kit orders are invoiced as
                 SL-numbered Preyone invoices you can download as PDF from the Billing tab.
               </p>
@@ -751,7 +933,7 @@ export default function StarlinkPortal({ onSignOut }: { onSignOut: () => void })
                       <span className="sp-detail-v">{fmtDate(k.created_at)}</span>
                     </div>
                   </div>
-                  <div className="sp-row-actions" style={{ marginTop: 14 }}>
+                  <div className="sp-row-actions sp-kit-actions" style={{ marginTop: 14 }}>
                     <button
                       type="button"
                       className="sp-icon-btn"
@@ -792,7 +974,7 @@ export default function StarlinkPortal({ onSignOut }: { onSignOut: () => void })
               <a className="sp-panel sp-support-card" href="https://wa.me/263771327202" target="_blank" rel="noreferrer">
                 <FiMessageSquare size={22} />
                 <b>WhatsApp</b>
-                <span>Chat with the team · +263 771 327 202</span>
+                <span>Chat with our team</span>
               </a>
               <a className="sp-panel sp-support-card" href="tel:+263771327202">
                 <FiPhone size={22} />
@@ -846,6 +1028,8 @@ export default function StarlinkPortal({ onSignOut }: { onSignOut: () => void })
           </>
         )}
       </main>
+
+      <SlFooter />
 
       {/* ── Search palette ── */}
       {paletteOpen && (
@@ -934,15 +1118,93 @@ export default function StarlinkPortal({ onSignOut }: { onSignOut: () => void })
         </div>
       )}
 
-      {/* ── Pese checkout ── */}
+      {/* ── Preyone Payment checkout ── */}
       {checkout && customer && (
         <PeseCheckoutModal
           customer={customer}
           kits={kits}
           initialKind={checkout}
+          plan={
+            checkout === 'plan_renewal'
+              ? plans.find((p) => p.code === customer.planCode)
+              : checkout === 'plan_change' && planTarget ? planTarget : undefined
+          }
+          invoiceId={checkout === 'plan_renewal' ? renewalPayId : undefined}
           onClose={() => setCheckout(null)}
           onQueued={onQueued}
         />
+      )}
+
+      {switchTarget && (
+        <div className="sp-modal-overlay" role="dialog" aria-modal="true" aria-label={`Switch to ${switchTarget.name}`} onClick={closeSwitch}>
+          <div className="sp-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="sp-modal-head">
+              <h3>{switchDone ? 'Application received' : `Switch to ${switchTarget.name}`}</h3>
+              <button type="button" className="sp-modal-close" onClick={closeSwitch} aria-label="Close">✕</button>
+            </div>
+            <div className="sp-modal-body">
+              {switchDone ? (
+                <div className="sp-alert sp-alert--ok" role="status">
+                  Your application for <b>{switchTarget.name}</b> was received. Your current package stays active until{' '}
+                  <b>{switchDone}</b>. You will receive a confirmation email if there is capacity for this package. A copy has
+                  been sent to your email and to our team.
+                </div>
+              ) : (
+                <>
+                  <div className="sp-summary">
+                    <div>
+                      <div className="sp-summary-k">{switchTarget.name} · ${switchTarget.priceUsd} / month</div>
+                      <div style={{ fontSize: 12, color: 'var(--sp-dim)', marginTop: 4 }}>
+                        Effective from {nextMonthLabel()}
+                      </div>
+                    </div>
+                  </div>
+                  <ul className="sp-switch-perks">
+                    {switchTarget.perks.map((perk) => (
+                      <li key={perk}><FiCheck size={14} /> {perk}</li>
+                    ))}
+                  </ul>
+                  <div className="sp-switch-row">
+                    <div>
+                      <b>Confirm plan switch</b>
+                      <div className="sp-hint">Slide to apply for {switchTarget.name} starting {nextMonthLabel()}.</div>
+                    </div>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={switchOn}
+                      aria-label="Confirm plan switch"
+                      className="sp-switch"
+                      onClick={() => setSwitchOn((v) => !v)}
+                    />
+                  </div>
+                  <p className="sp-hint" style={{ marginTop: 12 }}>
+                    If there is no capacity on this package, we will tell you by email and your current plan stays unchanged.
+                  </p>
+                  {switchError && <div className="sp-alert sp-alert--err" role="alert">{switchError}</div>}
+                </>
+              )}
+            </div>
+            <div className="sp-modal-foot">
+              {switchDone ? (
+                <button type="button" className="sp-btn sp-btn--primary" style={{ width: 'auto' }} onClick={closeSwitch}>Done</button>
+              ) : (
+                <>
+                  <button type="button" className="sp-btn sp-btn--ghost" style={{ width: 'auto' }} onClick={closeSwitch}>Cancel</button>
+                  <button
+                    type="button"
+                    className="sp-btn sp-btn--primary"
+                    style={{ width: 'auto' }}
+                    disabled={!switchOn || switchBusy}
+                    onClick={submitSwitch}
+                  >
+                    {switchBusy ? 'Submitting…' : 'Submit application'}
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
       )}
 
       {/* ── Toasts ── */}

@@ -1,5 +1,6 @@
 import nodemailer from 'nodemailer';
 import { randomUUID } from 'crypto';
+import { buildPasswordResetEmail, buildVerificationEmail, starlinkBaseUrl } from './starlinkEmailTemplates';
 
 let transporter: nodemailer.Transporter | null = null;
 
@@ -56,7 +57,7 @@ function emailFooter(): string {
 }
 
 // ── Generic email helper ──────────────────────────────────────────────
-async function sendMail(to: string, subject: string, html: string, fromName?: string, fromEmail?: string, attachments?: Array<{ filename: string; content: Buffer; cid?: string }>, headers?: Record<string, string>): Promise<boolean> {
+async function sendMail(to: string, subject: string, html: string, fromName?: string, fromEmail?: string, attachments?: Array<{ filename: string; content: Buffer; cid?: string }>, headers?: Record<string, string>, text?: string): Promise<boolean> {
   const t = getTransporter();
   if (!t) {
     console.log('[NOTIFICATION] Email not sent (SMTP not configured). To:', to);
@@ -65,7 +66,7 @@ async function sendMail(to: string, subject: string, html: string, fromName?: st
   const email = fromEmail || process.env.SMTP_FROM || 'info@preyone.com';
   const from = fromName ? `"${fromName}" <${email}>` : email;
   try {
-    await t.sendMail({ from, to, subject, html, attachments, headers });
+    await t.sendMail({ from, to, subject, html, text, attachments, headers });
     console.log('[NOTIFICATION] Email sent to', to, '-', subject);
     return true;
   } catch (err) {
@@ -598,25 +599,22 @@ export async function sendPortalSignupConfirmation(
   );
 }
 
+// Starlink portal: any branded template (customer or admin recipient)
+export async function sendStarlinkEmail(to: string, tpl: { subject: string; html: string; text: string }): Promise<boolean> {
+  return sendMail(to, tpl.subject, tpl.html, 'Preyone Starlink', undefined, undefined, undefined, tpl.text);
+}
+
+// Starlink portal: welcome + email verification (branded template in starlinkEmailTemplates.ts)
+export async function sendStarlinkVerificationEmail(email: string, fullName: string, verifyUrl: string): Promise<boolean> {
+  const tpl = buildVerificationEmail({ fullName, verifyUrl, email });
+  return sendMail(email, tpl.subject, tpl.html, 'Preyone Starlink', undefined, undefined, undefined, tpl.text);
+}
+
 // Starlink portal: customer password reset link (additive � admin/WiFi flows untouched)
 export async function sendStarlinkPasswordReset(email: string, resetToken: string, fullName: string): Promise<boolean> {
-  const baseUrl = process.env.STARLINK_BASE_URL || process.env.BASE_URL || 'https://starlink.preyone.com';
-  const resetUrl = `${baseUrl.replace(/\/$/, '')}/starlink/portal?mode=reset&token=${resetToken}`;
-  return sendMail(
-    email,
-    'Reset Your Preyone Starlink Portal Password',
-    `<div style="font-family:'Segoe UI',Arial,sans-serif;max-width:560px;margin:32px auto;background:#0a0a0a;border-radius:16px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.12),0 0 40px rgba(0,229,255,0.08)">
-      ${emailHeader('Starlink Portal Password Reset')}
-      <div style="padding:24px 32px;text-align:center">
-        <p style="margin:0 0 12px;font-size:15px;color:#cbd5e1;line-height:1.6">Hi <strong style="color:#ffffff">${fullName}</strong>,</p>
-        <p style="margin:0 0 20px;font-size:15px;color:#cbd5e1;line-height:1.6">We received a request to reset your Preyone Starlink Portal password. Click the button below to set a new one. This link expires in <strong style="color:#00e5ff">1 hour</strong>.</p>
-        <a href="${resetUrl}" style="display:inline-block;background:linear-gradient(135deg,#00e5ff,#a855f7);color:#050505;padding:14px 36px;border-radius:8px;text-decoration:none;font-weight:700;font-size:14px;box-shadow:0 4px 20px rgba(0,229,255,0.3)">Reset Password</a>
-        <p style="margin:16px 0 0;font-size:13px;color:#64748b">If you didn't request this, you can safely ignore this email.</p>
-        ${emailFooter()}
-      </div>
-    </div>`,
-    'Preyone Starlink Portal'
-  );
+  const resetUrl = `${starlinkBaseUrl()}/starlink/portal?mode=reset&token=${resetToken}`;
+  const tpl = buildPasswordResetEmail({ fullName, resetUrl, email });
+  return sendMail(email, tpl.subject, tpl.html, 'Preyone Starlink', undefined, undefined, undefined, tpl.text);
 }
 
 // ── Subscription dunning (3-tier SaaS engine) ────────────────────────────

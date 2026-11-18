@@ -25,6 +25,7 @@ import { isRuijieCloudConfigured, findRuijieProfile, mintRuijieVoucherForTier } 
 import { claimPooledVoucher } from '../services/voucherPool';
 import { requireStarlinkAuth } from '../middleware/starlinkAuth';
 import { createStarlinkInvoice, applyStarlinkPayment, getStarlinkKit } from '../db/starlink';
+import { getStarlinkPlan } from '../plans/starlinkPlans';
 import { syncSaleToLedgerAndStock } from '../db/accounting';
 import { canonicalPlanId, syncPlanModules } from '../plans/entitlements';
 
@@ -1976,8 +1977,10 @@ paymentsRouter.post('/pesepay/webhook', async (req: Request, res: Response) => {
 // ===========================================================================
 
 interface StarlinkCheckoutBody {
-  kind: 'wallet_topup' | 'data_topup' | 'kit_purchase';
+  kind: 'wallet_topup' | 'data_topup' | 'kit_purchase' | 'plan_change' | 'plan_renewal';
   amount: number;
+  planCode?: string;
+  invoiceId?: string;
   paymentMethod?: string;
   phone?: string;
   returnUrl?: string;
@@ -1988,7 +1991,8 @@ interface StarlinkCheckoutBody {
   nickname?: string;
 }
 
-const STARLINK_KINDS = ['wallet_topup', 'data_topup', 'kit_purchase'] as const;
+const STARLINK_KINDS = ['wallet_topup', 'data_topup', 'kit_purchase', 'plan_change', 'plan_renewal'] as const;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** Return URLs must stay inside the Preyone ecosystem (open-redirect guard). */
 function safeStarlinkReturnUrl(raw: unknown): string | null {
@@ -2009,7 +2013,7 @@ function safeStarlinkReturnUrl(raw: unknown): string | null {
 }
 
 function starlinkDefaultReturnUrl(): string {
-  const base = process.env.STARLINK_BASE_URL || process.env.BASE_URL || 'https://starlink.preyone.com';
+  const base = process.env.STARLINK_BASE_URL || 'https://starlink.preyone.com';
   return `${base.replace(/\/$/, '')}/starlink/portal`;
 }
 
@@ -2019,11 +2023,33 @@ paymentsRouter.post('/pese/checkout', requireStarlinkAuth, async (req: Request, 
 
   const kind = body.kind;
   if (!STARLINK_KINDS.includes(kind)) {
-    res.status(400).json({ error: 'kind must be wallet_topup, data_topup or kit_purchase' });
+    res.status(400).json({ error: 'kind must be wallet_topup, data_topup, kit_purchase or plan_change' });
     return;
   }
 
-  const amount = Number(body.amount);
+  // Plan changes are priced from the server-side catalog, never from the client.
+  const planTarget = kind === 'plan_change' ? getStarlinkPlan(body.planCode) : null;
+  if (kind === 'plan_change') {
+    if (!planTarget) { res.status(400).json({ error: 'Choose a valid plan' }); return; }
+    if (planTarget.code === customer.plan_code) { res.status(409).json({ error: 'You are already on this plan' }); return; }
+  }
+
+  // A renewal pays the PENDING invoice the renewal job issued — never a new one.
+  let renewalInvoice: { id: string; invoice_number: string; amount: number; meta: Record<string, unknown> } | null = null;
+  if (kind === 'plan_renewal') {
+    const invoiceId = String(body.invoiceId || '');
+    if (!UUID_RE.test(invoiceId)) { res.status(400).json({ error: 'Choose a renewal invoice to pay' }); return; }
+    const { rows } = await pool.query(
+      `SELECT id, invoice_number, amount, meta FROM starlink_invoices
+        WHERE id = $1 AND customer_id = $2 AND kind = 'plan_renewal' AND status = 'PENDING'`,
+      [invoiceId, customer.id]
+    );
+    if (!rows[0]) { res.status(404).json({ error: 'No pending renewal found' }); return; }
+    renewalInvoice = { ...rows[0], amount: Number(rows[0].amount) };
+  }
+
+  const amount = renewalInvoice ? renewalInvoice.amount
+    : planTarget ? planTarget.priceUsd : Number(body.amount);
   if (!Number.isFinite(amount) || amount <= 0) {
     res.status(400).json({ error: 'Enter a valid amount' });
     return;
@@ -2061,6 +2087,12 @@ paymentsRouter.post('/pese/checkout', requireStarlinkAuth, async (req: Request, 
     const nickname = String(body.nickname || '').trim();
     meta = kitNumber ? { kit_number: kitNumber, nickname } : { nickname };
     description = kitNumber ? `Starlink Kit Purchase - ${kitNumber}` : 'Starlink Kit Purchase';
+  } else if (planTarget) {
+    meta = { plan_code: planTarget.code, plan_name: planTarget.name };
+    description = `Starlink ${planTarget.name} plan (monthly)`;
+  } else if (renewalInvoice) {
+    meta = renewalInvoice.meta;
+    description = `Starlink plan renewal ${renewalInvoice.invoice_number}`;
   } else {
     description = 'Starlink Wallet Top-Up';
   }
@@ -2084,7 +2116,7 @@ paymentsRouter.post('/pese/checkout', requireStarlinkAuth, async (req: Request, 
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      const invoice = await createStarlinkInvoice({
+      const invoice = renewalInvoice ?? await createStarlinkInvoice({
         customerId: customer.id,
         amount,
         description,

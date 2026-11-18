@@ -26,15 +26,16 @@ export default function Navbar({ className }: { className?: string }) {
 
   return (
     <div className={'navbar-right' + (className ? ' ' + className : '')} ref={userRef}>
-      <a
+      <button
+        type="button"
         className="navbar-portal"
-        href="/starlink/portal"
-        title="Starlink Customer Portal"
-        aria-label="Open Starlink Customer Portal"
+        onClick={() => window.dispatchEvent(new CustomEvent('app-navigate', { detail: 'starlink' }))}
+        title="Starlink customer management"
+        aria-label="Open Starlink management"
       >
         <FiGlobe aria-hidden="true" />
         <span className="navbar-portal-label">Starlink Portal</span>
-      </a>
+      </button>
       <button
         type="button"
         className="navbar-profile"

@@ -5,7 +5,7 @@ import {
   type SlCheckoutResult, type SlCustomer, type SlKit,
 } from './api';
 
-export type CheckoutKind = 'wallet_topup' | 'data_topup' | 'kit_purchase';
+export type CheckoutKind = 'wallet_topup' | 'data_topup' | 'kit_purchase' | 'plan_change' | 'plan_renewal';
 
 const RAILS = [
   { id: 'ecocash', label: 'EcoCash', hint: 'Mobile money' },
@@ -26,17 +26,24 @@ export default function PeseCheckoutModal({
   customer,
   kits,
   initialKind = 'wallet_topup',
+  plan,
+  invoiceId,
   onClose,
   onQueued,
 }: {
   customer: SlCustomer;
   kits: SlKit[];
   initialKind?: CheckoutKind;
+  plan?: { code: string; name: string; priceUsd: number };
+  invoiceId?: string;
   onClose: () => void;
   onQueued: (result: SlCheckoutResult) => void;
 }) {
   const [kind, setKind] = useState<CheckoutKind>(initialKind);
-  const [amount, setAmount] = useState<string>(initialKind === 'kit_purchase' ? '250' : '');
+  const [amount, setAmount] = useState<string>(
+    (initialKind === 'plan_change' || initialKind === 'plan_renewal') && plan ? String(plan.priceUsd)
+      : initialKind === 'kit_purchase' ? '250' : ''
+  );
   const [rail, setRail] = useState<string>('ecocash');
   const [phone, setPhone] = useState<string>(customer.phone || '');
   const [kitId, setKitId] = useState<string>(kits[0]?.id || '');
@@ -93,12 +100,14 @@ export default function PeseCheckoutModal({
         ...(kind === 'kit_purchase'
           ? { kitNumber: kitNumber.trim(), nickname: nickname.trim() }
           : {}),
+        ...(kind === 'plan_change' && plan ? { planCode: plan.code } : {}),
+        ...(kind === 'plan_renewal' && invoiceId ? { invoiceId } : {}),
       });
 
       if (result.redirectUrl) {
         setRedirecting(result);
         onQueued(result);
-        // Leave to Pese's hosted checkout; they return to returnUrl on completion.
+        // Leave to Preyone Payment's hosted checkout; they return to returnUrl on completion.
         window.setTimeout(() => {
           window.location.href = result.redirectUrl!;
         }, 450);
@@ -114,18 +123,18 @@ export default function PeseCheckoutModal({
 
   if (redirecting) {
     return (
-      <div className="sp-modal-overlay" role="dialog" aria-modal="true" aria-label="Redirecting to Pese">
+      <div className="sp-modal-overlay" role="dialog" aria-modal="true" aria-label="Redirecting to Preyone Payment">
         <div className="sp-modal">
           <div className="sp-modal-body">
             <div className="sp-paying">
               <div className="sp-spinner" aria-hidden="true" />
               <div>
                 <h3 style={{ margin: '0 0 6px', fontFamily: 'var(--font-display)', letterSpacing: '0.06em' }}>
-                  Redirecting to Pese
+                  Redirecting to Preyone Payment
                 </h3>
                 <p style={{ margin: 0, color: 'var(--sp-mut)', fontSize: 13.5 }}>
                   Invoice <b style={{ color: 'var(--sp-cyan)' }}>{redirecting.invoiceNumber}</b> created —
-                  complete payment on the secure Pese checkout.
+                  complete payment on the secure Preyone Payment checkout.
                 </p>
                 <p style={{ margin: '8px 0 0', color: 'var(--sp-dim)', fontSize: 12 }}>
                   Reference {redirecting.referenceNumber}
@@ -140,10 +149,10 @@ export default function PeseCheckoutModal({
   }
 
   return (
-    <div className="sp-modal-overlay" role="dialog" aria-modal="true" aria-label="Pese checkout" onClick={onClose}>
+    <div className="sp-modal-overlay" role="dialog" aria-modal="true" aria-label="Preyone Payment checkout" onClick={onClose}>
       <form className="sp-modal" onClick={(e) => e.stopPropagation()} onSubmit={submit}>
         <div className="sp-modal-head">
-          <h3>Checkout · Pese Payments</h3>
+          <h3>Checkout · Preyone Payment Payments</h3>
           <button type="button" className="sp-modal-close" onClick={onClose} aria-label="Close checkout">✕</button>
         </div>
 
@@ -173,6 +182,18 @@ export default function PeseCheckoutModal({
               <FiPackage size={18} /> Buy Starlink Kit
             </button>
           </div>
+
+          {(kind === 'plan_change' || kind === 'plan_renewal') && plan && (
+            <div className="sp-field">
+              <label>{kind === 'plan_renewal' ? 'Renewal' : 'Plan'}</label>
+              <div className="sp-summary-k" style={{ fontSize: 16 }}>{plan.name}</div>
+              <span className="sp-hint">
+                {kind === 'plan_renewal'
+                  ? `Renews your plan for another month at $${plan.priceUsd}, settled in USD.`
+                  : `Your plan changes once Preyone Payment confirms payment. $${plan.priceUsd} per month, settled in USD.`}
+              </span>
+            </div>
+          )}
 
           {kind === 'wallet_topup' && (
             <>
@@ -318,7 +339,10 @@ export default function PeseCheckoutModal({
               <div className="sp-summary-k">
                 {kind === 'data_topup'
                   ? `${bundle.gb}GB bundle · ${monthLabel(new Date().toISOString())}`
-                  : kind === 'kit_purchase' ? 'Starlink kit purchase' : 'Wallet credit'}
+                  : kind === 'kit_purchase' ? 'Starlink kit purchase'
+                    : kind === 'plan_change' && plan ? `${plan.name} plan · monthly`
+                    : kind === 'plan_renewal' && plan ? `${plan.name} renewal · monthly`
+                      : 'Wallet credit'}
               </div>
               <div style={{ fontSize: 12, color: 'var(--sp-dim)', marginTop: 4 }}>
                 {RAILS.find((r) => r.id === rail)?.label} · settled in USD
@@ -328,14 +352,14 @@ export default function PeseCheckoutModal({
           </div>
 
           <div className="sp-secure">
-            <FiShield /> Secured by Pese — Preyone never stores your card or wallet PIN
+            <FiShield /> Secured by Preyone Payment — Preyone never stores your card or wallet PIN
           </div>
         </div>
 
         <div className="sp-modal-foot">
           <button type="button" className="sp-btn sp-btn--ghost" onClick={onClose} disabled={busy}>Cancel</button>
           <button type="submit" className="sp-btn sp-btn--primary" style={{ width: 'auto' }} disabled={busy}>
-            {busy ? 'Starting…' : `Pay ${fmtMoney(effectiveAmount)} with Pese`}
+            {busy ? 'Starting…' : `Pay ${fmtMoney(effectiveAmount)} with Preyone Payment`}
           </button>
         </div>
       </form>

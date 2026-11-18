@@ -8,6 +8,8 @@ export type SlCustomer = {
   email: string;
   phone: string;
   walletBalance: number;
+  planCode?: string | null;
+  emailVerified?: boolean;
   createdAt: string;
 };
 
@@ -68,7 +70,9 @@ export type SlCheckoutResult = {
 };
 
 export type SlCheckoutBody = {
-  kind: 'wallet_topup' | 'data_topup' | 'kit_purchase';
+  kind: 'wallet_topup' | 'data_topup' | 'kit_purchase' | 'plan_change' | 'plan_renewal';
+  planCode?: string;
+  invoiceId?: string;
   amount: number;
   paymentMethod?: string;
   phone?: string;
@@ -214,6 +218,16 @@ export function monthLabel(month: string): string {
   if (Number.isNaN(d.getTime())) return String(month).slice(0, 7);
   return d.toLocaleDateString('en-GB', { month: 'short' });
 }
+
+export type SlPlanApplication = {
+  id: string;
+  from_plan_code: string | null;
+  to_plan_code: string;
+  requested_start: string;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED' | string;
+  decision_note: string | null;
+  created_at: string;
+};
 
 export const SL_TABS = [
   'Home',

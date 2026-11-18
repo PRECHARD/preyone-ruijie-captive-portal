@@ -25,6 +25,9 @@ export interface StarlinkCustomer {
   password_hash: string;
   company_id: string | null;
   wallet_balance: number;
+  plan_code: string | null;
+  plan_renews_at: string | null;
+  email_verified_at: string | null;
   created_at: string;
 }
 
@@ -84,6 +87,27 @@ const STARLINK_DDL = `
       created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
+    ALTER TABLE starlink_customers ADD COLUMN IF NOT EXISTS plan_code TEXT;
+    ALTER TABLE starlink_customers ADD COLUMN IF NOT EXISTS plan_renews_at DATE;
+    ALTER TABLE starlink_customers ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMPTZ;
+    ALTER TABLE starlink_customers ADD COLUMN IF NOT EXISTS email_verify_token_hash TEXT;
+    ALTER TABLE starlink_customers ADD COLUMN IF NOT EXISTS email_verify_expires_at TIMESTAMPTZ;
+
+    -- Starlink checkouts record their intents as target_type = 'starlink'. The
+    -- original constraint (migrate.ts) predates that rail, so widen it here.
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+         WHERE conname = 'pesepay_intents_target_type_check'
+           AND pg_get_constraintdef(oid) LIKE '%starlink%'
+      ) THEN
+        ALTER TABLE pesepay_intents DROP CONSTRAINT IF EXISTS pesepay_intents_target_type_check;
+        ALTER TABLE pesepay_intents ADD CONSTRAINT pesepay_intents_target_type_check
+          CHECK (target_type IN ('invoice', 'shift', 'subscription', 'starlink'));
+      END IF;
+    END $$;
+
     CREATE UNIQUE INDEX IF NOT EXISTS idx_starlink_customers_email
       ON starlink_customers (lower(email));
     CREATE INDEX IF NOT EXISTS idx_starlink_customers_phone
@@ -140,6 +164,32 @@ const STARLINK_DDL = `
 
     CREATE UNIQUE INDEX IF NOT EXISTS idx_starlink_kit_usage_month
       ON starlink_kit_usage (kit_id, period_month);
+
+    -- Plan switch applications. Submitted by customers, decided by an admin
+    -- against the seat capacity of the requested package.
+    CREATE TABLE IF NOT EXISTS starlink_plan_capacity (
+      plan_code  TEXT PRIMARY KEY,
+      capacity   INTEGER NOT NULL DEFAULT 100,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS starlink_plan_applications (
+      id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      customer_id     UUID NOT NULL REFERENCES starlink_customers(id) ON DELETE CASCADE,
+      from_plan_code  TEXT,
+      to_plan_code    TEXT NOT NULL,
+      requested_start DATE NOT NULL,
+      status          TEXT NOT NULL DEFAULT 'PENDING',
+      decided_at      TIMESTAMPTZ,
+      decided_by      TEXT,
+      decision_note   TEXT,
+      created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_starlink_plan_applications_status
+      ON starlink_plan_applications (status, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_starlink_plan_applications_customer
+      ON starlink_plan_applications (customer_id, created_at DESC);
 `;
 
 /**
@@ -189,7 +239,7 @@ export async function createStarlinkCustomer(input: {
     const { rows } = await client.query(
       `INSERT INTO starlink_customers (full_name, email, phone, password_hash)
        VALUES ($1, lower($2), $3, $4)
-       RETURNING id, full_name, email, phone, password_hash, company_id, wallet_balance, created_at`,
+       RETURNING id, full_name, email, phone, password_hash, company_id, wallet_balance, plan_code, plan_renews_at, email_verified_at, created_at`,
       [input.fullName.trim(), input.email.trim(), input.phone.trim(), input.passwordHash]
     );
     const customer = rows[0] as StarlinkCustomer;
@@ -208,7 +258,7 @@ export async function createStarlinkCustomer(input: {
 
 export async function findStarlinkCustomerByEmail(email: string): Promise<StarlinkCustomer | null> {
   const { rows } = await pool.query(
-    `SELECT id, full_name, email, phone, password_hash, company_id, wallet_balance, created_at
+    `SELECT id, full_name, email, phone, password_hash, company_id, wallet_balance, plan_code, plan_renews_at, email_verified_at, created_at
        FROM starlink_customers WHERE lower(email) = lower($1)`,
     [email.trim()]
   );
@@ -219,7 +269,7 @@ export async function findStarlinkCustomerByEmail(email: string): Promise<Starli
 export async function findStarlinkCustomerByIdentifier(identifier: string): Promise<StarlinkCustomer | null> {
   const v = identifier.trim();
   const { rows } = await pool.query(
-    `SELECT id, full_name, email, phone, password_hash, company_id, wallet_balance, created_at
+    `SELECT id, full_name, email, phone, password_hash, company_id, wallet_balance, plan_code, plan_renews_at, email_verified_at, created_at
        FROM starlink_customers
       WHERE lower(email) = lower($1) OR phone = $1
       LIMIT 1`,
@@ -230,7 +280,7 @@ export async function findStarlinkCustomerByIdentifier(identifier: string): Prom
 
 export async function getStarlinkCustomerById(id: string): Promise<StarlinkCustomer | null> {
   const { rows } = await pool.query(
-    `SELECT id, full_name, email, phone, password_hash, company_id, wallet_balance, created_at
+    `SELECT id, full_name, email, phone, password_hash, company_id, wallet_balance, plan_code, plan_renews_at, email_verified_at, created_at
        FROM starlink_customers WHERE id = $1`,
     [id]
   );
@@ -262,7 +312,7 @@ export async function setStarlinkResetToken(email: string, token: string, expire
     `UPDATE starlink_customers
         SET reset_token = $2, reset_expires_at = $3
       WHERE lower(email) = lower($1)
-      RETURNING id, full_name, email, phone, password_hash, company_id, wallet_balance, created_at`,
+      RETURNING id, full_name, email, phone, password_hash, company_id, wallet_balance, plan_code, plan_renews_at, email_verified_at, created_at`,
     [email.trim(), token, expiresAt]
   );
   return (rows[0] as StarlinkCustomer) ?? null;
@@ -544,7 +594,21 @@ export async function applyStarlinkPayment(
 
   const meta = (inv.meta ?? {}) as Record<string, any>;
 
-  if (inv.kind === 'wallet_topup') {
+  if (inv.kind === 'plan_change' && meta.plan_code) {
+    await client.query(
+      `UPDATE starlink_customers
+          SET plan_code = $2, plan_renews_at = CURRENT_DATE + INTERVAL '30 days'
+        WHERE id = $1`,
+      [inv.customer_id, String(meta.plan_code)]
+    );
+  } else if (inv.kind === 'plan_renewal') {
+    await client.query(
+      `UPDATE starlink_customers
+          SET plan_renews_at = GREATEST(COALESCE(plan_renews_at, CURRENT_DATE), CURRENT_DATE) + INTERVAL '30 days'
+        WHERE id = $1`,
+      [inv.customer_id]
+    );
+  } else if (inv.kind === 'wallet_topup') {
     await client.query(
       'UPDATE starlink_customers SET wallet_balance = wallet_balance + $2 WHERE id = $1',
       [inv.customer_id, inv.amount]
@@ -575,4 +639,86 @@ export async function applyStarlinkPayment(
     walletBalance: Number(bal.rows[0]?.wallet_balance ?? 0),
     alreadyPaid: false,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Email verification (the raw token only ever lives in the email; we store its SHA-256)
+// ---------------------------------------------------------------------------
+
+export async function setStarlinkVerificationToken(customerId: string, tokenHash: string, expiresAt: Date): Promise<void> {
+  await pool.query(
+    `UPDATE starlink_customers
+        SET email_verify_token_hash = $2, email_verify_expires_at = $3
+      WHERE id = $1`,
+    [customerId, tokenHash, expiresAt]
+  );
+}
+
+/** Marks the email verified when the token matches and has not expired. Returns the customer or null. */
+export async function consumeStarlinkVerificationToken(tokenHash: string): Promise<{ id: string; email: string; full_name: string } | null> {
+  const { rows } = await pool.query(
+    `UPDATE starlink_customers
+        SET email_verified_at = COALESCE(email_verified_at, NOW()),
+            email_verify_token_hash = NULL,
+            email_verify_expires_at = NULL
+      WHERE email_verify_token_hash = $1
+        AND email_verify_expires_at > NOW()
+      RETURNING id, email, full_name`,
+    [tokenHash]
+  );
+  return rows[0] ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// Plan switch applications + seat capacity
+// ---------------------------------------------------------------------------
+
+export interface StarlinkPlanApplication {
+  id: string;
+  customer_id: string;
+  from_plan_code: string | null;
+  to_plan_code: string;
+  requested_start: string;
+  status: string;
+  decided_at: string | null;
+  decided_by: string | null;
+  decision_note: string | null;
+  created_at: string;
+}
+
+export const DEFAULT_PLAN_CAPACITY = 100;
+
+/** Seats available for a package = configured capacity minus active subscribers on it. */
+export async function getPlanCapacity(planCode: string, client?: PoolClient): Promise<{ capacity: number; active: number }> {
+  const q = client ?? pool;
+  const { rows } = await q.query(
+    `SELECT COALESCE(
+              (SELECT capacity FROM starlink_plan_capacity WHERE plan_code = $1),
+              $2
+            )::int AS capacity,
+            (SELECT COUNT(*)::int FROM starlink_customers WHERE plan_code = $1) AS active`,
+    [planCode, DEFAULT_PLAN_CAPACITY]
+  );
+  return { capacity: Number(rows[0].capacity), active: Number(rows[0].active) };
+}
+
+export async function getNextMonthStart(): Promise<string> {
+  const { rows } = await pool.query(`SELECT (date_trunc('month', CURRENT_DATE) + INTERVAL '1 month')::date::text AS d`);
+  return rows[0].d;
+}
+
+export async function getOpenPlanApplication(customerId: string): Promise<StarlinkPlanApplication | null> {
+  const { rows } = await pool.query(
+    `SELECT * FROM starlink_plan_applications WHERE customer_id = $1 AND status = 'PENDING' ORDER BY created_at DESC LIMIT 1`,
+    [customerId]
+  );
+  return rows[0] ?? null;
+}
+
+export async function listPlanApplications(customerId: string): Promise<StarlinkPlanApplication[]> {
+  const { rows } = await pool.query(
+    `SELECT * FROM starlink_plan_applications WHERE customer_id = $1 ORDER BY created_at DESC LIMIT 20`,
+    [customerId]
+  );
+  return rows;
 }
