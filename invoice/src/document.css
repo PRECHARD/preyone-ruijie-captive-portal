@@ -89,7 +89,7 @@
   width: 90mm;
   height: 90mm;
   border-radius: 50%;
-  background: radial-gradient(circle at center, color-mix(in srgb, var(--doc-accent, #7a0e57) 12%, transparent), transparent 68%);
+  background: radial-gradient(circle at center, var(--doc-halo, rgba(54, 17, 106, .12)), transparent 68%);
 }
 .a4-sheet::after {
   bottom: -36mm;
@@ -97,7 +97,7 @@
   width: 100mm;
   height: 100mm;
   border-radius: 50%;
-  background: radial-gradient(circle at center, color-mix(in srgb, var(--doc-accent, #300e5f) 10%, transparent), transparent 66%);
+  background: radial-gradient(circle at center, var(--doc-halo-soft, rgba(54, 17, 106, .10)), transparent 66%);
 }
 .a4-sheet > * { position: relative; z-index: 1; }
 
@@ -345,7 +345,7 @@
 .a4-doc.layout-minimal .a4-totals .a4-row.a4-grand { background-image: none; background-color: var(--doc-accent); }
 .a4-doc.layout-minimal .a4-number-bar { background-image: none; background-color: var(--doc-accent); }
 .a4-doc.layout-minimal .a4-thanks { font-weight: 600; letter-spacing: .12em; font-size: 15pt; }
-.a4-doc.layout-minimal .a4-items-table tbody tr:nth-child(odd) td { background-image: none; background-color: color-mix(in srgb, var(--doc-accent) 7%, #fff); }
+.a4-doc.layout-minimal .a4-items-table tbody tr:nth-child(odd) td { background-image: none; background-color: var(--doc-row-soft, #f7f4fc); }
 
 .a4-doc.layout-compact .a4-sheet { font-size: 8.8pt; padding-top: 11mm; }
 .a4-doc.layout-compact .a4-doc-meta { margin-top: 7mm; }

@@ -7,6 +7,7 @@
  * brand header, bill-to / details, ruled item table, totals, payment notes and
  * the footer band.
  */
+import html2canvas from 'html2canvas-pro';
 import { jsPDF } from 'jspdf';
 import type { InvoiceTemplate } from './api';
 import type { SheetCompany, SheetDoc } from './DocumentSheet';
@@ -131,6 +132,13 @@ export interface InvoicePdfInput {
   template?: InvoiceTemplate | null;
   /** Human label for the document type ("Invoice", "Tax Invoice", ...). */
   title?: string;
+  /**
+   * The live `.a4-sheet` element to snapshot. When present the PDF is a
+   * pixel-for-pixel copy of the preview (same fonts, colours, logo, spacing);
+   * the vector renderer below is only a fallback for environments without a
+   * DOM (tests) or if the canvas capture is unavailable.
+   */
+  element?: HTMLElement | null;
 }
 
 /** Build the PDF without saving it (exported for tests/tooling). */
@@ -501,8 +509,116 @@ export async function buildInvoicePdf({ doc, company, template, title }: Invoice
 }
 
 export async function downloadInvoicePdf(input: InvoicePdfInput): Promise<void> {
+  const filename = `${safeFilename(input.doc.number || 'document')}.pdf`;
+  const sheet =
+    input.element ??
+    (document.querySelector('.a4-print-host .a4-sheet') as HTMLElement | null);
+
+  if (sheet) {
+    try {
+      const pdf = await sheetToPdf(sheet);
+      pdf.save(filename);
+      return;
+    } catch (err) {
+      // Canvas capture can fail on locked-down browsers; fall through to the
+      // vector renderer so the download still works.
+      console.warn('[invoice] sheet snapshot failed, using vector fallback', err);
+    }
+  }
+
   const pdf = await buildInvoicePdf(input);
-  pdf.save(`${safeFilename(input.doc.number || 'document')}.pdf`);
+  pdf.save(filename);
+}
+
+/**
+ * Snapshot the exact preview sheet with html2canvas and lay the bitmap over
+ * A4 pages. Rasterising the real DOM is what guarantees the download matches
+ * the on-screen template (gradients, logo, fonts, spacing, footer band).
+ */
+export async function sheetToPdf(sheet: HTMLElement): Promise<jsPDF> {
+  const host = sheet.closest('.a4-print-host') as HTMLElement | null;
+  const previousStyle = host?.getAttribute('style') ?? null;
+
+  if (host) {
+    // `.a4-print-host` is display:none on screen (it only exists for print),
+    // so expose it to layout for the duration of the capture.
+    host.style.display = 'block';
+    host.style.position = 'fixed';
+    host.style.left = '0';
+    host.style.top = '0';
+    host.style.width = '210mm';
+    host.style.zIndex = '-1';
+    host.style.pointerEvents = 'none';
+    host.style.background = '#fff';
+  }
+
+  try {
+    await document.fonts?.ready?.catch(() => undefined);
+    await Promise.all(
+      Array.from(sheet.querySelectorAll('img')).map(
+        (img) =>
+          new Promise<void>((resolve) => {
+            if (img.complete) return resolve();
+            img.addEventListener('load', () => resolve(), { once: true });
+            img.addEventListener('error', () => resolve(), { once: true });
+          })
+      )
+    );
+
+    const width = Math.ceil(sheet.scrollWidth || sheet.getBoundingClientRect().width);
+    const height = Math.ceil(sheet.scrollHeight || sheet.getBoundingClientRect().height);
+
+    const canvas = await html2canvas(sheet, {
+      scale: 2,
+      backgroundColor: '#ffffff',
+      useCORS: true,
+      logging: false,
+      width,
+      height,
+      windowWidth: width,
+      windowHeight: height,
+      scrollX: 0,
+      scrollY: 0,
+    });
+
+    const pdf = new jsPDF({ unit: 'mm', format: 'a4', compress: true });
+    const pageHeightMm = 297;
+    const mmPerPx = PAGE_W / canvas.width;
+    const pageHeightPx = Math.max(1, Math.ceil(pageHeightMm / mmPerPx));
+    let pages = Math.max(1, Math.ceil(canvas.height / pageHeightPx));
+    // A perfect A4 sheet lands one or two pixels over the computed page height;
+    // don't let rounding emit a blank trailing page.
+    if (pages > 1 && canvas.height - (pages - 1) * pageHeightPx <= 2) pages -= 1;
+
+    for (let page = 0; page < pages; page += 1) {
+      if (page > 0) pdf.addPage();
+      const slice = document.createElement('canvas');
+      slice.width = canvas.width;
+      slice.height = Math.min(pageHeightPx, canvas.height - page * pageHeightPx);
+      const ctx = slice.getContext('2d');
+      if (!ctx) throw new Error('Canvas 2D context unavailable');
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, slice.width, slice.height);
+      ctx.drawImage(canvas, 0, -page * pageHeightPx);
+      pdf.addImage(
+        slice.toDataURL('image/jpeg', 0.94),
+        'JPEG',
+        0,
+        0,
+        PAGE_W,
+        slice.height * mmPerPx,
+        undefined,
+        'FAST'
+      );
+    }
+
+    return pdf;
+  } finally {
+    if (host) {
+      if (previousStyle === null) host.removeAttribute('style');
+      else host.setAttribute('style', previousStyle);
+    }
+  }
 }
 
 function isQuoteType(type: string): boolean {

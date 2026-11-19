@@ -125,15 +125,49 @@ export function isLegacyTemplate(template?: InvoiceTemplate | null): boolean {
   return template.id === 1 || String(template.accentColor).toLowerCase() === '#7a0e57';
 }
 
+/** Mix `a` towards `b`; `keep` is the weight of `a` (0..1). */
+function mixHex(a: string, b: string, keep: number): string {
+  const parse = (hex: string): [number, number, number] | null => {
+    const clean = String(hex || '').trim().replace(/^#/, '');
+    const full = clean.length === 3 ? clean.split('').map((c) => c + c).join('') : clean;
+    if (!/^[0-9a-f]{6}$/i.test(full)) return null;
+    return [parseInt(full.slice(0, 2), 16), parseInt(full.slice(2, 4), 16), parseInt(full.slice(4, 6), 16)];
+  };
+  const from = parse(a);
+  const to = parse(b);
+  if (!from || !to) return a;
+  const weight = Math.max(0, Math.min(1, keep));
+  const channel = (i: number) =>
+    Math.round(from[i] * weight + to[i] * (1 - weight))
+      .toString(16)
+      .padStart(2, '0');
+  return `#${channel(0)}${channel(1)}${channel(2)}`;
+}
+
+function rgbaOf(hex: string, alpha: number): string {
+  const clean = String(hex || '').trim().replace(/^#/, '');
+  if (!/^[0-9a-f]{6}$/i.test(clean)) return `rgba(54, 17, 106, ${alpha})`;
+  const r = parseInt(clean.slice(0, 2), 16);
+  const g = parseInt(clean.slice(2, 4), 16);
+  const b = parseInt(clean.slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
 export function templateVars(template?: InvoiceTemplate | null): CSSProperties {
   const accent = template?.accentColor || '#7a0e57';
   const legacy = isLegacyTemplate(template);
   const grad = legacy ? LEGACY_GRADIENT : gradientFromAccent(accent);
+  // Pre-mix the derived tint colours here rather than in CSS: html2canvas
+  // (used by the Download PDF path) cannot evaluate `color-mix()`.
+  const deep = legacy ? '#36116a' : mixHex(accent, '#14002e', 0.72);
   return {
     '--doc-grad': grad,
     '--doc-row-tint': `linear-gradient(rgba(255, 255, 255, .57), rgba(255, 255, 255, .57)), ${grad}`,
-    '--doc-accent': legacy ? '#36116a' : `color-mix(in srgb, ${accent} 72%, #14002e)`,
-    '--doc-thanks': legacy ? '#122b70' : `color-mix(in srgb, ${accent} 55%, #14002e)`,
+    '--doc-accent': deep,
+    '--doc-thanks': legacy ? '#122b70' : mixHex(accent, '#14002e', 0.55),
+    '--doc-halo': rgbaOf(deep, 0.12),
+    '--doc-halo-soft': rgbaOf(deep, 0.1),
+    '--doc-row-soft': mixHex(deep, '#ffffff', 0.07),
   } as CSSProperties;
 }
 

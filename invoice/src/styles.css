@@ -185,17 +185,21 @@ a:focus-visible {
 }
 
 .brand-logo {
-  width: 40px;
-  height: 40px;
+  height: 34px;
+  width: auto;
+  max-width: 148px;
   flex: none;
   object-fit: contain;
-  border-radius: 12px;
-  /* Logos are drawn for white paper, so they get a white plate here too: a
-     dark mark stays legible on the dark rail and the rail matches the invoice. */
-  background: #fff;
-  padding: 4px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3);
+  /* Transparent marks sit straight on the rail — no white plate. The glow is
+     built from the active palette so the logo blends with any theme. */
+  filter: drop-shadow(0 3px 10px rgba(0, 0, 0, 0.45)) drop-shadow(0 0 16px var(--pos-glow));
+  transition: filter 0.3s var(--pos-ease-out), transform 0.3s var(--pos-ease-out);
+}
+.brand:hover .brand-logo { transform: scale(1.03); }
+/* Applied by <Brand> when the uploaded artwork measures too dark to read on
+   the dark rail: pure white silhouette that still carries the theme glow. */
+.brand-logo.tone-lift {
+  filter: brightness(0) invert(1) drop-shadow(0 0 14px var(--pos-glow));
 }
 
 .brand-name {
@@ -2066,7 +2070,21 @@ tbody tr:last-child td { border-bottom: none; }
   animation: sheet-in 0.24s ease both;
 }
 .receipt-head { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #0f172a; padding-bottom: 14px; }
+.receipt-identity { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.receipt-logo {
+  height: 34px;
+  width: auto;
+  max-width: 150px;
+  flex: none;
+  object-fit: contain;
+  /* Receipts are monochrome stationery: force the invoice mark to solid black
+     so it reads on the white paper and survives thermal/greyscale printing. */
+  filter: brightness(0) saturate(100%);
+}
 .receipt-brand { font-size: 22px; font-weight: 800; letter-spacing: 0.12em; color: #0f172a; }
+.receipt-org { min-width: 0; }
+.receipt-org .receipt-brand { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.receipt-org .receipt-muted { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .receipt-muted { font-size: 11px; color: #64748b; margin-top: 2px; }
 .receipt-stamp {
   font-size: 11px;
@@ -2200,6 +2218,9 @@ tbody tr:last-child td { border-bottom: none; }
 /* Print exactly the receipt, never the console behind it. */
 @media print {
   .no-print { display: none !important; }
+  /* A receipt opened from the drawer must print on its own, never with the
+     A4 invoice sheet behind it. */
+  body:has(.receipt-overlay) .a4-print-host { display: none !important; }
   body:has(.receipt-overlay) .app-shell,
   body:has(.receipt-overlay) .overlay:not(.receipt-overlay) { display: none !important; }
   .receipt-overlay { position: static; inset: auto; display: block; padding: 0; background: #fff; backdrop-filter: none; overflow: visible; }

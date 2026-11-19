@@ -922,6 +922,7 @@ function DocumentDrawer({
   const [onlineOpen, setOnlineOpen] = useState(false);
   const [receiptOpen, setReceiptOpen] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
+  const printHostRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
     try {
@@ -999,6 +1000,7 @@ function DocumentDrawer({
         company,
         template,
         title: typeLabel(types, doc.doc_type),
+        element: printHostRef.current?.querySelector<HTMLElement>('.a4-sheet') ?? null,
       });
     } catch (err) {
       setError(errorText(err));
@@ -1193,13 +1195,15 @@ function DocumentDrawer({
         />
       )}
 
-      {receiptOpen && doc && <ReceiptPreview doc={doc} onClose={() => setReceiptOpen(false)} />}
+      {receiptOpen && doc && (
+        <ReceiptPreview doc={doc} company={company} onClose={() => setReceiptOpen(false)} />
+      )}
 
       {/* The same sheet again, portalled straight to <body>, so Print/PDF is
           never clipped by the drawer's scroll container. */}
       {drawerSheet &&
         createPortal(
-          <div className="a4-print-host">
+          <div className="a4-print-host" ref={printHostRef}>
             <DocumentSheet doc={drawerSheet} company={company} template={template} printRoot />
           </div>,
           document.body

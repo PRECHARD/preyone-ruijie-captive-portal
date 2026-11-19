@@ -170,15 +170,62 @@ function clearAuthStorage(): void {
   }
 }
 
+/**
+ * Average luminance of the opaque pixels in a logo, sampled on a canvas.
+ *
+ * The rail is dark, so a dark mark disappears without a white plate. Instead
+ * of guessing from the file name we measure the artwork and only lift it to a
+ * white silhouette when it is genuinely too dark to read. Returns null when
+ * the pixels cannot be inspected (e.g. a cross-origin image).
+ */
+function logoLuminance(img: HTMLImageElement): number | null {
+  try {
+    const width = 64;
+    const height = Math.max(1, Math.round((img.naturalHeight / img.naturalWidth) * width));
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+    ctx.drawImage(img, 0, 0, width, height);
+    const { data } = ctx.getImageData(0, 0, width, height);
+    let sum = 0;
+    let count = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i + 3] < 40) continue;
+      sum += (0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2]) / 255;
+      count += 1;
+    }
+    return count ? sum / count : null;
+  } catch {
+    return null;
+  }
+}
+
 export function Brand({ company }: { company?: Company | null }) {
-  const logo = company?.logo_url || (company?.logo_path ? `/images/${company.logo_path}` : null);
+  // Prefer the workspace logo, then the Preyone house mark. No white plate:
+  // the transparent PNG sits directly on the themed rail and gets a theme
+  // coloured glow, so it blends with whatever palette the merchant picked.
+  const logo =
+    company?.logo_url ||
+    (company?.logo_path ? `/images/${company.logo_path}` : '/images/preyonelogomainzw.png');
+  const [lift, setLift] = useState(false);
+
+  useEffect(() => {
+    setLift(false);
+  }, [logo]);
+
   return (
     <div className="brand">
-      {logo ? (
-        <img className="brand-logo" src={logo} alt={`${company?.name ?? 'Preyone'} logo`} />
-      ) : (
-        <div className="brand-mark">P</div>
-      )}
+      <img
+        className={`brand-logo${lift ? ' tone-lift' : ''}`}
+        src={logo}
+        alt={`${company?.name ?? 'Preyone'} logo`}
+        onLoad={(event) => {
+          const luminance = logoLuminance(event.currentTarget);
+          setLift(luminance !== null && luminance < 0.34);
+        }}
+      />
       <div>
         <div className="brand-name">{company?.name || 'Preyone'}</div>
         <div className="brand-sub">Invoicing</div>

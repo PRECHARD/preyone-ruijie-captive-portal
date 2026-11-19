@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ApiError, api, type DocumentDetail } from './api';
+import { ApiError, api, type Company, type DocumentDetail } from './api';
 
 /**
  * Customer-facing payment surfaces for the invoicing workspace.
@@ -480,14 +480,17 @@ export function OnlinePaymentModal({
 
 export function ReceiptPreview({
   doc,
+  company,
   onClose,
 }: {
   doc: DocumentDetail;
+  company?: Company | null;
   onClose: () => void;
 }) {
   const paid = Number(doc.amount_paid) || 0;
   const balance = Math.max(0, Number(doc.total) - paid);
   const currency = doc.currency || 'USD';
+  const logo = company?.logo_url || (company?.logo_path ? `/images/${company.logo_path}` : null);
 
   return (
     <div className="overlay receipt-overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
@@ -503,9 +506,16 @@ export function ReceiptPreview({
 
         <div className="receipt-paper" id="print-receipt">
           <div className="receipt-head">
-            <div>
-              <div className="receipt-brand">PREYONE</div>
-              <div className="receipt-muted">Connecting People. Powering Business.</div>
+            <div className="receipt-identity">
+              {logo && (
+                <img className="receipt-logo" src={logo} alt={`${company?.name || 'Company'} logo`} />
+              )}
+              <div className="receipt-org">
+                <div className="receipt-brand">{company?.name || 'PREYONE'}</div>
+                <div className="receipt-muted">
+                  {company?.tagline || 'Connecting People. Powering Business.'}
+                </div>
+              </div>
             </div>
             <div className="receipt-stamp">{balance <= 0 ? 'PAID' : 'PART PAID'}</div>
           </div>
