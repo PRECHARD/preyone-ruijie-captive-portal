@@ -756,11 +756,14 @@ router.post('/documents/:id/email', documentEmailLimiter, async (req, res) => {
 </body></html>`;
 
   const filename = `${String(doc.doc_number || 'document').replace(/[^A-Za-z0-9._-]+/g, '-') || 'document'}.pdf`;
+  const rawFrom = String(process.env.SMTP_FROM || '').trim();
+  const fromEmail = /<([^>]+)>/.exec(rawFrom)?.[1] || rawFrom || undefined;
   const sent = await sendTransactionalEmail({
     to,
     subject,
     html,
     fromName: companyName,
+    fromEmail,
     attachments: [{ filename, content: pdf }],
   }).catch(() => false);
 
