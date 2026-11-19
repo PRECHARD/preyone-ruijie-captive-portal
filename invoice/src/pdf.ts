@@ -80,6 +80,22 @@ function safeFilename(name: string): string {
   return plain(name).replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, ' ').trim() || 'document';
 }
 
+function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = window.setTimeout(() => reject(new Error(message)), ms);
+    promise.then(
+      (value) => {
+        window.clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        window.clearTimeout(timer);
+        reject(err);
+      }
+    );
+  });
+}
+
 interface LogoImage {
   dataUrl: string;
   ratio: number;
@@ -603,13 +619,17 @@ export async function sheetToPdf(
     // paints it with the same layout engine as the preview (gradients, layered
     // tints, SVG wordmark, PAID stamp, Poppins), unlike html2canvas which
     // mis-parsed the sheet's multi-layer backgrounds and SVG images.
-    const fontEmbedCSS = await getFontEmbedCSS(sheet).catch(() => '');
-    const canvas = await toCanvas(sheet, {
-      pixelRatio,
-      backgroundColor: '#ffffff',
-      fontEmbedCSS,
-      cacheBust: true,
-    });
+    const fontEmbedCSS = await withTimeout(getFontEmbedCSS(sheet), 10_000, 'timeout').catch(() => '');
+    const canvas = await withTimeout(
+      toCanvas(sheet, {
+        pixelRatio,
+        backgroundColor: '#ffffff',
+        fontEmbedCSS,
+        cacheBust: true,
+      }),
+      45_000,
+      'PDF capture timed out. Try again or use Print / PDF.'
+    );
 
     const pdf = new jsPDF({ unit: 'mm', format: 'a4', compress: true });
     const pageHeightMm = 297;

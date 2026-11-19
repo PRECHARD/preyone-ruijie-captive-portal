@@ -997,17 +997,30 @@ function SendDocumentModal({
     setError(null);
     setStatus(null);
     setBusy(true);
+    // Probe synchronously so the fallback chat tab is opened by the click
+    // itself; browsers block window.open() after an await.
+    let canShareFiles = false;
+    try {
+      canShareFiles = !!navigator.canShare?.({
+        files: [new File([new Blob()], 'probe.pdf', { type: 'application/pdf' })],
+      });
+    } catch {
+      canShareFiles = false;
+    }
+    let chatWindow: Window | null = null;
+    if (!canShareFiles) {
+      try {
+        chatWindow = window.open('about:blank', '_blank');
+        if (chatWindow) chatWindow.opener = null;
+      } catch {
+        chatWindow = null;
+      }
+    }
     try {
       const { blob, filename } = await preparePdf();
       const file = new File([blob], filename, { type: 'application/pdf' });
       const text = note.trim();
       let shared = false;
-      let canShareFiles = false;
-      try {
-        canShareFiles = !!navigator.canShare?.({ files: [file] });
-      } catch {
-        canShareFiles = false;
-      }
       try {
         if (canShareFiles) {
           await navigator.share({
@@ -1025,6 +1038,7 @@ function SendDocumentModal({
       }
 
       if (shared) {
+        chatWindow?.close();
         await api
           .post(`/api/pos/documents/${doc.id}/send`, { to: phone.replace(/\D/g, '') || null })
           .catch(() => undefined);
@@ -1045,9 +1059,14 @@ function SendDocumentModal({
 
       const digits = phone.replace(/\D/g, '').replace(/^00/, '');
       const waUrl = `https://wa.me/${digits}?text=${encodeURIComponent(text)}`;
-      window.open(waUrl, '_blank', 'noopener,noreferrer');
+      if (chatWindow && !chatWindow.closed) {
+        chatWindow.location.href = waUrl;
+      } else {
+        window.open(waUrl, '_blank', 'noopener,noreferrer');
+      }
       setStatus('PDF downloaded — attach it in the WhatsApp chat that just opened.');
     } catch (err) {
+      chatWindow?.close();
       setError(errorText(err));
     } finally {
       setBusy(false);
