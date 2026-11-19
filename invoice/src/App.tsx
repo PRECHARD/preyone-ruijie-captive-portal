@@ -921,6 +921,7 @@ function DocumentDrawer({
   const [payRef, setPayRef] = useState('');
   const [onlineOpen, setOnlineOpen] = useState(false);
   const [receiptOpen, setReceiptOpen] = useState(false);
+  const [pdfBusy, setPdfBusy] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -987,6 +988,25 @@ function DocumentDrawer({
     }
   };
 
+  const savePdf = async () => {
+    if (!drawerSheet || !doc) return;
+    setPdfBusy(true);
+    setError(null);
+    try {
+      const { downloadInvoicePdf } = await import('./pdf');
+      await downloadInvoicePdf({
+        doc: drawerSheet,
+        company,
+        template,
+        title: typeLabel(types, doc.doc_type),
+      });
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setPdfBusy(false);
+    }
+  };
+
   const recordPayment = () =>
     act(async () => {
       await api.post(`/api/pos/documents/${id}/payments`, {
@@ -1035,6 +1055,9 @@ function DocumentDrawer({
               )}
               <button className="btn" onClick={() => window.print()} type="button">
                 Print / PDF
+              </button>
+              <button className="btn" type="button" disabled={pdfBusy} onClick={() => void savePdf()}>
+                {pdfBusy ? 'Preparing PDF…' : 'Download PDF'}
               </button>
               <button
                 className="btn"

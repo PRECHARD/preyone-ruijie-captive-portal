@@ -107,10 +107,10 @@
   align-items: flex-start;
   gap: 10mm;
 }
-.a4-brand-logo { height: 15mm; width: auto; display: block; object-fit: contain; }
+.a4-brand-logo { height: 20mm; width: auto; max-width: 95mm; display: block; object-fit: contain; }
 .a4-brand-fallback {
-  height: 15mm;
-  min-width: 15mm;
+  height: 20mm;
+  min-width: 20mm;
   padding: 0 4mm;
   display: inline-flex;
   align-items: center;
@@ -118,7 +118,7 @@
   border-radius: 3mm;
   background-image: var(--doc-grad);
   color: #fff;
-  font-size: 18pt;
+  font-size: 24pt;
   font-weight: 700;
 }
 .a4-doc-mark { display: inline-flex; flex-direction: column; align-items: stretch; }
