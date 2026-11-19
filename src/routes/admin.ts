@@ -3332,26 +3332,84 @@ adminRouter.get('/catalogues', requireRole('CEO'), async (_req: Request, res: Re
   });
 });
 
-// Accepts a self-contained data:image URL, validates it, and returns it for the
-// caller to persist via PUT /company (logo_url). Storing the data URL (rather
-// than a file path) keeps the logo rendering on every host — the CSP already
-// allows data: images — and avoids a multipart upload dependency.
-adminRouter.post('/company/logo', requireRole('CEO'), async (req: Request, res: Response) => {
-  const { dataUrl } = req.body as { dataUrl?: string };
-  if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/')) {
-    res.status(422).json({ error: 'dataUrl must be a data:image/... URL' });
-    return;
-  }
-  const match = /^data:image\/(png|jpe?g|webp|gif|svg\+xml);base64,([A-Za-z0-9+/=]+)$/.exec(dataUrl);
+/**
+ * Company id for settings writes.
+ *
+ * A platform admin may name an explicit company; otherwise the session's
+ * portal company wins and only falls back to the singleton when the account is
+ * unassigned. This keeps the logo/company UPDATE from editing another tenant's
+ * branding.
+ */
+function targetCompanyId(req: Request): string | null {
+  const explicit = typeof (req.body as any)?.companyId === 'string' ? (req.body as any).companyId : null;
+  if (explicit) return explicit;
+  const sessionCompany = (req.adminUser as { portalCompanyId?: string | null } | undefined)?.portalCompanyId;
+  return sessionCompany ?? null;
+}
+
+// Logo upload for the Global Settings Hub and the invoice Company & Branding
+// panel.
+//
+// The browser sends a FileReader data URL, so no multipart parser is needed.
+// The bytes are decoded, size- and magic-checked, then written under
+// public/images so every SPA renders the same same-origin URL (CSP-safe, no
+// external host). Persisting companies.logo_url/logo_path is what makes the
+// new mark appear on invoices, quotes and receipts after a reload — the old
+// handler only echoed the data URL back and never saved it.
+adminRouter.post('/company/logo', requireRole('CEO', 'Manager'), async (req: Request, res: Response) => {
+  const dataUrl = typeof req.body?.dataUrl === 'string' ? req.body.dataUrl : '';
+  const match = /^data:image\/(png|jpe?g|webp);base64,([A-Za-z0-9+/=\s]+)$/i.exec(dataUrl);
   if (!match) {
-    res.status(422).json({ error: 'Unsupported image format or encoding' });
+    res.status(422).json({ error: 'Logo must be a PNG, JPEG or WebP data URL' });
     return;
   }
-  if (match[2].length > 2_800_000) { // ~2 MB decoded
+  const ext = match[1].toLowerCase() === 'jpeg' ? 'jpg' : match[1].toLowerCase();
+  const bytes = Buffer.from(match[2].replace(/\s/g, ''), 'base64');
+  if (bytes.length === 0) {
+    res.status(422).json({ error: 'Logo image is empty' });
+    return;
+  }
+  if (bytes.length > 2 * 1024 * 1024) {
     res.status(413).json({ error: 'Logo too large — keep it under 2 MB' });
     return;
   }
-  res.json({ logoUrl: dataUrl });
+  const magicOk =
+    (ext === 'png' && bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) ||
+    (ext === 'jpg' && bytes[0] === 0xff && bytes[1] === 0xd8) ||
+    (ext === 'webp' && bytes.subarray(0, 4).toString('ascii') === 'RIFF' && bytes.subarray(8, 12).toString('ascii') === 'WEBP');
+  if (!magicOk) {
+    res.status(422).json({ error: 'Logo file content does not match its declared image type' });
+    return;
+  }
+
+  const filename = `company-logo-${Date.now()}-${crypto.randomBytes(4).toString('hex')}.${ext}`;
+  const imagesDir = path.join(__dirname, '..', '..', 'public', 'images');
+  fs.mkdirSync(imagesDir, { recursive: true });
+  fs.writeFileSync(path.join(imagesDir, filename), bytes);
+
+  const publicUrl = `/images/${filename}`;
+  const companyId = targetCompanyId(req);
+  const { rows } = await pool.query(
+    `UPDATE companies
+        SET logo_url = $1, logo_path = $2, updated_at = NOW()
+      WHERE ($3::uuid IS NULL AND id = (SELECT id FROM companies ORDER BY created_at LIMIT 1))
+         OR id = $3::uuid
+      RETURNING id`,
+    [publicUrl, filename, companyId]
+  );
+  if (rows.length === 0) {
+    res.status(404).json({ error: 'Company not found' });
+    return;
+  }
+  await recordAuditLog(
+    req.adminUser!.id,
+    req.adminUser!.fullName,
+    'company_logo_update',
+    'companies',
+    rows[0].id,
+    `Company logo updated (${filename})`
+  );
+  res.json({ logoUrl: publicUrl, filename, bytes: bytes.length });
 });
 
 adminRouter.get('/company', requireRole('CEO'), async (_req: Request, res: Response) => {
