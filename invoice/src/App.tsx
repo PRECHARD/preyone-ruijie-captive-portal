@@ -12,11 +12,13 @@ import {
   type ArAging,
   type Catalog,
   type Company,
+  type CustomerRecord,
   type DocType,
   type DocumentDetail,
   type DocumentEvent,
   type InvoiceTemplate,
   type PosDocument,
+  type ProductRecord,
   type ThemeResponse,
   type ThemeTokens,
 } from './api';
@@ -538,6 +540,7 @@ interface DraftLine {
   description: string;
   qty: string;
   price: string;
+  productId?: string | null;
 }
 
 function Composer({
@@ -570,6 +573,36 @@ function Composer({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const nextKey = useRef(2);
+
+  // Client records + stock picker: the composer can link a stored customer and
+  // pull stock lines straight from the POS catalogue instead of retyping them.
+  const [customerMode, setCustomerMode] = useState<'existing' | 'new'>('new');
+  const [customerId, setCustomerId] = useState('');
+  const [customers, setCustomers] = useState<CustomerRecord[]>([]);
+  const [products, setProducts] = useState<ProductRecord[]>([]);
+  const [newStockOpen, setNewStockOpen] = useState(false);
+  const [newStock, setNewStock] = useState({ name: '', sku: '', price: '0', stockQty: '0' });
+  const [stockBusy, setStockBusy] = useState(false);
+  const [stockError, setStockError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    void api
+      .get<CustomerRecord[]>('/api/pos/customers')
+      .then((rows) => {
+        if (alive) setCustomers(rows);
+      })
+      .catch(() => undefined);
+    void api
+      .get<ProductRecord[]>('/api/pos/products')
+      .then((rows) => {
+        if (alive) setProducts(rows);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   const subtotal = useMemo(
     () => lines.reduce((sum, l) => sum + (Number(l.qty) || 0) * (Number(l.price) || 0), 0),
@@ -623,6 +656,77 @@ function Composer({
   const setLine = (key: number, patch: Partial<DraftLine>) =>
     setLines((prev) => prev.map((l) => (l.key === key ? { ...l, ...patch } : l)));
 
+  const chooseCustomer = (value: string) => {
+    if (!value || value === '__new') {
+      setCustomerMode('new');
+      setCustomerId('');
+      setCustomerName('');
+      setCustomerEmail('');
+      setCustomerAddress('');
+      return;
+    }
+    const record = customers.find((c) => c.id === value);
+    if (!record) return;
+    setCustomerMode('existing');
+    setCustomerId(record.id);
+    setCustomerName(record.name || '');
+    setCustomerEmail(record.email || '');
+    setCustomerAddress(record.address || '');
+  };
+
+  const appendStockLine = (product: ProductRecord) => {
+    const key = nextKey.current++;
+    const line: DraftLine = {
+      key,
+      description: product.name,
+      qty: '1',
+      price: String(Number(product.price) || 0),
+      productId: product.id,
+    };
+    setLines((prev) => {
+      const onlyBlank =
+        prev.length === 1 &&
+        !prev[0].description.trim() &&
+        !prev[0].productId &&
+        (Number(prev[0].price) || 0) === 0;
+      return onlyBlank ? [line] : [...prev, line];
+    });
+  };
+
+  const addFromStock = (productId: string) => {
+    const product = products.find((p) => p.id === productId);
+    if (product) appendStockLine(product);
+  };
+
+  const createStockItem = async () => {
+    const name = newStock.name.trim();
+    if (!name) {
+      setStockError('Stock item name is required.');
+      return;
+    }
+    setStockBusy(true);
+    setStockError(null);
+    try {
+      const created = await api.post<ProductRecord>('/api/pos/products', {
+        name,
+        sku: newStock.sku.trim() || undefined,
+        price: Number(newStock.price) || 0,
+        stockQty: Number(newStock.stockQty) || 0,
+        trackStock: true,
+      });
+      setProducts((prev) =>
+        [created, ...prev.filter((p) => p.id !== created.id)].sort((a, b) => a.name.localeCompare(b.name))
+      );
+      appendStockLine(created);
+      setNewStock({ name: '', sku: '', price: '0', stockQty: '0' });
+      setNewStockOpen(false);
+    } catch (err) {
+      setStockError(errorText(err));
+    } finally {
+      setStockBusy(false);
+    }
+  };
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     const clean = lines.filter((l) => l.description.trim());
@@ -635,9 +739,15 @@ function Composer({
     try {
       const created = await api.post<PosDocument>('/api/pos/documents', {
         docType,
-        customer: customerName.trim()
-          ? { name: customerName.trim(), email: customerEmail.trim() || undefined, address: customerAddress.trim() || undefined }
-          : undefined,
+        customerId: customerMode === 'existing' && customerId ? customerId : undefined,
+        customer:
+          customerMode === 'new' && customerName.trim()
+            ? {
+                name: customerName.trim(),
+                email: customerEmail.trim() || undefined,
+                address: customerAddress.trim() || undefined,
+              }
+            : undefined,
         issueDate,
         netDays: Number(netDays) || 0,
         currency,
@@ -653,6 +763,7 @@ function Composer({
           description: l.description.trim(),
           qty: Number(l.qty) || 1,
           price: Number(l.price) || 0,
+          productId: l.productId || undefined,
         })),
       });
       onCreated(created.id);
@@ -717,6 +828,27 @@ function Composer({
                 </select>
               </label>
               <label className="field span-2">
+                <span>Client record</span>
+                <select
+                  className="select"
+                  value={customerMode === 'existing' ? customerId : '__new'}
+                  onChange={(e) => chooseCustomer(e.target.value)}
+                >
+                  <option value="__new">＋ New client</option>
+                  {customers.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                      {c.email ? ` · ${c.email}` : ''}
+                    </option>
+                  ))}
+                </select>
+                <small className="muted small">
+                  {customerMode === 'existing'
+                    ? 'Address and e-mail are pulled from the selected client record.'
+                    : 'A new client record is created when you save this draft.'}
+                </small>
+              </label>
+              <label className="field span-2">
             <span>Bill to — customer</span>
             <input
               className="input"
@@ -731,7 +863,12 @@ function Composer({
           </label>
           <label className="field">
             <span>Customer address</span>
-            <input className="input" value={customerAddress} onChange={(e) => setCustomerAddress(e.target.value)} />
+            <textarea
+              className="textarea"
+              rows={2}
+              value={customerAddress}
+              onChange={(e) => setCustomerAddress(e.target.value)}
+            />
           </label>
           <label className="field">
             <span>Issue date</span>
@@ -775,6 +912,97 @@ function Composer({
 
         <div style={{ marginTop: 22 }}>
           <div className="panel-title" style={{ marginBottom: 10 }}>Line items</div>
+
+          <div className="stock-tools">
+            <label className="field">
+              <span>Add from stock</span>
+              <select
+                className="select"
+                value=""
+                onChange={(e) => {
+                  addFromStock(e.target.value);
+                  e.target.value = '';
+                }}
+              >
+                <option value="">Select an existing stock item…</option>
+                {products.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                    {p.sku ? ` · ${p.sku}` : ''} · {Number(p.stock_qty) || 0} in stock ·{' '}
+                    {money(Number(p.price) || 0, currency)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              className="btn ghost"
+              onClick={() => {
+                setStockError(null);
+                setNewStockOpen((open) => !open);
+              }}
+            >
+              {newStockOpen ? 'Close new stock' : '＋ New stock item'}
+            </button>
+          </div>
+
+          {newStockOpen && (
+            <div className="stock-new-panel">
+              <div className="form-grid">
+                <label className="field span-2">
+                  <span>Stock item name</span>
+                  <input
+                    className="input"
+                    value={newStock.name}
+                    onChange={(e) => setNewStock((s) => ({ ...s, name: e.target.value }))}
+                    placeholder="Heavy duty extension cable 5m"
+                  />
+                </label>
+                <label className="field">
+                  <span>SKU (optional)</span>
+                  <input
+                    className="input"
+                    value={newStock.sku}
+                    onChange={(e) => setNewStock((s) => ({ ...s, sku: e.target.value }))}
+                  />
+                </label>
+                <label className="field">
+                  <span>Unit price</span>
+                  <input
+                    className="input"
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={newStock.price}
+                    onChange={(e) => setNewStock((s) => ({ ...s, price: e.target.value }))}
+                  />
+                </label>
+                <label className="field">
+                  <span>Opening stock</span>
+                  <input
+                    className="input"
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={newStock.stockQty}
+                    onChange={(e) => setNewStock((s) => ({ ...s, stockQty: e.target.value }))}
+                  />
+                </label>
+              </div>
+              {stockError && <div className="banner error">{stockError}</div>}
+              <div className="stock-new-actions">
+                <button
+                  type="button"
+                  className="btn primary"
+                  disabled={stockBusy}
+                  onClick={() => void createStockItem()}
+                >
+                  {stockBusy ? 'Adding stock item…' : 'Add stock item'}
+                </button>
+              </div>
+            </div>
+          )}
+
           {lines.map((line) => (
             <div className="line-row" key={line.key}>
               <label className="field">

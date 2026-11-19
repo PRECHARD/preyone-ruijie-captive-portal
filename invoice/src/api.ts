@@ -198,6 +198,27 @@ export interface Catalog {
   modules: { kds: boolean; tables: boolean };
 }
 
+export interface CustomerRecord {
+  id: string;
+  name: string;
+  phone?: string | null;
+  email?: string | null;
+  address?: string | null;
+  notes?: string | null;
+}
+
+export interface ProductRecord {
+  id: string;
+  name: string;
+  sku?: string | null;
+  barcode?: string | null;
+  category?: string | null;
+  price: string | number;
+  stock_qty?: string | number;
+  track_stock?: boolean;
+  active?: boolean;
+}
+
 export interface PosDocument {
   id: string;
   doc_number: string;
