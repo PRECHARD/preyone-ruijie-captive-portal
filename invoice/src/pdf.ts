@@ -7,7 +7,7 @@
  * brand header, bill-to / details, ruled item table, totals, payment notes and
  * the footer band.
  */
-import html2canvas from 'html2canvas-pro';
+import { getFontEmbedCSS, toCanvas } from 'html-to-image';
 import { jsPDF } from 'jspdf';
 import type { InvoiceTemplate } from './api';
 import type { SheetCompany, SheetDoc } from './DocumentSheet';
@@ -514,26 +514,21 @@ export async function downloadInvoicePdf(input: InvoicePdfInput): Promise<void> 
     input.element ??
     (document.querySelector('.a4-print-host .a4-sheet') as HTMLElement | null);
 
-  if (sheet) {
-    try {
-      const pdf = await sheetToPdf(sheet);
-      pdf.save(filename);
-      return;
-    } catch (err) {
-      // Canvas capture can fail on locked-down browsers; fall through to the
-      // vector renderer so the download still works.
-      console.warn('[invoice] sheet snapshot failed, using vector fallback', err);
-    }
+  if (!sheet) {
+    throw new Error('Could not find the rendered invoice to export.');
   }
 
-  const pdf = await buildInvoicePdf(input);
+  // No silent vector fallback: a different-looking PDF is worse than a clear
+  // error, and the user must get exactly what the preview shows.
+  const pdf = await sheetToPdf(sheet);
   pdf.save(filename);
 }
 
 /**
- * Snapshot the exact preview sheet with html2canvas and lay the bitmap over
- * A4 pages. Rasterising the real DOM is what guarantees the download matches
- * the on-screen template (gradients, logo, fonts, spacing, footer band).
+ * Snapshot the exact preview sheet with html-to-image and lay the bitmap over
+ * A4 pages. The sheet is painted by the browser inside an SVG <foreignObject>,
+ * so gradients, layered tints, the SVG wordmark, the PAID stamp, fonts and
+ * spacing are byte-for-byte what the preview shows.
  */
 export async function sheetToPdf(sheet: HTMLElement): Promise<jsPDF> {
   const host = sheet.closest('.a4-print-host') as HTMLElement | null;
@@ -575,17 +570,20 @@ export async function sheetToPdf(sheet: HTMLElement): Promise<jsPDF> {
 
     // ~300 DPI at A4 width (210mm ≈ 794 CSS px) for a crisp, "full HD" page,
     // then back off for very long invoices so the canvas cannot exhaust memory.
-    let scale = Math.min(3, Math.max(2, 2380 / Math.max(cssWidth, 1)));
-    scale = Math.min(scale, Math.sqrt(28_000_000 / Math.max(cssWidth * cssHeight, 1)));
-    scale = Math.max(1.5, scale);
+    let pixelRatio = Math.min(3, Math.max(2, 2380 / Math.max(cssWidth, 1)));
+    pixelRatio = Math.min(pixelRatio, Math.sqrt(28_000_000 / Math.max(cssWidth * cssHeight, 1)));
+    pixelRatio = Math.max(1.5, pixelRatio);
 
-    const canvas = await html2canvas(sheet, {
-      scale,
+    // html-to-image renders the real DOM in an SVG <foreignObject>; the browser
+    // paints it with the same layout engine as the preview (gradients, layered
+    // tints, SVG wordmark, PAID stamp, Poppins), unlike html2canvas which
+    // mis-parsed the sheet's multi-layer backgrounds and SVG images.
+    const fontEmbedCSS = await getFontEmbedCSS(sheet).catch(() => '');
+    const canvas = await toCanvas(sheet, {
+      pixelRatio,
       backgroundColor: '#ffffff',
-      useCORS: true,
-      logging: false,
-      scrollX: 0,
-      scrollY: 0,
+      fontEmbedCSS,
+      cacheBust: true,
     });
 
     const pdf = new jsPDF({ unit: 'mm', format: 'a4', compress: true });
