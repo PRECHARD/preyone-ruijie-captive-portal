@@ -897,6 +897,259 @@ function Composer({
 
 /* ──────────────────────────── document view ────────────────────────── */
 
+function blobToBase64(blob: Blob): Promise<string> {
+  return blob.arrayBuffer().then((buffer) => {
+    const bytes = new Uint8Array(buffer);
+    let binary = '';
+    const chunk = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunk) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+    }
+    return btoa(binary);
+  });
+}
+
+/**
+ * Send the rendered document (the exact preview PDF) by e-mail or WhatsApp.
+ * E-mail goes through the workspace SMTP; WhatsApp uses the native share sheet
+ * when it can carry a file, otherwise downloads the PDF and opens the chat.
+ */
+function SendDocumentModal({
+  doc,
+  company,
+  sheet,
+  template,
+  types,
+  initialChannel,
+  onClose,
+  onSent,
+}: {
+  doc: DocumentDetail;
+  company: Company;
+  sheet: SheetDoc;
+  template?: InvoiceTemplate | null;
+  types: DocType[];
+  initialChannel: 'email' | 'whatsapp';
+  onClose: () => void;
+  onSent: () => void;
+}) {
+  const label = typeLabel(types, doc.doc_type);
+  const customerName = doc.customer?.name || doc.customer_name || 'Customer';
+  const totalText = money(Number(doc.total) || 0, doc.currency || 'USD');
+  const balance = Math.max((Number(doc.total) || 0) - (Number(doc.amount_paid) || 0), 0);
+
+  const [channel, setChannel] = useState<'email' | 'whatsapp'>(initialChannel);
+  const [email, setEmail] = useState(doc.customer?.email || '');
+  const [phone, setPhone] = useState(doc.customer?.phone || '');
+  const [note, setNote] = useState(
+    () =>
+      `Dear ${customerName},\n\nPlease find attached ${label} ${doc.doc_number} for ${totalText}.` +
+      (balance > 0.005 ? ` Balance due: ${money(balance, doc.currency || 'USD')}.` : '') +
+      `\n\nKind regards,\n${company.name || 'Preyone'}`
+  );
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [status, setStatus] = useState<string | null>(null);
+
+  const preparePdf = async () => {
+    const { buildDocumentPdf } = await import('./pdf');
+    return buildDocumentPdf({
+      doc: sheet,
+      company,
+      template,
+      title: label,
+      pixelRatio: 2.2,
+    });
+  };
+
+  const sendEmail = async () => {
+    setError(null);
+    setStatus(null);
+    const to = email.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) {
+      setError('Enter a valid recipient e-mail address.');
+      return;
+    }
+    setBusy(true);
+    try {
+      const { blob, filename } = await preparePdf();
+      if (blob.size > 3.3 * 1024 * 1024) {
+        throw new Error('This PDF is too large to e-mail. Use WhatsApp or download and share it.');
+      }
+      const pdfBase64 = await blobToBase64(blob);
+      await api.post(`/api/pos/documents/${doc.id}/email`, {
+        to,
+        message: note,
+        filename,
+        pdfBase64,
+      });
+      setStatus(`E-mailed ${filename} to ${to}.`);
+      onSent();
+      window.setTimeout(onClose, 1600);
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const sendWhatsApp = async () => {
+    setError(null);
+    setStatus(null);
+    setBusy(true);
+    try {
+      const { blob, filename } = await preparePdf();
+      const file = new File([blob], filename, { type: 'application/pdf' });
+      const text = note.trim();
+      let shared = false;
+      try {
+        if (navigator.canShare?.({ files: [file] })) {
+          await navigator.share({
+            files: [file],
+            title: `${label} ${doc.doc_number}`,
+            text,
+          });
+          shared = true;
+        }
+      } catch (err) {
+        if ((err as Error)?.name === 'AbortError') {
+          setBusy(false);
+          return;
+        }
+      }
+
+      if (shared) {
+        await api
+          .post(`/api/pos/documents/${doc.id}/send`, { to: phone.replace(/\D/g, '') || null })
+          .catch(() => undefined);
+        setStatus('Shared. Choose WhatsApp in the share sheet.');
+        onSent();
+        return;
+      }
+
+      // Fallback for desktops without file sharing: download the PDF, then
+      // open the WhatsApp chat so it can be attached in one drag.
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = filename;
+      anchor.rel = 'noopener';
+      anchor.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 5000);
+
+      const digits = phone.replace(/\D/g, '').replace(/^00/, '');
+      const waUrl = `https://wa.me/${digits}?text=${encodeURIComponent(text)}`;
+      window.open(waUrl, '_blank', 'noopener,noreferrer');
+      setStatus('PDF downloaded — attach it in the WhatsApp chat that just opened.');
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div
+      className="overlay send-overlay"
+      onMouseDown={(e) => e.target === e.currentTarget && !busy && onClose()}
+    >
+      <div className="send-panel" role="dialog" aria-modal="true" aria-label={`Send ${label}`}>
+        <div className="send-head">
+          <div>
+            <div className="send-eyebrow">Send document</div>
+            <h3>
+              {label} · {doc.doc_number}
+            </h3>
+            <p className="send-sub">
+              {customerName} · {totalText}
+              {balance > 0.005 ? ` · ${money(balance, doc.currency || 'USD')} due` : ' · Paid'}
+            </p>
+          </div>
+          <button className="btn ghost" type="button" onClick={onClose} disabled={busy}>
+            Close
+          </button>
+        </div>
+
+        <div className="send-tabs" role="tablist" aria-label="Delivery channel">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={channel === 'email'}
+            className={channel === 'email' ? 'active' : ''}
+            onClick={() => setChannel('email')}
+          >
+            Email
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={channel === 'whatsapp'}
+            className={channel === 'whatsapp' ? 'active' : ''}
+            onClick={() => setChannel('whatsapp')}
+          >
+            WhatsApp
+          </button>
+        </div>
+
+        {channel === 'email' ? (
+          <label className="field">
+            <span>Recipient e-mail</span>
+            <input
+              className="input"
+              type="email"
+              inputMode="email"
+              autoComplete="email"
+              placeholder="client@company.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
+          </label>
+        ) : (
+          <label className="field">
+            <span>WhatsApp number</span>
+            <input
+              className="input"
+              type="tel"
+              inputMode="tel"
+              placeholder="+263 77 123 4567"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+            />
+            <small className="muted small">Include the country code, e.g. +263.</small>
+          </label>
+        )}
+
+        <label className="field">
+          <span>Message</span>
+          <textarea
+            className="textarea"
+            rows={7}
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+          />
+        </label>
+
+        {error && <div className="banner error">{error}</div>}
+        {status && <div className="banner ok">{status}</div>}
+
+        <div className="send-actions">
+          <button className="btn" type="button" onClick={onClose} disabled={busy}>
+            Cancel
+          </button>
+          <button
+            className="btn primary"
+            type="button"
+            onClick={() => void (channel === 'email' ? sendEmail() : sendWhatsApp())}
+            disabled={busy}
+          >
+            {busy ? 'Preparing PDF…' : channel === 'email' ? 'Send e-mail' : 'Send with WhatsApp'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function DocumentDrawer({
   id,
   templates,
@@ -922,6 +1175,7 @@ function DocumentDrawer({
   const [onlineOpen, setOnlineOpen] = useState(false);
   const [receiptOpen, setReceiptOpen] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
+  const [sendChannel, setSendChannel] = useState<'email' | 'whatsapp' | null>(null);
   const printHostRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
@@ -1055,6 +1309,12 @@ function DocumentDrawer({
                   Receipt
                 </button>
               )}
+              <button className="btn" type="button" onClick={() => setSendChannel('email')}>
+                Email
+              </button>
+              <button className="btn" type="button" onClick={() => setSendChannel('whatsapp')}>
+                WhatsApp
+              </button>
               <button className="btn" onClick={() => window.print()} type="button">
                 Print / PDF
               </button>
@@ -1197,6 +1457,22 @@ function DocumentDrawer({
 
       {receiptOpen && doc && (
         <ReceiptPreview doc={doc} company={company} onClose={() => setReceiptOpen(false)} />
+      )}
+
+      {sendChannel && doc && drawerSheet && (
+        <SendDocumentModal
+          doc={doc}
+          company={company}
+          sheet={drawerSheet}
+          template={template}
+          types={types}
+          initialChannel={sendChannel}
+          onClose={() => setSendChannel(null)}
+          onSent={() => {
+            onChanged();
+            void load();
+          }}
+        />
       )}
 
       {/* The same sheet again, portalled straight to <body>, so Print/PDF is

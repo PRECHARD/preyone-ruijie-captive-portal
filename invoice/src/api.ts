@@ -231,7 +231,7 @@ export interface DocumentLine {
 export interface DocumentDetail extends PosDocument {
   items: DocumentLine[];
   payments: Array<{ id: string; amount: string | number; method: string; paid_at: string }>;
-  customer?: { id: string; name: string; email?: string | null; address?: string | null } | null;
+  customer?: { id: string; name: string; email?: string | null; phone?: string | null; address?: string | null } | null;
   cashier_name?: string | null;
 }
 

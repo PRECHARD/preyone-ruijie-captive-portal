@@ -2221,9 +2221,69 @@ tbody tr:last-child td { border-bottom: none; }
   .card, .stat { box-shadow: none; backdrop-filter: none; }
 }
 
+/* ── Send document (e-mail / WhatsApp) ───────────────────────────────── */
+.send-overlay { z-index: 80; place-items: center; padding: 24px; overflow-y: auto; }
+.send-panel {
+  width: min(600px, 100%);
+  background:
+    radial-gradient(420px 220px at 100% 0%, var(--pos-primary-soft), transparent 72%),
+    linear-gradient(160deg, rgba(19, 30, 51, 0.98), rgba(8, 14, 26, 0.99));
+  border: 1px solid var(--pos-glass-edge);
+  border-radius: 20px;
+  padding: 22px;
+  color: var(--pos-text);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.55);
+}
+.send-head { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; margin-bottom: 16px; }
+.send-eyebrow {
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--pos-text-muted);
+  font-weight: 700;
+}
+.send-head h3 { margin: 5px 0 3px; font-size: 20px; line-height: 1.2; }
+.send-sub { margin: 0; color: var(--pos-text-muted); font-size: 12px; }
+.send-tabs {
+  display: flex;
+  gap: 6px;
+  padding: 4px;
+  margin-bottom: 16px;
+  border-radius: 12px;
+  background: rgba(148, 163, 184, 0.09);
+  border: 1px solid var(--pos-glass-edge);
+}
+.send-tabs button {
+  flex: 1;
+  border: 0;
+  background: transparent;
+  color: var(--pos-text-muted);
+  padding: 9px 10px;
+  border-radius: 9px;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.18s var(--pos-ease), color 0.18s var(--pos-ease);
+}
+.send-tabs button.active {
+  color: #fff;
+  background: linear-gradient(135deg, var(--pos-primary), var(--pos-accent));
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3);
+}
+.send-panel .field { margin-bottom: 12px; }
+.send-panel .textarea { resize: vertical; }
+.send-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
+@media (max-width: 620px) {
+  .send-overlay { padding: 12px; }
+  .send-panel { padding: 16px; }
+  .send-actions { flex-direction: column-reverse; }
+  .send-actions .btn { width: 100%; justify-content: center; }
+}
+
 /* Print exactly the receipt, never the console behind it. */
 @media print {
   .no-print { display: none !important; }
+  .send-overlay { display: none !important; }
   /* A receipt opened from the drawer must print on its own, never with the
      A4 invoice sheet behind it. */
   body:has(.receipt-overlay) .a4-print-host { display: none !important; }

@@ -525,21 +525,45 @@ export async function downloadInvoicePdf(input: InvoicePdfInput): Promise<void> 
 }
 
 /**
+ * Build the same PDF as a Blob for e-mail / WhatsApp sharing.
+ * A slightly lower pixel ratio keeps attachments mail-friendly while still
+ * printing crisply.
+ */
+export async function buildDocumentPdf(
+  input: InvoicePdfInput & { pixelRatio?: number }
+): Promise<{ blob: Blob; filename: string }> {
+  const sheet =
+    input.element ??
+    (document.querySelector('.a4-print-host .a4-sheet') as HTMLElement | null);
+  if (!sheet) throw new Error('Could not find the rendered invoice to export.');
+  const pdf = await sheetToPdf(sheet, { pixelRatio: input.pixelRatio ?? 2.2 });
+  return {
+    blob: pdf.output('blob'),
+    filename: `${safeFilename(input.doc.number || 'document')}.pdf`,
+  };
+}
+
+/**
  * Snapshot the exact preview sheet with html-to-image and lay the bitmap over
  * A4 pages. The sheet is painted by the browser inside an SVG <foreignObject>,
  * so gradients, layered tints, the SVG wordmark, the PAID stamp, fonts and
  * spacing are byte-for-byte what the preview shows.
  */
-export async function sheetToPdf(sheet: HTMLElement): Promise<jsPDF> {
+export async function sheetToPdf(
+  sheet: HTMLElement,
+  options: { pixelRatio?: number } = {}
+): Promise<jsPDF> {
   const host = sheet.closest('.a4-print-host') as HTMLElement | null;
   const previousStyle = host?.getAttribute('style') ?? null;
 
   if (host) {
     // `.a4-print-host` is display:none on screen (it only exists for print),
-    // so expose it to layout for the duration of the capture.
+    // so expose it to layout for the duration of the capture. Render it far
+    // off-screen — never over the app — so clicking Download never flashes a
+    // full-size invoice behind the page.
     host.style.display = 'block';
     host.style.position = 'fixed';
-    host.style.left = '0';
+    host.style.left = '-10000px';
     host.style.top = '0';
     host.style.width = '210mm';
     host.style.zIndex = '-1';
@@ -573,6 +597,7 @@ export async function sheetToPdf(sheet: HTMLElement): Promise<jsPDF> {
     let pixelRatio = Math.min(3, Math.max(2, 2380 / Math.max(cssWidth, 1)));
     pixelRatio = Math.min(pixelRatio, Math.sqrt(28_000_000 / Math.max(cssWidth * cssHeight, 1)));
     pixelRatio = Math.max(1.5, pixelRatio);
+    if (options.pixelRatio) pixelRatio = Math.max(1, Math.min(4, options.pixelRatio));
 
     // html-to-image renders the real DOM in an SVG <foreignObject>; the browser
     // paints it with the same layout engine as the preview (gradients, layered
@@ -619,8 +644,7 @@ export async function sheetToPdf(sheet: HTMLElement): Promise<jsPDF> {
     }
 
     return pdf;
-  } finally {
-    if (host) {
+  } finally {    if (host) {
       if (previousStyle === null) host.removeAttribute('style');
       else host.setAttribute('style', previousStyle);
     }

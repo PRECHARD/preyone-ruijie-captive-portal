@@ -202,7 +202,7 @@ function fmtDate(iso?: string | null): string {
 /* ── filler-row maths (ported from the old docLayout.js) ────────────── */
 
 const INNER_MM = 272;
-const HEAD_MM = 21;
+const HEAD_MM = 24;
 const META_GAP_MM = 10;
 const TABLE_GAP_MM = 9;
 const HEADER_ROW_MM = 11.2;

@@ -13,6 +13,7 @@ import { markStockApplied, syncSaleToLedgerAndStock } from '../db/accounting';
 import { INVOICE_DOCUMENT_TYPES, ALL_DOCUMENT_TYPES } from '../services/pesepay';
 import { POS_THEMES, CURRENCIES, type PosTheme } from '../catalog/ecosystem';
 import { themeCssVariables, themeCssBlock } from '../utils/themeVars';
+import { sendTransactionalEmail } from '../services/notificationService';
 
 /**
  * Preyone POS module — additive only.
@@ -161,6 +162,13 @@ function requireStaff(req: Request, res: Response, next: NextFunction): void {
 }
 router.use(requireAdminAuth, requireStaff, requireCompany, moduleAccess('pos'));
 
+// Invoice and receipt payloads are private to the workspace. Never let a
+// shared browser or proxy keep a copy in its HTTP cache.
+router.use('/documents', (_req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store, max-age=0');
+  next();
+});
+
 // ── Tenant scoping ─────────────────────────────────────────────────
 //
 // requireCompany has populated req.company, and it is the ONLY trustworthy
@@ -174,6 +182,36 @@ router.use(requireAdminAuth, requireStaff, requireCompany, moduleAccess('pos'));
 function tenantId(req: Request): string {
   return req.company!.id;
 }
+
+/** Human labels for the e-mail subject/body. */
+const DOCUMENT_LABELS: Record<string, string> = {
+  invoice: 'Invoice',
+  tax_invoice: 'Tax Invoice',
+  quote: 'Quotation',
+  quotation: 'Quotation',
+  estimate: 'Estimate',
+  proforma: 'Proforma Invoice',
+  receipt: 'Receipt',
+  sales_receipt: 'Sales Receipt',
+  cash_receipt: 'Cash Receipt',
+  credit_memo: 'Credit Memo',
+  credit_note: 'Credit Note',
+  purchase_order: 'Purchase Order',
+};
+
+function escapeHtml(value: unknown): string {
+  return String(value ?? '').replace(/[&<>"']/g, (ch) =>
+    ch === '&' ? '&amp;' : ch === '<' ? '&lt;' : ch === '>' ? '&gt;' : ch === '"' ? '&quot;' : '&#39;'
+  );
+}
+
+const documentEmailLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 8,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many e-mails. Please wait a minute and try again.' },
+});
 
 // ── Payment methods accepted on documents ──────────────────────────
 // Mirrors the pos_document_payments_method_check constraint.
@@ -604,6 +642,148 @@ router.post('/documents/:id/send', async (req, res) => {
     [rows[0].id, cid, JSON.stringify({ to: str(req.body?.to) || null }), req.adminUser!.id]
   ).catch(() => undefined);
   res.json(rows[0]);
+});
+
+/**
+ * E-mail a document PDF to the customer (or any address staff choose).
+ *
+ * The browser renders the exact preview PDF and posts it as base64; this
+ * endpoint only validates the message, attaches the PDF and sends it through
+ * the configured SMTP transport. Auth, tenant scoping, a per-minute rate limit,
+ * strict address/PDF validation and a size cap keep it safe.
+ */
+router.post('/documents/:id/email', documentEmailLimiter, async (req, res) => {
+  const blocked = invoiceBlock(req.company!);
+  if (blocked) {
+    res.status(403).json(blocked);
+    return;
+  }
+  const cid = tenantId(req);
+
+  const to = str(req.body?.to).toLowerCase();
+  if (!to || to.length > 254 || !/^[^\s@\r\n]+@[^\s@\r\n]+\.[A-Za-z]{2,}$/.test(to)) {
+    res.status(422).json({ error: 'Enter a valid recipient e-mail address.' });
+    return;
+  }
+
+  const rawPdf = typeof req.body?.pdfBase64 === 'string' ? req.body.pdfBase64 : '';
+  const base64 = rawPdf.replace(/^data:application\/pdf;base64,/i, '').replace(/\s+/g, '');
+  if (!base64) {
+    res.status(422).json({ error: 'The document PDF is missing.' });
+    return;
+  }
+  const pdf = Buffer.from(base64, 'base64');
+  if (pdf.length === 0) {
+    res.status(422).json({ error: 'The document PDF is empty.' });
+    return;
+  }
+  if (pdf.length > 3.5 * 1024 * 1024) {
+    res.status(413).json({ error: 'This PDF is too large to e-mail. Download it and share it directly.' });
+    return;
+  }
+  if (pdf.subarray(0, 5).toString('ascii') !== '%PDF-') {
+    res.status(422).json({ error: 'The attachment is not a valid PDF.' });
+    return;
+  }
+
+  const message = str(req.body?.message).slice(0, 2000);
+
+  const { rows } = await pool.query(
+    `SELECT d.id, d.doc_number, d.doc_type, d.status, d.total, d.amount_paid, d.currency,
+            c.name AS company_name, c.email AS company_email,
+            c.support_phone AS company_phone, c.website AS company_website,
+            cu.name AS customer_name, cu.email AS customer_email
+       FROM pos_documents d
+       LEFT JOIN companies c ON c.id = d.company_id
+       LEFT JOIN pos_customers cu ON cu.id = d.customer_id
+      WHERE d.id = $1 AND d.company_id = $2`,
+    [req.params.id, cid]
+  );
+  if (rows.length === 0) {
+    res.status(404).json({ error: 'Document not found' });
+    return;
+  }
+  const doc = rows[0];
+  if (String(doc.status) === 'void') {
+    res.status(409).json({ error: 'Void documents cannot be sent.' });
+    return;
+  }
+
+  const companyName = str(doc.company_name) || 'Preyone';
+  const label = DOCUMENT_LABELS[String(doc.doc_type)] || 'Document';
+  const currency = String(doc.currency || 'USD').toUpperCase();
+  const fmt = (value: unknown) => `${currency} ${(Number(value) || 0).toFixed(2)}`;
+  const total = fmt(doc.total);
+  const balance = Math.max((Number(doc.total) || 0) - (Number(doc.amount_paid) || 0), 0);
+  const customerName = str(doc.customer_name) || str(doc.customer_email) || 'Customer';
+  const subject = `${label} ${doc.doc_number} from ${companyName}`.replace(/[\r\n]+/g, ' ').slice(0, 180);
+
+  const bodyText =
+    message ||
+    `Dear ${customerName},\n\nPlease find attached ${label} ${doc.doc_number} for ${total}.` +
+      (balance > 0 ? ` Balance due: ${fmt(balance)}.` : '') +
+      `\n\nKind regards,\n${companyName}`;
+  const bodyHtml = escapeHtml(bodyText).replace(/\r?\n/g, '<br/>');
+  const contact = [doc.company_phone, doc.company_email, doc.company_website]
+    .map((v) => str(v))
+    .filter(Boolean)
+    .map(escapeHtml)
+    .join(' &middot; ');
+
+  const html = `<!DOCTYPE html>
+<html><body style="margin:0;padding:24px;background:#f4f1f8;font-family:'Segoe UI',Arial,sans-serif;color:#241b3a">
+  <div style="max-width:560px;margin:0 auto;background:#fff;border-radius:14px;overflow:hidden;border:1px solid #e6e0ef">
+    <div style="background:linear-gradient(100deg,#14002e,#7a0e57);padding:24px 26px;color:#fff">
+      <div style="font-size:11px;letter-spacing:.18em;text-transform:uppercase;opacity:.8">${escapeHtml(companyName)}</div>
+      <div style="font-size:22px;font-weight:700;margin-top:6px">${escapeHtml(label)} ${escapeHtml(doc.doc_number)}</div>
+    </div>
+    <div style="padding:24px 26px">
+      <div style="font-size:14px;line-height:1.65">${bodyHtml}</div>
+      <table style="width:100%;border-collapse:collapse;font-size:14px;margin:18px 0">
+        <tr><td style="padding:6px 0;color:#6d6786">Total</td><td align="right" style="padding:6px 0;font-weight:700">${escapeHtml(total)}</td></tr>
+        ${
+          balance > 0
+            ? `<tr><td style="padding:6px 0;color:#6d6786">Balance due</td><td align="right" style="padding:6px 0;font-weight:700;color:#7a0e57">${escapeHtml(fmt(balance))}</td></tr>`
+            : ''
+        }
+      </table>
+      <p style="margin:0;color:#6d6786;font-size:13px">The ${escapeHtml(label.toLowerCase())} PDF is attached.</p>
+    </div>
+    <div style="padding:16px 26px;background:#f7f4fb;font-size:12px;color:#6d6786">
+      ${escapeHtml(companyName)}${contact ? ` &middot; ${contact}` : ''}
+    </div>
+  </div>
+</body></html>`;
+
+  const filename = `${String(doc.doc_number || 'document').replace(/[^A-Za-z0-9._-]+/g, '-') || 'document'}.pdf`;
+  const sent = await sendTransactionalEmail({
+    to,
+    subject,
+    html,
+    fromName: companyName,
+    attachments: [{ filename, content: pdf }],
+  }).catch(() => false);
+
+  if (!sent) {
+    res.status(502).json({ error: 'The mail service could not send this message. Check SMTP configuration and try again.' });
+    return;
+  }
+
+  await pool.query(
+    `UPDATE pos_documents
+        SET status = CASE WHEN status = 'draft' THEN 'unpaid' ELSE status END,
+            sent_at = NOW(),
+            updated_at = NOW()
+      WHERE id = $1 AND company_id = $2`,
+    [doc.id, cid]
+  );
+  await pool.query(
+    `INSERT INTO pos_document_events (document_id, company_id, event, detail, actor_id)
+     VALUES ($1,$2,'sent',$3,$4)`,
+    [doc.id, cid, JSON.stringify({ to, channel: 'email', label }), req.adminUser!.id]
+  ).catch(() => undefined);
+
+  res.json({ ok: true, to, sentAt: new Date().toISOString() });
 });
 
 // Append-only document timeline (audit trail for the workspace drawer).
