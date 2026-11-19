@@ -323,6 +323,7 @@ export default function SettingsPage({
   const [email, setEmail] = useState(company.email ?? '');
   const [phone, setPhone] = useState(company.support_phone ?? '');
   const [website, setWebsite] = useState(company.website ?? '');
+  const [tagline, setTagline] = useState(company.tagline ?? '');
 
   const [currency, setCurrency] = useState(company.currency || 'USD');
   const [taxPct, setTaxPct] = useState(String(initial.taxPct ?? 15.5));
@@ -459,6 +460,7 @@ export default function SettingsPage({
           email: email.trim(),
           supportPhone: phone.trim(),
           website: website.trim(),
+          tagline: tagline.trim(),
           currency,
           taxPct: taxValue,
           invoicePrefix: (numbering.invoice?.prefix ?? 'INV-').replace(/-+$/, '') || 'INV',
@@ -471,6 +473,7 @@ export default function SettingsPage({
         const saved = await api.patch<Company>('/api/pos/invoice-settings', {
           currency,
           taxPct: taxValue,
+          tagline: tagline.trim(),
           settings,
         });
         onCatalog({ ...catalog, company: { ...company, ...saved, invoice_settings: settings } });
@@ -492,6 +495,7 @@ export default function SettingsPage({
     setEmail(company.email ?? '');
     setPhone(company.support_phone ?? '');
     setWebsite(company.website ?? '');
+    setTagline(company.tagline ?? '');
     setCurrency(company.currency || 'USD');
     setTaxPct(String(fresh.taxPct ?? 15.5));
     setTaxLabel(fresh.taxLabel || 'VAT');
@@ -618,6 +622,21 @@ export default function SettingsPage({
                   disabled={role !== null && !isCeo}
                   placeholder="Preyone Technologies (Pvt) Ltd"
                 />
+              </label>
+
+              <label className="settings-field settings-field--wide">
+                <span>Motto / tagline</span>
+                <input
+                  className="input"
+                  value={tagline}
+                  maxLength={120}
+                  onChange={(e) => setTagline(e.target.value)}
+                  disabled={role !== null && !isManager}
+                  placeholder="Connecting People. Powering Business."
+                />
+                <small className="settings-hint">
+                  Printed above the footer band on every invoice, quotation and receipt.
+                </small>
               </label>
 
               <label className="settings-field settings-field--wide">

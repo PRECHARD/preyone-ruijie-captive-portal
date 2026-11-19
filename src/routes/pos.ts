@@ -448,6 +448,10 @@ router.patch('/invoice-settings', requireRole(...MANAGER_ROLES), async (req, res
   }
   const currency = str(b.currency) ? str(b.currency).toUpperCase() : null;
   const taxPct = b.taxPct === undefined || b.taxPct === null ? null : round2(num(b.taxPct));
+  // Motto / tagline is branding copy: managers may edit it even though the
+  // legal identity fields stay CEO-only. `undefined` means "leave unchanged";
+  // an empty string clears it.
+  const tagline = b.tagline === undefined ? null : str(b.tagline).slice(0, 120);
   const { rows } = await pool.query(
     `UPDATE companies
         SET invoice_template_id = COALESCE($1, invoice_template_id),
@@ -456,9 +460,10 @@ router.patch('/invoice-settings', requireRole(...MANAGER_ROLES), async (req, res
             terms_text          = COALESCE($4, terms_text),
             receipt_footer      = COALESCE($5, receipt_footer),
             invoice_settings    = COALESCE($6::jsonb, invoice_settings),
+            tagline             = COALESCE($7, tagline),
             updated_at          = NOW()
-      WHERE id = $7
-      RETURNING id, name, logo_url, currency, tax_pct, invoice_template_id,
+      WHERE id = $8
+      RETURNING id, name, tagline, logo_url, currency, tax_pct, invoice_template_id,
                 terms_text, receipt_footer, invoice_settings`,
     [
       templateId,
@@ -467,6 +472,7 @@ router.patch('/invoice-settings', requireRole(...MANAGER_ROLES), async (req, res
       str(b.termsText) || null,
       str(b.footer) || null,
       b.settings === undefined ? null : JSON.stringify(b.settings),
+      tagline,
       cid,
     ]
   );
