@@ -1002,8 +1002,14 @@ function SendDocumentModal({
       const file = new File([blob], filename, { type: 'application/pdf' });
       const text = note.trim();
       let shared = false;
+      let canShareFiles = false;
       try {
-        if (navigator.canShare?.({ files: [file] })) {
+        canShareFiles = !!navigator.canShare?.({ files: [file] });
+      } catch {
+        canShareFiles = false;
+      }
+      try {
+        if (canShareFiles) {
           await navigator.share({
             files: [file],
             title: `${label} ${doc.doc_number}`,
