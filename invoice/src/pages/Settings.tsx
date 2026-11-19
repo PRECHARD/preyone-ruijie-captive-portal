@@ -2,7 +2,6 @@ import {
   useCallback,
   useEffect,
   useMemo,
-  useRef,
   useState,
   type ReactNode,
 } from 'react';
@@ -324,8 +323,6 @@ export default function SettingsPage({
   const [email, setEmail] = useState(company.email ?? '');
   const [phone, setPhone] = useState(company.support_phone ?? '');
   const [website, setWebsite] = useState(company.website ?? '');
-  const [logoUrl, setLogoUrl] = useState(company.logo_url ?? '');
-  const [uploading, setUploading] = useState(false);
 
   const [currency, setCurrency] = useState(company.currency || 'USD');
   const [taxPct, setTaxPct] = useState(String(initial.taxPct ?? 15.5));
@@ -347,7 +344,6 @@ export default function SettingsPage({
 
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
 
   const normalizedRole = (role ?? '').toUpperCase();
   const isCeo = normalizedRole === 'CEO';
@@ -496,7 +492,6 @@ export default function SettingsPage({
     setEmail(company.email ?? '');
     setPhone(company.support_phone ?? '');
     setWebsite(company.website ?? '');
-    setLogoUrl(company.logo_url ?? '');
     setCurrency(company.currency || 'USD');
     setTaxPct(String(fresh.taxPct ?? 15.5));
     setTaxLabel(fresh.taxLabel || 'VAT');
@@ -510,39 +505,6 @@ export default function SettingsPage({
       Cashier: fresh.roles?.Cashier ?? DEFAULT_ROLES.Cashier,
     });
     setNotice(null);
-  };
-
-  const uploadLogo = (file: File) => {
-    setNotice(null);
-    if (!/^image\/(png|jpe?g|webp)$/i.test(file.type)) {
-      setNotice({ kind: 'error', text: 'Logo must be a PNG, JPEG or WebP image.' });
-      return;
-    }
-    if (file.size > 2 * 1024 * 1024) {
-      setNotice({ kind: 'error', text: 'Logo must be 2 MB or smaller.' });
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = async () => {
-      setUploading(true);
-      try {
-        const res = await api.post<{ logoUrl: string }>('/api/admin/company/logo', {
-          dataUrl: String(reader.result),
-        });
-        setLogoUrl(res.logoUrl);
-        onCatalog({ ...catalog, company: { ...company, logo_url: res.logoUrl } });
-        setNotice({ kind: 'ok', text: 'Logo saved. It appears on every invoice, quote and receipt.' });
-      } catch (err) {
-        setNotice({ kind: 'error', text: errorText(err) });
-      } finally {
-        setUploading(false);
-      }
-    };
-    reader.onerror = () => {
-      setNotice({ kind: 'error', text: 'Could not read that file.' });
-      setUploading(false);
-    };
-    reader.readAsDataURL(file);
   };
 
   const setNumber = (key: string, patch: Partial<NumberingRule>) => {
@@ -726,43 +688,6 @@ export default function SettingsPage({
                 />
               </label>
             </div>
-
-            <aside className="settings-logo-card">
-              <div className="settings-logo-frame">
-                {logoUrl ? (
-                  <img src={logoUrl} alt="Company logo" />
-                ) : (
-                  <span className="settings-logo-fallback" aria-hidden>{initials(legalName) || 'P'}</span>
-                )}
-                <span className="settings-logo-ratio">16 : 7</span>
-              </div>
-              <div className="settings-logo-copy">
-                <strong>Company logo</strong>
-                <p>Aspect-ratio locked at 16:7. The image is contained, never stretched.</p>
-              </div>
-              <div className="settings-logo-actions">
-                <button
-                  className="btn"
-                  type="button"
-                  onClick={() => fileRef.current?.click()}
-                  disabled={(role !== null && !isManager) || uploading}
-                >
-                  {uploading ? 'Uploading…' : 'Upload logo'}
-                </button>
-                <span className="settings-hint">PNG, JPEG or WebP · max 2 MB</span>
-              </div>
-              <input
-                ref={fileRef}
-                type="file"
-                accept="image/png,image/jpeg,image/webp"
-                hidden
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (file) uploadLogo(file);
-                  e.target.value = '';
-                }}
-              />
-            </aside>
           </div>
 
           {documentDesign && isManager && (

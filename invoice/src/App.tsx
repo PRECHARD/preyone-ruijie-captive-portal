@@ -1232,7 +1232,6 @@ function SettingsPanel({
   const [footer, setFooter] = useState(catalog.company.receipt_footer || '');
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
 
   const selectedTemplate = catalog.templates.find((t) => t.id === templateId) ?? catalog.templates[0];
   const sampleDue = (() => {
@@ -1310,30 +1309,6 @@ function SettingsPanel({
     }
   };
 
-  const uploadLogo = (file: File) => {
-    setNotice(null);
-    if (!/^image\/(png|jpe?g|webp)$/i.test(file.type)) {
-      setNotice({ kind: 'error', text: 'Logo must be a PNG, JPEG or WebP image.' });
-      return;
-    }
-    if (file.size > 2 * 1024 * 1024) {
-      setNotice({ kind: 'error', text: 'Logo must be 2 MB or smaller.' });
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = async () => {
-      try {
-        const res = await api.post<{ logoUrl: string }>('/api/admin/company/logo', { dataUrl: String(reader.result) });
-        onCatalog({ ...catalog, company: { ...catalog.company, logo_url: res.logoUrl } });
-        setNotice({ kind: 'ok', text: 'Logo updated across invoices and receipts.' });
-      } catch (err) {
-        setNotice({ kind: 'error', text: errorText(err) });
-      }
-    };
-    reader.onerror = () => setNotice({ kind: 'error', text: 'Could not read that file.' });
-    reader.readAsDataURL(file);
-  };
-
   return (
     <div>
       {notice && <div className={`banner ${notice.kind === 'ok' ? 'ok' : 'error'}`}>{notice.text}</div>}
@@ -1347,8 +1322,7 @@ function SettingsPanel({
             {busy ? 'Saving…' : 'Save defaults'}
           </button>
         </div>
-        <div className="split">
-          <div className="form-grid">
+        <div className="form-grid">
             <label className="field">
               <span>Default currency</span>
               <select className="select" value={currency} onChange={(e) => setCurrency(e.target.value)}>
@@ -1372,34 +1346,6 @@ function SettingsPanel({
               <input className="input" value={footer} onChange={(e) => setFooter(e.target.value)} />
             </label>
           </div>
-          <div>
-            <div className="muted small" style={{ marginBottom: 8 }}>Company logo</div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              {catalog.company.logo_url ? (
-                <img src={catalog.company.logo_url} alt="Company logo" style={{ width: 64, height: 64, objectFit: 'contain', background: '#fff', borderRadius: 10, padding: 6 }} />
-              ) : (
-                <div className="brand-mark" style={{ width: 64, height: 64, fontSize: 26 }}>P</div>
-              )}
-              <div>
-                <button className="btn" type="button" onClick={() => fileRef.current?.click()}>
-                  Upload logo
-                </button>
-                <div className="muted small" style={{ marginTop: 6 }}>PNG, JPEG or WebP · max 2 MB</div>
-              </div>
-            </div>
-            <input
-              ref={fileRef}
-              type="file"
-              accept="image/png,image/jpeg,image/webp"
-              hidden
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) uploadLogo(file);
-                e.target.value = '';
-              }}
-            />
-          </div>
-        </div>
       </div>
       )}
 

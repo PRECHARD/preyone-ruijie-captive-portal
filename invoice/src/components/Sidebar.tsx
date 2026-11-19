@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { getToken, type Company, type DocType } from '../api';
 
 /**
@@ -135,6 +135,16 @@ interface SessionUser {
   full_name?: string | null;
   email?: string | null;
   role?: string | null;
+  avatar_url?: string | null;
+}
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error('Could not read that file'));
+    reader.readAsDataURL(file);
+  });
 }
 
 const ROLE_LABELS: Record<string, string> = {
@@ -170,62 +180,12 @@ function clearAuthStorage(): void {
   }
 }
 
-/**
- * Average luminance of the opaque pixels in a logo, sampled on a canvas.
- *
- * The rail is dark, so a dark mark disappears without a white plate. Instead
- * of guessing from the file name we measure the artwork and only lift it to a
- * white silhouette when it is genuinely too dark to read. Returns null when
- * the pixels cannot be inspected (e.g. a cross-origin image).
- */
-function logoLuminance(img: HTMLImageElement): number | null {
-  try {
-    const width = 64;
-    const height = Math.max(1, Math.round((img.naturalHeight / img.naturalWidth) * width));
-    const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return null;
-    ctx.drawImage(img, 0, 0, width, height);
-    const { data } = ctx.getImageData(0, 0, width, height);
-    let sum = 0;
-    let count = 0;
-    for (let i = 0; i < data.length; i += 4) {
-      if (data[i + 3] < 40) continue;
-      sum += (0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2]) / 255;
-      count += 1;
-    }
-    return count ? sum / count : null;
-  } catch {
-    return null;
-  }
-}
-
 export function Brand({ company }: { company?: Company | null }) {
-  // Prefer the workspace logo, then the Preyone house mark. No white plate:
-  // the transparent PNG sits directly on the themed rail and gets a theme
-  // coloured glow, so it blends with whatever palette the merchant picked.
-  const logo =
-    company?.logo_url ||
-    (company?.logo_path ? `/images/${company.logo_path}` : '/images/preyonelogomainzw.png');
-  const [lift, setLift] = useState(false);
-
-  useEffect(() => {
-    setLift(false);
-  }, [logo]);
-
+  // The workspace chrome always carries the house mark. Tenant branding is
+  // personal, not navigational: it lives on the signed-in profile avatar.
   return (
     <div className="brand">
-      <img
-        className={`brand-logo${lift ? ' tone-lift' : ''}`}
-        src={logo}
-        alt={`${company?.name ?? 'Preyone'} logo`}
-        onLoad={(event) => {
-          const luminance = logoLuminance(event.currentTarget);
-          setLift(luminance !== null && luminance < 0.34);
-        }}
-      />
+      <img className="brand-logo" src="/images/preyonelogomainzw.png" alt="Preyone logo" />
       <div>
         <div className="brand-name">{company?.name || 'Preyone'}</div>
         <div className="brand-sub">Invoicing</div>
@@ -267,6 +227,9 @@ export default function Sidebar({
   const [user, setUser] = useState<SessionUser | null>(null);
   const [profileLoading, setProfileLoading] = useState(true);
   const [signingOut, setSigningOut] = useState(false);
+  const [avatarBusy, setAvatarBusy] = useState(false);
+  const [avatarNote, setAvatarNote] = useState<string | null>(null);
+  const avatarInputRef = useRef<HTMLInputElement>(null);
 
   // The rail loads its own identity so it renders in both shells: inside the
   // admin frame (localStorage bearer) and as a standalone invoice tab (wildcard
@@ -330,6 +293,49 @@ export default function Sidebar({
   const tone = roleTone(user?.role);
   const displayName = user?.full_name?.trim() || user?.email || 'Signed in';
   const roleLabel = ROLE_LABELS[tone];
+  const avatarSrc =
+    user?.avatar_url ||
+    company?.logo_url ||
+    (company?.logo_path ? `/images/${company.logo_path}` : null);
+
+  /**
+   * Profile picture upload: small PNG/SVG only, stored on the admin user. The
+   * image is shown exclusively on this card; the rail keeps the house mark.
+   */
+  const uploadAvatar = async (file: File) => {
+    setAvatarNote(null);
+    if (!/^image\/(png|svg\+xml)$/i.test(file.type)) {
+      setAvatarNote('Use a PNG or SVG image.');
+      return;
+    }
+    if (file.size > 512 * 1024) {
+      setAvatarNote('Keep the image under 512 KB.');
+      return;
+    }
+    setAvatarBusy(true);
+    try {
+      const dataUrl = await readFileAsDataUrl(file);
+      const token = getToken();
+      const res = await fetch('/api/admin/auth/avatar', {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ dataUrl, previousUrl: user?.avatar_url ?? '' }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { avatarUrl?: string; error?: string };
+      if (!res.ok) throw new Error(data.error || 'Upload failed');
+      if (data.avatarUrl) {
+        setUser((prev) => (prev ? { ...prev, avatar_url: data.avatarUrl } : prev));
+      }
+    } catch (err) {
+      setAvatarNote(err instanceof Error ? err.message : 'Upload failed');
+    } finally {
+      setAvatarBusy(false);
+    }
+  };
 
   const onDocuments = view === 'documents';
   const allDocumentsActive = onDocuments && typeFilter === 'all' && statusFilter === 'all';
@@ -492,10 +498,28 @@ export default function Sidebar({
         </div>
       ) : signedIn ? (
         <div className={`profile-card profile-card--${tone}`}>
-          <span className="profile-avatar" aria-hidden>
-            {initialsFor(user!)}
+          <button
+            type="button"
+            className={`profile-avatar${avatarBusy ? ' profile-avatar--busy' : ''}`}
+            onClick={() => avatarInputRef.current?.click()}
+            disabled={avatarBusy}
+            aria-label="Change profile picture"
+            title={avatarNote || 'Change profile picture (PNG or SVG, max 512 KB)'}
+          >
+            {avatarSrc ? <img src={avatarSrc} alt="" /> : initialsFor(user!)}
             <i className="profile-presence" />
-          </span>
+          </button>
+          <input
+            ref={avatarInputRef}
+            type="file"
+            accept="image/png,image/svg+xml"
+            hidden
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (file) void uploadAvatar(file);
+              event.target.value = '';
+            }}
+          />
           <span className="profile-id">
             <span className="profile-name" title={displayName}>
               {displayName}

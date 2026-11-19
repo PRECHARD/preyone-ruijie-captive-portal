@@ -258,6 +258,10 @@ const SQL = `
   -- always challenges regardless of this flag.
   ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS two_factor_enabled BOOLEAN NOT NULL DEFAULT FALSE;
 
+  -- Per-user profile picture (small PNG/SVG). Shown only on the signed-in
+  -- profile card; the workspace chrome uses the fixed Preyone mark.
+  ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS avatar_url TEXT;
+
   -- Per-device session rows (JWT "sid" claim). Revocation = DELETE the row.
   CREATE TABLE IF NOT EXISTS admin_user_sessions (
     sid           TEXT PRIMARY KEY,

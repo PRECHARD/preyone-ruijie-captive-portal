@@ -2,6 +2,8 @@ import { Router, Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import rateLimit from 'express-rate-limit';
+import fs from 'fs';
+import path from 'path';
 import { pool } from '../db/pool';
 import { loadCompany } from '../middleware/company';
 import { loadPermissions } from '../middleware/rbac';
@@ -971,6 +973,7 @@ adminAuthRouter.get('/me', async (req: Request, res: Response) => {
     const { rows } = await pool.query(
       `SELECT u.id, u.full_name, u.email, u.phone, u.role, u.company_id, u.portal_company_id, u.created_at,
               u.email_verified, u.approved, u.last_activity, u.auth_time, u.active_sid, u.two_factor_enabled,
+              u.avatar_url,
               s.sid           AS session_sid,
               s.auth_time     AS session_auth_time,
               s.last_activity AS session_last_activity
@@ -1080,6 +1083,80 @@ res.json({
   } catch {
     res.status(401).json({ error: 'Invalid token' });
   }
+});
+
+/**
+ * Profile avatar upload.
+ *
+ * Small PNG or SVG only (512 KB). The file is stored under `public/images`
+ * and remembered per admin user; the invoice rail shows it on the signed-in
+ * profile card. Workspace branding no longer exposes a logo upload — the
+ * top navigation always uses the fixed Preyone mark.
+ */
+adminAuthRouter.post('/avatar', requireAdminAuth, async (req: Request, res: Response) => {
+  const dataUrl = typeof req.body?.dataUrl === 'string' ? req.body.dataUrl : '';
+  const match = /^data:image\/(png|svg\+xml);base64,([A-Za-z0-9+/=\s]+)$/i.exec(dataUrl);
+  if (!match) {
+    res.status(422).json({ error: 'Avatar must be a PNG or SVG image' });
+    return;
+  }
+
+  const ext = match[1].toLowerCase() === 'svg+xml' ? 'svg' : 'png';
+  const bytes = Buffer.from(match[2].replace(/\s/g, ''), 'base64');
+  if (bytes.length === 0) {
+    res.status(422).json({ error: 'Avatar image is empty' });
+    return;
+  }
+  if (bytes.length > 512 * 1024) {
+    res.status(413).json({ error: 'Avatar too large - keep it under 512 KB' });
+    return;
+  }
+
+  if (ext === 'png') {
+    const pngMagic = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    if (!bytes.subarray(0, 8).equals(pngMagic)) {
+      res.status(422).json({ error: 'Avatar file content is not a PNG image' });
+      return;
+    }
+  } else {
+    const svg = bytes.toString('utf8');
+    if (!/<svg[\s>]/i.test(svg.slice(0, 2048))) {
+      res.status(422).json({ error: 'Avatar file content is not an SVG image' });
+      return;
+    }
+    // Uploaded SVGs are served same-origin, so strip anything executable.
+    if (/<script[\s>]/i.test(svg) || /\son\w+\s*=/i.test(svg) || /javascript:/i.test(svg)) {
+      res.status(422).json({ error: 'SVG contains executable content' });
+      return;
+    }
+  }
+
+  const adminId = req.adminUser!.id;
+  const filename = `avatar-${adminId}-${Date.now()}-${crypto.randomBytes(3).toString('hex')}.${ext}`;
+  const imagesDir = path.join(__dirname, '..', '..', 'public', 'images');
+  fs.mkdirSync(imagesDir, { recursive: true });
+  fs.writeFileSync(path.join(imagesDir, filename), bytes);
+
+  const publicUrl = `/images/${filename}`;
+  const { rows } = await pool.query(
+    `UPDATE admin_users SET avatar_url = $1 WHERE id = $2 RETURNING avatar_url`,
+    [publicUrl, adminId]
+  );
+
+  // Best-effort cleanup of the previous avatar so /public/images does not grow
+  // one stale file per upload.
+  const previous = typeof req.body?.previousUrl === 'string' ? req.body.previousUrl : '';
+  const previousName = /^\/images\/(avatar-[A-Za-z0-9-]+\.(?:png|svg))$/.exec(previous)?.[1];
+  if (previousName && previousName !== filename) {
+    try {
+      fs.unlinkSync(path.join(imagesDir, previousName));
+    } catch {
+      /* already gone */
+    }
+  }
+
+  await recordAuditLog(adminId, null, 'profile.avatar', 'admin_user', adminId, filename);
+  res.json({ avatarUrl: rows[0]?.avatar_url ?? publicUrl });
 });
 
 // ── Forgot password: generate token, send email ──────────────────────

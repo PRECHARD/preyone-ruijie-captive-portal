@@ -565,18 +565,25 @@ export async function sheetToPdf(sheet: HTMLElement): Promise<jsPDF> {
       )
     );
 
-    const width = Math.ceil(sheet.scrollWidth || sheet.getBoundingClientRect().width);
-    const height = Math.ceil(sheet.scrollHeight || sheet.getBoundingClientRect().height);
+    // Never pass width/height/windowWidth/windowHeight: html2canvas resizes the
+    // clone to those values, which stretches the sheet when the numbers differ
+    // from the element's real box. Let it measure the DOM itself so the bitmap
+    // has exactly the preview's aspect ratio.
+    const rect = sheet.getBoundingClientRect();
+    const cssWidth = rect.width || sheet.scrollWidth || 794;
+    const cssHeight = rect.height || sheet.scrollHeight || 1123;
+
+    // ~300 DPI at A4 width (210mm ≈ 794 CSS px) for a crisp, "full HD" page,
+    // then back off for very long invoices so the canvas cannot exhaust memory.
+    let scale = Math.min(3, Math.max(2, 2380 / Math.max(cssWidth, 1)));
+    scale = Math.min(scale, Math.sqrt(28_000_000 / Math.max(cssWidth * cssHeight, 1)));
+    scale = Math.max(1.5, scale);
 
     const canvas = await html2canvas(sheet, {
-      scale: 2,
+      scale,
       backgroundColor: '#ffffff',
       useCORS: true,
       logging: false,
-      width,
-      height,
-      windowWidth: width,
-      windowHeight: height,
       scrollX: 0,
       scrollY: 0,
     });
@@ -600,9 +607,10 @@ export async function sheetToPdf(sheet: HTMLElement): Promise<jsPDF> {
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(0, 0, slice.width, slice.height);
       ctx.drawImage(canvas, 0, -page * pageHeightPx);
+      // Lossless PNG: JPEG artefacts make small invoice type look distorted.
       pdf.addImage(
-        slice.toDataURL('image/jpeg', 0.94),
-        'JPEG',
+        slice.toDataURL('image/png'),
+        'PNG',
         0,
         0,
         PAGE_W,
