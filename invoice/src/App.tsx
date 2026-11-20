@@ -8,6 +8,7 @@ import {
   clearToken,
   download,
   getToken,
+  installSessionHeartbeat,
   type SessionSignal,
   type ArAging,
   type Catalog,
@@ -68,13 +69,29 @@ function money(value: unknown, currency = 'USD'): string {
 
 function dateLabel(value?: string | null): string {
   if (!value) return '—';
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return String(value);
+  const raw = String(value);
+  // DATE values arrive as YYYY-MM-DD. Parse those as local midnight so a
+  // timezone conversion can never show yesterday's date.
+  const d = /^\d{4}-\d{2}-\d{2}$/.test(raw) ? new Date(`${raw}T00:00:00`) : new Date(raw);
+  if (Number.isNaN(d.getTime())) return raw;
   return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
+/** Local calendar date in the company's trading timezone (Africa/Harare). */
 function today(): string {
-  return new Date().toISOString().slice(0, 10);
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Africa/Harare',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date());
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '';
+  return `${get('year')}-${get('month')}-${get('day')}`;
+}
+
+/** Format a Date using its local calendar components, never UTC. */
+function dateOnlyLocal(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 function typeLabel(types: DocType[], type: string): string {
@@ -660,7 +677,7 @@ function Composer({
     const d = new Date(`${issueDate}T00:00:00`);
     if (Number.isNaN(d.getTime())) return null;
     d.setDate(d.getDate() + (Number(netDays) || 0));
-    return d.toISOString().slice(0, 10);
+    return dateOnlyLocal(d);
   }, [issueDate, netDays]);
 
   // The live A4 proof. It uses the exact same component as the saved document
@@ -1968,9 +1985,9 @@ function SettingsPanel({
 
   const selectedTemplate = catalog.templates.find((t) => t.id === templateId) ?? catalog.templates[0];
   const sampleDue = (() => {
-    const d = new Date();
+    const d = new Date(`${today()}T00:00:00`);
     d.setDate(d.getDate() + 30);
-    return d.toISOString().slice(0, 10);
+    return dateOnlyLocal(d);
   })();
 
   // Proof for the picker: the same A4 component that renders issued documents
@@ -2315,6 +2332,9 @@ export default function App() {
 
   useEffect(() => {
     if (!catalog) return;
+    // Begin sliding the admin session on real interaction. Without this the
+    // invoice SPA was locked after 15 minutes even while the user was working.
+    installSessionHeartbeat();
     void loadDocs();
   }, [catalog, loadDocs]);
 

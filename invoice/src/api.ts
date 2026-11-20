@@ -30,6 +30,43 @@ export function clearToken(): void {
   }
 }
 
+const HEARTBEAT_THROTTLE_MS = 60_000;
+let heartbeatInstalled = false;
+let lastActivityPing = 0;
+
+/**
+ * Keep an actively used invoice workspace alive. The server's inactivity lock
+ * is 15 minutes, and the invoice SPA previously never called /refresh, so a
+ * signed-in user was locked out mid-task even while clicking and typing.
+ * This slides the session clock on real interaction (and on a visible tab every
+ * four minutes); hidden or abandoned tabs are deliberately left alone.
+ */
+export function installSessionHeartbeat(): void {
+  if (heartbeatInstalled || typeof window === 'undefined') return;
+  heartbeatInstalled = true;
+
+  const ping = () => {
+    if (document.visibilityState !== 'visible') return;
+    const now = Date.now();
+    if (now - lastActivityPing < HEARTBEAT_THROTTLE_MS) return;
+    lastActivityPing = now;
+    const token = getToken();
+    void fetch('/api/admin/auth/refresh', {
+      method: 'POST',
+      credentials: 'include',
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    }).catch(() => undefined);
+  };
+
+  for (const event of ['pointerdown', 'keydown', 'touchstart', 'mousemove', 'scroll'] as const) {
+    window.addEventListener(event, ping, { passive: true });
+  }
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') ping();
+  });
+  window.setInterval(ping, 4 * 60_000);
+}
+
 /**
  * App-level auth signals. The client emits these when the shared admin session
  * changes underneath the SPA, so a locked or revoked session can never leave the

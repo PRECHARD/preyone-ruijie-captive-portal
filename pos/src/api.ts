@@ -178,6 +178,42 @@ export class ApiError extends Error {
   }
 }
 
+const HEARTBEAT_THROTTLE_MS = 60_000;
+let heartbeatInstalled = false;
+let lastActivityPing = 0;
+
+/**
+ * Keep an actively used till alive. POS tokens are admin-session tokens with a
+ * per-device sid; /refresh slides the inactivity clock so a cashier is never
+ * dropped mid-sale. Hidden tabs stop refreshing.
+ */
+export function installSessionHeartbeat(): void {
+  if (heartbeatInstalled || typeof window === 'undefined') return;
+  heartbeatInstalled = true;
+
+  const ping = () => {
+    if (document.visibilityState !== 'visible') return;
+    const token = auth.token();
+    if (!token) return;
+    const now = Date.now();
+    if (now - lastActivityPing < HEARTBEAT_THROTTLE_MS) return;
+    lastActivityPing = now;
+    void fetch('/api/admin/auth/refresh', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { Authorization: `Bearer ${token}` },
+    }).catch(() => undefined);
+  };
+
+  for (const event of ['pointerdown', 'keydown', 'touchstart', 'mousemove', 'scroll'] as const) {
+    window.addEventListener(event, ping, { passive: true });
+  }
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') ping();
+  });
+  window.setInterval(ping, 4 * 60_000);
+}
+
 async function req<T>(path: string, opts: RequestInit = {}): Promise<T> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   const token = auth.token();

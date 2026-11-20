@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { api, auth, ApiError, type StaffUser, type MethodTotal, type Shift } from './api';
+import { api, auth, ApiError, installSessionHeartbeat, type StaffUser, type MethodTotal, type Shift } from './api';
 import PinLogin from './components/PinLogin';
 import ShiftGate from './components/ShiftGate';
 import Terminal from './components/Terminal';
@@ -31,6 +31,10 @@ export default function App() {
     setToast({ msg, kind });
     window.setTimeout(() => setToast(null), 2600);
   }, []);
+
+  useEffect(() => {
+    if (user) installSessionHeartbeat();
+  }, [user]);
 
   const refreshShift = useCallback(async () => {
     try {

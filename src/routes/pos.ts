@@ -43,9 +43,16 @@ const num = (v: unknown): number => {
 };
 const str = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
 
-function signToken(user: StaffUser): string {
+function signToken(user: StaffUser, sid?: string): string {
   return jwt.sign(
-    { id: user.id, email: user.email, role: user.role, fullName: user.fullName, company_id: user.company_id ?? null },
+    {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+      fullName: user.fullName,
+      company_id: user.company_id ?? null,
+      ...(sid ? { sid } : {}),
+    },
     JWT_SECRET,
     { expiresIn: '12h' }
   );
@@ -106,7 +113,17 @@ router.post('/auth/pin', pinLimiter, async (req, res) => {
       fullName: row.full_name,
       company_id: row.company_id ?? null,
     };
-    res.json({ token: signToken(user), user });
+    // A PIN sign-in is a real per-device session, not just a signed payload.
+    // The session row gives /refresh a clock to slide, so an active till never
+    // locks mid-sale, while an abandoned tablet can still be cleaned up.
+    const sid = crypto.randomUUID();
+    await pool.query(
+      `INSERT INTO admin_user_sessions (sid, admin_user_id, auth_time, last_activity)
+       VALUES ($1, $2, NOW(), NOW())
+       ON CONFLICT (sid) DO NOTHING`,
+      [sid, user.id]
+    );
+    res.json({ token: signToken(user, sid), user });
     return;
   }
   res.status(401).json({ error: 'Invalid PIN for this operator' });

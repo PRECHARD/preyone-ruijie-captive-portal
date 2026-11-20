@@ -127,12 +127,13 @@
   align-self: flex-end;
   font-size: 19pt;
   font-weight: 700;
+  line-height: 1;
   letter-spacing: .06em;
   text-transform: uppercase;
   color: var(--doc-accent, #7a0e57);
 }
 .a4-number-bar {
-  margin-top: 1.5mm;
+  margin-top: .45mm;
   display: flex;
   align-items: center;
   justify-content: center;

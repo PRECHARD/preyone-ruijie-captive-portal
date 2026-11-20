@@ -1,4 +1,10 @@
-import { Pool } from 'pg';
+import { Pool, types } from 'pg';
+
+// PostgreSQL DATE is a calendar day, not an instant. The default parser turns
+// it into a JS Date at local midnight, and JSON.stringify then emits the UTC
+// instant — which is the previous day for Harare (UTC+2). Return the raw
+// YYYY-MM-DD text instead so every API response keeps the exact document date.
+types.setTypeParser(1082, (value: string) => value);
 
 let _pool: Pool | null = null;
 
@@ -16,7 +22,10 @@ function getPool(): Pool {
       // Server-side guard: any single statement (including a runaway sync batch
       // or a missed index) is killed after 15s instead of pinning a client.
       // Kept modest so slow-but-legit admin reports don't trip it.
-      options: '-c statement_timeout=15000',
+      // The business timezone is Harare: CURRENT_DATE must be the local trading
+      // day, not the UTC day, or documents issued just after midnight are dated
+      // yesterday.
+      options: '-c statement_timeout=15000 -c timezone=Africa/Harare',
     });
     // A dropped backend must NEVER take the whole service down: log it and let
     // the pool replace the client on next use. (process.exit here would flip
