@@ -218,7 +218,7 @@
   background-image: var(--doc-row-tint);
   border-left-color: rgba(255, 255, 255, .9);
 }
-.a4-items-table tbody tr.a4-filler td { color: transparent; }
+
 
 /* ── Bullet details: a full-width spec panel on the white sheet ── */
 .a4-items-table tbody tr td.a4-item-cell { vertical-align: top; }
@@ -237,21 +237,36 @@
   color: var(--doc-ink);
 }
 .a4-item-details {
+  position: relative;
   margin-top: 0;
-  padding: 1.9mm 2.7mm 2.2mm;
-  border: .35mm solid var(--doc-detail-border, #b9a4dd);
-  border-left: .8mm solid var(--doc-accent, #7a0e57);
-  border-radius: 1.6mm;
+  padding: 2mm 2.8mm 2.3mm;
+  border: .35mm solid var(--doc-detail-border, rgba(54, 17, 106, .55));
+  border-left: .8mm solid var(--doc-accent, #36116a);
+  border-radius: 2mm;
   background: #fff;
-  box-shadow: 0 0 0 .16mm var(--doc-detail-glow, #f1e9ff);
+  box-shadow:
+    inset 0 0 0 .18mm var(--doc-detail-glow, rgba(54, 17, 106, .16)),
+    0 .7mm 1.8mm var(--doc-detail-glow, rgba(54, 17, 106, .16));
+}
+.a4-detail-head {
+  display: flex;
+  align-items: center;
+  gap: 2.2mm;
+  margin-bottom: 1.5mm;
 }
 .a4-detail-label {
-  margin-bottom: 1.25mm;
+  flex: none;
   font-size: 6pt;
+  font-weight: 600;
   line-height: 1;
-  letter-spacing: .2em;
+  letter-spacing: .22em;
   text-transform: uppercase;
-  color: var(--doc-accent, #7a0e57);
+  color: var(--doc-accent, #36116a);
+}
+.a4-detail-rule {
+  flex: 1;
+  height: .22mm;
+  background: linear-gradient(90deg, var(--doc-detail-border, #b9a4dd), transparent);
 }
 .a4-item-details ul {
   display: grid;
@@ -275,17 +290,26 @@
 }
 .a4-item-details li > span:last-child { min-width: 0; overflow-wrap: anywhere; }
 .a4-detail-mark {
+  position: relative;
   flex: none;
-  width: 1.75mm;
-  height: 1.75mm;
-  margin-top: .78mm;
+  width: 2mm;
+  height: 2mm;
+  margin-top: .72mm;
   transform: rotate(45deg);
   background: linear-gradient(
     135deg,
     var(--doc-accent, #36116a) 0 50%,
     var(--doc-detail-navy, #122b70) 50% 100%
   );
-  box-shadow: 0 0 0 .18mm #fff;
+  border: .16mm solid #fff;
+  box-shadow: 0 0 .7mm var(--doc-detail-glow, rgba(54, 17, 106, .2));
+}
+.a4-detail-mark > span {
+  position: absolute;
+  inset: .58mm;
+  opacity: .9;
+  border-radius: .12mm;
+  background: #fff;
 }
 .a4-doc.layout-compact .a4-item-details { margin-top: 1.4mm; padding: 1.2mm 1.8mm; }
 .a4-doc.layout-compact .a4-item-details li { font-size: 7.1pt; line-height: 1.36; }

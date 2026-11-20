@@ -10,7 +10,7 @@ import type { InvoiceTemplate } from './api';
  *
  *   brand lockup · wordmark + gradient number bar
  *   bill-to / document meta grid
- *   gradient item table with zebra fillers
+ *   gradient item table with zebra rows (no empty filler rows)
  *   gradient grand total, paid/balance rows
  *   payment notes
  *   THANKS + terms + full-bleed footer band
@@ -209,53 +209,6 @@ function fmtDate(iso?: string | null): string {
     : d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
-/* ── filler-row maths (ported from the old docLayout.js) ────────────── */
-
-const INNER_MM = 272;
-const HEAD_MM = 24;
-const META_GAP_MM = 10;
-const TABLE_GAP_MM = 9;
-const HEADER_ROW_MM = 11.2;
-const ROW_MM = 9.6;
-const TOTALS_GAP_MM = 7;
-const NOTES_GAP_MM = 8;
-const FOOTER_MM = 64.8;
-const TOTALS_BASE_MM = 31.5;
-const PAYED_MM = 20.9;
-const NOTES_ROW_MM = 9.4;
-const MIN_TOTAL_ROWS = 6;
-
-function metaLines(doc: SheetDoc): number {
-  const addr = String(doc.customerAddress || '')
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter(Boolean).length;
-  const extras = [doc.customerEmail, doc.customerPhone].filter((x) => String(x || '').trim()).length;
-  return 1 + addr + extras;
-}
-
-function fillerRows(doc: SheetDoc, itemCount: number): number {
-  const amountPaid = Number(doc.amountPaid) || 0;
-  const meta = 4.8 + metaLines(doc) * 5.1;
-  const totals =
-    TOTALS_BASE_MM +
-    (Number(doc.discountPct) > 0 ? 8.7 : 0) +
-    (amountPaid > 0 ? PAYED_MM : 0);
-  const notes = doc.notes
-    ? NOTES_ROW_MM + Math.max(0, String(doc.notes).split(/\r?\n/).filter((l) => l.trim()).length - 1) * 4.6
-    : 0;
-  const used =
-    HEAD_MM +
-    META_GAP_MM + meta +
-    TABLE_GAP_MM + HEADER_ROW_MM +
-    TOTALS_GAP_MM + totals +
-    (notes ? NOTES_GAP_MM + notes : 0) +
-    FOOTER_MM;
-  const availRows = Math.floor((INNER_MM - used) / ROW_MM);
-  const maxByDesign = Math.max(0, MIN_TOTAL_ROWS - itemCount);
-  return Math.max(0, Math.min(maxByDesign, availRows - itemCount));
-}
-
 /* ── component ──────────────────────────────────────────────────────── */
 
 export function DocumentSheet({
@@ -287,15 +240,6 @@ export function DocumentSheet({
   const amountPaid = Number(doc.amountPaid) || 0;
   const balance = Math.max(total - amountPaid, 0);
   const paid = doc.status === 'paid' || (total > 0 && amountPaid >= total - 0.005);
-  // Detail bullets take vertical room, so account for them when reserving the
-  // decorative filler rows. Roughly two bullets per extra line keeps the sheet
-  // from pushing the totals/footer off the page.
-  const detailCount = items.reduce(
-    (n, it) => n + (Array.isArray(it.details) ? it.details.filter((d) => String(d || '').trim()).length : 0),
-    0
-  );
-  const fillers = fillerRows(doc, items.length + Math.ceil(detailCount / 2));
-
   const addressLines = String(company.address || '')
     .split(/\r?\n/)
     .map((l) => l.trim())
@@ -422,11 +366,16 @@ export function DocumentSheet({
                     <tr className="a4-item-detail-row">
                       <td colSpan={4}>
                         <div className="a4-item-details">
-                          <div className="a4-detail-label">Details</div>
+                          <div className="a4-detail-head">
+                            <span className="a4-detail-label">Details</span>
+                            <span className="a4-detail-rule" aria-hidden />
+                          </div>
                           <ul className={details.length > 4 ? 'is-columns' : ''}>
                             {details.map((detail, j) => (
                               <li key={j}>
-                                <span className="a4-detail-mark" aria-hidden />
+                                <span className="a4-detail-mark" aria-hidden>
+                                  <span />
+                                </span>
                                 <span>{detail}</span>
                               </li>
                             ))}
@@ -438,14 +387,6 @@ export function DocumentSheet({
                 </Fragment>
               );
             })}
-            {Array.from({ length: fillers }, (_, i) => (
-              <tr className="a4-filler" key={`filler-${i}`}>
-                <td>&nbsp;</td>
-                <td className="a4-num">&nbsp;</td>
-                <td className="a4-num">&nbsp;</td>
-                <td className="a4-num">&nbsp;</td>
-              </tr>
-            ))}
           </tbody>
         </table>
 
