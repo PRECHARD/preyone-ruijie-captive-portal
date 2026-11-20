@@ -66,8 +66,12 @@ async function sendMail(to: string, subject: string, html: string, fromName?: st
   const email = fromEmail || process.env.SMTP_FROM || 'info@preyone.com';
   const from = fromName ? `"${fromName}" <${email}>` : email;
   try {
-    await t.sendMail({ from, to, subject, html, text, attachments, headers });
-    console.log('[NOTIFICATION] Email sent to', to, '-', subject);
+    const info = await t.sendMail({ from, to, subject, html, text, attachments, headers });
+    // The relay's response is the only proof of acceptance we get (the SMTP
+    // command succeeding is not delivery). Log it so a future "no email"
+    // report can be traced to the exact relay message instead of guesswork.
+    const response = (info as { response?: string } | undefined)?.response;
+    console.log('[NOTIFICATION] Email sent to', to, '-', subject, response ? `- ${response}` : '');
     return true;
   } catch (err) {
     console.error('[NOTIFICATION] Email send failed:', err);
@@ -720,6 +724,21 @@ export async function sendAdminLoginCode(email: string, fullName: string, code: 
   // server: it cannot leak into access logs, Referer headers or link scanners.
   const copyUrl = `${baseUrl}/copy-code#${encodeURIComponent(code)}`;
 
+  // Plain-text alternative. HTML-only mail is a well-known spam signal, and
+  // some clients/previewers only show the text part.
+  const text = [
+    `Hi ${fullName},`,
+    '',
+    `Your Preyone sign-in code is: ${code}`,
+    '',
+    'It expires in 15 minutes and can only be used once.',
+    'If you did not try to sign in, you can ignore this email and consider changing your password.',
+    '',
+    'Preyone Enterprises',
+    'support@preyone.com',
+    '+263 771 327 202',
+  ].join('\n');
+
   return sendMail(
     email,
     `Your Preyone sign-in code \u00b7 ${stamp}`,
@@ -803,7 +822,7 @@ export async function sendAdminLoginCode(email: string, fullName: string, code: 
               <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
                 <tr>
                   <td style="padding:18px 32px 0;font-family:${sans};font-size:13px;line-height:1.6;color:#64748b" align="center">
-                    This code expires in <strong style="color:#7be0ff;font-weight:600">5 minutes</strong>. It can only be used once.
+                    This code expires in <strong style="color:#7be0ff;font-weight:600">15 minutes</strong>. It can only be used once.
                   </td>
                 </tr>
                 <tr>
@@ -857,8 +876,11 @@ export async function sendAdminLoginCode(email: string, fullName: string, code: 
   </table>
 </body>
 </html>`,
-    'Preyone', 'admin@preyone.com', undefined,
-    { 'X-Entity-Ref-ID': threadRef, 'X-Auto-Response-Suppress': 'All' }
+    undefined,
+    undefined,
+    undefined,
+    { 'X-Entity-Ref-ID': threadRef, 'X-Auto-Response-Suppress': 'All', 'Reply-To': 'support@preyone.com' },
+    text
   );
 }
 
