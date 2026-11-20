@@ -225,7 +225,9 @@
 .a4-items-table tbody td.a4-item-cell.has-details { padding-bottom: 1.8mm; }
 .a4-items-table tbody tr.a4-item-detail-row td {
   height: auto;
-  padding: 0 5mm 3.2mm;
+  /* A little breathing room above and below, but no side inset: the spec box
+     must be exactly as wide as the full items table. */
+  padding: 1.3mm 0 2.2mm;
   border-left: none;
   background-image: none;
   background-color: #fff;
@@ -238,6 +240,7 @@
 }
 .a4-item-details {
   position: relative;
+  width: 100%;
   margin-top: 0;
   padding: 2mm 2.8mm 2.3mm;
   border: .35mm solid var(--doc-detail-border, rgba(54, 17, 106, .55));
@@ -447,7 +450,7 @@
 .a4-doc.layout-compact .a4-doc-meta { margin-top: 7mm; }
 .a4-doc.layout-compact .a4-items-table { margin-top: 6mm; }
 .a4-doc.layout-compact .a4-items-table tbody td { height: 7.8mm; }
-.a4-doc.layout-compact .a4-items-table tbody tr.a4-item-detail-row td { height: auto; padding: 0 5mm 2.6mm; }
+.a4-doc.layout-compact .a4-items-table tbody tr.a4-item-detail-row td { height: auto; padding: 1mm 0 1.8mm; }
 .a4-doc.layout-compact .a4-items-table thead th { height: 9.4mm; }
 .a4-doc.layout-compact .a4-totals .a4-row { padding: 1.5mm 4mm; }
 .a4-doc.layout-compact .a4-totals-wrap { margin-top: 5mm; }
