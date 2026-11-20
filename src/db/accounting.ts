@@ -325,7 +325,7 @@ export async function getAccountingOverview(
     `SELECT COALESCE(SUM(GREATEST(total - amount_paid, 0)), 0)::numeric AS outstanding
        FROM pos_documents
       WHERE company_id = $1
-        AND doc_type IN ('invoice', 'sale')
+        AND doc_type IN ('invoice', 'tax_invoice', 'proforma', 'sales_receipt', 'sale')
         AND status IN ('unpaid', 'partial', 'sent')`,
     [companyId]
   );

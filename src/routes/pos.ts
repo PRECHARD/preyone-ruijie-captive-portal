@@ -2278,7 +2278,9 @@ router.get('/dashboard', async (req, res) => {
                   COALESCE(SUM(d.amount_paid),0)::numeric AS collected,
                   COALESCE(SUM(d.total - d.subtotal),0)::numeric AS vat
              FROM pos_documents d
-            WHERE d.company_id = $1 AND d.doc_type IN ('sale','invoice') AND d.status <> 'void'
+            WHERE d.company_id = $1
+              AND d.doc_type IN ('sale','invoice','tax_invoice','sales_receipt','receipt','cash_receipt')
+              AND d.status <> 'void'
               AND d.created_at >= date_trunc('day', NOW())`,
           [cid]
         ),
@@ -2287,7 +2289,9 @@ router.get('/dashboard', async (req, res) => {
              FROM pos_document_items i
              JOIN pos_documents d ON d.id = i.document_id
              LEFT JOIN pos_products p ON p.id = i.product_id
-            WHERE d.company_id = $1 AND d.doc_type IN ('sale','invoice') AND d.status <> 'void'
+            WHERE d.company_id = $1
+              AND d.doc_type IN ('sale','invoice','tax_invoice','sales_receipt','receipt','cash_receipt')
+              AND d.status <> 'void'
               AND d.created_at >= date_trunc('day', NOW())`,
           [cid]
         ),
@@ -2304,7 +2308,8 @@ router.get('/dashboard', async (req, res) => {
                   COALESCE(SUM(i.line_total),0)::numeric AS revenue
              FROM pos_document_items i
              JOIN pos_documents d ON d.id = i.document_id
-            WHERE d.company_id = $1 AND d.status <> 'void'
+            WHERE d.company_id = $1 AND d.status NOT IN ('draft','void')
+              AND d.doc_type IN ('sale','invoice','tax_invoice','sales_receipt','receipt','cash_receipt')
             GROUP BY i.description ORDER BY revenue DESC LIMIT 10`,
           [cid]
         ),
@@ -2318,7 +2323,9 @@ router.get('/dashboard', async (req, res) => {
           `SELECT u.full_name AS cashier, COUNT(*)::int AS count, COALESCE(SUM(d.total),0)::numeric AS gross
              FROM pos_documents d
              LEFT JOIN admin_users u ON u.id = d.cashier_id
-            WHERE d.company_id = $1 AND d.status <> 'void' AND d.created_at >= date_trunc('day', NOW())
+            WHERE d.company_id = $1 AND d.status NOT IN ('draft','void')
+              AND d.doc_type IN ('sale','invoice','tax_invoice','sales_receipt','receipt','cash_receipt')
+              AND d.created_at >= date_trunc('day', NOW())
             GROUP BY u.full_name ORDER BY gross DESC LIMIT 20`,
           [cid]
         ),
@@ -2334,7 +2341,8 @@ router.get('/dashboard', async (req, res) => {
         pool.query(
           `SELECT COUNT(*)::int AS count, COALESCE(SUM(d.total - d.amount_paid),0)::numeric AS outstanding
              FROM pos_documents d
-            WHERE d.company_id = $1 AND d.doc_type = 'invoice'
+            WHERE d.company_id = $1
+              AND d.doc_type IN ('invoice','tax_invoice','proforma','sales_receipt')
               AND d.status IN ('unpaid','partial') AND d.due_date IS NOT NULL AND d.due_date < CURRENT_DATE`,
           [cid]
         ),
@@ -2415,7 +2423,9 @@ router.get('/reports/summary', async (req, res) => {
   const daily = await pool.query(
     `SELECT DATE(d.created_at) AS day, COUNT(*) AS documents, SUM(d.total) AS gross
        FROM pos_documents d
-      WHERE d.company_id = $3 AND d.status <> 'void' AND d.created_at BETWEEN $1::date AND ($2::date + INTERVAL '1 day')
+      WHERE d.company_id = $3 AND d.status NOT IN ('draft','void')
+        AND d.doc_type IN ('sale','invoice','tax_invoice','sales_receipt','receipt','cash_receipt')
+        AND d.created_at BETWEEN $1::date AND ($2::date + INTERVAL '1 day')
       GROUP BY DATE(d.created_at) ORDER BY day DESC LIMIT 90`,
     [from, to, me2]
   );
@@ -2423,7 +2433,9 @@ router.get('/reports/summary', async (req, res) => {
     `SELECT i.description, SUM(i.qty) AS qty_sold, SUM(i.line_total) AS revenue
        FROM pos_document_items i
        JOIN pos_documents d ON d.id = i.document_id
-      WHERE d.company_id = $3 AND d.status <> 'void' AND d.created_at BETWEEN $1::date AND ($2::date + INTERVAL '1 day')
+      WHERE d.company_id = $3 AND d.status NOT IN ('draft','void')
+        AND d.doc_type IN ('sale','invoice','tax_invoice','sales_receipt','receipt','cash_receipt')
+        AND d.created_at BETWEEN $1::date AND ($2::date + INTERVAL '1 day')
       GROUP BY i.description ORDER BY revenue DESC LIMIT 10`,
     [from, to, me2]
   );
@@ -2438,7 +2450,10 @@ router.get('/reports/summary', async (req, res) => {
 
 // Deep sales report: revenue/profit/VAT over a date range (admin console)
 async function salesReport(from: string, to: string, companyId: string) {
-  const range = `d.company_id = $3 AND d.created_at >= $1::date AND d.created_at < ($2::date + INTERVAL '1 day') AND d.status <> 'void'`;
+  const range = `d.company_id = $3
+    AND d.created_at >= $1::date AND d.created_at < ($2::date + INTERVAL '1 day')
+    AND d.status NOT IN ('draft','void')
+    AND d.doc_type IN ('sale','invoice','tax_invoice','sales_receipt','receipt','cash_receipt')`;
   const [totals, profitRow, byMethod, byDay, byCashier, bestSellers] = await Promise.all([
     pool.query(
       `SELECT COUNT(*) AS docs,
