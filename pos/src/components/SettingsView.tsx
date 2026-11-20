@@ -135,12 +135,14 @@ export default function SettingsView({
     }
     setClientBusy(true);
     try {
+      // null (not undefined) so clearing a field really clears it: the server
+      // only updates keys that are present in the JSON body.
       const payload = {
         name,
-        phone: clientDraft.phone.trim() || undefined,
-        email: clientDraft.email.trim() || undefined,
-        address: clientDraft.address.trim() || undefined,
-        notes: clientDraft.notes.trim() || undefined,
+        phone: clientDraft.phone.trim() || null,
+        email: clientDraft.email.trim() || null,
+        address: clientDraft.address.trim() || null,
+        notes: clientDraft.notes.trim() || null,
       };
       if (clientDraft.id) await api.updateCustomer(clientDraft.id, payload);
       else await api.createCustomer(payload);

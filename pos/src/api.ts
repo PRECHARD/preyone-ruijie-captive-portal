@@ -316,7 +316,13 @@ export const api = {
 
   // Client book (invoicing / credit customers)
   customers: () => req<CustomerRow[]>('/customers'),
-  createCustomer: (c: { name: string; phone?: string; email?: string; address?: string; notes?: string }) =>
+  createCustomer: (c: {
+    name: string;
+    phone?: string | null;
+    email?: string | null;
+    address?: string | null;
+    notes?: string | null;
+  }) =>
     req<CustomerRow>('/customers', { method: 'POST', body: JSON.stringify(c) }),
   updateCustomer: (id: string, patch: Partial<Omit<CustomerRow, 'id'>>) =>
     req<CustomerRow>(`/customers/${id}`, { method: 'PUT', body: JSON.stringify(patch) }),
