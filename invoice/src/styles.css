@@ -2377,3 +2377,71 @@ tbody tr:last-child td { border-bottom: none; }
   .receipt-shell { width: 100%; max-width: none; }
   .receipt-paper { box-shadow: none; border-radius: 0; padding: 0; animation: none; }
 }
+
+/* -- Branded confirm dialog (replaces window.confirm/prompt) ----------- */
+.confirm-overlay {
+  z-index: 90;
+  justify-content: center;
+  align-items: center;
+  padding: 20px;
+}
+.confirm-card {
+  position: relative;
+  width: min(480px, 100%);
+  padding: 26px 26px 22px;
+  border-radius: 20px;
+  border: 1px solid rgba(168, 85, 247, 0.36);
+  background:
+    radial-gradient(520px 260px at 100% 0%, rgba(217, 70, 239, 0.14), transparent 66%),
+    linear-gradient(160deg, rgba(30, 17, 52, 0.98), rgba(13, 7, 31, 0.99));
+  box-shadow: 0 34px 90px rgba(0, 0, 0, 0.62), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+  animation: confirm-in 0.2s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.confirm-card.danger { border-color: rgba(244, 63, 94, 0.42); }
+.confirm-orb {
+  position: absolute;
+  top: -70px;
+  right: -50px;
+  width: 210px;
+  height: 210px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(168, 85, 247, 0.26), transparent 70%);
+  pointer-events: none;
+}
+.confirm-card.danger .confirm-orb {
+  background: radial-gradient(circle, rgba(244, 63, 94, 0.22), transparent 70%);
+}
+.confirm-kicker {
+  margin-bottom: 8px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: #c4a7ff;
+}
+.confirm-card.danger .confirm-kicker { color: #ffb3c1; }
+.confirm-title {
+  margin: 0;
+  font-size: 22px;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+  color: #f8f4ff;
+}
+.confirm-message {
+  margin: 10px 0 18px;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: #b9add4;
+}
+.confirm-field { margin-top: 4px; }
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
+}
+@keyframes confirm-in {
+  from { opacity: 0; transform: translateY(10px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}

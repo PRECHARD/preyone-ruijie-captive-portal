@@ -414,6 +414,36 @@
   line-height: 1.25;
   white-space: nowrap;
 }
+.a4-band-verify {
+  position: absolute;
+  left: 5mm;
+  bottom: 3.2mm;
+  display: flex;
+  flex-direction: column;
+  gap: .35mm;
+  text-align: left;
+  color: rgba(255, 255, 255, .88);
+  white-space: nowrap;
+}
+.a4-band-verify-label {
+  font-size: 5.1pt;
+  font-weight: 600;
+  letter-spacing: .2em;
+  text-transform: uppercase;
+  opacity: .66;
+}
+.a4-band-verify-code {
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+  font-size: 6.6pt;
+  font-weight: 700;
+  letter-spacing: .055em;
+  color: #fff;
+}
+.a4-band-verify-url {
+  font-size: 5.2pt;
+  letter-spacing: .04em;
+  opacity: .58;
+}
 .a4-band-col span { display: block; }
 .a4-band-address { left: 55.6%; }
 .a4-band-contact { left: 84%; }

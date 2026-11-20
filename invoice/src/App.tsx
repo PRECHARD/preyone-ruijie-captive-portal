@@ -25,6 +25,7 @@ import {
 import { applyCssVars } from './theme';
 import { OnlinePaymentModal, ReceiptPreview } from './payments';
 import { DocumentSheet, TemplateThumb, type SheetDoc } from './DocumentSheet';
+import { ConfirmDialog, type ConfirmOptions } from './ConfirmDialog';
 import Sidebar, { type View } from './components/Sidebar';
 import SettingsPage from './pages/Settings';
 import AccountingPage from './pages/Accounting';
@@ -668,6 +669,7 @@ function Composer({
     docType,
     number: docNumber.trim() || `${types.find((t) => t.type === docType)?.prefix ?? 'DOC'}-0000`,
     status: 'draft',
+    verifyCode: 'PVN-••••-••••-••••-••••-••••',
     issueDate,
     dueDate: ['invoice', 'tax_invoice', 'sales_receipt', 'proforma'].includes(docType) ? previewDueDate : null,
     customerName: customerName.trim() || 'Customer name',
@@ -1515,6 +1517,7 @@ function DocumentDrawer({
   const [sendChannel, setSendChannel] = useState<'email' | 'whatsapp' | null>(null);
   const [editingNumber, setEditingNumber] = useState(false);
   const [numberDraft, setNumberDraft] = useState('');
+  const [confirm, setConfirm] = useState<ConfirmOptions | null>(null);
   const printHostRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
@@ -1546,6 +1549,7 @@ function DocumentDrawer({
         docType: doc.doc_type,
         number: doc.doc_number,
         status: doc.status,
+        verifyCode: doc.verify_code,
         issueDate: doc.issue_date,
         dueDate: doc.due_date,
         customerName: doc.customer?.name || doc.customer_name || 'Walk-in customer',
@@ -1601,20 +1605,40 @@ function DocumentDrawer({
     });
   };
 
-  const deleteDraft = async () => {
+  const askDeleteDraft = () => {
     if (!doc) return;
-    if (!window.confirm(`Delete draft ${doc.doc_number}? This cannot be undone.`)) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await api.del(`/api/pos/documents/${doc.id}`);
-      onChanged();
-      onClose();
-    } catch (err) {
-      setError(errorText(err));
-    } finally {
-      setBusy(false);
-    }
+    setConfirm({
+      title: 'Delete this draft?',
+      message: `Draft ${doc.doc_number} will be permanently removed. Issued, paid or voided documents can never be deleted.`,
+      confirmLabel: 'Delete draft',
+      tone: 'danger',
+      onConfirm: async () => {
+        await api.del(`/api/pos/documents/${doc.id}`);
+        onChanged();
+        onClose();
+      },
+    });
+  };
+
+  const askVoid = () => {
+    if (!doc) return;
+    setConfirm({
+      title: 'Void this document?',
+      message:
+        'The document will be marked void and kept for audit. Documents with payments cannot be voided — issue a credit note instead.',
+      confirmLabel: 'Void document',
+      tone: 'danger',
+      input: {
+        label: 'Reason for voiding',
+        placeholder: 'e.g. wrong customer or duplicate document',
+        required: true,
+      },
+      onConfirm: async (reason) => {
+        await api.post(`/api/pos/documents/${doc.id}/void`, { reason });
+        await load();
+        onChanged();
+      },
+    });
   };
 
   const savePdf = async () => {
@@ -1761,15 +1785,12 @@ function DocumentDrawer({
                 className="btn danger"
                 type="button"
                 disabled={busy || doc.status === 'void'}
-                onClick={() => {
-                  const reason = window.prompt('Reason for voiding this document?') || '';
-                  if (reason.trim()) void act(() => api.post(`/api/pos/documents/${doc.id}/void`, { reason }));
-                }}
+                onClick={askVoid}
               >
                 Void
               </button>
               {doc.status === 'draft' && (
-                <button className="btn danger" type="button" disabled={busy} onClick={() => void deleteDraft()}>
+                <button className="btn danger" type="button" disabled={busy} onClick={askDeleteDraft}>
                   Delete draft
                 </button>
               )}
@@ -1910,6 +1931,8 @@ function DocumentDrawer({
           </div>,
           document.body
         )}
+
+      {confirm && <ConfirmDialog options={confirm} onClose={() => setConfirm(null)} />}
     </>
   );
 }
@@ -2488,7 +2511,7 @@ export default function App() {
               <div className="panel-tools">
                 <input
                   className="input"
-                  placeholder="Search number or customer…"
+                  placeholder="Search number, document ID or customer…"
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                 />

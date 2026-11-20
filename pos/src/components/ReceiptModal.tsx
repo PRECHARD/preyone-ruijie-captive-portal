@@ -19,6 +19,7 @@ export default function ReceiptModal({
 }) {
   const [logoUri, setLogoUri] = useState<string>('');
   const [logoSize, setLogoSize] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
+  const [pdfError, setPdfError] = useState('');
 
   useEffect(() => {
     fetch('/preyone-logo-color.png')
@@ -63,6 +64,7 @@ export default function ReceiptModal({
     return generateReceiptPdf({
       docNumber: result.doc_number,
       docType: result.doc_type,
+      verifyCode: result.verify_code || undefined,
       date: when,
       customerName: result.customer_name,
       cashierName,
@@ -89,12 +91,13 @@ export default function ReceiptModal({
   }, [result, when, cashierName, cashTendered, change, company, logoUri, logoSize]);
 
   const downloadPdf = () => {
+    setPdfError('');
     try {
       var doc = getPdfDoc();
       downloadReceiptPdf(doc, `${result.doc_number}.pdf`);
     } catch (e) {
       console.error('PDF download failed:', e);
-      alert('Failed to generate PDF. Please try again.');
+      setPdfError('Could not generate the PDF. Please try again.');
     }
   };
 
@@ -114,6 +117,7 @@ export default function ReceiptModal({
   };
 
   const shareWhatsApp = async () => {
+    setPdfError('');
     try {
       var doc = getPdfDoc();
       var blob = receiptPdfToBlob(doc);
@@ -143,7 +147,7 @@ export default function ReceiptModal({
       window.open(`https://wa.me/?text=${msg}`, '_blank');
     } catch (e) {
       console.error('WhatsApp share failed:', e);
-      alert('Failed to generate PDF. Please try again.');
+      setPdfError('Could not generate the PDF. Please try again.');
     }
   };
 
@@ -264,7 +268,16 @@ export default function ReceiptModal({
               {company.name} · {company.email}
             </div>
           </div>
+          {result.verify_code && (
+            <div className="r-verify">
+              <span className="r-verify-label">Document ID</span>
+              <span className="r-verify-code">{result.verify_code}</span>
+              <span className="r-verify-url">preyone.com/verify</span>
+            </div>
+          )}
         </div>
+
+        {pdfError && <div className="err-msg" style={{ marginTop: 8 }}>{pdfError}</div>}
 
         <div className="receipt-actions">
           <button onClick={printReceipt}>Print</button>

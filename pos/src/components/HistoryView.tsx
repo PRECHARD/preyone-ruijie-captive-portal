@@ -114,6 +114,7 @@ export default function HistoryView({ notify, onApiError }: HistoryViewProps) {
     ? docs.filter(
         (d) =>
           d.doc_number.toLowerCase().includes(q) ||
+          (d.verify_code || '').toLowerCase().includes(q) ||
           (d.customer_name || '').toLowerCase().includes(q) ||
           (d.cashier_name || '').toLowerCase().includes(q) ||
           d.doc_type.toLowerCase().includes(q) ||
@@ -147,7 +148,7 @@ export default function HistoryView({ notify, onApiError }: HistoryViewProps) {
         <div className="history-filters">
           <input
             className="hist-search"
-            placeholder="Search number or customer…"
+            placeholder="Search number, document ID or customer…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -225,6 +226,7 @@ export default function HistoryView({ notify, onApiError }: HistoryViewProps) {
             doc_number: open.doc_number,
             doc_type: open.doc_type,
             status: open.status,
+            verify_code: open.verify_code,
             subtotal: Number(open.subtotal),
             discount_pct: Number(open.discount_pct),
             tax_pct: Number(open.tax_pct),

@@ -66,6 +66,7 @@ export interface CheckoutResult {
   doc_number: string;
   doc_type: string;
   status: string;
+  verify_code?: string | null;
   subtotal: number;
   discount_pct: number;
   tax_pct: number;
@@ -83,6 +84,7 @@ export interface PosDocument {
   doc_number: string;
   doc_type: string;
   status: string;
+  verify_code?: string | null;
   subtotal: number;
   discount_pct: number;
   tax_pct: number;

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api, type Product } from '../api';
+import { ConfirmDialog, type ConfirmOptions } from './ConfirmDialog';
 
 const money = (n: number): string => `$${(Number(n) || 0).toFixed(2)}`;
 
@@ -30,6 +31,7 @@ export default function StockManager({ onChanged }: { onChanged?: () => void }) 
   const [adjusting, setAdjusting] = useState<{ p: Product; delta: string; reason: string } | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [confirm, setConfirm] = useState<ConfirmOptions | null>(null);
 
   const load = () => {
     api.products(showArchived).then(setProducts).catch(() => {});
@@ -128,14 +130,18 @@ export default function StockManager({ onChanged }: { onChanged?: () => void }) 
     }
   };
 
-  const archive = async (p: Product) => {
-    try {
-      await api.archiveProduct(p.id);
-      load();
-      onChanged?.();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not archive');
-    }
+  const archive = (p: Product) => {
+    setConfirm({
+      title: 'Archive this product?',
+      message: `${p.name} will be hidden from the till and stock picker. Its sales history stays intact and you can restore it later.`,
+      confirmLabel: 'Archive product',
+      tone: 'danger',
+      onConfirm: async () => {
+        await api.archiveProduct(p.id);
+        load();
+        onChanged?.();
+      },
+    });
   };
 
   const restore = async (p: Product) => {
@@ -283,6 +289,8 @@ export default function StockManager({ onChanged }: { onChanged?: () => void }) 
           </div>
         </div>
       )}
+
+      {confirm && <ConfirmDialog options={confirm} onClose={() => setConfirm(null)} />}
     </div>
   );
 }

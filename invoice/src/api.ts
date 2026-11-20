@@ -225,6 +225,7 @@ export interface PosDocument {
   doc_number: string;
   doc_type: string;
   status: string;
+  verify_code?: string | null;
   subtotal?: string | number;
   total: string | number;
   amount_paid: string | number;

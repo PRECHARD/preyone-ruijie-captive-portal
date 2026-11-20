@@ -4,6 +4,7 @@ import path from 'path';
 import bcrypt from 'bcryptjs';
 import { pool } from './pool';
 import { formatZimPhone } from '../utils/phone';
+import { generateDocumentVerifyCode } from '../utils/documentVerifyCode';
 
 const SQL = `
   CREATE EXTENSION IF NOT EXISTS pgcrypto;
@@ -1170,6 +1171,9 @@ const SQL = `
   CREATE TABLE IF NOT EXISTS pos_documents (
     id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     doc_number   TEXT UNIQUE NOT NULL,
+    -- Public, globally unique document identifier (PVN-…). Resolves through
+    -- /verify/<code> on every Preyone host.
+    verify_code  TEXT,
     doc_type     TEXT NOT NULL CHECK (doc_type IN (
                    'sale', 'invoice', 'tax_invoice', 'proforma', 'quote', 'quotation',
                    'estimate', 'receipt', 'sales_receipt', 'cash_receipt',
@@ -1201,6 +1205,10 @@ const SQL = `
       'sale', 'invoice', 'tax_invoice', 'proforma', 'quote', 'quotation',
       'estimate', 'receipt', 'sales_receipt', 'cash_receipt',
       'credit_memo', 'credit_note', 'purchase_order', 'delivery_note'));
+
+  ALTER TABLE pos_documents ADD COLUMN IF NOT EXISTS verify_code TEXT;
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_pos_documents_verify_code
+    ON pos_documents (verify_code) WHERE verify_code IS NOT NULL;
 
   CREATE INDEX IF NOT EXISTS idx_pos_documents_number   ON pos_documents (doc_number);
   CREATE INDEX IF NOT EXISTS idx_pos_documents_customer ON pos_documents (customer_id);
@@ -1579,6 +1587,26 @@ const SQL = `
   const client = await pool.connect();
   try {
     await client.query(SQL);
+
+    // Backfill the public document identifier for every legacy document.
+    const missingVerify = await client.query<{ id: string }>(
+      `SELECT id FROM pos_documents WHERE verify_code IS NULL`
+    );
+    for (const row of missingVerify.rows) {
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        try {
+          await client.query('UPDATE pos_documents SET verify_code = $1 WHERE id = $2', [
+            generateDocumentVerifyCode(),
+            row.id,
+          ]);
+          break;
+        } catch (err) {
+          // A random collision is astronomically unlikely; retry rather than
+          // leaving a legacy document without an identifier.
+          if ((err as { code?: string })?.code !== '23505' || attempt === 4) throw err;
+        }
+      }
+    }
 
     // ── Multi‑currency engine ─────────────────────────────────────────────────
     // 1. Add currency / exchange_rate columns to pos_documents (idempotent)

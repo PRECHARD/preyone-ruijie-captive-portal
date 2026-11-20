@@ -3,6 +3,7 @@ import jsPDF from 'jspdf';
 export function generateReceiptPdf(opts: {
   docNumber: string;
   docType: string;
+  verifyCode?: string;
   date: string;
   customerName?: string;
   cashierName: string;
@@ -278,6 +279,31 @@ export function generateReceiptPdf(opts: {
   // Company footer
   doc.text(opts.company.name + ' · ' + opts.company.email, pw / 2, y + 1, { align: 'center' });
   y += 3;
+
+  // Public document identifier, bottom-left. This is the same PVN-… value
+  // printed on the A4 document and stored against the database row.
+  if (opts.verifyCode) {
+    y += 3;
+    if (y > ph - 18) {
+      doc.addPage([pw, ph]);
+      y = 6;
+    }
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(5);
+    doc.setTextColor(120, 120, 120);
+    doc.text('DOCUMENT ID', m, y + 2);
+    y += 3;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(6.4);
+    doc.setTextColor(54, 17, 106);
+    doc.text(opts.verifyCode, m, y + 2);
+    y += 3;
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(5);
+    doc.setTextColor(120, 120, 120);
+    doc.text('preyone.com/verify', m, y + 2);
+    y += 3;
+  }
 
   return doc;
 }

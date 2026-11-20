@@ -14,6 +14,7 @@ import { INVOICE_DOCUMENT_TYPES, ALL_DOCUMENT_TYPES } from '../services/pesepay'
 import { POS_THEMES, CURRENCIES, type PosTheme } from '../catalog/ecosystem';
 import { themeCssVariables, themeCssBlock } from '../utils/themeVars';
 import { sendTransactionalEmail } from '../services/notificationService';
+import { generateDocumentVerifyCode } from '../utils/documentVerifyCode';
 
 /**
  * Preyone POS module — additive only.
@@ -617,7 +618,11 @@ router.post('/documents', async (req, res) => {
         }),
       ]
     );
-    const doc = inserted.rows[0];
+    const verified = await client.query(
+      `UPDATE pos_documents SET verify_code = $1 WHERE id = $2 RETURNING *`,
+      [generateDocumentVerifyCode(), inserted.rows[0].id]
+    );
+    const doc = verified.rows[0];
 
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
@@ -1734,7 +1739,11 @@ router.get('/documents', async (req, res) => {
   }
   if (q) {
     params.push(`%${q.toLowerCase()}%`);
-    where.push(`(lower(d.doc_number) LIKE $${params.length} OR lower(coalesce(c.name,'')) LIKE $${params.length})`);
+    where.push(
+      `(lower(d.doc_number) LIKE $${params.length}
+        OR lower(coalesce(d.verify_code,'')) LIKE $${params.length}
+        OR lower(coalesce(c.name,'')) LIKE $${params.length})`
+    );
   }
   const from = str(req.query.from);
   const to = str(req.query.to);
@@ -1932,7 +1941,11 @@ router.post('/checkout', async (req, res) => {
         tenantId(req),
       ]
     );
-    const doc = docInsert.rows[0];
+    const verified = await client.query(
+      `UPDATE pos_documents SET verify_code = $1 WHERE id = $2 RETURNING *`,
+      [generateDocumentVerifyCode(), docInsert.rows[0].id]
+    );
+    const doc = verified.rows[0];
 
     for (const line of lines) {
       const description = str(line.description) || 'Item';
@@ -2105,23 +2118,40 @@ router.post('/documents/:id/void', requireRole(...MANAGER_ROLES), async (req, re
       res.status(404).json({ error: 'Document not found' });
       return;
     }
-    if (docs.rows[0].status === 'void') {
+    const current = docs.rows[0];
+    if (current.status === 'void') {
       await client.query('ROLLBACK');
       res.status(400).json({ error: 'Already void' });
       return;
     }
-    const items = await client.query(
-      `SELECT product_id, qty FROM pos_document_items WHERE document_id = $1 AND product_id IS NOT NULL`,
-      [req.params.id]
-    );
-    for (const it of items.rows) {
-      await client.query(
-        `UPDATE pos_products SET stock_qty = stock_qty + $1, updated_at = NOW() WHERE id = $2 AND track_stock = TRUE`,
-        [num(it.qty), it.product_id]
+    // Money already collected is a financial fact. Voiding it would leave the
+    // ledger holding revenue for a document marked void, so paid documents must
+    // be corrected with a credit note/refund instead of erased.
+    if (Number(current.amount_paid) > 0) {
+      await client.query('ROLLBACK');
+      res.status(409).json({
+        error:
+          'This document has payments recorded. Issue a credit note or refund instead of voiding it, so the ledger stays balanced.',
+        code: 'DOCUMENT_HAS_PAYMENTS',
+      });
+      return;
+    }
+    // Only reverse stock that was actually decremented. Office drafts and
+    // quotes never touch inventory; restocking them would invent stock.
+    if (current.stock_applied === true) {
+      const items = await client.query(
+        `SELECT product_id, qty FROM pos_document_items WHERE document_id = $1 AND product_id IS NOT NULL`,
+        [req.params.id]
       );
+      for (const it of items.rows) {
+        await client.query(
+          `UPDATE pos_products SET stock_qty = stock_qty + $1, updated_at = NOW() WHERE id = $2 AND track_stock = TRUE`,
+          [num(it.qty), it.product_id]
+        );
+      }
     }
     const updated = await client.query(
-      `UPDATE pos_documents SET status = 'void', updated_at = NOW()
+      `UPDATE pos_documents SET status = 'void', stock_applied = FALSE, updated_at = NOW()
         WHERE id = $1 AND company_id = $2 RETURNING *`,
       [req.params.id, tenantId(req)]
     );
@@ -2168,6 +2198,7 @@ router.get('/documents/:id/ubl', async (req, res) => {
   <cbc:CustomizationID>urn:cen.eu:en16931:2017#compliant#urn:fdc:peppol.eu:2017:poacc:billing:3.0</cbc:CustomizationID>
   <cbc:ProfileID>urn:fdc:peppol.eu:2017:poacc:billing:01:1.0</cbc:ProfileID>
   <cbc:ID>${esc(d.doc_number)}</cbc:ID>
+  <cbc:UUID schemeID="PREYONE">${esc(d.verify_code || '')}</cbc:UUID>
   <cbc:IssueDate>${esc(d.issue_date)}</cbc:IssueDate>
   <cbc:InvoiceTypeCode>380</cbc:InvoiceTypeCode>
   <cbc:DocumentCurrencyCode>${esc(d.currency || 'USD')}</cbc:DocumentCurrencyCode>

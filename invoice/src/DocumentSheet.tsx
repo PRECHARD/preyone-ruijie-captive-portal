@@ -47,6 +47,8 @@ export interface SheetDoc {
   docType: string;
   number: string;
   status: string;
+  /** Globally unique PVN-… identifier printed in the bottom-left band. */
+  verifyCode?: string | null;
   issueDate?: string | null;
   dueDate?: string | null;
   customerName?: string | null;
@@ -440,6 +442,13 @@ export function DocumentSheet({
           {company.terms_text && <p className="a4-terms-text">{company.terms_text}</p>}
           {company.tagline && <div className="a4-tagline">{company.tagline}</div>}
           <div className={`a4-footer-band ${legacy ? 'a4-legacy-band' : ''}`}>
+            {doc.verifyCode && (
+              <div className="a4-band-verify">
+                <span className="a4-band-verify-label">Document ID</span>
+                <span className="a4-band-verify-code">{doc.verifyCode}</span>
+                <span className="a4-band-verify-url">preyone.com/verify</span>
+              </div>
+            )}
             {bandAddress.length > 0 && (
               <div className="a4-band-col a4-band-address">
                 {bandAddress.map((line, i) => (

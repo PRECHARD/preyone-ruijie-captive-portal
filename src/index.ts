@@ -33,6 +33,7 @@ import { alertsRouter } from './routes/alerts';
 import { usageRouter } from './routes/usage';
 import { voucherAnalyticsRouter } from './routes/voucherAnalytics';
 import { reportsRouter } from './routes/reports';
+import { publicVerifyRouter, renderDocumentVerifyPage } from './routes/publicVerify';
 import { startVoucherMonitor } from './services/voucherMonitorService';
 import { startVoucherPoolWorker } from './services/voucherPool';
 import { startRuijieVoucherStatusWorker } from './services/ruijieVoucherStatusSync';
@@ -392,6 +393,11 @@ app.use('/images', (_req, res) => {
   res.status(404).type('text/plain').send('Image not found');
 });
 
+// ── Public document verification ──
+// Registered before the subdomain router so the same URL works on every
+// Preyone host (and on the canonical preyone.com domain printed on documents).
+app.get('/verify/:code', renderDocumentVerifyPage);
+
 // ── Subdomain-based routing ──
 app.use((req, res, next) => {
   const host = req.hostname;
@@ -621,6 +627,8 @@ app.use('/api', marketingRouter);
 app.use('/api/ruijie', ruijieRouter);
 // Multi-currency exchange rates (company-scoped)
 app.use('/api/currency', currencyRouter);
+// Public document identifier lookup (no session; rate-limited in the router)
+app.use('/api/verify', publicVerifyRouter);
 
 // Standard route aliases
 app.get('/login', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'account-login.html')));

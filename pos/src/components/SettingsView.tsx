@@ -10,6 +10,7 @@ import {
   type SubscriptionPlans,
 } from '../api';
 import UpgradeModal from './UpgradeModal';
+import { ConfirmDialog, type ConfirmOptions } from './ConfirmDialog';
 import { mergePlanTiers } from '../plans';
 
 const fmtDate = (t: string | null): string =>
@@ -68,6 +69,7 @@ export default function SettingsView({
     notes: string;
   } | null>(null);
   const [clientBusy, setClientBusy] = useState(false);
+  const [confirm, setConfirm] = useState<ConfirmOptions | null>(null);
 
   const loadTill = useCallback(async () => {
     const [c, s, cust] = await Promise.all([
@@ -156,15 +158,22 @@ export default function SettingsView({
     }
   };
 
-  const removeClient = async (c: CustomerRow) => {
-    if (!window.confirm(`Delete ${c.name}? Customers with documents cannot be deleted.`)) return;
-    try {
-      await api.deleteCustomer(c.id);
-      notify('Client deleted');
-      await loadTill();
-    } catch (e) {
-      if (!onApiError(e)) notify(e instanceof Error ? e.message : 'Could not delete client', 'error');
-    }
+  const removeClient = (c: CustomerRow) => {
+    setConfirm({
+      title: 'Delete this client?',
+      message: `${c.name} will be removed from the client book. Clients with existing documents are protected and cannot be deleted.`,
+      confirmLabel: 'Delete client',
+      tone: 'danger',
+      onConfirm: async () => {
+        try {
+          await api.deleteCustomer(c.id);
+          notify('Client deleted');
+          await loadTill();
+        } catch (e) {
+          if (!onApiError(e)) throw e;
+        }
+      },
+    });
   };
 
   const testDrawer = async () => {
@@ -421,10 +430,18 @@ export default function SettingsView({
                   <button
                     className="ghost-btn small"
                     disabled={pinBusy}
-                    onClick={() => {
-                      const pin = window.prompt(`Set a new 4–8 digit PIN for ${c.full_name}:`);
-                      if (pin) changePin(c.id, pin);
-                    }}
+                    onClick={() =>
+                      setConfirm({
+                        title: 'Set operator PIN',
+                        message: `Choose a new 4–8 digit PIN for ${c.full_name}. This PIN signs them into the till.`,
+                        confirmLabel: 'Update PIN',
+                        input: { label: 'New PIN', placeholder: '4–8 digits', required: true },
+                        onConfirm: async (pin) => {
+                          if (!/^\d{4,8}$/.test(pin)) throw new Error('PIN must be 4–8 digits.');
+                          await changePin(c.id, pin);
+                        },
+                      })
+                    }
                   >
                     Set PIN
                   </button>
@@ -534,6 +551,8 @@ export default function SettingsView({
           </div>
         </div>
       )}
+
+      {confirm && <ConfirmDialog options={confirm} onClose={() => setConfirm(null)} />}
 
       {showUpgrade && (
         <UpgradeModal
