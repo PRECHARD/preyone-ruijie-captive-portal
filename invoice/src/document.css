@@ -212,12 +212,84 @@
 .a4-items-table tbody td:first-child { border-left: none; text-align: left; }
 .a4-items-table tbody td.a4-num { text-align: right; font-variant-numeric: tabular-nums; }
 
-.a4-items-table tbody tr:nth-child(odd) td {
+/* Zebra is applied by an explicit class, not nth-child, because each item with
+   details emits a second (full-width) row and would otherwise flip the stripes. */
+.a4-items-table tbody tr.a4-item-alt td {
   background-image: var(--doc-row-tint);
   border-left-color: rgba(255, 255, 255, .9);
 }
-.a4-items-table tbody tr:nth-child(odd) td:first-child { border-left-color: transparent; }
 .a4-items-table tbody tr.a4-filler td { color: transparent; }
+
+/* ── Bullet details: a full-width spec panel on the white sheet ── */
+.a4-items-table tbody tr td.a4-item-cell {
+  vertical-align: top;
+  /* The product name always sits on clean white, even on a zebra row. */
+  background-image: none;
+  background-color: #fff;
+}
+.a4-items-table tbody td.a4-item-cell.has-details { padding-bottom: 1.8mm; }
+.a4-items-table tbody tr.a4-item-detail-row td {
+  height: auto;
+  padding: 0 5mm 3.2mm;
+  border-left: none;
+  background-image: none;
+  background-color: #fff;
+  vertical-align: top;
+}
+.a4-item-name {
+  font-weight: 600;
+  letter-spacing: .004em;
+  color: var(--doc-ink);
+}
+.a4-item-details {
+  margin-top: 0;
+  padding: 1.8mm 2.6mm 2.1mm;
+  border: .25mm solid #ece7f6;
+  border-left: .6mm solid var(--doc-accent, #7a0e57);
+  border-radius: 1.4mm;
+  background: #fbfaff;
+}
+.a4-detail-label {
+  margin-bottom: 1.25mm;
+  font-size: 6pt;
+  line-height: 1;
+  letter-spacing: .2em;
+  text-transform: uppercase;
+  color: var(--doc-accent, #7a0e57);
+}
+.a4-item-details ul {
+  display: grid;
+  gap: .8mm;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.a4-item-details ul.is-columns {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 8mm;
+  row-gap: .9mm;
+}
+.a4-item-details li {
+  display: flex;
+  align-items: flex-start;
+  gap: 1.8mm;
+  font-size: 7.5pt;
+  line-height: 1.45;
+  color: var(--doc-muted);
+}
+.a4-item-details li > span:last-child { min-width: 0; overflow-wrap: anywhere; }
+.a4-detail-mark {
+  flex: none;
+  width: 1.7mm;
+  height: 1.7mm;
+  margin-top: .8mm;
+  transform: rotate(45deg);
+  background: linear-gradient(135deg, var(--doc-accent, #7a0e57) 0 46%, #00d4ff 54% 100%);
+  box-shadow: 0 0 0 .18mm #fff, 0 0 .8mm rgba(0, 212, 255, .5);
+}
+.a4-doc.layout-compact .a4-item-details { margin-top: 1.4mm; padding: 1.2mm 1.8mm; }
+.a4-doc.layout-compact .a4-item-details li { font-size: 7.1pt; line-height: 1.36; }
+.a4-doc.layout-minimal .a4-item-details { background: #fff; }
 
 .a4-totals-wrap {
   display: flex;
@@ -345,12 +417,13 @@
 .a4-doc.layout-minimal .a4-totals .a4-row.a4-grand { background-image: none; background-color: var(--doc-accent); }
 .a4-doc.layout-minimal .a4-number-bar { background-image: none; background-color: var(--doc-accent); }
 .a4-doc.layout-minimal .a4-thanks { font-weight: 600; letter-spacing: .12em; font-size: 15pt; }
-.a4-doc.layout-minimal .a4-items-table tbody tr:nth-child(odd) td { background-image: none; background-color: var(--doc-row-soft, #f7f4fc); }
+.a4-doc.layout-minimal .a4-items-table tbody tr.a4-item-main.a4-item-alt td { background-image: none; background-color: var(--doc-row-soft, #f7f4fc); }
 
 .a4-doc.layout-compact .a4-sheet { font-size: 8.8pt; padding-top: 11mm; }
 .a4-doc.layout-compact .a4-doc-meta { margin-top: 7mm; }
 .a4-doc.layout-compact .a4-items-table { margin-top: 6mm; }
 .a4-doc.layout-compact .a4-items-table tbody td { height: 7.8mm; }
+.a4-doc.layout-compact .a4-items-table tbody tr.a4-item-detail-row td { height: auto; padding: 0 5mm 2.6mm; }
 .a4-doc.layout-compact .a4-items-table thead th { height: 9.4mm; }
 .a4-doc.layout-compact .a4-totals .a4-row { padding: 1.5mm 4mm; }
 .a4-doc.layout-compact .a4-totals-wrap { margin-top: 5mm; }

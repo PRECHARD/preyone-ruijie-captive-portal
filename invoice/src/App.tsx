@@ -81,13 +81,29 @@ function typeLabel(types: DocType[], type: string): string {
 }
 
 /**
- * A stock item carries both a short name and a long description. Documents have
- * one description column, so both travel together on the invoice/receipt:
- * "Extension cable — 5 m, heavy duty, 16 A".
+ * Detail bullets are stored as an ordered list, one entry per line. A stock
+ * item's long description is split the same way (newlines or •) so the A4
+ * sheet can lay each detail on its own line instead of one crowded paragraph.
  */
-function stockLineDescription(product: { name: string; description?: string | null }): string {
-  const description = (product.description || '').trim();
-  return description ? `${product.name} — ${description}` : product.name;
+function parseDetails(value: string | string[] | null | undefined): string[] {
+  const raw = Array.isArray(value)
+    ? value
+    : String(value || '').split(/\r?\n|\u2022|\u00b7|\u25aa|\u25e6/);
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const entry of raw) {
+    const text = String(entry ?? '')
+      .replace(/^\s*(?:[-\u2013\u2014*]|\d+[.)])\s*/, '')
+      .trim()
+      .slice(0, 300);
+    if (!text) continue;
+    const key = text.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(text);
+    if (out.length >= 20) break;
+  }
+  return out;
 }
 
 function errorText(err: unknown): string {
@@ -548,6 +564,7 @@ function LoginPanel({ onSignedIn, initialNotice }: { onSignedIn: () => void; ini
 interface DraftLine {
   key: number;
   description: string;
+  details: string;
   qty: string;
   price: string;
   productId?: string | null;
@@ -580,7 +597,9 @@ function Composer({
   const [poNumber, setPoNumber] = useState('');
   const [reference, setReference] = useState('');
   const [notes, setNotes] = useState('');
-  const [lines, setLines] = useState<DraftLine[]>([{ key: 1, description: '', qty: '1', price: '0' }]);
+  const [lines, setLines] = useState<DraftLine[]>([
+    { key: 1, description: '', details: '', qty: '1', price: '0' },
+  ]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const nextKey = useRef(2);
@@ -656,6 +675,7 @@ function Composer({
     customerEmail: customerEmail.trim() || undefined,
     items: lines.map((l) => ({
       description: l.description.trim() || 'Line item description',
+      details: parseDetails(l.details),
       qty: Number(l.qty) || 0,
       price: Number(l.price) || 0,
     })),
@@ -695,7 +715,8 @@ function Composer({
     const key = nextKey.current++;
     const line: DraftLine = {
       key,
-      description: stockLineDescription(product),
+      description: product.name,
+      details: product.description || '',
       qty: '1',
       price: String(Number(product.price) || 0),
       productId: product.id,
@@ -780,6 +801,7 @@ function Composer({
         status: 'draft',
         items: clean.map((l) => ({
           description: l.description.trim(),
+          details: parseDetails(l.details),
           qty: Number(l.qty) || 1,
           price: Number(l.price) || 0,
           productId: l.productId || undefined,
@@ -959,7 +981,7 @@ function Composer({
                 {products.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.name}
-                    {p.description ? ` — ${p.description}` : ''}
+                    {p.description ? ` — ${String(p.description).replace(/\s*[\r\n]+\s*/g, ' · ')}` : ''}
                     {p.sku ? ` · ${p.sku}` : ''} · {Number(p.stock_qty) || 0} in stock ·{' '}
                     {money(Number(p.price) || 0, currency)}
                   </option>
@@ -997,7 +1019,7 @@ function Composer({
                     rows={2}
                     value={newStock.description}
                     onChange={(e) => setNewStock((s) => ({ ...s, description: e.target.value }))}
-                    placeholder="What it is, specs, warranty or anything the invoice should explain."
+                    placeholder={'One detail per line — e.g.\n5 m heavy duty cable\n16 A rated\n2-year warranty'}
                   />
                 </label>
                 <label className="field">
@@ -1045,42 +1067,62 @@ function Composer({
             </div>
           )}
 
-          {lines.map((line) => (
-            <div className="line-row" key={line.key}>
-              <label className="field">
-                <span>Description</span>
-                <input
-                  className="input"
-                  value={line.description}
-                  onChange={(e) => setLine(line.key, { description: e.target.value })}
-                  placeholder="Consulting — October"
-                />
-              </label>
-              <label className="field">
-                <span>Qty</span>
-                <input className="input" type="number" min={0} step="0.01" value={line.qty} onChange={(e) => setLine(line.key, { qty: e.target.value })} />
-              </label>
-              <label className="field">
-                <span>Price</span>
-                <input className="input" type="number" min={0} step="0.01" value={line.price} onChange={(e) => setLine(line.key, { price: e.target.value })} />
-              </label>
-              <div className="line-total">{money((Number(line.qty) || 0) * (Number(line.price) || 0), currency)}</div>
-              <button
-                type="button"
-                className="icon-btn"
-                aria-label="Remove line"
-                onClick={() => setLines((prev) => (prev.length > 1 ? prev.filter((l) => l.key !== line.key) : prev))}
-              >
-                −
-              </button>
-            </div>
-          ))}
+          {lines.map((line) => {
+            const detailCount = parseDetails(line.details).length;
+            return (
+              <div className="line-card" key={line.key}>
+                <div className="line-row">
+                  <label className="field">
+                    <span>Description</span>
+                    <input
+                      className="input"
+                      value={line.description}
+                      onChange={(e) => setLine(line.key, { description: e.target.value })}
+                      placeholder="Consulting — October"
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Qty</span>
+                    <input className="input" type="number" min={0} step="0.01" value={line.qty} onChange={(e) => setLine(line.key, { qty: e.target.value })} />
+                  </label>
+                  <label className="field">
+                    <span>Price</span>
+                    <input className="input" type="number" min={0} step="0.01" value={line.price} onChange={(e) => setLine(line.key, { price: e.target.value })} />
+                  </label>
+                  <div className="line-total">{money((Number(line.qty) || 0) * (Number(line.price) || 0), currency)}</div>
+                  <button
+                    type="button"
+                    className="icon-btn"
+                    aria-label="Remove line"
+                    onClick={() => setLines((prev) => (prev.length > 1 ? prev.filter((l) => l.key !== line.key) : prev))}
+                  >
+                    −
+                  </button>
+                </div>
+                <label className="line-details-field">
+                  <span className="line-details-head">
+                    <span>Detail bullets</span>
+                    <span className={`line-details-count${detailCount ? ' has' : ''}`}>
+                      {detailCount ? `${detailCount} bullet${detailCount === 1 ? '' : 's'}` : 'optional'}
+                    </span>
+                  </span>
+                  <textarea
+                    className="textarea line-details-input"
+                    rows={Math.min(8, Math.max(2, detailCount + 1))}
+                    value={line.details}
+                    onChange={(e) => setLine(line.key, { details: e.target.value })}
+                    placeholder={'One detail per line — e.g.\n5 m heavy duty cable\n16 A rated\n2-year warranty'}
+                  />
+                </label>
+              </div>
+            );
+          })}
           <button
             type="button"
             className="btn ghost"
             onClick={() => {
               const key = nextKey.current++;
-              setLines((prev) => [...prev, { key, description: '', qty: '1', price: '0' }]);
+              setLines((prev) => [...prev, { key, description: '', details: '', qty: '1', price: '0' }]);
             }}
           >
             + Add line
@@ -1511,6 +1553,7 @@ function DocumentDrawer({
         customerEmail: doc.customer?.email || null,
         items: doc.items.map((it) => ({
           description: it.description,
+          details: it.details || [],
           qty: it.qty,
           price: it.price,
           line_total: it.line_total,

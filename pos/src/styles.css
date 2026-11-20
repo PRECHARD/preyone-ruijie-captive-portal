@@ -296,6 +296,33 @@ select option,
 }
 .cart-line .cl-name { font-size: 0.85rem; font-weight: 500; color: #fff; }
 .cart-line .cl-price { font-size: 0.72rem; color: #94a3b8; }
+.cl-details {
+  margin: 3px 0 2px;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 1px;
+}
+.cl-details li {
+  position: relative;
+  padding-left: 9px;
+  font-size: 0.66rem;
+  line-height: 1.35;
+  color: #7be0ff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cl-details li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0.48em;
+  width: 4px;
+  height: 4px;
+  transform: rotate(45deg);
+  background: linear-gradient(135deg, #a855f7, #00d4ff);
+}
 .qty-btn {
   width: 30px; height: 30px;
   border-radius: 8px;
@@ -655,6 +682,26 @@ select option,
 .r-table { width: 100%; border-collapse: collapse; margin: 6px 0; }
 .r-table td { padding: 1.5px 0; vertical-align: top; }
 .r-table .r-num { text-align: right; white-space: nowrap; }
+.r-details {
+  margin: 2px 0 2px;
+  padding: 0 0 0 9px;
+  list-style: none;
+}
+.r-details li {
+  position: relative;
+  padding-left: 7px;
+  font-size: 9px;
+  line-height: 1.35;
+  color: #444;
+}
+.r-details li::before {
+  content: '•';
+  position: absolute;
+  left: 0;
+  top: 0;
+  color: #7a0e57;
+  font-weight: 700;
+}
 .r-rule { border: none; border-top: 1px dashed #999; margin: 6px 0; }
 .r-grand { font-weight: 700; font-size: 13px; }
 .receipt-actions { display: flex; gap: 0.5rem; margin-top: 0.9rem; }

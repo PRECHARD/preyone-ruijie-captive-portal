@@ -1,4 +1,4 @@
-import type { CSSProperties } from 'react';
+import { Fragment, type CSSProperties } from 'react';
 import type { InvoiceTemplate } from './api';
 
 /**
@@ -36,6 +36,8 @@ export interface SheetCompany {
 
 export interface SheetItem {
   description: string;
+  /** Bullet details rendered under the item name, one per line. */
+  details?: string[] | null;
   qty: number | string;
   price: number | string;
   line_total?: number | string;
@@ -277,7 +279,14 @@ export function DocumentSheet({
   const amountPaid = Number(doc.amountPaid) || 0;
   const balance = Math.max(total - amountPaid, 0);
   const paid = doc.status === 'paid' || (total > 0 && amountPaid >= total - 0.005);
-  const fillers = fillerRows(doc, items.length);
+  // Detail bullets take vertical room, so account for them when reserving the
+  // decorative filler rows. Roughly two bullets per extra line keeps the sheet
+  // from pushing the totals/footer off the page.
+  const detailCount = items.reduce(
+    (n, it) => n + (Array.isArray(it.details) ? it.details.filter((d) => String(d || '').trim()).length : 0),
+    0
+  );
+  const fillers = fillerRows(doc, items.length + Math.ceil(detailCount / 2));
 
   const addressLines = String(company.address || '')
     .split(/\r?\n/)
@@ -384,16 +393,43 @@ export function DocumentSheet({
             </tr>
           </thead>
           <tbody>
-            {items.map((it, i) => (
-              <tr key={i}>
-                <td>{it.description || '—'}</td>
-                <td className="a4-num">{money(it.price, doc.currency)}</td>
-                <td className="a4-num">{Number(it.qty) || 0}</td>
-                <td className="a4-num">
-                  {money(it.line_total ?? (Number(it.price) || 0) * (Number(it.qty) || 0), doc.currency)}
-                </td>
-              </tr>
-            ))}
+            {items.map((it, i) => {
+              const details = Array.isArray(it.details)
+                ? it.details.map((d) => String(d || '').trim()).filter(Boolean)
+                : [];
+              const alt = i % 2 === 1;
+              return (
+                <Fragment key={i}>
+                  <tr className={`a4-item-main${alt ? ' a4-item-alt' : ''}`}>
+                    <td className={`a4-item-cell${details.length ? ' has-details' : ''}`}>
+                      <div className="a4-item-name">{it.description || '—'}</div>
+                    </td>
+                    <td className="a4-num">{money(it.price, doc.currency)}</td>
+                    <td className="a4-num">{Number(it.qty) || 0}</td>
+                    <td className="a4-num">
+                      {money(it.line_total ?? (Number(it.price) || 0) * (Number(it.qty) || 0), doc.currency)}
+                    </td>
+                  </tr>
+                  {details.length > 0 && (
+                    <tr className="a4-item-detail-row">
+                      <td colSpan={4}>
+                        <div className="a4-item-details">
+                          <div className="a4-detail-label">Details</div>
+                          <ul className={details.length > 4 ? 'is-columns' : ''}>
+                            {details.map((detail, j) => (
+                              <li key={j}>
+                                <span className="a4-detail-mark" aria-hidden />
+                                <span>{detail}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              );
+            })}
             {Array.from({ length: fillers }, (_, i) => (
               <tr className="a4-filler" key={`filler-${i}`}>
                 <td>&nbsp;</td>

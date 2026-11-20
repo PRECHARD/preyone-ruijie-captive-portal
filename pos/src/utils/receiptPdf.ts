@@ -6,7 +6,7 @@ export function generateReceiptPdf(opts: {
   date: string;
   customerName?: string;
   cashierName: string;
-  items: Array<{ description: string; qty: number; price: number; lineTotal: number }>;
+  items: Array<{ description: string; details?: string[]; qty: number; price: number; lineTotal: number }>;
   subtotal: number;
   discountPct: number;
   taxPct: number;
@@ -126,10 +126,33 @@ export function generateReceiptPdf(opts: {
   doc.setFontSize(7);
   for (var j = 0; j < opts.items.length; j++) {
     var item = opts.items[j];
+    if (y > ph - 14) {
+      doc.addPage([pw, ph]);
+      y = 6;
+    }
     doc.setTextColor(0, 0, 0);
+    doc.setFontSize(7);
     doc.text(item.description, m, y + 2);
     doc.text('$' + item.lineTotal.toFixed(2), pw - m, y + 2, { align: 'right' });
     y += 3;
+
+    // Bullet details, one per line. Wrapped to the 80 mm roll width so long
+    // specifications stay readable instead of being clipped at the margin.
+    var details = Array.isArray(item.details) ? item.details : [];
+    for (var k = 0; k < details.length; k++) {
+      var wrapped = doc.splitTextToSize('\u2022 ' + details[k], pw - m * 2 - 2);
+      for (var w = 0; w < wrapped.length; w++) {
+        if (y > ph - 12) {
+          doc.addPage([pw, ph]);
+          y = 6;
+        }
+        doc.setTextColor(90, 90, 90);
+        doc.setFontSize(6);
+        doc.text(String(wrapped[w]), m + 1.5, y + 2);
+        y += 3;
+      }
+    }
+
     doc.setTextColor(100, 100, 100);
     doc.setFontSize(6);
     doc.text(item.qty + ' x $' + item.price.toFixed(2), m, y + 2);

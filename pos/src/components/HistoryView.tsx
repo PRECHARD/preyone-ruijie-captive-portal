@@ -233,6 +233,7 @@ export default function HistoryView({ notify, onApiError }: HistoryViewProps) {
             balanceDue: balanceOf(open),
             items: (open.items || []).map((i) => ({
               description: String(i.description),
+              details: Array.isArray(i.details) ? i.details : [],
               price: Number(i.price),
               qty: Number(i.qty),
               lineTotal: Number(i.lineTotal ?? i.line_total ?? i.price * i.qty),

@@ -16,6 +16,15 @@ type DocType = 'sale' | 'invoice' | 'quotation';
 const money = (n: number): string => `$${(Number(n) || 0).toFixed(2)}`;
 const zig = (n: number, rate: number): string => `ZiG ${(Math.round(n * rate * 100) / 100).toFixed(2)}`;
 
+/** Stock descriptions become one bullet per line/• separator on the receipt. */
+function splitDetails(value?: string | null): string[] {
+  return String(value || '')
+    .split(/\r?\n|\u2022|\u00b7|\u25aa|\u25e6/)
+    .map((s) => s.replace(/^\s*(?:[-\u2013\u2014*]|\d+[.)])\s*/, '').trim())
+    .filter(Boolean)
+    .slice(0, 20);
+}
+
 export default function Terminal({ user, notify, onApiError, onShiftChanged, shiftId }: Props) {
   const [products, setProducts] = useState<Product[]>([]);
   const [query, setQuery] = useState('');
@@ -33,6 +42,7 @@ export default function Terminal({ user, notify, onApiError, onShiftChanged, shi
   interface CartLineState {
     productId: string | null;
     description: string;
+    details: string[];
     price: number;
     qty: number;
   }
@@ -83,12 +93,12 @@ export default function Terminal({ user, notify, onApiError, onShiftChanged, shi
         copy[i] = { ...copy[i], qty: copy[i].qty + 1 };
         return copy;
       }
-      const description = (p.description || '').trim();
       return [
         ...c,
         {
           productId: p.id,
-          description: description ? `${p.name} — ${description}` : p.name,
+          description: p.name,
+          details: splitDetails(p.description),
           price: Number(p.price),
           qty: 1,
         },
@@ -139,6 +149,7 @@ export default function Terminal({ user, notify, onApiError, onShiftChanged, shi
         items: cart.map((l) => ({
           productId: l.productId,
           description: l.description,
+          details: l.details,
           price: l.price,
           qty: l.qty,
         })),
@@ -222,6 +233,14 @@ export default function Terminal({ user, notify, onApiError, onShiftChanged, shi
               <div className="cart-line" key={`${l.productId}-${idx}`}>
                 <div>
                   <div className="cl-name">{l.description}</div>
+                  {l.details.length > 0 && (
+                    <ul className="cl-details">
+                      {l.details.slice(0, 3).map((detail, j) => (
+                        <li key={j}>{detail}</li>
+                      ))}
+                      {l.details.length > 3 && <li>+{l.details.length - 3} more</li>}
+                    </ul>
+                  )}
                   <div className="cl-price">{money(l.price)} each</div>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>

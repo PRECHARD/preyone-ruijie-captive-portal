@@ -68,6 +68,7 @@ export default function ReceiptModal({
       cashierName,
       items: result.items.map((i) => ({
         description: String(i.description),
+        details: Array.isArray(i.details) ? i.details : [],
         qty: Number(i.qty),
         price: Number(i.price),
         lineTotal: Number(i.lineTotal),
@@ -184,7 +185,13 @@ export default function ReceiptModal({
                 <tr key={idx}>
                   <td>
                     {i.description}
-                    <br />
+                    {(i.details || []).length > 0 && (
+                      <ul className="r-details">
+                        {(i.details || []).map((d, j) => (
+                          <li key={j}>{d}</li>
+                        ))}
+                      </ul>
+                    )}
                     <span className="receipt-muted">{i.qty} × {money(i.price)}</span>
                   </td>
                   <td className="r-num">{money(i.lineTotal)}</td>

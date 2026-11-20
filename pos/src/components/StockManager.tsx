@@ -233,7 +233,7 @@ export default function StockManager({ onChanged }: { onChanged?: () => void }) 
                   rows={3}
                   value={draft.description}
                   onChange={(e) => setDraft({ ...draft, description: e.target.value })}
-                  placeholder="What it is, specs, warranty — shown on invoices and the till."
+                  placeholder={'One detail per line — e.g.\n5 m heavy duty cable\n16 A rated\n2-year warranty'}
                 />
               </label>
               {field('SKU', 'sku')}

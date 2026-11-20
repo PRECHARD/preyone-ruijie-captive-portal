@@ -244,6 +244,7 @@ export interface PosDocument {
 export interface DocumentLine {
   id?: string;
   description: string;
+  details?: string[] | null;
   price: string | number;
   qty: string | number;
   line_total?: string | number;

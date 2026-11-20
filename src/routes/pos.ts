@@ -511,6 +511,7 @@ router.post('/documents', async (req, res) => {
   const items = rawItems
     .map((it: any) => ({
       description: str(it?.description),
+      details: normalizeDetails(it?.details),
       price: round2(num(it?.price)),
       qty: round2(num(it?.qty)) || 1,
       productId: str(it?.productId) || null,
@@ -621,9 +622,18 @@ router.post('/documents', async (req, res) => {
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
       await client.query(
-        `INSERT INTO pos_document_items (document_id, product_id, description, price, qty, line_total, position)
-         VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-        [doc.id, line.productId ?? null, line.description, line.price, line.qty, line.lineTotal, line.position]
+        `INSERT INTO pos_document_items (document_id, product_id, description, details, price, qty, line_total, position)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+        [
+          doc.id,
+          line.productId ?? null,
+          line.description,
+          line.details ?? [],
+          line.price,
+          line.qty,
+          line.lineTotal,
+          line.position,
+        ]
       );
     }
 
@@ -1621,6 +1631,7 @@ router.get('/shifts', async (req, res) => {
 interface CartItemInput {
   productId?: string;
   description?: string;
+  details?: string[] | string;
   price?: number | string;
   qty?: number | string;
 }
@@ -1648,6 +1659,34 @@ const DOC_NUMBER_RE = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,39}$/;
  * Anything supplied must stay URL/file-safe because it becomes the PDF and
  * UBL XML filename on the client.
  */
+/**
+ * Normalise a line's detail bullets from either a string (one per line / bullet
+ * separated) or an array. Order is preserved, duplicates are dropped and the
+ * list is capped so a pathological payload cannot push a document off the A4.
+ */
+function normalizeDetails(value: unknown): string[] {
+  const raw = Array.isArray(value)
+    ? value
+    : typeof value === 'string'
+      ? value.split(/\r?\n|\u2022|\u00b7|\u25aa|\u25e6/)
+      : [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const entry of raw) {
+    const text = String(entry ?? '')
+      .replace(/^\s*(?:[-\u2013\u2014*]|\d+[.)])\s*/, '')
+      .trim()
+      .slice(0, 300);
+    if (!text) continue;
+    const key = text.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(text);
+    if (out.length >= 20) break;
+  }
+  return out;
+}
+
 function normalizeDocNumber(value: unknown): { number?: string; error?: string } {
   const raw = str(value);
   if (!raw) return {};
@@ -1809,7 +1848,9 @@ router.post('/checkout', async (req, res) => {
     Array.isArray(b.payments) ? b.payments : [];
   const discountPct = Math.max(0, Math.min(100, num(b.discountPct)));
   const taxPct = Math.max(0, num(b.taxPct));
-  const { lines, subtotal, discountAmount, taxAmount, total } = computeTotals(rawItems, discountPct, taxPct);
+  const totals = computeTotals(rawItems, discountPct, taxPct);
+  const lines = totals.lines.map((line) => ({ ...line, details: normalizeDetails(line.details) }));
+  const { subtotal, discountAmount, taxAmount, total } = totals;
   const paidTotal = round2(rawPayments.reduce((s, p) => s + num(p?.amount), 0));
 
   const client = await pool.connect();
@@ -1896,9 +1937,18 @@ router.post('/checkout', async (req, res) => {
     for (const line of lines) {
       const description = str(line.description) || 'Item';
       await client.query(
-        `INSERT INTO pos_document_items (document_id, product_id, description, price, qty, line_total, position)
-         VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-        [doc.id, str(line.productId) || null, description, line.price, line.qty, line.lineTotal, line.position]
+        `INSERT INTO pos_document_items (document_id, product_id, description, details, price, qty, line_total, position)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+        [
+          doc.id,
+          str(line.productId) || null,
+          description,
+          line.details ?? [],
+          line.price,
+          line.qty,
+          line.lineTotal,
+          line.position,
+        ]
       );
       if (line.productId) {
         await client.query(
@@ -1949,6 +1999,7 @@ router.post('/checkout', async (req, res) => {
       balanceDue: round2(total - paidTotal),
       items: lines.map((l) => ({
         description: str(l.description) || 'Item',
+        details: l.details ?? [],
         price: l.price,
         qty: l.qty,
         lineTotal: l.lineTotal,
@@ -2140,7 +2191,11 @@ ${items.map((it: any, i: number) => `  <cac:InvoiceLine>
     <cbc:ID>${i + 1}</cbc:ID>
     <cbc:InvoicedQuantity unitCode="EA">${Number(it.qty)}</cbc:InvoicedQuantity>
     <cbc:LineExtensionAmount currencyID="${esc(d.currency || 'USD')}">${Number(it.line_total).toFixed(2)}</cbc:LineExtensionAmount>
-    <cac:Item><cbc:Name>${esc(it.description)}</cbc:Name></cac:Item>
+    <cac:Item><cbc:Name>${esc(it.description)}</cbc:Name>${
+      Array.isArray(it.details) && it.details.length
+        ? `<cbc:Description>${esc(it.details.join('; '))}</cbc:Description>`
+        : ''
+    }</cac:Item>
     <cac:Price><cbc:PriceAmount currencyID="${esc(d.currency || 'USD')}">${Number(it.price).toFixed(2)}</cbc:PriceAmount></cac:Price>
   </cac:InvoiceLine>`).join('\n')}
 </Invoice>`;

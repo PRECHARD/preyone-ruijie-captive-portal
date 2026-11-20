@@ -50,6 +50,7 @@ export interface MethodTotal {
 export interface CartLine {
   productId: string | null;
   description: string;
+  details: string[];
   price: number;
   qty: number;
 }
@@ -71,7 +72,7 @@ export interface CheckoutResult {
   total: number;
   amount_paid: number;
   balanceDue: number;
-  items: Array<{ description: string; price: number; qty: number; lineTotal: number }>;
+  items: Array<{ description: string; details?: string[]; price: number; qty: number; lineTotal: number }>;
   payments: Array<{ amount: number; method: string; reference?: string }>;
   customer_name?: string;
   customer_phone?: string;
@@ -92,7 +93,14 @@ export interface PosDocument {
   cashier_name: string | null;
   customer_name?: string | null;
   item_count?: number;
-  items?: Array<{ description: string; price: number; qty: number; lineTotal?: number; line_total?: number }>;
+  items?: Array<{
+    description: string;
+    details?: string[];
+    price: number;
+    qty: number;
+    lineTotal?: number;
+    line_total?: number;
+  }>;
   payments?: Array<{ amount: number; method: string; reference?: string }>;
 }
 

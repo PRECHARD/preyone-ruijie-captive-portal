@@ -1214,11 +1214,17 @@ const SQL = `
     document_id   UUID NOT NULL REFERENCES pos_documents(id) ON DELETE CASCADE,
     product_id    UUID REFERENCES pos_products(id) ON DELETE SET NULL,
     description   TEXT NOT NULL,
+    details       TEXT[] NOT NULL DEFAULT '{}',
     price         NUMERIC(12,2) NOT NULL DEFAULT 0,
     qty           NUMERIC(12,2) NOT NULL DEFAULT 1,
     line_total    NUMERIC(12,2) NOT NULL DEFAULT 0,
     position      INTEGER NOT NULL DEFAULT 0
   );
+
+  -- Bullet details for a line ("5 m heavy duty", "16 A rated", …). Stored as
+  -- an array so the A4 sheet, thermal receipt and composer all render the same
+  -- ordered list instead of one crowded paragraph.
+  ALTER TABLE pos_document_items ADD COLUMN IF NOT EXISTS details TEXT[] NOT NULL DEFAULT '{}';
 
   CREATE INDEX IF NOT EXISTS idx_pos_doc_items_document ON pos_document_items (document_id);
   CREATE INDEX IF NOT EXISTS idx_pos_doc_items_product  ON pos_document_items (product_id);
