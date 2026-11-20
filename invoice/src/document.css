@@ -221,12 +221,7 @@
 .a4-items-table tbody tr.a4-filler td { color: transparent; }
 
 /* ── Bullet details: a full-width spec panel on the white sheet ── */
-.a4-items-table tbody tr td.a4-item-cell {
-  vertical-align: top;
-  /* The product name always sits on clean white, even on a zebra row. */
-  background-image: none;
-  background-color: #fff;
-}
+.a4-items-table tbody tr td.a4-item-cell { vertical-align: top; }
 .a4-items-table tbody td.a4-item-cell.has-details { padding-bottom: 1.8mm; }
 .a4-items-table tbody tr.a4-item-detail-row td {
   height: auto;
@@ -243,11 +238,12 @@
 }
 .a4-item-details {
   margin-top: 0;
-  padding: 1.8mm 2.6mm 2.1mm;
-  border: .25mm solid #ece7f6;
-  border-left: .6mm solid var(--doc-accent, #7a0e57);
-  border-radius: 1.4mm;
-  background: #fbfaff;
+  padding: 1.9mm 2.7mm 2.2mm;
+  border: .35mm solid var(--doc-detail-border, #b9a4dd);
+  border-left: .8mm solid var(--doc-accent, #7a0e57);
+  border-radius: 1.6mm;
+  background: #fff;
+  box-shadow: 0 0 0 .16mm var(--doc-detail-glow, #f1e9ff);
 }
 .a4-detail-label {
   margin-bottom: 1.25mm;
@@ -280,12 +276,16 @@
 .a4-item-details li > span:last-child { min-width: 0; overflow-wrap: anywhere; }
 .a4-detail-mark {
   flex: none;
-  width: 1.7mm;
-  height: 1.7mm;
-  margin-top: .8mm;
+  width: 1.75mm;
+  height: 1.75mm;
+  margin-top: .78mm;
   transform: rotate(45deg);
-  background: linear-gradient(135deg, var(--doc-accent, #7a0e57) 0 46%, #00d4ff 54% 100%);
-  box-shadow: 0 0 0 .18mm #fff, 0 0 .8mm rgba(0, 212, 255, .5);
+  background: linear-gradient(
+    135deg,
+    var(--doc-accent, #36116a) 0 50%,
+    var(--doc-detail-navy, #122b70) 50% 100%
+  );
+  box-shadow: 0 0 0 .18mm #fff;
 }
 .a4-doc.layout-compact .a4-item-details { margin-top: 1.4mm; padding: 1.2mm 1.8mm; }
 .a4-doc.layout-compact .a4-item-details li { font-size: 7.1pt; line-height: 1.36; }

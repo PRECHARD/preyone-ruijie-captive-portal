@@ -1308,8 +1308,8 @@ tbody tr:last-child td { border-bottom: none; }
   inset: 10px auto 10px 0;
   width: 2px;
   border-radius: 2px;
-  background: linear-gradient(180deg, #7a0e57, #00d4ff);
-  opacity: .7;
+  background: linear-gradient(180deg, #7a0e57, #122b70);
+  opacity: .8;
 }
 .line-card .line-row { margin-bottom: 0; }
 .line-details-field { display: block; margin-top: 9px; }
@@ -1334,9 +1334,9 @@ tbody tr:last-child td { border-bottom: none; }
   color: var(--pos-text-muted);
 }
 .line-details-count.has {
-  border-color: rgba(0, 212, 255, .38);
-  color: #7be0ff;
-  background: rgba(0, 212, 255, .08);
+  border-color: rgba(168, 85, 247, .5);
+  color: #d8c4ff;
+  background: rgba(168, 85, 247, .12);
 }
 .line-details-input {
   min-height: 52px;

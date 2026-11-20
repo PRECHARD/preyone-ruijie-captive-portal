@@ -308,7 +308,7 @@ select option,
   padding-left: 9px;
   font-size: 0.66rem;
   line-height: 1.35;
-  color: #7be0ff;
+  color: #d8c4ff;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -321,7 +321,7 @@ select option,
   width: 4px;
   height: 4px;
   transform: rotate(45deg);
-  background: linear-gradient(135deg, #a855f7, #00d4ff);
+  background: linear-gradient(135deg, #a855f7 0 50%, #122b70 50% 100%);
 }
 .qty-btn {
   width: 30px; height: 30px;

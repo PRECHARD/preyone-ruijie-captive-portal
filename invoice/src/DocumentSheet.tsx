@@ -162,11 +162,19 @@ export function templateVars(template?: InvoiceTemplate | null): CSSProperties {
   // Pre-mix the derived tint colours here rather than in CSS: html2canvas
   // (used by the Download PDF path) cannot evaluate `color-mix()`.
   const deep = legacy ? '#36116a' : mixHex(accent, '#14002e', 0.72);
+  // Detail bullets use the template's own purple + navy pairing. The legacy
+  // house template gets the exact Preyone purple/navy; every other template
+  // derives both stops from its accent so the spec panel always belongs to
+  // the chosen design instead of importing a fixed colour from another theme.
+  const detailNavy = legacy ? '#122b70' : mixHex(accent, '#122b70', 0.58);
   return {
     '--doc-grad': grad,
     '--doc-row-tint': `linear-gradient(rgba(255, 255, 255, .57), rgba(255, 255, 255, .57)), ${grad}`,
     '--doc-accent': deep,
     '--doc-thanks': legacy ? '#122b70' : mixHex(accent, '#14002e', 0.55),
+    '--doc-detail-navy': detailNavy,
+    '--doc-detail-border': rgbaOf(deep, 0.62),
+    '--doc-detail-glow': rgbaOf(deep, 0.18),
     '--doc-halo': rgbaOf(deep, 0.12),
     '--doc-halo-soft': rgbaOf(deep, 0.1),
     '--doc-row-soft': mixHex(deep, '#ffffff', 0.07),
@@ -397,7 +405,7 @@ export function DocumentSheet({
               const details = Array.isArray(it.details)
                 ? it.details.map((d) => String(d || '').trim()).filter(Boolean)
                 : [];
-              const alt = i % 2 === 1;
+              const alt = i % 2 === 0;
               return (
                 <Fragment key={i}>
                   <tr className={`a4-item-main${alt ? ' a4-item-alt' : ''}`}>
