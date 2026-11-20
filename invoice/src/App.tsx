@@ -1731,6 +1731,14 @@ function DocumentDrawer({
             </h2>
             <p className="sheet-sub">
               {doc ? `${typeLabel(types, doc.doc_type)} · ${dateLabel(doc.issue_date)}` : ''}
+              {doc?.verify_code && (
+                <>
+                  {' · '}
+                  <span className="mono" title="Public document ID">
+                    {doc.verify_code}
+                  </span>
+                </>
+              )}
             </p>
           </div>
           <button type="button" className="icon-btn" onClick={onClose} aria-label="Close">
