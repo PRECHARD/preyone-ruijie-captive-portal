@@ -1170,7 +1170,10 @@ const SQL = `
   CREATE TABLE IF NOT EXISTS pos_documents (
     id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     doc_number   TEXT UNIQUE NOT NULL,
-    doc_type     TEXT NOT NULL CHECK (doc_type IN ('sale', 'invoice', 'quotation')),
+    doc_type     TEXT NOT NULL CHECK (doc_type IN (
+                   'sale', 'invoice', 'tax_invoice', 'proforma', 'quote', 'quotation',
+                   'estimate', 'receipt', 'sales_receipt', 'cash_receipt',
+                   'credit_memo', 'credit_note', 'purchase_order', 'delivery_note')),
     channel      TEXT NOT NULL DEFAULT 'till' CHECK (channel IN ('till', 'online', 'office')),
     status       TEXT NOT NULL DEFAULT 'draft'
                  CHECK (status IN ('draft', 'unpaid', 'partial', 'paid', 'sent', 'void')),
@@ -1188,6 +1191,16 @@ const SQL = `
     created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
+
+  -- Upgrade the original three-type CHECK in place. The office workspace
+  -- raises all twelve international document types, not just invoice/quotation;
+  -- leaving the old constraint meant nine types failed to insert in production.
+  ALTER TABLE pos_documents DROP CONSTRAINT IF EXISTS pos_documents_doc_type_check;
+  ALTER TABLE pos_documents ADD CONSTRAINT pos_documents_doc_type_check
+    CHECK (doc_type IN (
+      'sale', 'invoice', 'tax_invoice', 'proforma', 'quote', 'quotation',
+      'estimate', 'receipt', 'sales_receipt', 'cash_receipt',
+      'credit_memo', 'credit_note', 'purchase_order', 'delivery_note'));
 
   CREATE INDEX IF NOT EXISTS idx_pos_documents_number   ON pos_documents (doc_number);
   CREATE INDEX IF NOT EXISTS idx_pos_documents_customer ON pos_documents (customer_id);

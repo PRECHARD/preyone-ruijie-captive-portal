@@ -248,6 +248,15 @@ select option,
   flex: 1;
   color: #ffffff;
 }
+.product-card .p-desc {
+  font-size: 0.66rem;
+  line-height: 1.3;
+  color: #94a3b8;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
 .product-card .p-price { font-weight: 700; color: #34d399; }
 .product-card .p-zig { font-size: 0.68rem; color: #fbbf24; font-weight: 600; }
 .product-card .p-stock { font-size: 0.66rem; color: #94a3b8; }

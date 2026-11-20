@@ -1677,8 +1677,17 @@ router.get('/documents', async (req, res) => {
   const status = str(req.query.status);
   const q = str(req.query.q);
   if (type) {
-    params.push(type);
-    where.push(`d.doc_type = $${params.length}`);
+    // The till has always called a quote "quotation"; the office workspace
+    // stores it as "quote". Treat the two names as one family so a document
+    // never disappears from the history just because of its label.
+    const family: Record<string, string[]> = {
+      quote: ['quote', 'quotation'],
+      quotation: ['quotation', 'quote'],
+      receipt: ['receipt', 'sales_receipt', 'cash_receipt'],
+      credit: ['credit_note', 'credit_memo'],
+    };
+    params.push(family[type] ?? [type]);
+    where.push(`d.doc_type = ANY($${params.length}::text[])`);
   }
   if (status) {
     params.push(status);
@@ -1758,7 +1767,9 @@ router.post('/documents/:id/convert-to-invoice', async (req, res) => {
   }
   const doc = await pool.query(
     `SELECT id, doc_type, status FROM pos_documents
-      WHERE id = $1 AND company_id = $2 AND doc_type IN ('quotation', 'sale') AND status <> 'void'`,
+      WHERE id = $1 AND company_id = $2
+        AND doc_type IN ('quotation', 'quote', 'estimate', 'proforma', 'sale')
+        AND status <> 'void'`,
     [req.params.id, tenantId(req)]
   );
   if (doc.rows.length === 0) {

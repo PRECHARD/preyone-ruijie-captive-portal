@@ -80,6 +80,16 @@ function typeLabel(types: DocType[], type: string): string {
   return types.find((t) => t.type === type)?.label ?? type.replace(/_/g, ' ');
 }
 
+/**
+ * A stock item carries both a short name and a long description. Documents have
+ * one description column, so both travel together on the invoice/receipt:
+ * "Extension cable — 5 m, heavy duty, 16 A".
+ */
+function stockLineDescription(product: { name: string; description?: string | null }): string {
+  const description = (product.description || '').trim();
+  return description ? `${product.name} — ${description}` : product.name;
+}
+
 function errorText(err: unknown): string {
   if (err instanceof ApiError && err.status === 0) return NETWORK_ERROR;
   if (err instanceof Error) {
@@ -685,7 +695,7 @@ function Composer({
     const key = nextKey.current++;
     const line: DraftLine = {
       key,
-      description: product.name,
+      description: stockLineDescription(product),
       qty: '1',
       price: String(Number(product.price) || 0),
       productId: product.id,
@@ -949,6 +959,7 @@ function Composer({
                 {products.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.name}
+                    {p.description ? ` — ${p.description}` : ''}
                     {p.sku ? ` · ${p.sku}` : ''} · {Number(p.stock_qty) || 0} in stock ·{' '}
                     {money(Number(p.price) || 0, currency)}
                   </option>

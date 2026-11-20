@@ -83,7 +83,16 @@ export default function Terminal({ user, notify, onApiError, onShiftChanged, shi
         copy[i] = { ...copy[i], qty: copy[i].qty + 1 };
         return copy;
       }
-      return [...c, { productId: p.id, description: p.name, price: Number(p.price), qty: 1 }];
+      const description = (p.description || '').trim();
+      return [
+        ...c,
+        {
+          productId: p.id,
+          description: description ? `${p.name} — ${description}` : p.name,
+          price: Number(p.price),
+          qty: 1,
+        },
+      ];
     });
   };
 
@@ -186,6 +195,7 @@ export default function Terminal({ user, notify, onApiError, onShiftChanged, shi
               return (
                 <button className="product-card" key={p.id} onClick={() => addToCart(p)}>
                   <span className="p-name">{p.name}</span>
+                  {p.description && <span className="p-desc">{p.description}</span>}
                   <span className="p-price">{money(Number(p.price))}</span>
                   {zigRate !== null && <span className="p-zig">≈ {zig(Number(p.price), zigRate)}</span>}
                   <span className={`p-stock ${low ? 'low' : ''}`}>

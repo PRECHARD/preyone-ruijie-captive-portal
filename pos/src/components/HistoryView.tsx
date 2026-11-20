@@ -5,13 +5,29 @@ import PaymentModal from './PaymentModal';
 
 const money = (n: number): string => `$${(Number(n) || 0).toFixed(2)}`;
 
-type Filter = '' | 'sale' | 'invoice' | 'quotation';
+type Filter =
+  | ''
+  | 'sale'
+  | 'invoice'
+  | 'quotation'
+  | 'receipt'
+  | 'credit'
+  | 'purchase_order'
+  | 'delivery_note'
+  | 'proforma'
+  | 'estimate';
 
 const FILTERS: Array<{ key: Filter; label: string }> = [
   { key: '', label: 'All' },
   { key: 'sale', label: 'Sales' },
   { key: 'invoice', label: 'Invoices' },
-  { key: 'quotation', label: 'Quotations' },
+  { key: 'quotation', label: 'Quotes' },
+  { key: 'receipt', label: 'Receipts' },
+  { key: 'credit', label: 'Credits' },
+  { key: 'proforma', label: 'Proformas' },
+  { key: 'estimate', label: 'Estimates' },
+  { key: 'purchase_order', label: 'POs' },
+  { key: 'delivery_note', label: 'Delivery' },
 ];
 
 export interface HistoryViewProps {
@@ -118,12 +134,11 @@ export default function HistoryView({ notify, onApiError }: HistoryViewProps) {
     }
   };
 
-  const emptyText =
-    q ? 'No documents match your search.'
-    : filter === 'invoice' ? 'No invoices yet.'
-    : filter === 'quotation' ? 'No quotations yet.'
-    : filter === 'sale' ? 'No sales yet.'
-    : 'No documents yet.';
+  const emptyText = q
+    ? 'No documents match your search.'
+    : filter
+      ? `No ${FILTERS.find((f) => f.key === filter)?.label.toLowerCase() ?? 'documents'} yet.`
+      : 'No documents yet.';
 
   return (
     <div className="history-pane">
@@ -158,7 +173,9 @@ export default function HistoryView({ notify, onApiError }: HistoryViewProps) {
           {visible.map((d) => {
             const due = balanceOf(d);
             const payable = due > 0 && d.status !== 'void';
-            const convertible = (d.doc_type === 'quotation' || d.doc_type === 'sale') && d.status !== 'void';
+            const convertible =
+              ['quotation', 'quote', 'estimate', 'proforma', 'sale'].includes(d.doc_type) &&
+              d.status !== 'void';
             return (
               <div className="history-item" key={d.id}>
                 <button className="history-row" onClick={() => openDoc(d)}>
@@ -184,7 +201,7 @@ export default function HistoryView({ notify, onApiError }: HistoryViewProps) {
                       className="hr-convert"
                       disabled={convertingId === d.id}
                       onClick={() => convert(d)}
-                      title="Convert this quotation or sale into an invoice"
+                      title="Convert this quote, estimate, proforma or sale into an invoice"
                     >
                       {convertingId === d.id ? '…' : '→ Invoice'}
                     </button>
