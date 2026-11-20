@@ -1016,7 +1016,7 @@ function Composer({
                   <span>Description (optional)</span>
                   <textarea
                     className="textarea"
-                    rows={2}
+                    rows={Math.min(8, Math.max(2, newStock.description.split(/\r?\n/).length + 1))}
                     value={newStock.description}
                     onChange={(e) => setNewStock((s) => ({ ...s, description: e.target.value }))}
                     placeholder={'One detail per line — e.g.\n5 m heavy duty cable\n16 A rated\n2-year warranty'}

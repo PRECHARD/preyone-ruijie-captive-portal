@@ -230,7 +230,7 @@ export default function StockManager({ onChanged }: { onChanged?: () => void }) 
               <label className="field-label" style={{ gridColumn: '1 / -1' }}>
                 Description
                 <textarea
-                  rows={3}
+                  rows={Math.min(8, Math.max(3, draft.description.split(/\r?\n/).length + 1))}
                   value={draft.description}
                   onChange={(e) => setDraft({ ...draft, description: e.target.value })}
                   placeholder={'One detail per line — e.g.\n5 m heavy duty cable\n16 A rated\n2-year warranty'}
