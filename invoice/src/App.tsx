@@ -2603,6 +2603,11 @@ export default function App() {
           }}
           onCreated={(id) => {
             setComposerOpen(false);
+            // A newly issued document must be visible when the drawer closes,
+            // even if the list was filtering to a different type or status.
+            setTypeFilter('all');
+            setStatusFilter('all');
+            setQuery('');
             refreshAll();
             setOpenDocId(id);
           }}
