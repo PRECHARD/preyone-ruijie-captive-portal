@@ -444,8 +444,10 @@ export function DocumentSheet({
           <div className={`a4-footer-band ${legacy ? 'a4-legacy-band' : ''}`}>
             {doc.verifyCode && (
               <div className="a4-band-verify">
-                <span className="a4-band-verify-label">Document ID</span>
-                <span className="a4-band-verify-code">{doc.verifyCode}</span>
+                <span className="a4-band-verify-line">
+                  <span className="a4-band-verify-label">Document ID</span>
+                  <span className="a4-band-verify-code">{doc.verifyCode}</span>
+                </span>
                 <span className="a4-band-verify-url">preyone.com/verify</span>
               </div>
             )}

@@ -685,11 +685,12 @@ select option,
 .r-verify {
   display: flex;
   flex-direction: column;
+  align-items: flex-end;
   gap: 1px;
   margin-top: 10px;
   padding-top: 6px;
   border-top: 1px dashed #bbb;
-  text-align: left;
+  text-align: right;
 }
 .r-verify-label {
   font-size: 7px;

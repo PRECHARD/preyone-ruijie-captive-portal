@@ -291,17 +291,17 @@ export function generateReceiptPdf(opts: {
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(5);
     doc.setTextColor(120, 120, 120);
-    doc.text('DOCUMENT ID', m, y + 2);
-    y += 3;
+    doc.text('DOCUMENT ID', pw - m, y + 2, { align: 'right' });
+    y += 2.8;
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(6.4);
+    doc.setFontSize(6);
     doc.setTextColor(54, 17, 106);
-    doc.text(opts.verifyCode, m, y + 2);
+    doc.text(opts.verifyCode, pw - m, y + 2, { align: 'right' });
     y += 3;
     doc.setFont('helvetica', 'normal');
-    doc.setFontSize(5);
+    doc.setFontSize(4.8);
     doc.setTextColor(120, 120, 120);
-    doc.text('preyone.com/verify', m, y + 2);
+    doc.text('preyone.com/verify', pw - m, y + 2, { align: 'right' });
     y += 3;
   }
 
