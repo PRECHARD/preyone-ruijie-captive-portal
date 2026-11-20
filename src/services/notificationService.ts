@@ -57,14 +57,43 @@ function emailFooter(): string {
 }
 
 // ── Generic email helper ──────────────────────────────────────────────
-async function sendMail(to: string, subject: string, html: string, fromName?: string, fromEmail?: string, attachments?: Array<{ filename: string; content: Buffer; cid?: string }>, headers?: Record<string, string>, text?: string): Promise<boolean> {
+
+/**
+ * One sender identity for every transactional message. Mail clients show the
+ * display name, so this is always "Preyone Enterprises" regardless of which
+ * app (invoice, POS, WiFi, Starlink, admin) triggered the message. The
+ * envelope address is the verified SMTP_FROM mailbox so SPF/DKIM alignment
+ * stays on support@preyone.com.
+ */
+const TRANSACTIONAL_FROM_NAME = 'Preyone Enterprises';
+
+function senderAddress(): string {
+  const configured = String(process.env.SMTP_FROM || '').trim();
+  const bracketed = /<([^>]+)>/.exec(configured)?.[1]?.trim();
+  if (bracketed) return bracketed;
+  if (/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(configured)) return configured;
+  return 'support@preyone.com';
+}
+
+async function sendMail(
+  to: string,
+  subject: string,
+  html: string,
+  _fromName?: string,
+  _fromEmail?: string,
+  attachments?: Array<{ filename: string; content: Buffer; cid?: string }>,
+  headers?: Record<string, string>,
+  text?: string
+): Promise<boolean> {
   const t = getTransporter();
   if (!t) {
     console.log('[NOTIFICATION] Email not sent (SMTP not configured). To:', to);
     return false;
   }
-  const email = fromEmail || process.env.SMTP_FROM || 'info@preyone.com';
-  const from = fromName ? `"${fromName}" <${email}>` : email;
+  // Per-call fromName/fromEmail are kept in the signature for compatibility
+  // but deliberately ignored: every message must present the same brand and
+  // the same verified mailbox.
+  const from = `"${TRANSACTIONAL_FROM_NAME}" <${senderAddress()}>`;
   try {
     const info = await t.sendMail({ from, to, subject, html, text, attachments, headers });
     // The relay's response is the only proof of acceptance we get (the SMTP
