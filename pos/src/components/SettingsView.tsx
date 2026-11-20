@@ -4,6 +4,7 @@ import {
   type CashierRow,
   type CompanyProfile,
   type CurrencyRate,
+  type CustomerRow,
   type ShiftHistoryRow,
   type StaffUser,
   type SubscriptionPlans,
@@ -54,13 +55,29 @@ export default function SettingsView({
   const [shiftsAll, setShiftsAll] = useState(false);
   const manager = isManagerRole(user.role);
 
+  // Client book (manager/CEO): add, edit and delete customers here so the
+  // invoice composer and credit statements always have clean records.
+  const [customers, setCustomers] = useState<CustomerRow[]>([]);
+  const [clientQuery, setClientQuery] = useState('');
+  const [clientDraft, setClientDraft] = useState<{
+    id?: string;
+    name: string;
+    phone: string;
+    email: string;
+    address: string;
+    notes: string;
+  } | null>(null);
+  const [clientBusy, setClientBusy] = useState(false);
+
   const loadTill = useCallback(async () => {
-    const [c, s] = await Promise.all([
+    const [c, s, cust] = await Promise.all([
       manager ? api.cashiers().catch(() => [] as CashierRow[]) : Promise.resolve([] as CashierRow[]),
       api.shiftHistory(manager && shiftsAll).catch(() => [] as ShiftHistoryRow[]),
+      manager ? api.customers().catch(() => [] as CustomerRow[]) : Promise.resolve([] as CustomerRow[]),
     ]);
     setCashiers(c);
     setShifts(s);
+    setCustomers(cust);
   }, [manager, shiftsAll]);
 
   const load = useCallback(async () => {
@@ -106,6 +123,45 @@ export default function SettingsView({
       if (!onApiError(e)) notify(e instanceof Error ? e.message : 'Could not update PIN', 'error');
     } finally {
       setPinBusy(false);
+    }
+  };
+
+  const saveClient = async () => {
+    if (!clientDraft) return;
+    const name = clientDraft.name.trim();
+    if (!name) {
+      notify('Client name is required', 'error');
+      return;
+    }
+    setClientBusy(true);
+    try {
+      const payload = {
+        name,
+        phone: clientDraft.phone.trim() || undefined,
+        email: clientDraft.email.trim() || undefined,
+        address: clientDraft.address.trim() || undefined,
+        notes: clientDraft.notes.trim() || undefined,
+      };
+      if (clientDraft.id) await api.updateCustomer(clientDraft.id, payload);
+      else await api.createCustomer(payload);
+      notify(clientDraft.id ? 'Client updated' : 'Client added');
+      setClientDraft(null);
+      await loadTill();
+    } catch (e) {
+      if (!onApiError(e)) notify(e instanceof Error ? e.message : 'Could not save client', 'error');
+    } finally {
+      setClientBusy(false);
+    }
+  };
+
+  const removeClient = async (c: CustomerRow) => {
+    if (!window.confirm(`Delete ${c.name}? Customers with documents cannot be deleted.`)) return;
+    try {
+      await api.deleteCustomer(c.id);
+      notify('Client deleted');
+      await loadTill();
+    } catch (e) {
+      if (!onApiError(e)) notify(e instanceof Error ? e.message : 'Could not delete client', 'error');
     }
   };
 
@@ -207,6 +263,74 @@ export default function SettingsView({
           <div className="hint">No store profile on file.</div>
         )}
       </section>
+
+      {manager && (
+        <section className="settings-card">
+          <div className="settings-card-head">
+            <span>Clients</span>
+            <button
+              className="ghost-btn small"
+              onClick={() =>
+                setClientDraft({ name: '', phone: '', email: '', address: '', notes: '' })
+              }
+            >
+              + Add client
+            </button>
+          </div>
+          <input
+            placeholder="Search clients…"
+            value={clientQuery}
+            onChange={(e) => setClientQuery(e.target.value)}
+            style={{ width: '100%', margin: '0.2rem 0 0.6rem' }}
+          />
+          {customers.length === 0 ? (
+            <div className="hint">No clients yet — add one to use on invoices and credit sales.</div>
+          ) : (
+            <div className="rate-list">
+              {customers
+                .filter((c) => {
+                  const q = clientQuery.trim().toLowerCase();
+                  if (!q) return true;
+                  return [c.name, c.phone, c.email, c.address].some((v) =>
+                    (v || '').toLowerCase().includes(q)
+                  );
+                })
+                .map((c) => (
+                  <div className="x-report-row" key={c.id}>
+                    <span>
+                      {c.name}
+                      <span className="receipt-muted">
+                        {[c.phone, c.email].filter(Boolean).length
+                          ? ` · ${[c.phone, c.email].filter(Boolean).join(' · ')}`
+                          : ''}
+                      </span>
+                    </span>
+                    <span style={{ display: 'inline-flex', gap: 6 }}>
+                      <button
+                        className="ghost-btn small"
+                        onClick={() =>
+                          setClientDraft({
+                            id: c.id,
+                            name: c.name,
+                            phone: c.phone || '',
+                            email: c.email || '',
+                            address: c.address || '',
+                            notes: c.notes || '',
+                          })
+                        }
+                      >
+                        Edit
+                      </button>
+                      <button className="ghost-btn small" onClick={() => void removeClient(c)}>
+                        Delete
+                      </button>
+                    </span>
+                  </div>
+                ))}
+            </div>
+          )}
+        </section>
+      )}
 
       <section className="settings-card">
         <div className="settings-card-head">
@@ -353,6 +477,61 @@ export default function SettingsView({
           </div>
         </div>
       </section>
+
+      {clientDraft && (
+        <div className="modal-backdrop" onClick={() => setClientDraft(null)}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+            <h3 className="modal-title">{clientDraft.id ? 'Edit client' : 'New client'}</h3>
+            <label className="field-label">
+              Name *
+              <input
+                value={clientDraft.name}
+                autoFocus
+                onChange={(e) => setClientDraft({ ...clientDraft, name: e.target.value })}
+              />
+            </label>
+            <div className="form-grid">
+              <label className="field-label">
+                Phone
+                <input
+                  value={clientDraft.phone}
+                  onChange={(e) => setClientDraft({ ...clientDraft, phone: e.target.value })}
+                />
+              </label>
+              <label className="field-label">
+                Email
+                <input
+                  type="email"
+                  value={clientDraft.email}
+                  onChange={(e) => setClientDraft({ ...clientDraft, email: e.target.value })}
+                />
+              </label>
+            </div>
+            <label className="field-label">
+              Address
+              <textarea
+                rows={2}
+                value={clientDraft.address}
+                onChange={(e) => setClientDraft({ ...clientDraft, address: e.target.value })}
+              />
+            </label>
+            <label className="field-label">
+              Notes
+              <textarea
+                rows={2}
+                value={clientDraft.notes}
+                onChange={(e) => setClientDraft({ ...clientDraft, notes: e.target.value })}
+              />
+            </label>
+            <button className="primary-btn" disabled={clientBusy} onClick={() => void saveClient()}>
+              {clientBusy ? 'Saving…' : 'Save client'}
+            </button>
+            <button className="secondary-btn" onClick={() => setClientDraft(null)}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
 
       {showUpgrade && (
         <UpgradeModal

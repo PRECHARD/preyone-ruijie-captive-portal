@@ -6,6 +6,7 @@ const money = (n: number): string => `$${(Number(n) || 0).toFixed(2)}`;
 interface Draft {
   id?: string;
   name: string;
+  description: string;
   sku: string;
   barcode: string;
   category: string;
@@ -17,22 +18,23 @@ interface Draft {
 }
 
 const emptyDraft: Draft = {
-  name: '', sku: '', barcode: '', category: '',
+  name: '', description: '', sku: '', barcode: '', category: '',
   price: '', costPrice: '', stockQty: '0', trackStock: true, lowStockThreshold: '3',
 };
 
 export default function StockManager({ onChanged }: { onChanged?: () => void }) {
   const [products, setProducts] = useState<Product[]>([]);
   const [query, setQuery] = useState('');
+  const [showArchived, setShowArchived] = useState(false);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [adjusting, setAdjusting] = useState<{ p: Product; delta: string; reason: string } | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
   const load = () => {
-    api.products().then(setProducts).catch(() => {});
+    api.products(showArchived).then(setProducts).catch(() => {});
   };
-  useEffect(load, []);
+  useEffect(load, [showArchived]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -49,6 +51,7 @@ export default function StockManager({ onChanged }: { onChanged?: () => void }) 
     setDraft({
       id: p.id,
       name: p.name,
+      description: p.description || '',
       sku: p.sku || '',
       barcode: p.barcode || '',
       category: p.category || '',
@@ -70,6 +73,7 @@ export default function StockManager({ onChanged }: { onChanged?: () => void }) 
       if (draft.id) {
         await api.updateProduct(draft.id, {
           name: draft.name.trim(),
+          description: draft.description.trim() || null,
           sku: draft.sku.trim() || null,
           barcode: draft.barcode.trim() || null,
           category: draft.category.trim() || null,
@@ -82,6 +86,7 @@ export default function StockManager({ onChanged }: { onChanged?: () => void }) 
       } else {
         await api.createProduct({
           name: draft.name.trim(),
+          description: draft.description.trim() || null,
           sku: draft.sku,
           barcode: draft.barcode,
           category: draft.category,
@@ -133,6 +138,16 @@ export default function StockManager({ onChanged }: { onChanged?: () => void }) 
     }
   };
 
+  const restore = async (p: Product) => {
+    try {
+      await api.updateProduct(p.id, { active: true });
+      load();
+      onChanged?.();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not restore');
+    }
+  };
+
   const field = (label: string, key: keyof Draft, opts: { type?: string; wide?: boolean } = {}) => (
     <label className="field-label" style={opts.wide ? { gridColumn: '1 / -1' } : undefined}>
       {label}
@@ -148,6 +163,13 @@ export default function StockManager({ onChanged }: { onChanged?: () => void }) 
     <div className="catalogue">
       <div className="search-row">
         <input placeholder="Search products…" value={query} onChange={(e) => setQuery(e.target.value)} />
+        <button
+          className="secondary-btn"
+          style={{ whiteSpace: 'nowrap' }}
+          onClick={() => setShowArchived((v) => !v)}
+        >
+          {showArchived ? 'Hide archived' : 'Show archived'}
+        </button>
         <button style={{ padding: '0 1rem', whiteSpace: 'nowrap' }} onClick={() => setDraft({ ...emptyDraft })}>
           + Add product
         </button>
@@ -166,7 +188,10 @@ export default function StockManager({ onChanged }: { onChanged?: () => void }) 
             const low = p.track_stock && Number(p.stock_qty) <= Number(p.low_stock_threshold);
             return (
               <tr key={p.id} className={p.active ? '' : 'archived'}>
-                <td>{p.name}{!p.active && ' (archived)'}</td>
+                <td>
+                  {p.name}{!p.active && ' (archived)'}
+                  {p.description && <span className="product-desc">{p.description}</span>}
+                </td>
                 <td>{p.sku || p.barcode || '—'}</td>
                 <td>{p.category || '—'}</td>
                 <td style={{ textAlign: 'right' }}>{money(Number(p.cost_price))}</td>
@@ -181,7 +206,11 @@ export default function StockManager({ onChanged }: { onChanged?: () => void }) 
                 <td style={{ whiteSpace: 'nowrap', textAlign: 'right' }}>
                   <button className="qty-btn" title="Receive / adjust stock" onClick={() => setAdjusting({ p, delta: '', reason: '' })}>±</button>{' '}
                   <button className="qty-btn" title="Edit" onClick={() => openEdit(p)}>✎</button>{' '}
-                  {p.active && <button className="qty-btn" title="Archive" onClick={() => archive(p)}>🗑</button>}
+                  {p.active ? (
+                    <button className="qty-btn" title="Archive" onClick={() => archive(p)}>🗑</button>
+                  ) : (
+                    <button className="qty-btn" title="Restore" onClick={() => restore(p)}>↺</button>
+                  )}
                 </td>
               </tr>
             );
@@ -198,6 +227,15 @@ export default function StockManager({ onChanged }: { onChanged?: () => void }) 
             {error && <div className="err-msg">{error}</div>}
             <div className="form-grid">
               {field('Name *', 'name', { wide: true })}
+              <label className="field-label" style={{ gridColumn: '1 / -1' }}>
+                Description
+                <textarea
+                  rows={3}
+                  value={draft.description}
+                  onChange={(e) => setDraft({ ...draft, description: e.target.value })}
+                  placeholder="What it is, specs, warranty — shown on invoices and the till."
+                />
+              </label>
               {field('SKU', 'sku')}
               {field('Barcode', 'barcode')}
               {field('Category', 'category', { wide: true })}

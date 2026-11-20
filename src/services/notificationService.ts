@@ -695,7 +695,36 @@ export async function sendSubscriptionExpiryUrgentEmail(
 }
 
 // ── Admin 2FA login code ─────────────────────────────────────────────
-export async function sendAdminLoginCode(email: string, fullName: string, code: string): Promise<boolean> {
+
+/**
+ * Which Preyone app a sign-in code belongs to. The subject, heading and body
+ * are branded per app so a user who signs in at invoice.preyone.com gets an
+ * "Invoice" code, not a generic one they might mistake for another product.
+ */
+export type MailClient = 'invoice' | 'pos' | 'admin' | 'wifi' | 'starlink';
+
+const MAIL_CLIENTS: Record<MailClient, { brand: string; domain: string }> = {
+  invoice: { brand: 'Preyone Invoice', domain: 'invoice.preyone.com' },
+  pos: { brand: 'Preyone POS', domain: 'pos.preyone.com' },
+  admin: { brand: 'Preyone Admin', domain: 'admin.preyone.com' },
+  wifi: { brand: 'Preyone WiFi', domain: 'wifi.preyone.com' },
+  starlink: { brand: 'Preyone Starlink', domain: 'starlink.preyone.com' },
+};
+
+/** Narrow an untrusted value (request body / JWT claim) to a known app. */
+export function resolveMailClient(value: unknown): MailClient {
+  return typeof value === 'string' && Object.prototype.hasOwnProperty.call(MAIL_CLIENTS, value)
+    ? (value as MailClient)
+    : 'admin';
+}
+
+export async function sendAdminLoginCode(
+  email: string,
+  fullName: string,
+  code: string,
+  client: MailClient = 'admin'
+): Promise<boolean> {
+  const app = MAIL_CLIENTS[resolveMailClient(client)];
   // Self-contained template: the shared emailHeader()/emailFooter() helpers
   // are styled for the older green skin and are reused by a dozen other
   // transactional emails. Restyling them here would silently change all of
@@ -729,9 +758,9 @@ export async function sendAdminLoginCode(email: string, fullName: string, code: 
   const text = [
     `Hi ${fullName},`,
     '',
-    `Your Preyone sign-in code is: ${code}`,
+    `Your ${app.brand} sign-in code is: ${code}`,
     '',
-    'It expires in 15 minutes and can only be used once.',
+    `It expires in 15 minutes and can only be used once. This code is for ${app.domain}.`,
     'If you did not try to sign in, you can ignore this email and consider changing your password.',
     '',
     'Preyone Enterprises',
@@ -741,7 +770,7 @@ export async function sendAdminLoginCode(email: string, fullName: string, code: 
 
   return sendMail(
     email,
-    `Your Preyone sign-in code \u00b7 ${stamp}`,
+    `Your ${app.brand} sign-in code \u00b7 ${stamp}`,
     `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -749,7 +778,7 @@ export async function sendAdminLoginCode(email: string, fullName: string, code: 
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="color-scheme" content="dark">
   <meta name="supported-color-schemes" content="dark">
-  <title>Your Preyone sign-in code</title>
+  <title>Your ${app.brand} sign-in code</title>
 </head>
 <body style="margin:0;padding:0;background:#050505;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%">
   <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#050505">
@@ -767,12 +796,12 @@ export async function sendAdminLoginCode(email: string, fullName: string, code: 
               <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
                 <tr>
                   <td align="center" style="padding:34px 32px 4px">
-                    <img src="${logo}" width="190" alt="Preyone" style="display:block;width:190px;max-width:100%;height:auto;border:0;outline:none;text-decoration:none">
+                    <img src="${logo}" width="190" alt="${app.brand}" style="display:block;width:190px;max-width:100%;height:auto;border:0;outline:none;text-decoration:none">
                   </td>
                 </tr>
                 <tr>
                   <td align="center" style="padding:22px 32px 0">
-                    <h1 style="margin:0;font-family:${sans};font-size:24px;line-height:1.3;font-weight:700;color:#f8fbff;letter-spacing:-0.2px">Your sign-in code</h1>
+                    <h1 style="margin:0;font-family:${sans};font-size:24px;line-height:1.3;font-weight:700;color:#f8fbff;letter-spacing:-0.2px">Your ${app.brand} sign-in code</h1>
                   </td>
                 </tr>
               </table>
@@ -781,7 +810,7 @@ export async function sendAdminLoginCode(email: string, fullName: string, code: 
                 <tr>
                   <td style="padding:22px 32px 0;font-family:${sans};font-size:15px;line-height:1.6;color:#94a3b8">
                     <p style="margin:0 0 10px">Hi <strong style="color:#f8fbff;font-weight:600">${fullName}</strong>,</p>
-                    <p style="margin:0">Use the code below to finish signing in to the Preyone Admin Console.</p>
+                    <p style="margin:0">Use the code below to finish signing in to ${app.brand} (<span style="color:#7be0ff">${app.domain}</span>).</p>
                   </td>
                 </tr>
               </table>

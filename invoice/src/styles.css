@@ -1258,7 +1258,9 @@ tbody tr:last-child td { border-bottom: none; }
   padding-bottom: 16px;
   border-bottom: 1px solid var(--pos-glass-edge);
 }
-.sheet-title { margin: 0; font-size: 20px; letter-spacing: -0.3px; color: #f4f7ff; }
+.sheet-title { margin: 0; font-size: 20px; letter-spacing: -0.3px; color: #f4f7ff; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.doc-number-edit { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.doc-number-edit .input { width: 200px; font-family: var(--pos-mono, monospace); font-size: 15px; }
 .sheet-sub { margin: 5px 0 0; color: var(--pos-text-muted); font-size: 12.5px; }
 .icon-btn {
   width: 34px;

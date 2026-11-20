@@ -557,6 +557,7 @@ function Composer({
   const types = catalog.documentTypes.length ? catalog.documentTypes : FALLBACK_TYPES;
   const templates = catalog.templates;
   const [docType, setDocType] = useState(types[0]?.type ?? 'invoice');
+  const [docNumber, setDocNumber] = useState('');
   const [customerName, setCustomerName] = useState('');
   const [customerEmail, setCustomerEmail] = useState('');
   const [customerAddress, setCustomerAddress] = useState('');
@@ -581,7 +582,13 @@ function Composer({
   const [customers, setCustomers] = useState<CustomerRecord[]>([]);
   const [products, setProducts] = useState<ProductRecord[]>([]);
   const [newStockOpen, setNewStockOpen] = useState(false);
-  const [newStock, setNewStock] = useState({ name: '', sku: '', price: '0', stockQty: '0' });
+  const [newStock, setNewStock] = useState({
+    name: '',
+    description: '',
+    sku: '',
+    price: '0',
+    stockQty: '0',
+  });
   const [stockBusy, setStockBusy] = useState(false);
   const [stockError, setStockError] = useState<string | null>(null);
 
@@ -630,7 +637,7 @@ function Composer({
   // and print view, so what the user sees while typing is what gets issued.
   const previewDoc: SheetDoc = {
     docType,
-    number: `${types.find((t) => t.type === docType)?.prefix ?? 'DOC'}-0000`,
+    number: docNumber.trim() || `${types.find((t) => t.type === docType)?.prefix ?? 'DOC'}-0000`,
     status: 'draft',
     issueDate,
     dueDate: ['invoice', 'tax_invoice', 'sales_receipt', 'proforma'].includes(docType) ? previewDueDate : null,
@@ -709,6 +716,7 @@ function Composer({
     try {
       const created = await api.post<ProductRecord>('/api/pos/products', {
         name,
+        description: newStock.description.trim() || undefined,
         sku: newStock.sku.trim() || undefined,
         price: Number(newStock.price) || 0,
         stockQty: Number(newStock.stockQty) || 0,
@@ -718,7 +726,7 @@ function Composer({
         [created, ...prev.filter((p) => p.id !== created.id)].sort((a, b) => a.name.localeCompare(b.name))
       );
       appendStockLine(created);
-      setNewStock({ name: '', sku: '', price: '0', stockQty: '0' });
+      setNewStock({ name: '', description: '', sku: '', price: '0', stockQty: '0' });
       setNewStockOpen(false);
     } catch (err) {
       setStockError(errorText(err));
@@ -739,6 +747,7 @@ function Composer({
     try {
       const created = await api.post<PosDocument>('/api/pos/documents', {
         docType,
+        docNumber: docNumber.trim() || undefined,
         customerId: customerMode === 'existing' && customerId ? customerId : undefined,
         customer:
           customerMode === 'new' && customerName.trim()
@@ -826,6 +835,18 @@ function Composer({
                     </option>
                   ))}
                 </select>
+              </label>
+              <label className="field">
+                <span>Document number</span>
+                <input
+                  className="input"
+                  value={docNumber}
+                  onChange={(e) => setDocNumber(e.target.value)}
+                  maxLength={40}
+                  spellCheck={false}
+                  placeholder={`Auto · ${types.find((t) => t.type === docType)?.prefix ?? 'DOC'}-0000`}
+                />
+                <small className="muted small">Leave blank for the next number.</small>
               </label>
               <label className="field span-2">
                 <span>Client record</span>
@@ -956,6 +977,16 @@ function Composer({
                     value={newStock.name}
                     onChange={(e) => setNewStock((s) => ({ ...s, name: e.target.value }))}
                     placeholder="Heavy duty extension cable 5m"
+                  />
+                </label>
+                <label className="field span-2">
+                  <span>Description (optional)</span>
+                  <textarea
+                    className="textarea"
+                    rows={2}
+                    value={newStock.description}
+                    onChange={(e) => setNewStock((s) => ({ ...s, description: e.target.value }))}
+                    placeholder="What it is, specs, warranty or anything the invoice should explain."
                   />
                 </label>
                 <label className="field">
@@ -1429,6 +1460,8 @@ function DocumentDrawer({
   const [receiptOpen, setReceiptOpen] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
   const [sendChannel, setSendChannel] = useState<'email' | 'whatsapp' | null>(null);
+  const [editingNumber, setEditingNumber] = useState(false);
+  const [numberDraft, setNumberDraft] = useState('');
   const printHostRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
@@ -1439,6 +1472,7 @@ function DocumentDrawer({
       ]);
       setDoc(detail);
       setEvents(timeline);
+      setNumberDraft(detail.doc_number);
       setError(null);
     } catch (err) {
       setError(errorText(err));
@@ -1496,6 +1530,39 @@ function DocumentDrawer({
     }
   };
 
+  const saveNumber = async () => {
+    if (!doc) return;
+    const next = numberDraft.trim();
+    if (!next) {
+      setError('Document number cannot be empty.');
+      return;
+    }
+    if (next === doc.doc_number) {
+      setEditingNumber(false);
+      return;
+    }
+    await act(async () => {
+      await api.put(`/api/pos/documents/${doc.id}`, { docNumber: next });
+      setEditingNumber(false);
+    });
+  };
+
+  const deleteDraft = async () => {
+    if (!doc) return;
+    if (!window.confirm(`Delete draft ${doc.doc_number}? This cannot be undone.`)) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api.del(`/api/pos/documents/${doc.id}`);
+      onChanged();
+      onClose();
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const savePdf = async () => {
     if (!drawerSheet || !doc) return;
     setPdfBusy(true);
@@ -1534,7 +1601,54 @@ function DocumentDrawer({
         <div className="sheet-head">
           <div>
             <h2 className="sheet-title">
-              {doc ? doc.doc_number : 'Loading…'}{' '}
+              {doc ? (
+                editingNumber ? (
+                  <span className="doc-number-edit">
+                    <input
+                      className="input"
+                      value={numberDraft}
+                      onChange={(e) => setNumberDraft(e.target.value)}
+                      maxLength={40}
+                      spellCheck={false}
+                      autoFocus
+                      aria-label="Document number"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          void saveNumber();
+                        }
+                        if (e.key === 'Escape') setEditingNumber(false);
+                      }}
+                    />
+                    <button className="btn primary" type="button" disabled={busy} onClick={() => void saveNumber()}>
+                      {busy ? 'Saving…' : 'Save'}
+                    </button>
+                    <button className="btn ghost" type="button" onClick={() => setEditingNumber(false)}>
+                      Cancel
+                    </button>
+                  </span>
+                ) : (
+                  <>
+                    <span className="mono">{doc.doc_number}</span>
+                    {doc.status !== 'void' && (
+                      <button
+                        className="icon-btn"
+                        type="button"
+                        title="Edit document number"
+                        aria-label="Edit document number"
+                        onClick={() => {
+                          setNumberDraft(doc.doc_number);
+                          setEditingNumber(true);
+                        }}
+                      >
+                        ✎
+                      </button>
+                    )}
+                  </>
+                )
+              ) : (
+                'Loading…'
+              )}{' '}
               {doc && <StatusBadge status={doc.status} />}
             </h2>
             <p className="sheet-sub">
@@ -1600,6 +1714,11 @@ function DocumentDrawer({
               >
                 Void
               </button>
+              {doc.status === 'draft' && (
+                <button className="btn danger" type="button" disabled={busy} onClick={() => void deleteDraft()}>
+                  Delete draft
+                </button>
+              )}
             </div>
 
             <div className="split">

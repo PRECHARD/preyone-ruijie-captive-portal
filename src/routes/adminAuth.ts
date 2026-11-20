@@ -22,6 +22,8 @@ import {
   sendPasswordResetEmail,
   sendAdminLoginCode,
   sendAdminPasswordChangedEmail,
+  resolveMailClient,
+  type MailClient,
 } from '../services/notificationService';
 import { setPreyoneCookie, clearPreyoneCookie, resolveAuthToken } from '../utils/ssoCookie';
 import { SESSION_POLICY } from '../sessionPolicy';
@@ -85,9 +87,28 @@ function twoFaExpiresAt(): Date {
   return new Date(Date.now() + TWO_FA_TTL_MINUTES * 60 * 1000);
 }
 
+/**
+ * Which app the sign-in started from, used only to brand the code email.
+ * The host wins because the SPAs call the API same-origin; the body value is
+ * a whitelisted fallback for local dev, never a way to skip the code.
+ */
+function mailClientFor(req: Request): MailClient {
+  const host = String(req.hostname || '').toLowerCase();
+  if (host.startsWith('invoice.')) return 'invoice';
+  if (host.startsWith('pos.')) return 'pos';
+  if (host.startsWith('starlink.')) return 'starlink';
+  if (host.startsWith('wifi.')) return 'wifi';
+  if (host.startsWith('admin.')) return 'admin';
+  return resolveMailClient((req.body as { client?: unknown } | undefined)?.client);
+}
+
 /** Mint a challenge token with exactly the same lifetime as the code. */
-function signTwoFaChallenge(adminId: string, purpose: '2fa' | '2fa-enable' = '2fa'): string {
-  return jwt.sign({ id: adminId, purpose }, getJwtSecret(), {
+function signTwoFaChallenge(
+  adminId: string,
+  purpose: '2fa' | '2fa-enable' = '2fa',
+  client: MailClient = 'admin'
+): string {
+  return jwt.sign({ id: adminId, purpose, client }, getJwtSecret(), {
     expiresIn: `${TWO_FA_TTL_MINUTES}m`,
   });
 }
@@ -484,11 +505,12 @@ adminAuthRouter.post('/login', authLimiter, async (req: Request, res: Response) 
   const requireOtp = !!user.email;
 
   if (requireOtp) {
+    const mailClient = mailClientFor(req);
     const challenge = await prepareTwoFaChallenge(user.id);
-    const challengeToken = signTwoFaChallenge(user.id);
+    const challengeToken = signTwoFaChallenge(user.id, '2fa', mailClient);
     if (challenge.code) {
       await recordAuditLog(user.id, user.full_name, 'login_challenge', 'admin_user', user.id, '2FA code emailed');
-      const emailed = await sendAdminLoginCode(user.email, user.full_name, challenge.code);
+      const emailed = await sendAdminLoginCode(user.email, user.full_name, challenge.code, mailClient);
       if (!emailed) {
         await pool.query('DELETE FROM admin_2fa_challenges WHERE id = $1', [challenge.id]);
         // The relay refused (or SMTP is unconfigured). Returning success here
@@ -619,6 +641,7 @@ adminAuthRouter.post('/resend-2fa', resendLimiter, async (req: Request, res: Res
   }
 
   try {
+    const mailClient = resolveMailClient(decoded.client);
     const { rows } = await pool.query(
       'SELECT id, full_name, email FROM admin_users WHERE id = $1',
       [decoded.id]
@@ -630,7 +653,7 @@ adminAuthRouter.post('/resend-2fa', resendLimiter, async (req: Request, res: Res
     }
     const challenge = await prepareTwoFaChallenge(user.id);
     if (challenge.code) {
-      const emailed = await sendAdminLoginCode(user.email, user.full_name, challenge.code);
+      const emailed = await sendAdminLoginCode(user.email, user.full_name, challenge.code, mailClient);
       if (!emailed) {
         await pool.query('DELETE FROM admin_2fa_challenges WHERE id = $1', [challenge.id]);
         res.status(503).json({
@@ -646,7 +669,7 @@ adminAuthRouter.post('/resend-2fa', resendLimiter, async (req: Request, res: Res
     res.json({
       message: challenge.code ? 'A new code has been sent.' : 'A code was sent recently. Please check your inbox.',
       maskedEmail: maskEmail(user.email),
-      challengeToken: signTwoFaChallenge(user.id),
+      challengeToken: signTwoFaChallenge(user.id, '2fa', mailClient),
       expiresAt: twoFaExpiresAt().toISOString(),
       expiresInMinutes: TWO_FA_TTL_MINUTES,
     });
@@ -795,10 +818,11 @@ adminAuthRouter.post('/2fa/enable-request', authLimiter, requireAdminAuth, async
     return;
   }
 
+  const mailClient = mailClientFor(req);
   const challenge = await prepareTwoFaChallenge(user.id);
-  const challengeToken = signTwoFaChallenge(user.id, '2fa-enable');
+  const challengeToken = signTwoFaChallenge(user.id, '2fa-enable', mailClient);
   if (challenge.code) {
-    const emailed = await sendAdminLoginCode(user.email, user.full_name, challenge.code);
+    const emailed = await sendAdminLoginCode(user.email, user.full_name, challenge.code, mailClient);
     if (!emailed) {
       await pool.query('DELETE FROM admin_2fa_challenges WHERE id = $1', [challenge.id]);
       res.status(503).json({

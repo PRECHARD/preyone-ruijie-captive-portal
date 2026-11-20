@@ -210,6 +210,7 @@ export interface CustomerRecord {
 export interface ProductRecord {
   id: string;
   name: string;
+  description?: string | null;
   sku?: string | null;
   barcode?: string | null;
   category?: string | null;

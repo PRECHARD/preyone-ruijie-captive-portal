@@ -501,6 +501,12 @@ router.post('/documents', async (req, res) => {
     return;
   }
 
+  const requestedNumber = normalizeDocNumber(b.docNumber);
+  if (requestedNumber.error) {
+    res.status(422).json({ error: requestedNumber.error });
+    return;
+  }
+
   const rawItems = Array.isArray(b.items) ? b.items : [];
   const items = rawItems
     .map((it: any) => ({
@@ -553,8 +559,24 @@ router.post('/documents', async (req, res) => {
       customerId = await upsertCustomer(client, b.customer);
     }
 
+    if (requestedNumber.number) {
+      const duplicate = await client.query(
+        'SELECT 1 FROM pos_documents WHERE doc_number = $1',
+        [requestedNumber.number]
+      );
+      if (duplicate.rows.length > 0) {
+        await client.query('ROLLBACK');
+        res.status(409).json({
+          error: `Document number ${requestedNumber.number} is already in use. Choose another number.`,
+          code: 'DOC_NUMBER_TAKEN',
+        });
+        return;
+      }
+    }
+
     const seq = await client.query(`SELECT nextval('pos_doc_number_seq') AS v`);
-    const docNumber = `${DOC_PREFIX[docType]}-${String(seq.rows[0].v).padStart(4, '0')}`;
+    const docNumber =
+      requestedNumber.number ?? `${DOC_PREFIX[docType]}-${String(seq.rows[0].v).padStart(4, '0')}`;
     const templateId = num(b.templateId) || num(company.invoice_template_id) || null;
 
     const inserted = await client.query(
@@ -615,10 +637,192 @@ router.post('/documents', async (req, res) => {
     res.status(201).json({ ...doc, items: lines });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => undefined);
+    if ((err as { code?: string })?.code === '23505') {
+      res.status(409).json({
+        error: 'That document number was just taken. Choose another number.',
+        code: 'DOC_NUMBER_TAKEN',
+      });
+      return;
+    }
     throw err;
   } finally {
     client.release();
   }
+});
+
+/**
+ * Edit a document's identity and office metadata. Line items, totals, payments
+ * and stock stay untouched: those are financial facts and must go through
+ * checkout/payment/void flows so the ledger and inventory stay reconcilable.
+ */
+router.put('/documents/:id', requireRole(...MANAGER_ROLES), async (req, res) => {
+  const b = req.body || {};
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const found = await client.query(
+      'SELECT * FROM pos_documents WHERE id = $1 AND company_id = $2 FOR UPDATE',
+      [req.params.id, tenantId(req)]
+    );
+    if (found.rows.length === 0) {
+      await client.query('ROLLBACK');
+      res.status(404).json({ error: 'Document not found' });
+      return;
+    }
+    const current = found.rows[0];
+    if (current.status === 'void') {
+      await client.query('ROLLBACK');
+      res.status(409).json({ error: 'A voided document cannot be edited.' });
+      return;
+    }
+
+    const patches: string[] = [];
+    const values: unknown[] = [];
+    const changed: string[] = [];
+    const set = (column: string, value: unknown, label: string) => {
+      values.push(value);
+      patches.push(`${column} = $${values.length}`);
+      changed.push(label);
+    };
+
+    if ('docNumber' in b) {
+      const normalized = normalizeDocNumber(b.docNumber);
+      if (normalized.error) {
+        await client.query('ROLLBACK');
+        res.status(422).json({ error: normalized.error });
+        return;
+      }
+      if (normalized.number && normalized.number !== current.doc_number) {
+        const duplicate = await client.query(
+          'SELECT 1 FROM pos_documents WHERE doc_number = $1 AND id <> $2',
+          [normalized.number, current.id]
+        );
+        if (duplicate.rows.length > 0) {
+          await client.query('ROLLBACK');
+          res.status(409).json({
+            error: `Document number ${normalized.number} is already in use. Choose another number.`,
+            code: 'DOC_NUMBER_TAKEN',
+          });
+          return;
+        }
+        set('doc_number', normalized.number, 'docNumber');
+      }
+    }
+
+    for (const [key, column] of [
+      ['issueDate', 'issue_date'],
+      ['dueDate', 'due_date'],
+    ] as const) {
+      if (!(key in b)) continue;
+      const value = str(b[key]);
+      if (value && !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+        await client.query('ROLLBACK');
+        res.status(422).json({ error: `${key} must be YYYY-MM-DD.` });
+        return;
+      }
+      set(column, value || null, key);
+    }
+
+    if ('notes' in b) set('notes', str(b.notes) || null, 'notes');
+
+    if ('customerId' in b) {
+      const customerId = str(b.customerId) || null;
+      if (customerId) {
+        const customer = await client.query('SELECT 1 FROM pos_customers WHERE id = $1', [customerId]);
+        if (customer.rows.length === 0) {
+          await client.query('ROLLBACK');
+          res.status(422).json({ error: 'Customer not found.' });
+          return;
+        }
+      }
+      set('customer_id', customerId, 'customerId');
+    }
+
+    const metaPatch: Record<string, unknown> = {};
+    for (const key of ['poNumber', 'reference', 'netDays'] as const) {
+      if (key in b) metaPatch[key] = key === 'netDays' ? num(b[key]) : str(b[key]) || null;
+    }
+    if (Object.keys(metaPatch).length > 0) {
+      values.push(JSON.stringify(metaPatch));
+      patches.push(`doc_meta = COALESCE(doc_meta, '{}'::jsonb) || $${values.length}::jsonb`);
+      changed.push(...Object.keys(metaPatch));
+    }
+
+    if (patches.length === 0) {
+      await client.query('ROLLBACK');
+      res.status(400).json({ error: 'Nothing to update' });
+      return;
+    }
+
+    values.push(current.id);
+    const updated = await client.query(
+      `UPDATE pos_documents SET ${patches.join(', ')}, updated_at = NOW()
+        WHERE id = $${values.length} RETURNING *`,
+      values
+    );
+
+    await client.query(
+      `INSERT INTO pos_document_events (document_id, company_id, event, detail, actor_id)
+       VALUES ($1,$2,'updated',$3,$4)`,
+      [
+        current.id,
+        tenantId(req),
+        JSON.stringify({
+          fields: changed,
+          from: current.doc_number,
+          to: updated.rows[0].doc_number,
+        }),
+        req.adminUser!.id,
+      ]
+    ).catch(() => undefined);
+
+    await client.query('COMMIT');
+    res.json(updated.rows[0]);
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    if ((err as { code?: string })?.code === '23505') {
+      res.status(409).json({
+        error: 'That document number was just taken. Choose another number.',
+        code: 'DOC_NUMBER_TAKEN',
+      });
+      return;
+    }
+    throw err;
+  } finally {
+    client.release();
+  }
+});
+
+/**
+ * Delete an unused draft. Issued documents keep a permanent audit trail, so
+ * anything sent, paid or voided must be voided/credited instead of erased.
+ */
+router.delete('/documents/:id', requireRole(...MANAGER_ROLES), async (req, res) => {
+  const found = await pool.query(
+    'SELECT id, doc_number, status, amount_paid FROM pos_documents WHERE id = $1 AND company_id = $2',
+    [req.params.id, tenantId(req)]
+  );
+  if (found.rows.length === 0) {
+    res.status(404).json({ error: 'Document not found' });
+    return;
+  }
+  const doc = found.rows[0];
+  if (doc.status !== 'draft' || Number(doc.amount_paid) > 0) {
+    res.status(409).json({
+      error: 'Only drafts with no payments can be deleted. Void the document to preserve the audit trail.',
+      code: 'DOC_NOT_DELETABLE',
+    });
+    return;
+  }
+  await pool.query('DELETE FROM pos_documents WHERE id = $1 AND company_id = $2', [doc.id, tenantId(req)]);
+  await pool
+    .query(
+      `INSERT INTO admin_audit_log (admin_id, admin_name, action, target_type, target_id, detail)
+       VALUES ($1,$2,'pos.document_delete','document',$3,$4)`,
+      [req.adminUser!.id, req.adminUser!.fullName ?? null, doc.id, `Deleted draft ${doc.doc_number}`]
+    )
+    .catch(() => undefined);
+  res.json({ ok: true, deleted: doc.id });
 });
 
 // Mark a document as sent (quote/invoice handed to the customer). Idempotent.
@@ -997,7 +1201,7 @@ router.get('/products', async (req, res) => {
   let where = includeInactive ? '' : 'AND active = TRUE';
   if (q) {
     params.push(`%${q.toLowerCase()}%`);
-    where += ` AND (lower(name) LIKE $${params.length} OR lower(coalesce(sku,'')) LIKE $${params.length} OR lower(coalesce(barcode,'')) LIKE $${params.length})`;
+    where += ` AND (lower(name) LIKE $${params.length} OR lower(coalesce(description,'')) LIKE $${params.length} OR lower(coalesce(sku,'')) LIKE $${params.length} OR lower(coalesce(barcode,'')) LIKE $${params.length})`;
   }
   const { rows } = await pool.query(
     `SELECT * FROM pos_products WHERE TRUE ${where} ORDER BY name LIMIT 500`,
@@ -1014,11 +1218,12 @@ router.post('/products', async (req, res) => {
     return;
   }
   const { rows } = await pool.query(
-    `INSERT INTO pos_products (name, sku, barcode, category, price, cost_price, stock_qty, track_stock, low_stock_threshold)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+    `INSERT INTO pos_products (name, description, sku, barcode, category, price, cost_price, stock_qty, track_stock, low_stock_threshold)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
      RETURNING *`,
     [
       name,
+      str(b.description) || null,
       str(b.sku) || null,
       str(b.barcode) || null,
       str(b.category) || null,
@@ -1029,6 +1234,13 @@ router.post('/products', async (req, res) => {
       round2(num(b.lowStockThreshold)),
     ]
   );
+  await pool
+    .query(
+      `INSERT INTO admin_audit_log (admin_id, admin_name, action, target_type, target_id, detail)
+       VALUES ($1,$2,'pos.product_create','product',$3,$4)`,
+      [req.adminUser!.id, req.adminUser!.fullName ?? null, rows[0].id, `${rows[0].name} · ${rows[0].price}`]
+    )
+    .catch(() => undefined);
   res.status(201).json(rows[0]);
 });
 
@@ -1038,6 +1250,7 @@ router.put('/products/:id', async (req, res) => {
   const values: unknown[] = [];
   const map: Record<string, string> = {
     name: 'name',
+    description: 'description',
     sku: 'sku',
     barcode: 'barcode',
     category: 'category',
@@ -1067,18 +1280,32 @@ router.put('/products/:id', async (req, res) => {
     res.status(404).json({ error: 'Product not found' });
     return;
   }
+  await pool
+    .query(
+      `INSERT INTO admin_audit_log (admin_id, admin_name, action, target_type, target_id, detail)
+       VALUES ($1,$2,'pos.product_update','product',$3,$4)`,
+      [req.adminUser!.id, req.adminUser!.fullName ?? null, rows[0].id, Object.keys(b).join(', ')]
+    )
+    .catch(() => undefined);
   res.json(rows[0]);
 });
 
 router.delete('/products/:id', requireRole(...MANAGER_ROLES), async (req, res) => {
   const { rows } = await pool.query(
-    `UPDATE pos_products SET active = FALSE, updated_at = NOW() WHERE id = $1 RETURNING id`,
+    `UPDATE pos_products SET active = FALSE, updated_at = NOW() WHERE id = $1 RETURNING id, name`,
     [req.params.id]
   );
   if (rows.length === 0) {
     res.status(404).json({ error: 'Product not found' });
     return;
   }
+  await pool
+    .query(
+      `INSERT INTO admin_audit_log (admin_id, admin_name, action, target_type, target_id, detail)
+       VALUES ($1,$2,'pos.product_archive','product',$3,$4)`,
+      [req.adminUser!.id, req.adminUser!.fullName ?? null, rows[0].id, `Archived ${rows[0].name}`]
+    )
+    .catch(() => undefined);
   res.json({ ok: true, archived: rows[0].id });
 });
 
@@ -1163,6 +1390,13 @@ router.post('/customers', async (req, res) => {
       return;
     }
     const { rows } = await client.query(`SELECT * FROM pos_customers WHERE id = $1`, [id]);
+    await pool
+      .query(
+        `INSERT INTO admin_audit_log (admin_id, admin_name, action, target_type, target_id, detail)
+         VALUES ($1,$2,'pos.customer_create','customer',$3,$4)`,
+        [req.adminUser!.id, req.adminUser!.fullName ?? null, id, rows[0]?.name ?? '']
+      )
+      .catch(() => undefined);
     res.status(201).json(rows[0]);
   } catch (e) {
     await client.query('ROLLBACK');
@@ -1202,7 +1436,44 @@ router.put('/customers/:id', async (req, res) => {
     res.status(404).json({ error: 'Customer not found' });
     return;
   }
+  await pool
+    .query(
+      `INSERT INTO admin_audit_log (admin_id, admin_name, action, target_type, target_id, detail)
+       VALUES ($1,$2,'pos.customer_update','customer',$3,$4)`,
+      [req.adminUser!.id, req.adminUser!.fullName ?? null, rows[0].id, Object.keys(b).join(', ')]
+    )
+    .catch(() => undefined);
   res.json(rows[0]);
+});
+
+router.delete('/customers/:id', requireRole(...MANAGER_ROLES), async (req, res) => {
+  const customer = await pool.query('SELECT id, name FROM pos_customers WHERE id = $1', [req.params.id]);
+  if (customer.rows.length === 0) {
+    res.status(404).json({ error: 'Customer not found' });
+    return;
+  }
+  // Deleting a referenced customer would null the link on issued documents and
+  // erase who they were billed to. Refuse and let the user correct the record.
+  const used = await pool.query(
+    'SELECT COUNT(*)::int AS n FROM pos_documents WHERE customer_id = $1',
+    [req.params.id]
+  );
+  if (Number(used.rows[0]?.n) > 0) {
+    res.status(409).json({
+      error: `This customer is attached to ${used.rows[0].n} document(s) and cannot be deleted. Edit the record instead.`,
+      code: 'CUSTOMER_IN_USE',
+    });
+    return;
+  }
+  await pool.query('DELETE FROM pos_customers WHERE id = $1', [req.params.id]);
+  await pool
+    .query(
+      `INSERT INTO admin_audit_log (admin_id, admin_name, action, target_type, target_id, detail)
+       VALUES ($1,$2,'pos.customer_delete','customer',$3,$4)`,
+      [req.adminUser!.id, req.adminUser!.fullName ?? null, req.params.id, `Deleted client ${customer.rows[0].name}`]
+    )
+    .catch(() => undefined);
+  res.json({ ok: true, deleted: req.params.id });
 });
 
 // Credit statement: documents + payments for one customer (admin console)
@@ -1368,6 +1639,25 @@ export function computeTotals(items: CartItemInput[], discountPct: number, taxPc
   const taxAmount = round2(((subtotal - discountAmount) * round2(taxPct)) / (100 + round2(taxPct)));
   const total = round2(subtotal - discountAmount);
   return { lines, subtotal, discountAmount, taxAmount, total };
+}
+
+const DOC_NUMBER_RE = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,39}$/;
+
+/**
+ * A document number is optional: blank means "use the next sequence value".
+ * Anything supplied must stay URL/file-safe because it becomes the PDF and
+ * UBL XML filename on the client.
+ */
+function normalizeDocNumber(value: unknown): { number?: string; error?: string } {
+  const raw = str(value);
+  if (!raw) return {};
+  if (!DOC_NUMBER_RE.test(raw)) {
+    return {
+      error:
+        'Document number must start with a letter or digit and may only contain letters, digits, dots, dashes, underscores or slashes (max 40 characters).',
+    };
+  }
+  return { number: raw };
 }
 
 export function statusForPaid(docType: string, total: number, paid: number): string {

@@ -1123,6 +1123,10 @@ const SQL = `
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
 
+  -- Long-form product description shown in the till, invoice line picker and
+  -- stock manager. Added after the table so older databases upgrade in place.
+  ALTER TABLE pos_products ADD COLUMN IF NOT EXISTS description TEXT;
+
   CREATE UNIQUE INDEX IF NOT EXISTS idx_pos_products_sku     ON pos_products (sku)     WHERE sku IS NOT NULL;
   CREATE UNIQUE INDEX IF NOT EXISTS idx_pos_products_barcode ON pos_products (barcode) WHERE barcode IS NOT NULL;
   CREATE INDEX IF NOT EXISTS idx_pos_products_name   ON pos_products (lower(name));

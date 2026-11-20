@@ -8,6 +8,7 @@ export interface StaffUser {
 export interface Product {
   id: string;
   name: string;
+  description: string | null;
   sku: string | null;
   barcode: string | null;
   category: string | null;
@@ -17,6 +18,15 @@ export interface Product {
   track_stock: boolean;
   low_stock_threshold: number;
   active: boolean;
+}
+
+export interface CustomerRow {
+  id: string;
+  name: string;
+  phone: string | null;
+  email: string | null;
+  address: string | null;
+  notes: string | null;
 }
 
 export interface Shift {
@@ -244,12 +254,14 @@ export const api = {
       body: JSON.stringify({ userId, pin }),
     }),
 
-  products: () => req<Product[]>('/products'),
+  products: (includeInactive = false) =>
+    req<Product[]>(`/products${includeInactive ? '?includeInactive=1' : ''}`),
   createProduct: (p: Partial<Product> & { name: string }) =>
     req<Product>('/products', {
       method: 'POST',
       body: JSON.stringify({
         name: p.name,
+        description: p.description || undefined,
         sku: p.sku || undefined,
         barcode: p.barcode || undefined,
         category: p.category || undefined,
@@ -298,6 +310,17 @@ export const api = {
   },
 
   document: (id: string) => req<PosDocument>(`/documents/${id}`),
+  updateDocument: (id: string, patch: Record<string, unknown>) =>
+    req<PosDocument>(`/documents/${id}`, { method: 'PUT', body: JSON.stringify(patch) }),
+  deleteDocument: (id: string) => req<{ ok: boolean }>(`/documents/${id}`, { method: 'DELETE' }),
+
+  // Client book (invoicing / credit customers)
+  customers: () => req<CustomerRow[]>('/customers'),
+  createCustomer: (c: { name: string; phone?: string; email?: string; address?: string; notes?: string }) =>
+    req<CustomerRow>('/customers', { method: 'POST', body: JSON.stringify(c) }),
+  updateCustomer: (id: string, patch: Partial<Omit<CustomerRow, 'id'>>) =>
+    req<CustomerRow>(`/customers/${id}`, { method: 'PUT', body: JSON.stringify(patch) }),
+  deleteCustomer: (id: string) => req<{ ok: boolean }>(`/customers/${id}`, { method: 'DELETE' }),
 
   // Installment payment against an existing invoice/quote (office or till issued)
   recordPayment: (id: string, p: { amount: number; method: string; reference?: string }) =>

@@ -610,7 +610,22 @@ select option,
   color: var(--muted); margin: 0.7rem 0 0.3rem;
   text-transform: uppercase;
 }
-.field-label input { width: 100%; font-size: 1rem; }
+.field-label input,
+.field-label textarea { width: 100%; font-size: 1rem; }
+.field-label textarea { font-size: 0.9rem; resize: vertical; min-height: 68px; }
+.product-desc {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  color: #94a3b8;
+  max-width: 360px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
 
 .x-report-row { display: flex; justify-content: space-between; font-size: 0.85rem; padding: 0.3rem 0; }
 .x-report-row strong { font-variant-numeric: tabular-nums; }
