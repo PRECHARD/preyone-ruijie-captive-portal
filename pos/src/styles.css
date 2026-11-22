@@ -34,14 +34,22 @@
   --warn: #a05e03;
   --danger: #b3261e;
   /* Settings & Branding fallbacks (overwritten by /api/pos/theme) */
-  --pos-primary: #059669;
-  --pos-accent: #d97706;
-  --pos-bg: #0f172a;
+  --pos-primary: #7c3aed;
+  --pos-primary-strong: #6d28d9;
+  --pos-primary-soft: rgba(124, 58, 237, 0.16);
+  --pos-secondary: #2a0b4e;
+  --pos-accent: #d946ef;
+  --pos-accent-soft: rgba(217, 70, 239, 0.18);
+  --pos-bg: #0c0618;
   --pos-text: #f8fafc;
-  --pos-text-muted: #94a3b8;
-  --pos-surface: #1e293b;
-  --pos-border: #334155;
-  --pos-glow: rgba(5, 150, 105, 0.35);
+  --pos-text-muted: #a79bc4;
+  --pos-surface: #1a0f30;
+  --pos-surface-2: #22143c;
+  --pos-border: #33224f;
+  --pos-glow: rgba(124, 58, 237, 0.35);
+  --pos-glow-accent: rgba(217, 70, 239, 0.3);
+  --pos-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+  --pos-radius: 16px;
   --grad-brand: linear-gradient(
     100deg,
     #14002e 0%,
@@ -64,7 +72,8 @@ body {
   font-family: 'Poppins', system-ui, sans-serif;
   background:
     radial-gradient(900px 520px at 8% -12%, rgba(124, 58, 237, 0.22), transparent 58%),
-    radial-gradient(800px 480px at 100% 0%, rgba(5, 150, 105, 0.12), transparent 55%),
+    radial-gradient(800px 480px at 100% 0%, rgba(217, 70, 239, 0.14), transparent 55%),
+    radial-gradient(900px 700px at 50% 120%, rgba(37, 99, 235, 0.08), transparent 62%),
     #0a0518;
   color: #f1f5f9;
   -webkit-font-smoothing: antialiased;
@@ -167,11 +176,19 @@ select option,
   gap: 1rem;
   padding: 0.55rem 1rem;
   background:
-    linear-gradient(100deg, rgba(20, 0, 46, 0.92), rgba(54, 17, 106, 0.88) 42%, rgba(5, 150, 105, 0.35));
-  border-bottom: 1px solid rgba(168, 85, 247, 0.28);
+    linear-gradient(100deg, rgba(20, 0, 46, 0.94), rgba(54, 17, 106, 0.9) 48%, rgba(217, 70, 239, 0.38));
+  border-bottom: 1px solid rgba(168, 85, 247, 0.32);
   color: #fff;
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35), 0 0 40px rgba(124, 58, 237, 0.12);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35), 0 0 40px rgba(124, 58, 237, 0.16);
   backdrop-filter: blur(14px);
+}
+.topbar-brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.topbar-logo {
+  height: 36px;
+  width: 36px;
+  object-fit: cover;
+  object-position: center;
+  filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.35));
 }
 .topbar .brand-name {
   font-weight: 700;
@@ -367,7 +384,7 @@ select option,
   transition: box-shadow 0.2s ease, filter 0.2s ease, background 0.2s ease;
 }
 .charge-btn.ready {
-  background: linear-gradient(120deg, #059669, #7c3aed 55%, #10b981);
+  background: linear-gradient(120deg, #7c3aed, #d946ef 55%, #a855f7);
   box-shadow:
     0 0 0 1px rgba(16, 185, 129, 0.35),
     0 8px 28px rgba(124, 58, 237, 0.35),
@@ -431,7 +448,7 @@ select option,
   border-color: rgba(168, 85, 247, 0.28);
 }
 .method-tabs button.on {
-  background: linear-gradient(120deg, #059669, #7c3aed);
+  background: linear-gradient(120deg, #7c3aed, #d946ef);
   color: #fff;
   border-color: transparent;
   box-shadow: 0 0 18px rgba(16, 185, 129, 0.22);
@@ -525,17 +542,20 @@ select option,
   justify-content: center;
   padding: 1.5rem;
   background:
-    radial-gradient(900px 520px at 12% -10%, rgba(5, 150, 105, 0.22), transparent 60%),
-    radial-gradient(800px 480px at 92% 0%, rgba(217, 119, 6, 0.18), transparent 55%),
-    linear-gradient(160deg, #070b14 0%, #0f172a 48%, #111827 100%);
+    radial-gradient(900px 520px at 12% -10%, rgba(124, 58, 237, 0.24), transparent 60%),
+    radial-gradient(800px 480px at 92% 0%, rgba(217, 70, 239, 0.18), transparent 55%),
+    radial-gradient(700px 500px at 50% 120%, rgba(37, 99, 235, 0.1), transparent 62%),
+    linear-gradient(160deg, #07030f 0%, #0c0618 48%, #130a24 100%);
 }
 .pin-login-glass {
   width: min(400px, 100%);
   text-align: center;
   padding: 1.6rem 1.5rem 1.8rem;
   border-radius: 22px;
-  background: linear-gradient(160deg, rgba(15, 23, 42, 0.82), rgba(30, 41, 59, 0.72));
-  border: 1px solid rgba(148, 163, 184, 0.22);
+  background:
+    radial-gradient(360px 180px at 100% 0%, rgba(217, 70, 239, 0.14), transparent 68%),
+    linear-gradient(160deg, rgba(30, 17, 52, 0.9), rgba(13, 7, 31, 0.82));
+  border: 1px solid rgba(168, 85, 247, 0.32);
   box-shadow:
     0 24px 60px rgba(0, 0, 0, 0.45),
     inset 0 1px 0 rgba(255, 255, 255, 0.06);
@@ -580,9 +600,9 @@ select option,
   transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
 }
 .pin-dot.filled {
-  background: #34d399;
-  border-color: #34d399;
-  box-shadow: 0 0 12px rgba(52, 211, 153, 0.45);
+  background: #a855f7;
+  border-color: #d946ef;
+  box-shadow: 0 0 12px rgba(168, 85, 247, 0.5);
 }
 .pin-pad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.55rem; max-width: 280px; margin: 0 auto; }
 .pin-pad button {
@@ -593,16 +613,16 @@ select option,
   color: #e2e8f0;
 }
 .pin-pad button:hover:not(:disabled) {
-  border-color: rgba(52, 211, 153, 0.45);
-  box-shadow: 0 0 16px rgba(52, 211, 153, 0.12);
+  border-color: rgba(168, 85, 247, 0.5);
+  box-shadow: 0 0 16px rgba(124, 58, 237, 0.16);
 }
 .pin-pad button.pin-ok {
-  background: linear-gradient(120deg, #059669, #d97706);
+  background: linear-gradient(120deg, #7c3aed, #d946ef);
   border: none;
   color: #fff;
 }
 .pin-login-wrap { max-width: 360px; margin: 8vh auto 0; text-align: center; }
-.pin-logo { height: 52px; margin-bottom: 0.35rem; filter: drop-shadow(0 8px 18px rgba(5, 150, 105, 0.25)); }
+.pin-logo { height: 56px; width: 56px; object-fit: cover; object-position: center; margin-bottom: 0.35rem; filter: drop-shadow(0 8px 18px rgba(124, 58, 237, 0.3)); }
 .pin-brand {
   font-weight: 800; letter-spacing: 0.28em; font-size: 0.95rem; color: #f8fafc;
 }
@@ -615,16 +635,16 @@ select option,
   display: flex; justify-content: space-between; align-items: center; gap: 0.5rem;
   font-size: 1.02rem; font-weight: 600; padding: 0.8rem 1rem;
   border-radius: 12px; text-align: left;
-  background: rgba(15, 23, 42, 0.65);
-  border: 1px solid rgba(148, 163, 184, 0.2);
-  color: #e2e8f0;
+  background: linear-gradient(160deg, rgba(26, 15, 48, 0.78), rgba(13, 7, 31, 0.84));
+  border: 1px solid rgba(168, 85, 247, 0.24);
+  color: #f1eaff;
 }
-.op-btn:hover { border-color: rgba(52, 211, 153, 0.45); }
+.op-btn:hover { border-color: rgba(217, 70, 239, 0.5); box-shadow: 0 0 18px rgba(124, 58, 237, 0.16); }
 .op-role { font-size: 0.68rem; letter-spacing: 0.08em; text-transform: uppercase; color: #94a3b8; }
 .op-selected {
   font-size: 1.05rem; font-weight: 700; padding: 0.75rem 1rem;
   border-radius: 12px; width: 100%; margin-bottom: 0.5rem;
-  background: linear-gradient(120deg, rgba(5, 150, 105, 0.85), rgba(217, 119, 6, 0.75));
+  background: linear-gradient(120deg, rgba(124, 58, 237, 0.9), rgba(217, 70, 239, 0.82));
   border: none; color: #fff;
 }
 .op-change { font-size: 0.75rem; font-weight: 400; opacity: 0.7; }
@@ -1023,8 +1043,8 @@ select option,
   --pos-primary: #7c3aed;
   --pos-primary-strong: #6d28d9;
   --pos-primary-soft: rgba(124, 58, 237, 0.18);
-  --pos-accent: #d97706;
-  --pos-accent-soft: rgba(217, 119, 6, 0.18);
+  --pos-accent: #d946ef;
+  --pos-accent-soft: rgba(217, 70, 239, 0.18);
   --pos-text: #f3efff;
   --pos-text-muted: #a79bc4;
   --pos-glow: rgba(124, 58, 237, 0.4);
@@ -1288,7 +1308,7 @@ select option,
   cursor: pointer;
 }
 .btn.primary {
-  background: linear-gradient(120deg, #059669, #7c3aed 55%, #d97706);
+  background: linear-gradient(120deg, #7c3aed, #d946ef 55%, #a855f7);
   color: #fff;
   border: none;
 }

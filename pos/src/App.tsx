@@ -104,9 +104,12 @@ export default function App() {
       ) : (
         <div className="app-shell">
           <header className="topbar">
-            <div>
-              <div className="brand-name">PREYONE POS</div>
-              <div className="brand-sub">ENTERPRISE</div>
+            <div className="topbar-brand">
+              <img className="topbar-logo" src="/images/preyonelogomainzw-email.png" alt="Preyone" />
+              <div>
+                <div className="brand-name">PREYONE POS</div>
+                <div className="brand-sub">ENTERPRISE</div>
+              </div>
             </div>
             <div className="spacer" />
             <button className={`chip ${view === 'home' ? 'ok' : ''}`} onClick={() => setView('home')}>HOME</button>

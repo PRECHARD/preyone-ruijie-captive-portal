@@ -85,7 +85,7 @@ export default function PinLogin({ onLoggedIn }: { onLoggedIn: (token: string, u
         </div>
 
         <img
-          src="/Preyone.svg"
+          src="/images/preyonelogomainzw-email.png"
           alt="Preyone"
           className="pin-logo"
           onError={(e) => ((e.target as HTMLImageElement).style.display = 'none')}

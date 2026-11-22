@@ -185,9 +185,10 @@ a:focus-visible {
 }
 
 .brand-logo {
-  height: 34px;
-  width: auto;
-  max-width: 148px;
+  height: 38px;
+  width: 38px;
+  object-fit: cover;
+  object-position: center;
   flex: none;
   object-fit: contain;
   /* Transparent marks sit straight on the rail — no white plate. The glow is

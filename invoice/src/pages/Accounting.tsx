@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api, download } from '../api';
+import '../accounting.css';
 
 type Tab = 'overview' | 'ledger' | 'pesepay' | 'tax';
 
@@ -56,6 +57,153 @@ const PESEPAY_RAILS = ['ecocash', 'omari', 'innbucks', 'paygo', 'pesepay'];
 
 const money = (n: number | undefined) =>
   `$${(Number(n) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+const CHART_COLORS = ['#a855f7', '#d946ef', '#22d3ee', '#f59e0b', '#34d399', '#60a5fa', '#fb7185', '#fbbf24'];
+
+function DonutChart({
+  data,
+  centreLabel = 'collected',
+}: {
+  data: Array<{ label: string; value: number; color: string }>;
+  centreLabel?: string;
+}) {
+  const total = data.reduce((sum, item) => sum + Math.max(0, item.value), 0);
+  if (total <= 0) {
+    return <div className="fin-area-empty">No collections in this period.</div>;
+  }
+  let offset = 0;
+  return (
+    <div className="fin-donut-wrap">
+      <svg className="fin-donut" viewBox="0 0 160 160" role="img" aria-label="Collections by payment rail">
+        <circle cx="80" cy="80" r="54" fill="none" stroke="rgba(168,85,247,0.12)" strokeWidth="16" />
+        {data.map((item) => {
+          const pct = (Math.max(0, item.value) / total) * 100;
+          const visible = Math.max(pct - 1.1, 0.4);
+          const segment = (
+            <circle
+              key={item.label}
+              className="segment"
+              cx="80"
+              cy="80"
+              r="54"
+              fill="none"
+              stroke={item.color}
+              strokeWidth="16"
+              pathLength={100}
+              strokeDasharray={`${visible} ${100 - visible}`}
+              strokeDashoffset={-offset}
+              transform="rotate(-90 80 80)"
+            >
+              <title>{`${item.label}: ${money(item.value)} (${pct.toFixed(1)}%)`}</title>
+            </circle>
+          );
+          offset += pct;
+          return segment;
+        })}
+        <text x="80" y="78" className="fin-donut-centre">
+          {money(total)}
+        </text>
+        <text x="80" y="94" className="fin-donut-centre-label">
+          {centreLabel}
+        </text>
+      </svg>
+      <div className="fin-legend">
+        {data.map((item) => (
+          <div className="fin-legend-row" key={item.label}>
+            <span className="fin-legend-dot" style={{ background: item.color }} />
+            <span style={{ textTransform: 'capitalize' }}>{item.label}</span>
+            <span className="fin-legend-amount">{money(item.value)}</span>
+            <span className="fin-legend-pct">{((item.value / total) * 100).toFixed(0)}%</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function RevenuePulse({ points }: { points: Array<{ label: string; value: number }> }) {
+  if (points.length === 0) {
+    return <div className="fin-area-empty">No ledger movement in this period.</div>;
+  }
+  const width = 640;
+  const height = 190;
+  const padX = 26;
+  const padTop = 16;
+  const padBottom = 26;
+  const max = Math.max(...points.map((point) => point.value), 1);
+  const step = points.length > 1 ? (width - padX * 2) / (points.length - 1) : 0;
+  const coords = points.map((point, index) => {
+    const x = padX + index * step;
+    const y = height - padBottom - (point.value / max) * (height - padTop - padBottom);
+    return [x, y] as const;
+  });
+  const line = coords
+    .map(([x, y], index) => `${index === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`)
+    .join(' ');
+  const area = `${line} L${(width - padX).toFixed(1)},${height - padBottom} L${padX},${height - padBottom} Z`;
+  return (
+    <svg className="fin-area" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Revenue pulse by day">
+      <defs>
+        <linearGradient id="fin-line-grad" x1="0" x2="1">
+          <stop offset="0%" stopColor="#22d3ee" />
+          <stop offset="55%" stopColor="#a855f7" />
+          <stop offset="100%" stopColor="#d946ef" />
+        </linearGradient>
+        <linearGradient id="fin-area-fill" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#a855f7" stopOpacity="0.3" />
+          <stop offset="100%" stopColor="#a855f7" stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      {[0, 1, 2, 3].map((lineIndex) => {
+        const y = padTop + ((height - padTop - padBottom) / 3) * lineIndex;
+        return (
+          <line
+            key={lineIndex}
+            className="grid"
+            x1={padX}
+            x2={width - padX}
+            y1={y}
+            y2={y}
+            strokeDasharray="3 5"
+          />
+        );
+      })}
+      <path d={area} fill="url(#fin-area-fill)" />
+      <path d={line} className="line" />
+      {coords.map(([x, y], index) => (
+        <circle className="dot" key={points[index].label} cx={x} cy={y} r="3.2">
+          <title>{`${points[index].label}: ${money(points[index].value)}`}</title>
+        </circle>
+      ))}
+      <text className="axis" x={padX} y={height - 6}>
+        {points[0].label}
+      </text>
+      <text className="axis" x={width - padX} y={height - 6} textAnchor="end">
+        {points[points.length - 1].label}
+      </text>
+    </svg>
+  );
+}
+
+function PnlLadder({ rows }: { rows: Array<{ label: string; value: number; tone?: 'neg' | 'total' }> }) {
+  const max = Math.max(...rows.map((row) => Math.abs(row.value)), 1);
+  return (
+    <div className="fin-ladder">
+      {rows.map((row) => (
+        <div className="fin-bar-row" key={row.label}>
+          <span className="fin-bar-label">{row.label}</span>
+          <span className="fin-bar-track">
+            <i
+              className={`fin-bar-fill${row.tone === 'neg' ? ' neg' : ''}${row.tone === 'total' ? ' total' : ''}`}
+              style={{ width: `${Math.max(2, (Math.abs(row.value) / max) * 100)}%` }}
+            />
+          </span>
+          <span className="fin-bar-value">{money(row.value)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 /**
  * Accounting & Financing dashboard — same /api/accounting surface as the
@@ -118,40 +266,133 @@ export default function AccountingPage() {
     return () => window.clearInterval(id);
   }, [load]);
 
+  const stamp = new Date().toISOString().slice(0, 10);
+  const exportWorkbook = () => {
+    void download(
+      `/api/accounting/export.xlsx${qs()}`,
+      `preyone-client-account-${stamp}.xlsx`
+    ).catch((e) => setError(e instanceof Error ? e.message : 'Excel export failed'));
+  };
   const exportCsv = () => {
-    const q = qs();
-    void download(`/api/accounting/export.csv${q}`, `preyone-ledger-${new Date().toISOString().slice(0, 10)}.csv`).catch(
-      (e) => setError(e instanceof Error ? e.message : 'Export failed')
-    );
+    void download(
+      `/api/accounting/export.csv${qs()}`,
+      `preyone-client-account-${stamp}.csv`
+    ).catch((e) => setError(e instanceof Error ? e.message : 'CSV export failed'));
+  };
+  const exportLedgerCsv = () => {
+    void download(
+      `/api/accounting/export-ledger.csv${qs()}`,
+      `preyone-ledger-${stamp}.csv`
+    ).catch((e) => setError(e instanceof Error ? e.message : 'Ledger export failed'));
+  };
+
+  const applyRange = (preset: 'all' | 'month' | '30' | 'year') => {
+    if (preset === 'all') {
+      setFrom('');
+      setTo('');
+      return;
+    }
+    const now = new Date();
+    const local = (d: Date) =>
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    if (preset === 'month') {
+      setFrom(local(new Date(now.getFullYear(), now.getMonth(), 1)));
+      setTo(local(now));
+    } else if (preset === '30') {
+      const start = new Date(now);
+      start.setDate(start.getDate() - 29);
+      setFrom(local(start));
+      setTo(local(now));
+    } else {
+      setFrom(local(new Date(now.getFullYear(), 0, 1)));
+      setTo(local(now));
+    }
   };
 
   const cashier = overview?.role === 'Cashier';
 
+  const railData = useMemo(
+    () =>
+      Object.entries(overview?.byRail || {})
+        .map(([label, value]) => ({ label, value: Number(value) || 0 }))
+        .filter((row) => row.value > 0)
+        .sort((a, b) => b.value - a.value)
+        .map((row, index) => ({ ...row, color: CHART_COLORS[index % CHART_COLORS.length] })),
+    [overview]
+  );
+
+  const dailyPoints = useMemo(() => {
+    const byDay = new Map<string, number>();
+    for (const row of ledger) {
+      const day = String(row.occurred_at || '').slice(0, 10);
+      if (!day) continue;
+      byDay.set(day, (byDay.get(day) || 0) + (Number(row.gross_amount) || 0));
+    }
+    return [...byDay.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .slice(-40)
+      .map(([label, value]) => ({ label: label.slice(5), value }));
+  }, [ledger]);
+
+  const pnlRows = useMemo(
+    () =>
+      pnl
+        ? [
+            { label: 'Gross revenue', value: pnl.grossRevenue },
+            { label: 'VAT collected', value: pnl.taxCollected },
+            { label: 'Net sales', value: pnl.netSales, tone: 'total' as const },
+            { label: 'COGS', value: pnl.cogs, tone: 'neg' as const },
+            { label: 'Expenses', value: pnl.expenses, tone: 'neg' as const },
+            { label: 'Operating profit', value: pnl.operatingProfit, tone: 'total' as const },
+          ]
+        : [],
+    [pnl]
+  );
+
+  const maxRail = Math.max(...railData.map((row) => row.value), 1);
+
   return (
     <div className="acct-view">
-      <div className="topbar">
-        <div>
-          <h1 className="page-title">Accounting &amp; Financing</h1>
-          <p className="page-sub">Overview, P&amp;L, ledger, Pesepay rails and VAT — same reports as the admin console.</p>
+      <div className="fin-hero">
+        <div className="fin-hero-copy">
+          <div className="fin-kicker">Financial intelligence</div>
+          <h1>Accounting &amp; Financing</h1>
+          <p>
+            Live revenue, P&amp;L, cash mix, ledger, Pesepay rails and VAT — a complete financial
+            cockpit for Preyone Enterprises.
+          </p>
+          <div className="fin-range">
+            <button type="button" onClick={() => applyRange('all')}>All time</button>
+            <button type="button" onClick={() => applyRange('month')}>This month</button>
+            <button type="button" onClick={() => applyRange('30')}>Last 30 days</button>
+            <button type="button" onClick={() => applyRange('year')}>This year</button>
+          </div>
         </div>
-        <div className="topbar-actions">
-          <input className="input" type="date" value={from} onChange={(e) => setFrom(e.target.value)} aria-label="From date" />
-          <input className="input" type="date" value={to} onChange={(e) => setTo(e.target.value)} aria-label="To date" />
-          <button className="btn ghost" type="button" onClick={() => void load()} disabled={loading}>
-            {loading ? <span className="spinner" aria-hidden /> : null}
-            {loading ? 'Loading…' : 'Refresh'}
-          </button>
-          {!cashier && (
-            <button className="btn" type="button" onClick={exportCsv}>
-              Export CSV
+        <div className="fin-hero-side">
+          <div className="fin-date-inputs">
+            <input className="input" type="date" value={from} onChange={(e) => setFrom(e.target.value)} aria-label="From date" />
+            <input className="input" type="date" value={to} onChange={(e) => setTo(e.target.value)} aria-label="To date" />
+            <button className="btn ghost" type="button" onClick={() => void load()} disabled={loading}>
+              {loading ? <span className="spinner" aria-hidden /> : null}
+              {loading ? 'Loading…' : 'Refresh'}
             </button>
+          </div>
+          {!cashier && (
+            <div className="fin-export-actions">
+              <button className="btn xls" type="button" onClick={exportWorkbook}>
+                Export Excel
+              </button>
+              <button className="btn csv" type="button" onClick={exportCsv}>
+                Export CSV
+              </button>
+            </div>
           )}
         </div>
       </div>
 
       {error && <div className="banner error">{error}</div>}
 
-      <div className="stats">
+      <div className="stats fin-kpis">
         <div className="stat">
           <div className="stat-label">Today&apos;s till</div>
           <div className="stat-value">{money(overview?.todayTill)}</div>
@@ -194,11 +435,76 @@ export default function AccountingPage() {
         )}
       </div>
 
+      {!cashier && (
+        <>
+          <div className="fin-chart-grid">
+            <section className="fin-card">
+              <div className="fin-chart-head">
+                <div>
+                  <div className="fin-chart-title">Revenue pulse</div>
+                  <div className="fin-chart-sub">Daily gross collections from the general ledger</div>
+                </div>
+                <span className="fin-chart-badge">{dailyPoints.length} days</span>
+              </div>
+              <RevenuePulse points={dailyPoints} />
+            </section>
+            <section className="fin-card">
+              <div className="fin-chart-head">
+                <div>
+                  <div className="fin-chart-title">Money mix</div>
+                  <div className="fin-chart-sub">Collections by payment rail</div>
+                </div>
+              </div>
+              <DonutChart data={railData} />
+            </section>
+          </div>
+
+          <div className="fin-chart-grid">
+            <section className="fin-card">
+              <div className="fin-chart-head">
+                <div>
+                  <div className="fin-chart-title">P&amp;L ladder</div>
+                  <div className="fin-chart-sub">Revenue to operating profit, 3rd-to-3rd cycle</div>
+                </div>
+                <span className="fin-chart-badge">VAT {overview?.vatRate ?? 15.5}%</span>
+              </div>
+              {pnl ? <PnlLadder rows={pnlRows} /> : <div className="fin-area-empty">Loading P&amp;L…</div>}
+            </section>
+            <section className="fin-card">
+              <div className="fin-chart-head">
+                <div>
+                  <div className="fin-chart-title">Rail leaderboard</div>
+                  <div className="fin-chart-sub">Where the money came from</div>
+                </div>
+              </div>
+              <div className="fin-rail-list">
+                {railData.length === 0 ? (
+                  <div className="fin-area-empty">No rail collections yet.</div>
+                ) : (
+                  railData.slice(0, 7).map((rail) => (
+                    <div className="fin-rail-row" key={rail.label}>
+                      <span className="fin-rail-name">{rail.label}</span>
+                      <span className="fin-rail-track">
+                        <i
+                          className="fin-rail-fill"
+                          style={{ width: `${Math.max(3, (rail.value / maxRail) * 100)}%` }}
+                        />
+                      </span>
+                      <span className="fin-rail-value">{money(rail.value)}</span>
+                    </div>
+                  ))
+                )}
+              </div>
+            </section>
+          </div>
+        </>
+      )}
+
       {cashier ? (
         <p className="muted">Cashier view — till drawer totals only. Ask a Manager or CEO for the full ledger.</p>
       ) : (
         <>
-          <div className="acct-tabs" role="tablist" aria-label="Accounting reports">
+          <div className="acct-tabs fin-tabs" role="tablist" aria-label="Accounting reports">
             {(
               [
                 ['overview', 'Overview & P&L'],
@@ -286,6 +592,9 @@ export default function AccountingPage() {
                       </option>
                     ))}
                   </select>
+                  <button className="btn ghost" type="button" onClick={exportLedgerCsv}>
+                    Ledger CSV
+                  </button>
                 </div>
               </div>
               <div className="table-wrap">

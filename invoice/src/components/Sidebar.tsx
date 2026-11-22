@@ -185,7 +185,7 @@ export function Brand({ company }: { company?: Company | null }) {
   // personal, not navigational: it lives on the signed-in profile avatar.
   return (
     <div className="brand">
-      <img className="brand-logo" src="/images/preyonelogomainzw.png" alt="Preyone logo" />
+      <img className="brand-logo" src="/images/preyonelogomainzw-email.png" alt="Preyone logo" />
       <div>
         <div className="brand-name">{company?.name || 'Preyone'}</div>
         <div className="brand-sub">Invoicing</div>
