@@ -6,6 +6,7 @@ const pub = (f: string) => readFileSync(path.join(process.cwd(), 'public', f), '
 const html = pub('data.html');
 const sw = pub('sw.js');
 const index = pub('index.html');
+const success = pub('success.html');
 const manifest = JSON.parse(pub('manifest.json'));
 
 /**
@@ -53,7 +54,7 @@ describe('/data PWA — advisory, alerting and unlimited rendering', () => {
     expect(html).toContain('stopPolling()');
     expect(html).toContain('startPolling()');
     // a just-typed PIN is kept for editing (typo), a stored one is cleared
-    expect(html).toContain("state.lastEntry = 'manual'");
+    expect(html).toContain("switchToVoucher(v, 'manual')");
     expect(html).toContain("state.lastEntry === 'manual'");
     // old numbers must never sit next to the new-PIN form
     expect(html).toContain("$('dataUsageNumbers').textContent = '— / —'");
@@ -212,6 +213,94 @@ describe('/data PWA — unlimited everywhere and customer records', () => {
   });
 });
 
+describe('/data PWA — switching to another voucher PIN', () => {
+  it('offers ENTER ANOTHER PIN without showing it as permanent chrome', () => {
+    expect(html).toContain('id="switchPinBtn"');
+    expect(html).toContain('id="switchPinChip"');
+    expect(html).toContain('>ENTER ANOTHER PIN</button>');
+    expect(html).toContain('id="switchPinChip" hidden');
+    expect(html).toContain('id="switchPinBtn" class="btn-secondary" hidden');
+    expect(html).toContain('function openPinEntry');
+    expect(html).toContain("$('switchPinChip').addEventListener('click', openPinEntry)");
+    expect(html).toContain("$('switchPinBtn').addEventListener('click', openPinEntry)");
+  });
+
+  it('hides the swap control while online and shows it when ended or offline', () => {
+    expect(html).toContain('function setPinSwitchVisible');
+    expect(html).toContain("var visible = show === true && $('manualSection').hidden;");
+    expect(html).toContain('function snapshotUsable');
+    expect(html).toContain('var usable = snapshotUsable(j);');
+    expect(html).toContain('setPinSwitchVisible(!usable);');
+    // network/API failure is an offline state, so the rescue action returns
+    expect(html).toContain('setPinSwitchVisible(true);');
+  });
+
+  it('updates the PIN in state, storage, saved list, URL, records and alerts together', () => {
+    expect(html).toContain('function switchToVoucher');
+    expect(html).toContain("localStorage.setItem(LS_VOUCHER, v)");
+    expect(html).toContain('renderSaved();');
+    expect(html).toContain('clearRecords();');
+    expect(html).toContain('resetUsageFigures();');
+    expect(html).toContain('fetchPendingAlerts();');
+    expect(html).toContain('ensurePushSubscription();');
+    expect(html).toContain("switchToVoucher(v, 'manual')");
+    expect(html).toContain("switchToVoucher(code, 'stored')");
+  });
+
+  it('drops the old PIN from the URL so a reload cannot restore it', () => {
+    expect(html).toContain('history.replaceState');
+    expect(html).toContain("['voucher', 'code', 'mac', 'client_mac', 'clientMac', 'ssid', 'nas_mac', 'nas_ip', 'gw_id'].forEach");
+  });
+
+  it('ignores slow responses for the PIN the customer just replaced', () => {
+    expect(html).toContain('var usageSeq = 0');
+    expect(html).toContain('if (seq !== usageSeq) return;');
+    expect(html).toContain('var historySeq = 0');
+    expect(html).toContain('if (seq === historySeq && j) renderHistory(j)');
+    expect(html).toContain('historySeq += 1;');
+  });
+});
+
+describe('/data PWA — band changes and record retention', () => {
+  it('makes the voucher chip itself a change-PIN action, even while online', () => {
+    expect(html).toContain('class="chip chip--action" id="metaVoucher"');
+    expect(html).toContain('class="chip-change">CHANGE</span>');
+    expect(html).toContain("$('metaVoucher').addEventListener('click', openPinEntry)");
+    // opening the form must be reversible without submitting a new PIN
+    expect(html).toContain('id="manualCancel"');
+    expect(html).toContain("$('manualCancel').addEventListener('click'");
+  });
+
+  it('keeps every unexpired voucher record and drops only expired ones', () => {
+    expect(html).toContain("var LS_META = 'preyone_voucher_meta'");
+    expect(html).toContain('function saveVoucherMeta');
+    expect(html).toContain('function voucherSnapshot');
+    expect(html).toContain('function isExpiredMeta');
+    expect(html).toContain('isExpiredMeta(meta[code])');
+    // no arbitrary eviction: unexpired records survive a PIN/band switch
+    expect(html).not.toContain('a.slice(0, 5)');
+    expect(html).not.toContain('a.slice(0, 20)');
+  });
+
+  it('paints the saved record while checking and keeps it if Wi-Fi is off', () => {
+    expect(html).toContain('render(snap, true)');
+    expect(html).toContain('render(bootSnap, true)');
+    expect(html).toContain("'Showing the saved record — checking the network…'");
+    // a cached render must not create samples, notifications or history calls
+    expect(html).toContain('if (!quiet) {');
+  });
+
+  it('treats a band hand-off as a hint, never as a reason to clear the voucher', () => {
+    expect(html).toContain("params.get('ssid')");
+    expect(html).toContain('netChanged');
+    expect(html).toContain('NETWORK CHANGED');
+    expect(html).toContain('Your saved voucher and records are unchanged');
+    // success page carries the band context into /data
+    expect(success).toContain("trackQuery.set('ssid', ssid)");
+    expect(success).toContain("trackQuery.set('nas_mac', nas)");
+  });
+});
+
 /**
  * 2026-11-22 brand-shell pass: the old portal header/footer are back, merged
  * with the PWA status actions and the new records UI. These assertions protect
@@ -232,7 +321,7 @@ describe('/data PWA — restored brand shell', () => {
     expect(html).toContain('id="wifiState"');
     expect(html).toContain('wifi-icon--success');
     expect(html).toContain('function setWifi');
-    expect(html).toContain('setWifi(j.active === true && j.onlineNow !== false)');
+    expect(html).toContain('setWifi(usable);');
   });
 
   it('keeps the brand header sticky, compact and stable once scrolled', () => {

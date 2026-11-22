@@ -490,6 +490,24 @@
     .chip--plan { color: var(--app-cyan); border-color: rgba(0, 212, 255, 0.42); }
     .chip--online { color: var(--app-green); border-color: rgba(37, 211, 102, 0.42); }
     .chip--offline { color: #f87171; border-color: rgba(239, 68, 68, 0.42); }
+    .chip--action {
+      cursor: pointer;
+      appearance: none;
+      font-family: inherit;
+      font-weight: 600;
+      color: var(--app-text);
+    }
+    .chip--action:hover,
+    .chip--action:focus-visible {
+      border-color: rgba(0, 212, 255, 0.6);
+      background: rgba(0, 212, 255, 0.08);
+      outline: none;
+    }
+    .chip--action .chip-change {
+      color: var(--app-cyan);
+      font-size: 0.54rem;
+      letter-spacing: 0.1em;
+    }
 
     .hero-updated { margin: 6px 0 0; font-size: 0.64rem; letter-spacing: 0.06em; color: var(--app-muted); }
 
@@ -1128,6 +1146,7 @@
             <span class="field-error" id="manualError"></span>
           </div>
           <button type="submit" class="btn-primary" style="width:100%">CHECK USAGE</button>
+          <button type="button" id="manualCancel" class="link-btn" style="margin-top:8px" hidden>Cancel and keep the current voucher</button>
         </form>
 
         <!-- The gateway passes client_mac automatically, so this is not a
@@ -1167,9 +1186,12 @@
           <h1 class="hero-title" id="heroTitle">Your data</h1>
           <p class="hero-sub" id="heroSub">Checking your session…</p>
           <div class="hero-chips">
-            <span class="chip" id="metaVoucher" style="display:none">PIN ••••<span id="metaVoucherTail"></span></span>
+            <button type="button" class="chip chip--action" id="metaVoucher" style="display:none"
+              aria-label="Enter another voucher PIN" title="Enter another voucher PIN">PIN ••••<span
+                id="metaVoucherTail"></span><span class="chip-change">CHANGE</span></button>
             <span class="chip chip--plan" id="planChip" hidden>UNLIMITED</span>
             <span class="chip" id="chipOnline" hidden>● ONLINE</span>
+            <button type="button" class="chip-btn" id="switchPinChip" hidden>ENTER ANOTHER PIN</button>
           </div>
           <p class="hero-updated" aria-live="polite"><span id="lastUpdated">Waiting for first update…</span></p>
         </div>
@@ -1304,6 +1326,7 @@
 
       <div class="usage-actions">
         <button type="button" id="refreshBtn" class="btn-primary">REFRESH</button>
+        <button type="button" id="switchPinBtn" class="btn-secondary" hidden>ENTER ANOTHER PIN</button>
         <a href="/#packages-section" class="btn-secondary">BUY DATA</a>
         <a href="/" class="btn-secondary">PORTAL</a>
       </div>
@@ -1496,6 +1519,8 @@
       var LS_MAC = 'user_mac';
       var LS_VOUCHER = 'user_voucher';
       var LS_SAVED = 'preyone_vouchers';
+      var LS_META = 'preyone_voucher_meta';
+      var LS_NET = 'preyone_net';
       var LS_SAMPLES = 'preyone_samples_';
       var POLL_MS = 15000;
       var HISTORY_MS = 5 * 60 * 1000;
@@ -1536,6 +1561,19 @@
       // turn a valid PIN into a failed lookup.
       if (qVoucher) { try { localStorage.setItem(LS_VOUCHER, qVoucher.toLowerCase()); } catch (e) {} }
 
+      // Network/band hand-off from the success page (SSID + gateway identity).
+      // A change is only a hint to offer another PIN — never a reason to clear
+      // the voucher or its records. Wi-Fi being off simply leaves the stored
+      // context untouched.
+      var qNet = [
+        params.get('ssid') || '',
+        params.get('nas_mac') || params.get('nas_ip') || params.get('gw_id') || '',
+      ].filter(Boolean).join('|');
+      var prevNet = '';
+      try { prevNet = localStorage.getItem(LS_NET) || ''; } catch (e) {}
+      var netChanged = Boolean(qNet && prevNet && qNet !== prevNet);
+      if (qNet) { try { localStorage.setItem(LS_NET, qNet); } catch (e) {} }
+
       var state = {
         mac: qMac || storedMac,
         voucher: (qVoucher || lsGet(LS_VOUCHER)).toLowerCase(),
@@ -1543,11 +1581,26 @@
         deferredPrompt: null,
         last: null,
         lastHistory: null,
+        netChanged: netChanged,
         // Where the current PIN came from: 'stored' (link/localStorage, i.e.
         // possibly a dead PIN) or 'manual' (they just typed it — a 404 may be
         // a typo, so we keep their input instead of blanking it).
         lastEntry: 'stored',
       };
+
+      // The PIN in the URL is a one-time hand-off from the success page. Strip
+      // it from the address bar after storing it, otherwise a reload/refresh
+      // resurrects the old PIN after the customer has switched to a new one.
+      if (qVoucher || qMacRaw) {
+        try {
+          var cleanParams = new URLSearchParams(location.search);
+          ['voucher', 'code', 'mac', 'client_mac', 'clientMac', 'ssid', 'nas_mac', 'nas_ip', 'gw_id'].forEach(function (k) {
+            cleanParams.delete(k);
+          });
+          var cleanQs = cleanParams.toString();
+          history.replaceState(null, '', location.pathname + (cleanQs ? '?' + cleanQs : '') + location.hash);
+        } catch (e) {}
+      }
 
       // ── Formatting ──
       function fmtMB(bytes) {
@@ -1639,7 +1692,28 @@
         el.className = 'usage-alert usage-alert--' + kind;
         $('alertTitle').textContent = title;
         $('alertBody').textContent = body;
-        $('alertEnter').hidden = false;
+      }
+
+      // The swap control is a rescue action, not permanent chrome: hide it
+      // while a live voucher is online, show it the moment the voucher ends or
+      // the station drops offline. When the PIN form itself is already open it
+      // is the action, so the buttons stay out of the way.
+      function setPinSwitchVisible(show) {
+        var visible = show === true && $('manualSection').hidden;
+        ['switchPinChip', 'switchPinBtn', 'alertEnter'].forEach(function (id) {
+          var el = $(id);
+          if (el) el.hidden = !visible;
+        });
+      }
+
+      // Same "usable" definition the renderer and the cancel action share.
+      function snapshotUsable(j) {
+        if (!j) return false;
+        var uncapped = !!(j.unlimited || j.isUncapped);
+        var used = j.bytesUsed;
+        var total = j.bytesTotal;
+        var spent = !uncapped && used != null && total != null && total > 0 && used >= total;
+        return j.active === true && j.onlineNow !== false && !spent;
       }
 
       function clearAlert() { $('usageAlert').hidden = true; }
@@ -1760,12 +1834,12 @@
         }).catch(function () { /* banner channel still works */ });
       }
 
-      function ackAlert(id) {
+      function ackAlert(id, voucher) {
         fetch('/api/alerts/ack', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'same-origin',
-          body: JSON.stringify({ id: id, voucher: state.voucher }),
+          body: JSON.stringify({ id: id, voucher: voucher || state.voucher }),
         }).catch(function () { /* local dismiss already happened */ });
       }
 
@@ -1774,9 +1848,12 @@
         // An unlimited plan can never cross a cap; a stray event would only
         // confuse, so the banner channel stays silent for it.
         if (state.last && (state.last.unlimited || state.last.isUncapped)) return;
-        fetch('/api/alerts/pending?voucher=' + encodeURIComponent(state.voucher), { credentials: 'same-origin' })
+        var voucher = state.voucher;
+        fetch('/api/alerts/pending?voucher=' + encodeURIComponent(voucher), { credentials: 'same-origin' })
           .then(function (r) { return r.ok ? r.json() : { alerts: [] }; })
           .then(function (j) {
+            // The customer may have switched PINs while this was in flight.
+            if (state.voucher !== voucher) return;
             var list = j.alerts || [];
             if (!list.length) return;
             var top = list[0]; // newest first
@@ -1787,8 +1864,9 @@
             setAlert(kind,
               top.tier >= 95 ? 'ALMOST OUT OF DATA' : 'DATA RUNNING LOW',
               top.body);
+            if (top.tier >= 100) setPinSwitchVisible(true);
             pushToast(kind, top.title, top.body);
-            ackAlert(top.id);
+            ackAlert(top.id, voucher);
           })
           .catch(function () { /* alerts are best-effort */ });
       }
@@ -1879,22 +1957,90 @@
       }
 
       // ── Saved vouchers on this device ──────────────────────────────────
-      function savedList() {
+      // A voucher's record is kept until the voucher itself expires. Switching
+      // to a new PIN or band must never wipe the old one, and Wi-Fi being off
+      // is not an expiry event.
+      function readMap(key) {
         try {
-          var a = JSON.parse(localStorage.getItem(LS_SAVED) || '[]');
-          return Array.isArray(a) ? a.filter(function (x) { return typeof x === 'string' && x; }) : [];
-        } catch (e) { return []; }
+          var o = JSON.parse(localStorage.getItem(key) || '{}');
+          return o && typeof o === 'object' && !Array.isArray(o) ? o : {};
+        } catch (e) { return {}; }
+      }
+
+      function voucherMeta() { return readMap(LS_META); }
+
+      function metaExpiry(m) {
+        if (!m || !m.expiresAt) return null;
+        var t = new Date(m.expiresAt).getTime();
+        return isFinite(t) ? t : null;
+      }
+
+      function isExpiredMeta(m) {
+        var t = metaExpiry(m);
+        return t != null && t <= Date.now();
+      }
+
+      function saveVoucherMeta(j) {
+        var code = String((j && j.voucherCode) || '').toLowerCase();
+        if (!code) return;
+        var all = voucherMeta();
+        var prev = all[code] || {};
+        all[code] = {
+          code: code,
+          voucherCode: code,
+          packageTier: j.packageTier != null ? j.packageTier : (prev.packageTier || null),
+          expiresAt: j.expiresAt !== undefined ? j.expiresAt : (prev.expiresAt || null),
+          activatedAt: j.activatedAt !== undefined ? j.activatedAt : (prev.activatedAt || null),
+          unlimited: !!(j.unlimited || j.isUncapped),
+          isUncapped: !!(j.unlimited || j.isUncapped),
+          active: j.active !== false,
+          onlineNow: j.onlineNow !== undefined ? j.onlineNow : (prev.onlineNow !== undefined ? prev.onlineNow : null),
+          usedMB: j.usedMB != null ? j.usedMB : (prev.usedMB != null ? prev.usedMB : null),
+          totalMB: j.totalMB !== undefined ? j.totalMB : (prev.totalMB != null ? prev.totalMB : null),
+          remainingMB: j.remainingMB != null ? j.remainingMB : (prev.remainingMB != null ? prev.remainingMB : null),
+          bytesUsed: j.bytesUsed != null ? j.bytesUsed : (prev.bytesUsed != null ? prev.bytesUsed : null),
+          bytesTotal: j.bytesTotal !== undefined ? j.bytesTotal : (prev.bytesTotal != null ? prev.bytesTotal : null),
+          usageSource: j.usageSource || prev.usageSource || null,
+          savedAt: Date.now(),
+        };
+        // Expired vouchers are the only records we ever drop.
+        Object.keys(all).forEach(function (c) {
+          if (isExpiredMeta(all[c])) delete all[c];
+        });
+        try { localStorage.setItem(LS_META, JSON.stringify(all)); } catch (e) {}
+      }
+
+      function savedList() {
+        var a = [];
+        try {
+          var raw = JSON.parse(localStorage.getItem(LS_SAVED) || '[]');
+          if (Array.isArray(raw)) {
+            a = raw.filter(function (x) { return typeof x === 'string' && x; });
+          }
+        } catch (e) { a = []; }
+        var meta = voucherMeta();
+        return a.filter(function (code) { return !isExpiredMeta(meta[code]); });
       }
 
       function rememberVoucher(v) {
         if (!v) return;
         var a = savedList();
-        // Already at the front (the common 15s-poll case): nothing to churn.
-        if (a[0] === v) return;
-        a = a.filter(function (x) { return x !== v; });
-        a.unshift(v);
-        try { localStorage.setItem(LS_SAVED, JSON.stringify(a.slice(0, 5))); } catch (e) {}
+        if (a[0] !== v) {
+          a = a.filter(function (x) { return x !== v; });
+          a.unshift(v);
+        }
+        // Keep every unexpired voucher: switching PIN or band must never evict
+        // a record the customer is still entitled to.
+        try { localStorage.setItem(LS_SAVED, JSON.stringify(a)); } catch (e) {}
         renderSaved();
+      }
+
+      // Cached last-known figures for a voucher that has not expired. Lets the
+      // customer see the record while the network check is in flight or while
+      // Wi-Fi is off — without treating offline as voucher expiry.
+      function voucherSnapshot(code) {
+        var m = voucherMeta()[String(code || '').toLowerCase()];
+        return m && !isExpiredMeta(m) ? m : null;
       }
 
       function renderSaved() {
@@ -1914,18 +2060,9 @@
           b.type = 'button';
           b.className = 'chip-btn' + (code === state.voucher ? ' chip-btn--active' : '');
           b.textContent = '•••• ' + code.slice(-4).toUpperCase();
-          b.title = 'Check this voucher';
+          b.title = 'Check ' + code.toUpperCase() + ' (record kept until it expires)';
           b.addEventListener('click', function () {
-            state.voucher = code;
-            state.lastEntry = 'stored';
-            state.last = null;
-            historyAt = 0;
-            try { localStorage.setItem(LS_VOUCHER, code); } catch (e) {}
-            hideManual();
-            renderSaved();
-            drawTrend(loadSamples());
-            checkUsage();
-            startPolling();
+            switchToVoucher(code, 'stored');
           });
           box.appendChild(b);
         });
@@ -1933,16 +2070,26 @@
 
       // ── Server records (sessions + data alerts for this PIN) ───────────
       var historyAt = 0;
+      var historySeq = 0;
+
+      function clearRecords() {
+        state.lastHistory = null;
+        var s = $('sessionHistory');
+        if (s) { s.innerHTML = ''; s.appendChild(emptyItem('Checking the new PIN…')); }
+        var a = $('alertHistory');
+        if (a) { a.innerHTML = ''; a.appendChild(emptyItem('Checking the new PIN…')); }
+      }
 
       function fetchHistory(force) {
         if (!state.voucher) return;
         var now = Date.now();
         if (!force && now - historyAt < HISTORY_MS) return;
         historyAt = now;
+        var seq = ++historySeq;
         fetch('/api/check-usage/history?voucher=' + encodeURIComponent(state.voucher),
           { credentials: 'same-origin' })
           .then(function (r) { return r.ok ? r.json() : null; })
-          .then(function (j) { if (j) renderHistory(j); })
+          .then(function (j) { if (seq === historySeq && j) renderHistory(j); })
           .catch(function () { /* records are best-effort */ });
       }
 
@@ -2004,7 +2151,7 @@
       }
 
       // ── Render ──
-      function render(j) {
+      function render(j, quiet) {
         state.last = j;
         var used = j.bytesUsed;
         var total = j.bytesTotal;
@@ -2129,37 +2276,45 @@
         if (exhausted) {
           setAlert('over', 'BUNDLE EXHAUSTED',
             'Your data has run out and the gateway has paused your connection. Buy a fresh bundle to get back online.');
-          notify('exhaust', 'ULTRANET // BUNDLE EXHAUSTED',
+          if (!quiet) notify('exhaust', 'ULTRANET // BUNDLE EXHAUSTED',
             'Data used up. Buy a new voucher to reconnect.', 'over');
         } else if (!isUncapped && pct >= CRIT_PCT) {
           setAlert('over', 'ALMOST OUT OF DATA',
             'You have used ' + Math.round(pct) + '% of your bundle. Buy a new one now or the gateway cuts you off.');
-          notify('low95', 'ULTRANET // RUNNING DRY - ' + CRIT_PCT + '%',
+          if (!quiet) notify('low95', 'ULTRANET // RUNNING DRY - ' + CRIT_PCT + '%',
             'Almost out of data - buy a new bundle to stay online.', 'over');
         } else if (!isUncapped && pct >= WARN_PCT) {
           setAlert('warn', 'DATA RUNNING LOW',
             'You have used ' + Math.round(pct) + '% of your bundle. Top up now so you never drop off.');
-          notify('low80', 'ULTRANET // DATA THRESHOLD ' + WARN_PCT + '%',
+          if (!quiet) notify('low80', 'ULTRANET // DATA THRESHOLD ' + WARN_PCT + '%',
             'Bundle at ' + WARN_PCT + '% - top up now to stay online.', 'warn');
         } else {
           clearAlert();
         }
 
-        setNetBadge(j.onlineNow === false ? '● OFFLINE' : '● ONLINE',
-          j.onlineNow === false ? 'usage-badge--offline' : 'usage-badge--online');
-        // Wi-Fi success mark: shown while the session is live and the station
-        // is not explicitly offline.
-        setWifi(j.active === true && j.onlineNow !== false);
+        // A usable voucher is one that is still valid, not exhausted, and not
+        // explicitly offline. Only that state hides the swap control; ended,
+        // exhausted and offline all need the next-PIN action.
+        var usable = snapshotUsable(j);
+        setNetBadge(usable ? '● ONLINE' : '● OFFLINE',
+          usable ? 'usage-badge--online' : 'usage-badge--offline');
+        setWifi(usable);
+        setPinSwitchVisible(!usable);
 
-        // Records + local trend follow the live figure.
-        if (j.voucherCode) rememberVoucher(String(j.voucherCode).toLowerCase());
-        recordSample(used);
-        fetchHistory(false);
+        // Records + local trend follow the live figure. A cached render only
+        // paints the stored record; it must not write samples or re-notify.
+        if (!quiet) {
+          saveVoucherMeta(j);
+          if (j.voucherCode) rememberVoucher(String(j.voucherCode).toLowerCase());
+          recordSample(used);
+          fetchHistory(false);
+        }
       }
 
       function renderError(msg) {
         setNetBadge('● OFFLINE', 'usage-badge--offline');
         setWifi(false);
+        setPinSwitchVisible(true);
         if (msg) {
           $('detailStatus').textContent = 'UNAVAILABLE';
           $('detailStatus').style.color = '#f87171';
@@ -2168,37 +2323,40 @@
       }
 
       // ── API ──
+      // Every lookup gets a sequence number. When the customer switches PINs a
+      // slow response for the old code must not land after the new one and put
+      // the dead voucher's figures (or a 404) back on screen.
+      var usageSeq = 0;
       function checkUsage() {
         if (!state.voucher && !state.mac) { showManual(); return; }
         var qs = new URLSearchParams();
         if (state.voucher) qs.set('voucher', state.voucher);
         if (state.mac) qs.set('mac', state.mac);
+        var seq = ++usageSeq;
 
         setNetBadge('UPDATING…');
 
         fetch('/api/check-usage?' + qs.toString(), { credentials: 'same-origin' })
           .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, body: j }; }); })
           .then(function (res) {
+            if (seq !== usageSeq) return;
             if (!res.ok || res.body.error) {
               if (res.body && res.body.error === 'not_found') handleNotFound();
               else renderError(true);
               return;
             }
-            hideManual();
+            // Do not hide the PIN form here: a 15s poll for the voucher that is
+            // running out must not close the form under a customer who tapped
+            // ENTER ANOTHER PIN and is mid-typing. Submit and saved-voucher
+            // switching hide it explicitly.
             render(res.body);
           })
-          .catch(function () { renderError(true); });
+          .catch(function () { if (seq === usageSeq) renderError(true); });
       }
 
-      // The PIN is dead: expired, fully used, disabled, or a typo. The API
-      // deliberately cannot tell us which (uniform 404 — see usage.ts), so we
-      // say all of them, blank every stale figure so old numbers never sit
-      // next to the new-PIN form, stop polling the corpse, and offer the two
-      // ways forward: enter the voucher just bought, or buy one.
-      function handleNotFound() {
-        stopPolling();
-        state.last = null;
-
+      // Blank every stale figure so a dead PIN's numbers can never sit next to
+      // the next-PIN form (or the new PIN's loading state).
+      function resetUsageFigures() {
         $('metricUsed').textContent = '—';
         $('metricRemaining').textContent = '—';
         $('metricTotal').textContent = '—';
@@ -2213,9 +2371,6 @@
         $('dataUsageRemaining').textContent = '— remaining';
         $('detailStatus').textContent = 'EXPIRED';
         $('detailStatus').style.color = '#f87171';
-        $('heroTitle').textContent = 'Voucher ended';
-        $('heroSub').textContent = 'Enter your new PIN below to see its balance and records.';
-        $('metaTier').textContent = 'PREYONE ULTRANET';
         $('detailActivated').textContent = '—';
         $('detailExpires').textContent = '—';
         $('detailTimeLeft').textContent = '—';
@@ -2230,6 +2385,21 @@
         $('gaugeLabel').textContent = 'USED';
         $('gaugeValue').setAttribute('class', 'gauge-value');
         $('gaugeValue').style.strokeDashoffset = '527.79';
+      }
+
+      // The PIN is dead: expired, fully used, disabled, or a typo. The API
+      // deliberately cannot tell us which (uniform 404 — see usage.ts), so we
+      // say all of them, blank every stale figure so old numbers never sit
+      // next to the new-PIN form, stop polling the corpse, and offer the two
+      // ways forward: enter the voucher just bought, or buy one.
+      function handleNotFound() {
+        stopPolling();
+        state.last = null;
+
+        resetUsageFigures();
+        $('heroTitle').textContent = 'Voucher ended';
+        $('heroSub').textContent = 'Enter your new PIN below to see its balance and records.';
+        $('metaTier').textContent = 'PREYONE ULTRANET';
 
         setAlert('over', 'VOUCHER EXPIRED OR USED UP',
           'That voucher has ended — it expired, was fully used, or was disabled. Enter the PIN of a bundle you just bought, or grab a new one.');
@@ -2247,6 +2417,7 @@
           $('manualVoucher').value = '';
         }
         if (firstTime) $('manualVoucher').focus({ preventScroll: true });
+        setPinSwitchVisible(true);
 
         setNetBadge('● VOUCHER ENDED', 'usage-badge--offline');
         $('lastUpdated').textContent = 'No live session for this voucher.';
@@ -2257,10 +2428,81 @@
       // ── Manual fallback ──
       function showManual(msg) {
         $('manualSection').hidden = false;
+        var cancel = $('manualCancel');
+        if (cancel) cancel.hidden = !state.voucher;
         if (state.voucher) $('manualVoucher').value = state.voucher;
         var macEl = $('manualMac');
         if (macEl && state.mac) macEl.value = state.mac;
         if (msg) $('manualError').textContent = msg;
+      }
+
+      // One place owns a PIN change. It updates the live state, localStorage,
+      // the saved-voucher list, the URL hand-off, the visible figures, records,
+      // alerts and push subscription together — so no surface is left showing
+      // the previous voucher.
+      function switchToVoucher(v, entry) {
+        v = String(v || '').trim().toLowerCase();
+        if (!v) return;
+        state.voucher = v;
+        state.lastEntry = entry || 'manual';
+        state.last = null;
+        state.lastHistory = null;
+        historyAt = 0;
+        // Invalidate every response still in flight for the old PIN.
+        usageSeq += 1;
+        historySeq += 1;
+        try { localStorage.setItem(LS_VOUCHER, v); } catch (e) {}
+        renderSaved();
+        // Drop an old ?voucher=... hand-off from the URL so a reload cannot
+        // switch the customer back to the PIN they just replaced.
+        try {
+          if (location.search) history.replaceState(null, '', location.pathname + location.hash);
+        } catch (e) {}
+        hideManual();
+        clearAlert();
+        resetUsageFigures();
+        clearRecords();
+        $('metaVoucher').style.display = '';
+        $('metaVoucherTail').textContent = v.slice(-4);
+        // If this voucher was checked before and has not expired, paint its
+        // cached record immediately. The network check then refreshes it; if
+        // Wi-Fi is off the record stays visible instead of being blanked.
+        var snap = voucherSnapshot(v);
+        if (snap) {
+          render(snap, true);
+        } else {
+          $('metaTier').textContent = 'PREYONE ULTRANET';
+          $('heroTitle').textContent = 'Checking voucher…';
+          $('heroSub').textContent = 'Looking up ••••' + v.slice(-4) + '…';
+        }
+        $('detailStatus').textContent = 'CHECKING…';
+        $('detailStatus').style.color = '#00d4ff';
+        $('lastUpdated').textContent = snap
+          ? 'Showing the saved record — checking the network…'
+          : 'Checking the new PIN…';
+        setNetBadge('UPDATING…');
+        setPinSwitchVisible(false);
+        drawTrend(loadSamples());
+        checkUsage();
+        startPolling();
+        // Re-point the alert channel and push subscription at the new PIN.
+        fetchPendingAlerts();
+        ensurePushSubscription();
+      }
+
+      // Explicit "enter another PIN" action: clear the finished code, focus the
+      // field and bring the form into view.
+      function openPinEntry() {
+        $('manualSection').hidden = false;
+        var cancel = $('manualCancel');
+        if (cancel) cancel.hidden = !state.voucher;
+        $('manualVoucher').value = '';
+        $('manualError').textContent = '';
+        var macEl = $('manualMac');
+        if (macEl) macEl.value = state.mac || '';
+        $('manualVoucher').focus({ preventScroll: false });
+        $('manualSection').scrollIntoView({ behavior: 'smooth', block: 'center' });
+        setPinSwitchVisible(false);
       }
 
       function hideManual() { $('manualSection').hidden = true; }
@@ -2284,23 +2526,14 @@
           $('manualMacError').textContent = 'That is not a full MAC address — leave it blank unless support asked for it.';
           return;
         }
-        state.voucher = v;
         state.mac = m;
-        // Fresh manual entry: a 404 from here is as likely a typo as a dead
-        // voucher, so handleNotFound keeps this input for editing.
-        state.lastEntry = 'manual';
-        historyAt = 0;
         try {
-          localStorage.setItem(LS_VOUCHER, v);
           if (m) localStorage.setItem(LS_MAC, m);
           else localStorage.removeItem(LS_MAC);
         } catch (err) {}
-        hideManual();
-        drawTrend(loadSamples());
-        checkUsage();
-        // Restart the 15s cadence for the newly entered voucher (a dead PIN
-        // had stopped it in handleNotFound).
-        startPolling();
+        // Fresh manual entry: a 404 from here is as likely a typo as a dead
+        // voucher, so handleNotFound keeps this input for editing.
+        switchToVoucher(v, 'manual');
       });
 
       $('manualVoucher').addEventListener('input', function () {
@@ -2310,13 +2543,15 @@
         $('manualMacError').textContent = '';
       });
 
-      $('alertEnter').addEventListener('click', function () {
-        showManual('');
-        $('manualVoucher').value = '';
-        state.lastEntry = 'manual';
-        $('manualVoucher').focus({ preventScroll: false });
-        $('manualSection').scrollIntoView({ behavior: 'smooth', block: 'center' });
+      $('manualCancel').addEventListener('click', function () {
+        hideManual();
+        setPinSwitchVisible(!snapshotUsable(state.last));
       });
+
+      $('alertEnter').addEventListener('click', openPinEntry);
+      $('switchPinChip').addEventListener('click', openPinEntry);
+      $('switchPinBtn').addEventListener('click', openPinEntry);
+      $('metaVoucher').addEventListener('click', openPinEntry);
 
       $('toastClose').addEventListener('click', function () {
         $('usageToast').hidden = true;
@@ -2537,6 +2772,11 @@
       for (var yi = 0; yi < yearEls.length; yi += 1) yearEls[yi].textContent = year;
       refreshAlertsBtn();
       renderSaved();
+      if (state.netChanged) {
+        pushToast('', 'NETWORK CHANGED',
+          'You are on a different Wi-Fi band. Your saved voucher and records are unchanged — tap the PIN chip to enter another voucher if you bought one.');
+        if (state.voucher) $('metaVoucher').style.display = '';
+      }
       drawTrend(loadSamples());
       // Re-arm the push subscription on every visit (idempotent server-side)
       // and surface any alert the backend fired while this device was away.
@@ -2548,9 +2788,17 @@
         // A MAC alone is not a credential (usage.ts rejects it), so the PIN
         // form is the only honest first screen.
         showManual();
+        setPinSwitchVisible(false);
         setNetBadge('ENTER VOUCHER');
         $('lastUpdated').textContent = 'Enter the PIN from your SMS or receipt.';
       } else {
+        // Paint the last saved record immediately (Wi-Fi may be off, or the
+        // network may be slow); the live check replaces it when it answers.
+        var bootSnap = voucherSnapshot(state.voucher);
+        if (bootSnap) {
+          render(bootSnap, true);
+          $('lastUpdated').textContent = 'Showing the saved record — checking the network…';
+        }
         checkUsage();
         startPolling();
       }

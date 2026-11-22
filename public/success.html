@@ -653,6 +653,12 @@
           trackQuery.set('voucher', voucherCode);
           var mac = gatewayQuery.get('mac') || gatewayQuery.get('client_mac') || gatewayQuery.get('clientMac');
           if (mac) trackQuery.set('mac', mac);
+          // Carry the band/gateway context so /data can tell the customer when
+          // they moved between radios without touching the saved record.
+          var ssid = gatewayQuery.get('ssid');
+          if (ssid) trackQuery.set('ssid', ssid);
+          var nas = gatewayQuery.get('nas_mac') || gatewayQuery.get('nas_ip') || gatewayQuery.get('gw_id');
+          if (nas) trackQuery.set('nas_mac', nas);
           trackBtn.href = '/data?' + trackQuery.toString();
           trackBtn.hidden = false;
         }

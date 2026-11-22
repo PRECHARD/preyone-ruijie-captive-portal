@@ -2,15 +2,20 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 
-const { mockQuery } = vi.hoisted(() => ({ mockQuery: vi.fn() }));
+const { mockQuery, mockRuijieConfigured, mockRoster } = vi.hoisted(() => ({
+  mockQuery: vi.fn(),
+  mockRuijieConfigured: vi.fn(() => false),
+  mockRoster: vi.fn(async (): Promise<any> => ({ vouchers: [], fetchedAt: null, stale: false })),
+}));
 
 vi.mock('../src/db/pool', () => ({
   pool: { query: mockQuery },
 }));
 
-// Keep the route on its local-DB path so the tests never reach Ruijie.
+// Keep the route on its local-DB path by default so the tests never reach
+// Ruijie; individual tests opt in by flipping the configured flag.
 vi.mock('../src/services/ruijieCloud', () => ({
-  isRuijieCloudConfigured: () => false,
+  isRuijieCloudConfigured: mockRuijieConfigured,
 }));
 vi.mock('../src/services/ruijieService', () => ({
   fetchRuijieAccountingRecords: vi.fn(async () => []),
@@ -19,7 +24,7 @@ vi.mock('../src/services/ruijieSessionCache', () => ({
   getRuijieSessionSnapshot: vi.fn(async () => ({ users: [] })),
 }));
 vi.mock('../src/services/ruijieRoster', () => ({
-  getRuijieRoster: vi.fn(async () => ({ vouchers: [], fetchedAt: null, stale: false })),
+  getRuijieRoster: mockRoster,
 }));
 
 import { usageRouter, __resetUsageCachesForTests } from '../src/routes/usage';
@@ -47,6 +52,8 @@ const soldRow = {
 describe('GET /api/check-usage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockRuijieConfigured.mockReturnValue(false);
+    mockRoster.mockResolvedValue({ vouchers: [], fetchedAt: null, stale: false });
     __resetUsageCachesForTests();
   });
 
@@ -126,11 +133,69 @@ describe('GET /api/check-usage', () => {
     // Usage itself is still reported — only the balance is unlimited.
     expect(res.body.bytesUsed).toBe(19108 * 1048576);
   });
+
+  it('ends a voucher disabled in the Ruijie admin console before the local sweep catches up', async () => {
+    mockQuery.mockResolvedValue({ rows: [soldRow] });
+    mockRuijieConfigured.mockReturnValue(true);
+    mockRoster.mockResolvedValue({
+      vouchers: [{ codeNo: 'k47nfu', voucherCode: 'k47nfu', disableStatus: 1 }],
+      fetchedAt: new Date(),
+      stale: false,
+    });
+
+    const res = await request(createApp()).get('/api/check-usage?voucher=k47nfu');
+
+    // Same uniform 404 as a locally dead PIN: /data then shows the next-PIN form.
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe('not_found');
+  });
+
+  it('ends a voucher whose Ruijie expiry has passed when the local row has none', async () => {
+    mockQuery.mockResolvedValue({ rows: [soldRow] });
+    mockRuijieConfigured.mockReturnValue(true);
+    mockRoster.mockResolvedValue({
+      vouchers: [{
+        codeNo: 'k47nfu',
+        voucherCode: 'k47nfu',
+        expiryTime: Date.now() - 60_000,
+      }],
+      fetchedAt: new Date(),
+      stale: false,
+    });
+
+    const res = await request(createApp()).get('/api/check-usage?voucher=k47nfu');
+
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe('not_found');
+  });
+
+  it('trusts a locally renewed expiry over a stale remote one', async () => {
+    mockQuery.mockResolvedValue({
+      rows: [{ ...soldRow, expires_at: new Date(Date.now() + 86_400_000).toISOString() }],
+    });
+    mockRuijieConfigured.mockReturnValue(true);
+    mockRoster.mockResolvedValue({
+      vouchers: [{
+        codeNo: 'k47nfu',
+        voucherCode: 'k47nfu',
+        expiryTime: Date.now() - 60_000,
+      }],
+      fetchedAt: new Date(),
+      stale: false,
+    });
+
+    const res = await request(createApp()).get('/api/check-usage?voucher=k47nfu');
+
+    expect(res.status).toBe(200);
+    expect(res.body.voucherCode).toBe('k47nfu');
+  });
 });
 
 describe('GET /api/check-usage/history', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockRuijieConfigured.mockReturnValue(false);
+    mockRoster.mockResolvedValue({ vouchers: [], fetchedAt: null, stale: false });
     __resetUsageCachesForTests();
   });
 

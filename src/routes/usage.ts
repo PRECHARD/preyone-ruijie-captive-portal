@@ -451,6 +451,31 @@ usageRouter.get('/', usageLimiter, async (req: Request, res: Response) => {
     // without a local MAC binding.
     const rv = await ruijieVoucherByCode(row.code);
 
+    // Admin-console cancellation/expiry can beat the local status sweep. If
+    // Ruijie itself says the voucher is disabled, or that it has expired while
+    // our row has no expiry of its own, stop serving it: return the same
+    // uniform 404 as a locally dead PIN so /data immediately offers the
+    // customer the next-PIN form instead of a reassuring stale balance.
+    const remoteExpiryMs =
+      rv?.expiryTime != null && Number(rv.expiryTime) > 0
+        ? Number(rv.expiryTime) > 1_000_000_000_000
+          ? Number(rv.expiryTime)
+          : Number(rv.expiryTime) > 1_000_000_000
+            ? Number(rv.expiryTime) * 1000
+            : null
+        : null;
+    const localExpiryMs = row.expires_at ? new Date(row.expires_at).getTime() : null;
+    const localExpiryKnown = localExpiryMs != null && Number.isFinite(localExpiryMs);
+    const remoteDisabled = rv?.disableStatus != null && Number(rv.disableStatus) !== 0;
+    const remoteExpired =
+      remoteExpiryMs != null &&
+      remoteExpiryMs <= Date.now() &&
+      !(localExpiryKnown && localExpiryMs > Date.now());
+    if (remoteDisabled || remoteExpired) {
+      res.status(404).json({ error: 'not_found' });
+      return;
+    }
+
     const isUncapped = row.is_uncapped === true;
 
     // Best figure seen so far, with its provenance. Sources merge by MAX (see
