@@ -477,6 +477,15 @@ app.use((req, res, next) => {
 
   // wifi.preyone.com → captive portal
   if (host === 'wifi.preyone.com') {
+    // The PWA manifest and service worker are not portal interstitials. Serving
+    // them through the static branch below stamped X-Captive-Portal on them,
+    // which suppresses beforeinstallprompt and made install/update flaky. They
+    // also must stay cacheable enough for the browser's SW update check.
+    if (req.path === '/manifest.json' || req.path === '/sw.js') {
+      res.setHeader('Cache-Control', 'no-cache');
+      if (req.path === '/sw.js') res.setHeader('Service-Worker-Allowed', '/');
+      return res.sendFile(path.join(__dirname, '..', 'public', req.path.slice(1)));
+    }
     // Tell OS this is a captive portal (triggers popup on iOS/Android/Windows)
     res.setHeader('X-Captive-Portal', 'true');
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');

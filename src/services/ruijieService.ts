@@ -1,7 +1,7 @@
 import axios from 'axios';
 import type { PoolClient } from 'pg';
 import { pool } from '../db/pool';
-import { attachRuijieQuotaGuard } from './ruijieRateLimiter';
+import { attachRuijieQuotaGuard, hasBackgroundBudget } from './ruijieRateLimiter';
 import {
   getRuijieVouchers,
   isRuijieCloudConfigured,
@@ -81,12 +81,14 @@ function maintConfig() {
 
 function maintClient(): ReturnType<typeof axios.create> {
   // Same cluster-wide quota guard as ruijieCloud.client(): all maintenance
-  // endpoints share one tenant quota with voucher minting.
+  // endpoints share one tenant quota with voucher minting. Everything this
+  // client calls (accounting + device inventory) is periodic sweep work, so
+  // it is capped below the interactive reserve.
   return attachRuijieQuotaGuard(axios.create({
     baseURL: process.env.RUIJIE_CLOUD_BASE_URL || 'https://cloud.ruijienetworks.com',
     timeout: 20000,
     headers: { 'Content-Type': 'application/json' },
-  }));
+  }), { background: true });
 }
 
 function errMsg(err: unknown): string {
@@ -944,6 +946,12 @@ export function startRuijieAccountingPolling(): void {
 
   const tick = async () => {
     try {
+      // Background reconciliation: leave the interactive share of the minute
+      // budget alone. Skipping is safe — the next tick catches up.
+      if (!(await hasBackgroundBudget())) {
+        console.log('[RUIJIE ACCT] skipped: background quota budget in use');
+        return;
+      }
       const r = await syncAccountingData();
       if (!r.skipped && (r.updated > 0 || r.errors.length > 0)) {
         console.log(

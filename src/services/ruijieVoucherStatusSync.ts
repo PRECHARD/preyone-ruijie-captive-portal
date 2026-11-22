@@ -2,6 +2,7 @@ import type { PoolClient } from 'pg';
 import { pool } from '../db/pool';
 import { isRuijieCloudConfigured } from './ruijieCloud';
 import { getRuijieRoster } from './ruijieRoster';
+import { hasBackgroundBudget } from './ruijieRateLimiter';
 import type { RuijieVoucher } from './ruijieCloud';
 
 /**
@@ -379,6 +380,13 @@ export function startRuijieVoucherStatusWorker(): void {
 
   const tick = async () => {
     try {
+      // Background sweep: yield the interactive reserve. Skipping a cycle is
+      // safe — the next tick reconciles, and the sold-voucher fix means no
+      // customer depends on activated_at being written within seconds.
+      if (!(await hasBackgroundBudget())) {
+        console.log('[ruijie-voucher-status] skipped: background quota budget in use');
+        return;
+      }
       const result = await syncRuijieVoucherStatuses();
       if (!result.skipped && (result.updated > 0 || result.errors.length > 0)) {
         console.log(

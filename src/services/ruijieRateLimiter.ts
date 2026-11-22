@@ -49,6 +49,24 @@ export const MINUTE_LIMIT = positiveInt(process.env.RUIJIE_MAX_CALLS_PER_MIN, 15
 export const DAY_LIMIT = positiveInt(process.env.RUIJIE_MAX_CALLS_PER_DAY, 5000);
 
 /**
+ * Background sweeps (roster refresh, status sync, accounting reconciliation)
+ * may only spend this share of the per-minute budget. The remainder is
+ * reserved for interactive work — voucher creation, redemption and a
+ * customer's own usage lookup — so a sweep burst can never starve a sale.
+ * Bounded to (0,1); a bad env value falls back to 0.6.
+ */
+const BACKGROUND_MINUTE_SHARE = (() => {
+  const n = Number(process.env.RUIJIE_BACKGROUND_MINUTE_SHARE ?? 0.6);
+  return Number.isFinite(n) && n > 0 && n < 1 ? n : 0.6;
+})();
+
+/** Ceiling a single minute's background work may reach, cluster-wide. */
+export const BACKGROUND_MINUTE_LIMIT = Math.max(
+  1,
+  Math.floor(MINUTE_LIMIT * BACKGROUND_MINUTE_SHARE)
+);
+
+/**
  * How many worker processes share the quota. Used only to divide the budget for
  * the in-memory fallback (the DB path is inherently cluster-wide).
  */
@@ -86,8 +104,8 @@ export interface RuijieQuotaStatus {
  * existing resilience path (write retry → pre-minted pool → 429, read cooldown,
  * circuit breaker, serve-stale cache) treats a local refusal identically.
  */
-function quotaError(minuteCount: number, dayCount: number): Error {
-  const detail = `minute=${minuteCount}/${MINUTE_LIMIT} day=${dayCount}/${DAY_LIMIT}`;
+function quotaError(minuteCount: number, dayCount: number, minuteLimit = MINUTE_LIMIT): Error {
+  const detail = `minute=${minuteCount}/${minuteLimit} day=${dayCount}/${DAY_LIMIT}`;
   return new RuijieApiError(
     RATE_LIMIT_CODE,
     `Too many requests (local Ruijie quota guard exhausted: ${detail})`
@@ -117,17 +135,22 @@ function dayKeyOf(now: Date): string {
   return `${y}-${m}-${d}`;
 }
 
-function reserveInMemory(now: Date): RuijieQuotaReservation {
+function reserveInMemory(now: Date, background = false): RuijieQuotaReservation {
   const mk = minuteKeyOf(now);
   const dk = dayKeyOf(now);
+  // The fallback budget is per-worker, so apply the same split locally: a
+  // sweep may not take every slot a single worker has.
+  const limit = background
+    ? Math.max(1, Math.floor(FALLBACK_MINUTE_LIMIT * BACKGROUND_MINUTE_SHARE))
+    : FALLBACK_MINUTE_LIMIT;
   if (memory.minuteKey !== mk) {
     memory = { ...memory, minuteKey: mk, minuteCount: 0 };
   }
   if (memory.dayKey !== dk) {
     memory = { ...memory, dayKey: dk, dayCount: 0 };
   }
-  if (memory.minuteCount >= FALLBACK_MINUTE_LIMIT || memory.dayCount >= FALLBACK_DAY_LIMIT) {
-    throw quotaError(memory.minuteCount, memory.dayCount);
+  if (memory.minuteCount >= limit || memory.dayCount >= FALLBACK_DAY_LIMIT) {
+    throw quotaError(memory.minuteCount, memory.dayCount, limit);
   }
   memory.minuteCount += 1;
   memory.dayCount += 1;
@@ -135,7 +158,7 @@ function reserveInMemory(now: Date): RuijieQuotaReservation {
     allowed: true,
     source: 'memory',
     minuteCount: memory.minuteCount,
-    minuteLimit: FALLBACK_MINUTE_LIMIT,
+    minuteLimit: limit,
     dayCount: memory.dayCount,
     dayLimit: FALLBACK_DAY_LIMIT,
   };
@@ -195,13 +218,22 @@ const STATUS_SQL = `
  * Reserve one outbound call. Throws `RuijieApiError(RATE_LIMIT_CODE)` when the
  * cluster (or the fallback worker budget) is out of quota.
  *
+ * `background: true` marks a periodic sweep / cache refresh. Such a call may
+ * not push the shared minute counter past `BACKGROUND_MINUTE_LIMIT`, so the
+ * remainder of the tenant quota is always available to a sale or a customer's
+ * own lookup. The check is atomic in the same UPSERT as the increment, so four
+ * workers ticking together still cannot eat the reserve.
+ *
  * Never throws for infrastructure reasons: a broken quota table degrades to the
  * conservative in-memory window instead of failing the sale.
  */
-export async function reserveRuijieCall(): Promise<RuijieQuotaReservation> {
+export async function reserveRuijieCall(
+  opts: { background?: boolean } = {}
+): Promise<RuijieQuotaReservation> {
   const now = new Date();
+  const minuteLimit = opts.background ? BACKGROUND_MINUTE_LIMIT : MINUTE_LIMIT;
   try {
-    const { rows } = await pool.query(RESERVE_SQL, [MINUTE_LIMIT, DAY_LIMIT]);
+    const { rows } = await pool.query(RESERVE_SQL, [minuteLimit, DAY_LIMIT]);
     if (rows.length > 0) {
       const minuteCount = Number(rows[0].minute_count) || 0;
       const dayCount = Number(rows[0].day_count) || 0;
@@ -217,7 +249,7 @@ export async function reserveRuijieCall(): Promise<RuijieQuotaReservation> {
         allowed: true,
         source: 'db',
         minuteCount,
-        minuteLimit: MINUTE_LIMIT,
+        minuteLimit,
         dayCount,
         dayLimit: DAY_LIMIT,
       };
@@ -225,12 +257,12 @@ export async function reserveRuijieCall(): Promise<RuijieQuotaReservation> {
 
     // No row returned: the UPSERT's WHERE clause refused the increment.
     const status = await ruijieQuotaStatus();
-    throw quotaError(status.minuteCount, status.dayCount);
+    throw quotaError(status.minuteCount, status.dayCount, minuteLimit);
   } catch (err) {
     // A rejection from the guard itself must never be swallowed.
     if (isQuotaGuardError(err)) throw err;
     warnQuotaTableOnce(err);
-    return reserveInMemory(now);
+    return reserveInMemory(now, opts.background);
   }
 }
 
@@ -277,6 +309,20 @@ export async function ruijieQuotaStatus(): Promise<RuijieQuotaStatus> {
 }
 
 /**
+ * Cheap pre-flight for periodic sweeps: is there room for one more background
+ * call without eating into the interactive reserve? Advisory (the reservation
+ * itself is still atomic), but it lets a sweep skip a cycle and serve its cache
+ * instead of repeatedly bouncing off the guard.
+ */
+export async function hasBackgroundBudget(): Promise<boolean> {
+  const s = await ruijieQuotaStatus();
+  return (
+    s.minuteCount < Math.min(s.minuteLimit, BACKGROUND_MINUTE_LIMIT) &&
+    s.dayCount < s.dayLimit
+  );
+}
+
+/**
  * Install the guard on an axios instance. Every outbound request reserves a
  * slot first; a refusal rejects with the Ruijie "throttled" error so callers
  * follow their existing degraded paths.
@@ -285,11 +331,17 @@ export async function ruijieQuotaStatus(): Promise<RuijieQuotaStatus> {
  * with a bare `{ get, post }` object, and older/partial instances must keep
  * working rather than crash at construction time.
  */
-export function attachRuijieQuotaGuard(instance: AxiosInstance): AxiosInstance {
+export function attachRuijieQuotaGuard(
+  instance: AxiosInstance,
+  opts: { background?: boolean } = {}
+): AxiosInstance {
   const interceptors = (instance as unknown as { interceptors?: any }).interceptors;
   if (!interceptors?.request?.use) return instance;
   interceptors.request.use(async (config: any) => {
-    await reserveRuijieCall();
+    // Either the whole client is a sweep client (maintenance endpoints) or a
+    // single request opts in with `ruijieBackground: true` (roster pages).
+    const background = opts.background === true || config?.ruijieBackground === true;
+    await reserveRuijieCall({ background });
     return config;
   });
   return instance;
@@ -301,4 +353,4 @@ export function __resetRuijieQuotaForTests(): void {
   warnedAboutQuotaTable = false;
 }
 
-export const __testing = { FALLBACK_MINUTE_LIMIT, FALLBACK_DAY_LIMIT, WORKER_COUNT };
+export const __testing = { FALLBACK_MINUTE_LIMIT, FALLBACK_DAY_LIMIT, WORKER_COUNT, BACKGROUND_MINUTE_LIMIT };

@@ -12,109 +12,769 @@
   <meta name="apple-mobile-web-app-title" content="Preyone" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="mobile-web-app-capable" content="yes" />
-  <meta name="theme-color" content="#0066ff" />
-  <meta name="description" content="Check your Preyone UltraNet WiFi data usage, remaining bundle and session status." />
+  <meta name="theme-color" content="#04060c" />
+  <meta name="description" content="Check your Preyone UltraNet WiFi data usage, remaining bundle, session records and alerts." />
   <link rel="manifest" href="/manifest.json" />
   <link
-    href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Montserrat:wght@500;700&family=Satisfy&display=swap"
+    href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Montserrat:wght@500;600;700&family=Satisfy&display=swap"
     rel="stylesheet">
   <link rel="stylesheet" href="/css/portal.css?v=52" />
   <style>
-    /* PWA-specific additions only. Every colour below reuses the portal.css
-       tokens so this page stays on the same design language as success.html. */
-    .usage-metric-value {
-      font-family: 'Courier New', monospace;
-      font-size: 1.35rem;
-      font-weight: 800;
-      letter-spacing: 1px;
-      color: var(--cyan);
-      text-shadow: 0 0 15px rgba(0, 212, 255, 0.35);
-      word-break: break-word;
+    /* ═══════════════════════════════════════════════════════════════════
+       Preyone UltraNet — /data app shell.
+       Scoped to .data-body so nothing here leaks into the captive portal.
+       Mobile-first; every multi-column block is a grid that reflows, and
+       the two-column desktop layout starts at 900px.
+       ═══════════════════════════════════════════════════════════════════ */
+    body.data-body {
+      --app-bg: #04060c;
+      --app-panel: rgba(13, 18, 30, 0.82);
+      --app-stroke: rgba(255, 255, 255, 0.09);
+      --app-text: #f2f7ff;
+      --app-muted: #8d9bb3;
+      --app-cyan: #00d4ff;
+      --app-magenta: #ff2fd0;
+      --app-violet: #7c3aed;
+      --app-green: #25d366;
+      --app-amber: #f5a623;
+      --app-red: #ef4444;
+      --app-radius: 18px;
+      margin: 0;
+      padding: 0;
+      min-height: 100vh;
+      min-height: 100dvh;
+      overflow-x: clip;
+      color: var(--app-text);
+      background:
+        radial-gradient(1100px 560px at 8% -12%, rgba(0, 212, 255, 0.13), transparent 62%),
+        radial-gradient(900px 520px at 112% 4%, rgba(124, 58, 237, 0.18), transparent 60%),
+        radial-gradient(700px 420px at 50% 110%, rgba(255, 47, 208, 0.07), transparent 60%),
+        var(--app-bg);
+      -webkit-text-size-adjust: 100%;
     }
 
-    .usage-metric-value--warn { color: var(--orange); text-shadow: 0 0 15px rgba(245, 166, 35, 0.35); }
-    .usage-metric-value--over { color: #ef4444; text-shadow: 0 0 15px rgba(239, 68, 68, 0.4); }
+    .data-body *,
+    .data-body *::before,
+    .data-body *::after { box-sizing: border-box; }
 
-    .usage-meta-row {
+    /* Author display rules (.chip, .btn-*, .usage-alert) override the UA
+       [hidden] rule, so make the attribute authoritative inside the app. */
+    .data-body [hidden] { display: none !important; }
+
+    .data-app {
+      position: relative;
+      z-index: 1;
+      min-height: 100vh;
+      min-height: 100dvh;
       display: flex;
-      flex-wrap: wrap;
-      gap: 0.5rem 1rem;
-      justify-content: center;
+      flex-direction: column;
+    }
+
+    /* ── App bar ─────────────────────────────────────────────────────── */
+    .app-bar {
+      position: sticky;
+      top: 0;
+      z-index: 40;
+      display: flex;
       align-items: center;
-      margin: 0 0 1rem;
-      font-size: 0.7rem;
-      letter-spacing: 1px;
-      color: var(--text-muted);
+      justify-content: space-between;
+      gap: 10px;
+      padding: calc(10px + env(safe-area-inset-top, 0px)) clamp(12px, 4vw, 32px) 10px;
+      background: rgba(4, 6, 12, 0.74);
+      -webkit-backdrop-filter: blur(16px);
+      backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--app-stroke);
+    }
+
+    .app-brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+      color: inherit;
+      text-decoration: none;
+    }
+
+    .app-brand img {
+      display: block;
+      height: 32px;
+      width: auto;
+      max-width: 96px;
+      object-fit: contain;
+    }
+
+    .app-brand-text { display: flex; flex-direction: column; line-height: 1.05; min-width: 0; }
+
+    .app-brand-text strong {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 1.1rem;
+      letter-spacing: 0.16em;
+      white-space: nowrap;
+    }
+
+    .app-brand-text small {
+      font-size: 0.58rem;
+      letter-spacing: 0.2em;
+      color: var(--app-muted);
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    .app-bar-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+
+    /* ── Sticky brand header: status strip + banner stay on screen ─────── */
+    .data-top {
+      position: sticky;
+      top: 0;
+      z-index: 60;
+      background: transparent;
+      border-bottom: 1px solid transparent;
+      transition: background 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
+    }
+
+    .data-top.is-scrolled {
+      background: linear-gradient(180deg, rgba(4, 6, 12, 0.93), rgba(4, 6, 12, 0.8));
+      -webkit-backdrop-filter: blur(20px) saturate(160%);
+      backdrop-filter: blur(20px) saturate(160%);
+      border-bottom-color: rgba(255, 255, 255, 0.08);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 16px 40px rgba(0, 0, 0, 0.42);
+    }
+
+    .data-top.is-scrolled::after {
+      content: '';
+      position: absolute;
+      left: 10%;
+      right: 10%;
+      bottom: -1px;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(37, 211, 102, 0.55), rgba(168, 85, 247, 0.55), transparent);
+      pointer-events: none;
+    }
+
+    .data-nav { background: transparent; }
+
+    .data-nav-inner {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 10px;
+      width: 100%;
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: calc(8px + env(safe-area-inset-top, 0px)) clamp(12px, 4vw, 32px) 6px;
+    }
+
+    .data-nav-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-shrink: 0;
+    }
+
+    /* ── Old brand header, beneath the status strip ────────────────────── */
+    .data-header {
+      position: relative;
+      flex: 0 0 auto;
+      width: 100%;
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 0 clamp(12px, 4vw, 32px);
+      text-align: center;
+      transition: padding 0.35s ease;
+    }
+
+    .data-header .brand-banner { margin-top: 0; }
+
+    .data-header .brand-logo-img {
+      width: min(100%, 560px);
+      max-height: clamp(88px, 18vw, 150px);
+      height: auto;
+      object-fit: contain;
+      transition: max-height 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .data-header .brand-banner a {
+      display: block;
+      line-height: 0;
+    }
+
+    .data-header .brand-eyebrow {
+      margin-top: 8px;
+      max-width: 100%;
+      line-height: 1.3;
+      transition: transform 0.35s ease, margin-top 0.35s ease;
+    }
+
+    .data-header .brand-eyebrow span {
+      font-size: clamp(0.82rem, 3.4vw, 1.15rem);
+    }
+
+    /* Compact the sticky brand once the page moves, so it stays useful
+       without eating the viewport. */
+    .data-top.is-scrolled .brand-logo-img { max-height: 64px; }
+    .data-top.is-scrolled .brand-eyebrow { margin-top: 4px; transform: scale(0.9); }
+    .data-top.is-scrolled .data-header { padding-bottom: 6px; }
+
+    .wifi-success {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 30px;
+      height: 30px;
+      flex: 0 0 auto;
+      color: var(--app-green);
+      filter: drop-shadow(0 0 6px rgba(37, 211, 102, 0.45));
+    }
+
+    .wifi-success::before,
+    .wifi-success::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border-radius: 50%;
+      background: conic-gradient(from 120deg, #25d366, #00d4ff, #a855f7, #25d366);
+      -webkit-mask: radial-gradient(closest-side, transparent 66%, #000 70%, #000 100%);
+      mask: radial-gradient(closest-side, transparent 66%, #000 70%, #000 100%);
+      opacity: 0;
+      animation: wifi-pulse 2.6s ease-out infinite;
+      pointer-events: none;
+    }
+
+    .wifi-success::after { animation-delay: 1.3s; }
+
+    @keyframes wifi-pulse {
+      0% { transform: scale(0.55); opacity: 0.9; }
+      72% { opacity: 0.2; }
+      100% { transform: scale(1.85); opacity: 0; }
+    }
+
+    .wifi-success svg {
+      position: relative;
+      z-index: 1;
+      width: 21px;
+      height: 21px;
+      display: block;
+      overflow: visible;
     }
 
     .usage-badge {
       display: inline-flex;
       align-items: center;
       gap: 0.35rem;
-      padding: 0.25rem 0.6rem;
+      padding: 0.32rem 0.62rem;
       border-radius: 999px;
       border: 1px solid rgba(255, 255, 255, 0.12);
       background: rgba(255, 255, 255, 0.04);
+      font-size: 0.58rem;
+      letter-spacing: 0.16em;
+      white-space: nowrap;
+      color: var(--app-muted);
     }
 
     .usage-badge--offline { border-color: rgba(239, 68, 68, 0.5); color: #f87171; }
-    .usage-badge--online { border-color: rgba(37, 211, 102, 0.5); color: #25D366; }
-
-    .usage-install-row { margin-top: 1.5rem; }
-
-    .usage-manual {
-      text-align: left;
-      margin-top: 1.5rem;
-      padding-top: 1.5rem;
-      border-top: 1px solid rgba(255, 255, 255, 0.08);
+    .usage-badge--online {
+      border-color: rgba(37, 211, 102, 0.45);
+      background: linear-gradient(100deg, rgba(37, 211, 102, 0.13), rgba(168, 85, 247, 0.13));
+      color: #6ef2a1;
     }
 
-    .usage-manual h2 {
-      font-family: 'Bebas Neue', sans-serif;
-      font-size: 1.15rem;
-      letter-spacing: 1px;
-      margin: 0 0 0.35rem;
-    }
-
-    .usage-manual p.hint {
-      font-size: 0.78rem;
-      color: var(--text-muted);
-      margin: 0 0 1rem;
-    }
-
-    .usage-manual .field input {
+    /* ── Layout ──────────────────────────────────────────────────────── */
+    .app-main {
       width: 100%;
-      padding: 0.75rem 0.9rem;
-      border-radius: var(--radius, 12px);
-      border: 1px solid rgba(255, 255, 255, 0.14);
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: clamp(14px, 3.5vw, 30px) clamp(12px, 3.5vw, 30px) calc(30px + env(safe-area-inset-bottom, 0px));
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      gap: clamp(12px, 2vw, 18px);
+      align-content: start;
+    }
+
+    @media (min-width: 760px) {
+      .app-main { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .hero, .tiles, .progress, .records, .usage-actions, .manual, #usageAlert { grid-column: 1 / -1; }
+      .trend, .details, .alerts-card, .install-card { grid-column: span 1; }
+    }
+
+    /* Session history and data alerts share a row on wide screens so the
+       records card stays compact; on phones they stack. */
+    .record-columns { display: grid; gap: 0 24px; }
+
+    @media (min-width: 760px) {
+      .record-columns { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+
+    .card {
+      position: relative;
+      min-width: 0;
+      padding: clamp(14px, 2.6vw, 22px);
+      border: 1px solid var(--app-stroke);
+      border-radius: var(--app-radius);
+      background: linear-gradient(180deg, rgba(17, 23, 38, 0.86), rgba(8, 11, 19, 0.93));
+      box-shadow: 0 18px 50px rgba(0, 0, 0, 0.35);
+      overflow: hidden;
+    }
+
+    .card::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border-radius: inherit;
+      pointer-events: none;
+      background: linear-gradient(120deg, rgba(0, 212, 255, 0.07), transparent 32%, transparent 68%, rgba(255, 47, 208, 0.06));
+    }
+
+    .card > * { position: relative; z-index: 1; }
+
+    .card-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 10px;
+      flex-wrap: wrap;
+    }
+
+    .card-head h2 {
+      margin: 0;
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 1rem;
+      font-weight: 400;
+      letter-spacing: 0.18em;
+      color: var(--app-text);
+    }
+
+    .card-head h2 + span { font-size: 0.68rem; }
+
+    .muted { color: var(--app-muted); }
+    .small { font-size: 0.72rem; line-height: 1.55; }
+
+    /* ── Hero ────────────────────────────────────────────────────────── */
+    .hero {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      align-items: center;
+      gap: clamp(16px, 3.2vw, 30px);
+    }
+
+    .hero-gauge {
+      position: relative;
+      width: clamp(142px, 33vw, 188px);
+      aspect-ratio: 1 / 1;
+      flex-shrink: 0;
+    }
+
+    .gauge { width: 100%; height: 100%; transform: rotate(-90deg); overflow: visible; }
+
+    .gauge-track { fill: none; stroke: rgba(255, 255, 255, 0.08); stroke-width: 12; }
+
+    .gauge-value {
+      fill: none;
+      stroke: url(#gauge-grad);
+      stroke-width: 12;
+      stroke-linecap: round;
+      stroke-dasharray: 527.79;
+      stroke-dashoffset: 527.79;
+      transition: stroke-dashoffset 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+      filter: drop-shadow(0 0 6px rgba(0, 212, 255, 0.45));
+    }
+
+    .gauge-value--unlimited {
+      stroke: url(#gauge-unlimited);
+      animation: gauge-spin 7s linear infinite;
+      transform-origin: 100px 100px;
+      filter: drop-shadow(0 0 8px rgba(255, 47, 208, 0.5));
+    }
+
+    @keyframes gauge-spin { to { transform: rotate(360deg); } }
+
+    .gauge-center {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 2px;
+      text-align: center;
+      padding: 0 12%;
+    }
+
+    .gauge-figure {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: clamp(1.45rem, 5.4vw, 2rem);
+      letter-spacing: 0.03em;
+      line-height: 1;
+      color: var(--app-text);
+      overflow-wrap: anywhere;
+    }
+
+    /* A drawn infinity rather than the ∞ glyph: Bebas Neue (and several
+       Android/iPhone fallback fonts) lack U+221E, so the text form rendered
+       as tofu on some phones. */
+    .gauge-infinity {
+      display: block;
+      width: clamp(54px, 15vw, 74px);
+      height: auto;
+      overflow: visible;
+      filter: drop-shadow(0 0 9px rgba(0, 212, 255, 0.4));
+    }
+
+    .gauge-infinity path {
+      fill: none;
+      stroke: url(#gauge-unlimited);
+      stroke-width: 3.2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .gauge-label { font-size: 0.56rem; letter-spacing: 0.3em; color: var(--app-muted); }
+
+    .hero-copy { min-width: 0; }
+
+    .eyebrow {
+      margin: 0 0 4px;
+      font-size: 0.6rem;
+      letter-spacing: 0.24em;
+      text-transform: uppercase;
+      color: var(--app-cyan);
+    }
+
+    .hero-title {
+      margin: 0 0 6px;
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: clamp(1.5rem, 4.6vw, 2.1rem);
+      font-weight: 400;
+      letter-spacing: 0.06em;
+      line-height: 1.05;
+      overflow-wrap: anywhere;
+    }
+
+    .hero-sub { margin: 0; font-size: 0.82rem; line-height: 1.5; color: var(--app-muted); }
+
+    .hero-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 6px; }
+
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--app-stroke);
       background: rgba(255, 255, 255, 0.04);
-      color: var(--text);
-      font-family: var(--font), sans-serif;
-      font-size: 0.95rem;
-      /* deliberately NOT text-transform:uppercase -- voucher PINs are issued
-         lowercase (see the migrate that ran lower(voucher_code) across every
-         table), and a forced-uppercase display made a correct PIN look wrong
-         and a paste of one fail the lookup. */
-      text-transform: none;
+      font-size: 0.6rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--app-muted);
+      white-space: nowrap;
     }
 
-    .usage-manual .field input:focus {
-      outline: none;
-      border-color: var(--cyan);
-      box-shadow: 0 0 0 2px rgba(0, 212, 255, 0.18);
+    .chip--plan { color: var(--app-cyan); border-color: rgba(0, 212, 255, 0.42); }
+    .chip--online { color: var(--app-green); border-color: rgba(37, 211, 102, 0.42); }
+    .chip--offline { color: #f87171; border-color: rgba(239, 68, 68, 0.42); }
+
+    .hero-updated { margin: 6px 0 0; font-size: 0.64rem; letter-spacing: 0.06em; color: var(--app-muted); }
+
+    /* ── Tiles ───────────────────────────────────────────────────────── */
+    .tiles {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
     }
 
-    .usage-actions { display: flex; flex-wrap: wrap; gap: 0.75rem; justify-content: center; margin-top: 1.5rem; }
+    @media (min-width: 560px) { .tiles { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
 
-    /* ── Advisory banner: exhausted / low / expired ───────────────────── */
+    .tile {
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      padding: 12px 14px;
+      border: 1px solid var(--app-stroke);
+      border-radius: 14px;
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.015));
+    }
+
+    .tile-label { font-size: 0.56rem; letter-spacing: 0.22em; color: var(--app-muted); text-transform: uppercase; }
+
+    .tile-value {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: clamp(1.2rem, 3.4vw, 1.55rem);
+      font-weight: 400;
+      letter-spacing: 0.03em;
+      color: var(--app-cyan);
+      line-height: 1.05;
+      overflow-wrap: anywhere;
+    }
+
+    .tile-value--sm { font-size: clamp(0.95rem, 2.6vw, 1.12rem); color: var(--app-text); }
+    .tile-value--unlimited { color: var(--app-cyan); text-shadow: 0 0 14px rgba(0, 212, 255, 0.35); }
+    .tile-value--warn { color: var(--app-amber); }
+    .tile-value--over { color: var(--app-red); }
+    .tile-foot { font-size: 0.6rem; line-height: 1.35; color: var(--app-muted); overflow-wrap: anywhere; }
+
+    /* ── Progress ────────────────────────────────────────────────────── */
+    .data-bar-track {
+      height: 12px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      overflow: hidden;
+    }
+
+    .data-bar-fill {
+      height: 100%;
+      width: 0;
+      border-radius: inherit;
+      background: linear-gradient(90deg, var(--app-cyan), var(--app-violet));
+      box-shadow: 0 0 18px rgba(0, 212, 255, 0.4);
+      transition: width 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .data-bar-fill--warn { background: linear-gradient(90deg, #ffd700, var(--app-amber)); box-shadow: 0 0 18px rgba(245, 166, 35, 0.4); }
+    .data-bar-fill--over { background: linear-gradient(90deg, #ff5f6d, #ff1744); box-shadow: 0 0 18px rgba(239, 68, 68, 0.45); }
+
+    .data-bar-fill--unlimited {
+      width: 100% !important;
+      background: linear-gradient(90deg, #00d4ff, #ff00ff, #00d4ff);
+      background-size: 200% 100%;
+      animation: usage-flow 3.2s linear infinite;
+      box-shadow: 0 0 14px rgba(255, 0, 255, 0.35);
+    }
+
+    @keyframes usage-flow { to { background-position: -200% 0; } }
+
+    .data-usage-pct--unlimited {
+      color: var(--app-cyan);
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-shadow: 0 0 12px rgba(0, 212, 255, 0.4);
+    }
+
+    .progress-foot {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px 14px;
+      flex-wrap: wrap;
+      margin-top: 9px;
+      font-size: 0.72rem;
+      color: var(--app-muted);
+    }
+
+    /* ── Trend ───────────────────────────────────────────────────────── */
+    .spark {
+      display: block;
+      width: 100%;
+      height: clamp(110px, 24vw, 168px);
+      margin: 2px 0 10px;
+      border-radius: 12px;
+      background: linear-gradient(180deg, rgba(0, 212, 255, 0.05), transparent);
+    }
+
+    .spark-grid { stroke: rgba(255, 255, 255, 0.07); stroke-width: 1; }
+    .spark-line { fill: none; stroke: url(#spark-grad); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+    .spark-area { fill: url(#spark-fill); }
+    .spark-dot { fill: #00d4ff; filter: drop-shadow(0 0 5px rgba(0, 212, 255, 0.8)); }
+    .spark-empty { fill: var(--app-muted); font-size: 12px; letter-spacing: 0.08em; }
+
+    .trend-stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(82px, 1fr));
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+
+    .trend-stats > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+
+    .trend-stats strong {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 1.02rem;
+      font-weight: 400;
+      letter-spacing: 0.04em;
+      color: var(--app-text);
+      overflow-wrap: anywhere;
+    }
+
+    /* ── Details ─────────────────────────────────────────────────────── */
+    .detail-list { margin: 0; padding: 0; display: grid; }
+
+    .detail-list > div {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 9px 0;
+      border-bottom: 1px dashed rgba(255, 255, 255, 0.07);
+      font-size: 0.78rem;
+    }
+
+    .detail-list > div:last-child { border-bottom: none; }
+    .detail-list dt { color: var(--app-muted); flex-shrink: 0; }
+    .detail-list dd { margin: 0; text-align: right; color: var(--app-text); overflow-wrap: anywhere; }
+
+    /* ── Records ─────────────────────────────────────────────────────── */
+    .record-group { margin-top: 12px; }
+
+    .record-group h3 {
+      margin: 0 0 8px;
+      font-size: 0.58rem;
+      font-weight: 600;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      color: var(--app-muted);
+    }
+
+    .record-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: grid;
+      gap: 6px;
+      max-height: 210px;
+      overflow: auto;
+      overscroll-behavior: contain;
+    }
+
+    .record-list li {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 8px 10px;
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.035);
+      font-size: 0.72rem;
+      color: var(--app-text);
+    }
+
+    .record-list li span:last-child { color: var(--app-muted); text-align: right; overflow-wrap: anywhere; }
+    .record-list li.is-empty { justify-content: flex-start; color: var(--app-muted); }
+
+    .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+
+    .chip-btn {
+      min-height: 40px;
+      padding: 8px 13px;
+      border: 1px solid var(--app-stroke);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.04);
+      color: var(--app-text);
+      font-family: inherit;
+      font-size: 0.7rem;
+      letter-spacing: 0.04em;
+      cursor: pointer;
+    }
+
+    .chip-btn--active { border-color: rgba(0, 212, 255, 0.55); box-shadow: 0 0 14px rgba(0, 212, 255, 0.18); }
+
+    .record-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+
+    /* ── Buttons ─────────────────────────────────────────────────────── */
+    .data-body .btn-primary,
+    .data-body .btn-secondary {
+      min-height: 44px;
+      padding: 0 18px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      border-radius: 12px;
+      font-family: 'Montserrat', sans-serif;
+      font-size: 0.76rem;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-decoration: none;
+      cursor: pointer;
+      transition: transform 0.15s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+    }
+
+    .data-body .btn-primary {
+      border: none;
+      color: #04121a;
+      background: linear-gradient(135deg, var(--app-cyan), #367cff);
+      box-shadow: 0 10px 26px rgba(0, 212, 255, 0.2);
+    }
+
+    .data-body .btn-secondary {
+      color: var(--app-text);
+      border: 1px solid var(--app-stroke);
+      background: rgba(255, 255, 255, 0.04);
+    }
+
+    .data-body .btn-primary:active,
+    .data-body .btn-secondary:active { transform: translateY(1px); }
+    .data-body .btn-primary:disabled,
+    .data-body .btn-secondary:disabled { opacity: 0.6; cursor: default; transform: none; }
+
+    .link-btn {
+      border: none;
+      background: transparent;
+      color: var(--app-cyan);
+      font-family: inherit;
+      font-size: 0.7rem;
+      letter-spacing: 0.06em;
+      cursor: pointer;
+      padding: 4px 0;
+      min-height: 40px;
+    }
+
+    .usage-actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
+    .usage-actions .btn-primary,
+    .usage-actions .btn-secondary { flex: 1 1 130px; }
+
+    /* ── Footer ──────────────────────────────────────────────────────── */
+    .app-foot {
+      margin-top: auto;
+      padding: 16px clamp(14px, 4vw, 32px) calc(16px + env(safe-area-inset-bottom, 0px));
+      border-top: 1px solid var(--app-stroke);
+      background: rgba(4, 6, 12, 0.6);
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px 18px;
+      font-size: 0.66rem;
+      letter-spacing: 0.06em;
+      color: var(--app-muted);
+    }
+
+    .app-foot nav { display: flex; flex-wrap: wrap; gap: 14px; }
+
+    .app-foot a { color: var(--app-muted); text-decoration: none; }
+    .app-foot a:hover { color: var(--app-cyan); }
+    .app-foot-note { letter-spacing: 0.18em; text-transform: uppercase; }
+
+    /* Old marketing footer, restored: it already carries its own responsive
+       grid, so it only needs a padded shell now that the app body has none. */
+    .data-foot-shell {
+      width: 100%;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding-inline: clamp(12px, 4vw, 32px);
+    }
+
+    .data-app .main-footer {
+      margin-top: clamp(1.25rem, 3vw, 2rem);
+      padding-top: clamp(2.5rem, 6vw, 5rem);
+      padding-bottom: clamp(1.25rem, 3vw, 2rem);
+    }
+
+    /* The WhatsApp FAB is part of the portal's identity. Keep it clear of the
+       last action row on phones. */
+    @media (max-width: 700px) {
+      .app-main { padding-bottom: calc(100px + env(safe-area-inset-bottom, 0px)); }
+    }
+
+    /* ── Advisory banner ─────────────────────────────────────────────── */
     .usage-alert {
       position: relative;
-      margin: 0 0 1rem;
+      margin: 0;
       padding: 1rem 1rem 0.95rem 1.15rem;
-      border-radius: var(--radius, 14px);
+      border-radius: var(--app-radius);
       border: 1px solid rgba(0, 212, 255, 0.4);
       background:
-        linear-gradient(160deg, rgba(10, 13, 23, 0.92), rgba(5, 5, 5, 0.92)),
+        linear-gradient(160deg, rgba(10, 13, 23, 0.94), rgba(5, 5, 5, 0.94)),
         radial-gradient(120% 80% at 0% 0%, rgba(106, 13, 173, 0.28), transparent 60%);
       box-shadow: 0 0 22px rgba(0, 212, 255, 0.16), inset 0 0 30px rgba(106, 13, 173, 0.12);
       text-align: left;
@@ -122,7 +782,6 @@
       animation: usage-alert-in 0.4s cubic-bezier(0.16, 1, 0.3, 1);
     }
 
-    /* Neon rail down the left edge — the Preyone signal stripe. */
     .usage-alert::before {
       content: '';
       position: absolute;
@@ -139,40 +798,35 @@
     .usage-alert--warn::before, .usage-toast--warn::before { background: linear-gradient(180deg, #ffd700, #f5a623); }
 
     .usage-alert__eyebrow {
+      margin: 0 0 0.3rem;
       font-family: 'Bebas Neue', sans-serif;
       font-size: 0.68rem;
       letter-spacing: 0.32em;
-      color: var(--cyan);
-      margin: 0 0 0.3rem;
+      color: var(--app-cyan);
     }
 
     .usage-alert--warn .usage-alert__eyebrow, .usage-toast--warn .usage-alert__eyebrow { color: #f5a623; }
     .usage-alert--over .usage-alert__eyebrow, .usage-toast--over .usage-alert__eyebrow { color: #ff6b81; }
 
     .usage-alert__title {
+      margin: 0 0 0.35rem;
       font-family: 'Bebas Neue', sans-serif;
       font-size: 1.2rem;
+      font-weight: 400;
       letter-spacing: 0.07em;
       color: #f8fbff;
-      margin: 0 0 0.35rem;
     }
 
-    .usage-alert__body {
-      font-size: 0.78rem;
-      line-height: 1.55;
-      color: var(--text-muted);
-      margin: 0 0 0.8rem;
-    }
-
+    .usage-alert__body { margin: 0 0 0.8rem; font-size: 0.78rem; line-height: 1.55; color: var(--app-muted); }
     .usage-alert__actions { display: flex; flex-wrap: wrap; gap: 0.6rem; }
-    .usage-alert__btn { font-size: 0.76rem; padding: 0.55rem 1.05rem; letter-spacing: 0.05em; }
+    .usage-alert__btn { font-size: 0.74rem; padding: 0.5rem 1rem; min-height: 42px; }
 
     @keyframes usage-alert-in {
       from { opacity: 0; transform: translateY(-8px); }
       to { opacity: 1; transform: translateY(0); }
     }
 
-    /* ── Transient threshold toast (glass + glow, futuristic genre) ───── */
+    /* ── Toast ───────────────────────────────────────────────────────── */
     .usage-toast {
       position: fixed;
       left: 50%;
@@ -205,13 +859,13 @@
 
     .usage-toast__close {
       position: absolute;
-      top: 0.35rem;
-      right: 0.45rem;
-      width: 2rem;
-      height: 2rem;
+      top: 0.3rem;
+      right: 0.35rem;
+      width: 2.2rem;
+      height: 2.2rem;
       border: none;
       background: transparent;
-      color: var(--text-muted);
+      color: var(--app-muted);
       font-size: 1.3rem;
       line-height: 1;
       cursor: pointer;
@@ -224,37 +878,139 @@
       to { opacity: 1; transform: translate(-50%, 0); }
     }
 
-    /* ── Unlimited bundles: a flowing signal, never a "full" bar ──────── */
-    .data-bar-fill--unlimited {
-      width: 100% !important;
-      background: linear-gradient(90deg, #00d4ff, #ff00ff, #00d4ff);
-      background-size: 200% 100%;
-      animation: usage-flow 3.2s linear infinite;
-      box-shadow: 0 0 14px rgba(255, 0, 255, 0.35);
+    /* ── Manual entry ────────────────────────────────────────────────── */
+    .manual h2 {
+      margin: 0 0 4px;
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 1.15rem;
+      font-weight: 400;
+      letter-spacing: 0.1em;
     }
 
-    @keyframes usage-flow { to { background-position: -200% 0; } }
+    .manual p { margin: 0 0 14px; }
 
-    .data-usage-pct--unlimited {
-      color: var(--cyan);
-      font-weight: 700;
-      letter-spacing: 0.12em;
-      text-shadow: 0 0 12px rgba(0, 212, 255, 0.4);
+    .manual .field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+
+    .manual label { font-size: 0.64rem; letter-spacing: 0.16em; text-transform: uppercase; color: var(--app-muted); }
+
+    .manual input {
+      width: 100%;
+      min-height: 50px;
+      padding: 0 14px;
+      border-radius: 12px;
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      background: rgba(255, 255, 255, 0.04);
+      color: var(--app-text);
+      font-family: 'Montserrat', sans-serif;
+      font-size: 1rem;
+      letter-spacing: 0.08em;
+      text-transform: none;
     }
 
+    .manual input:focus {
+      outline: none;
+      border-color: var(--app-cyan);
+      box-shadow: 0 0 0 2px rgba(0, 212, 255, 0.18);
+    }
+
+    /* Voucher codes are 6 alphanumeric characters; the hint reads as small
+       caps so it matches the PIN shape without shouting. */
+    .manual input#manualVoucher::placeholder {
+      font-variant-caps: all-small-caps;
+      text-transform: lowercase;
+      letter-spacing: 0.22em;
+      color: rgba(242, 247, 255, 0.42);
+    }
+
+    .field-error { min-height: 1em; font-size: 0.72rem; color: #f87171; }
+
+    .manual-adv { margin-top: 4px; border-top: 1px dashed rgba(255, 255, 255, 0.08); padding-top: 10px; }
+
+    .manual-adv summary {
+      cursor: pointer;
+      min-height: 40px;
+      display: flex;
+      align-items: center;
+      font-size: 0.66rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--app-muted);
+      list-style: none;
+    }
+
+    .manual-adv summary::-webkit-details-marker { display: none; }
+    .manual-adv summary::before { content: '+'; margin-right: 8px; color: var(--app-cyan); font-weight: 700; }
+    .manual-adv[open] summary::before { content: '−'; }
+    .manual-adv .hint { font-size: 0.66rem; color: var(--app-muted); }
+
+    /* ── Responsive refinements ──────────────────────────────────────── */
+    @media (max-width: 640px) {
+      .record-list { max-height: clamp(170px, 34vh, 240px); }
+    }
+
+    @media (max-width: 520px) {
+      .hero { grid-template-columns: minmax(0, 1fr); justify-items: center; text-align: center; }
+      .hero-copy { width: 100%; }
+      .hero-chips { justify-content: center; }
+      .hero-updated { text-align: center; }
+      .app-brand-text small { display: none; }
+      .usage-actions .btn-primary, .usage-actions .btn-secondary { flex: 1 1 100%; }
+      .card-head { align-items: center; }
+    }
+
+    /* 320–380px phones: keep the app bar on one line and let the denser
+       blocks fall back to two columns instead of squeezing three. */
+    @media (max-width: 380px) {
+      .app-bar { gap: 6px; padding-left: 10px; padding-right: 10px; }
+      .app-brand img { height: 26px; }
+      .app-brand-text strong { font-size: 0.95rem; letter-spacing: 0.1em; }
+      .usage-badge { font-size: 0.52rem; letter-spacing: 0.1em; padding: 0.28rem 0.46rem; }
+      .tiles { gap: 8px; }
+      .tile { padding: 10px 11px; }
+      .trend-stats { gap: 6px; }
+      .record-actions .btn-secondary,
+      .record-actions .btn-primary { flex: 1 1 100%; }
+    }
+
+    @media (min-width: 1440px) {
+      .app-main { max-width: 1200px; }
+      .data-header { max-width: 1200px; }
+      .data-nav-inner { max-width: 1200px; }
+    }
+
+    /* Phones held sideways: reclaim vertical space and drop the sticky bar. */
+    @media (max-height: 520px) and (orientation: landscape) {
+      .hero-gauge { width: clamp(96px, 24vh, 136px); }
+      .app-main { padding-top: 10px; }
+      .app-bar { position: static; }
+    }
+
+    /* ── Motion / print ──────────────────────────────────────────────── */
     @media (prefers-reduced-motion: reduce) {
       .usage-toast, .usage-alert { animation: none; }
-      .data-bar-fill--unlimited { animation: none; }
+      .data-bar-fill--unlimited, .gauge-value--unlimited { animation: none; }
+      .gauge-value, .data-bar-fill { transition: none; }
+      .data-nav { transition: none; }
+      .wifi-success::before, .wifi-success::after { animation: none; opacity: 0; }
     }
 
-    @media (max-width: 480px) {
-      .status-grid { grid-template-columns: 1fr; gap: 0.75rem; padding: 1rem; }
-      .usage-metric-value { font-size: 1.2rem; }
+    @media print {
+      .app-bar, .portal-header, .data-top, .data-nav, .usage-actions, .install-card, .alerts-card, .record-actions,
+      .whatsapp-fab, .app-foot, .portal-footer, .usage-toast, #bootLoading, .link-btn { display: none !important; }
+      .data-body { background: #fff !important; color: #000 !important; }
+      .card { background: #fff !important; border-color: #ddd !important; box-shadow: none !important; break-inside: avoid; }
+      .card::after { display: none !important; }
+      .app-main { display: block !important; padding: 0 !important; }
+      .card { margin-bottom: 12px; }
+      .tile-value, .gauge-figure, .hero-title, .card-head h2 { color: #000 !important; text-shadow: none !important; }
+      .muted, .tile-foot, .detail-list dt, .tile-label { color: #555 !important; }
+      .record-list { max-height: none !important; overflow: visible !important; }
+      .spark { background: #fff !important; }
     }
   </style>
 </head>
 
-<body class="portal-body">
+<body class="portal-body data-body">
   <style>#bootLoading{animation:boot-failsafe .4s ease 8s forwards}@keyframes boot-failsafe{to{opacity:0;visibility:hidden;pointer-events:none}}</style>
   <div class="body-loading" id="bootLoading" role="status" aria-live="polite">
     <div class="loading-spinner">
@@ -264,51 +1020,71 @@
     </div>
     <div class="loading-text">Loading data usage…</div>
   </div>
-  <svg aria-hidden="true" style="position:absolute;width:0;height:0">
+
+  <svg aria-hidden="true" width="0" height="0" style="position:absolute">
     <defs>
-      <linearGradient id="ring-grad" x1="0%" y1="0%" x2="100%" y2="100%">
-        <stop offset="0%" stop-color="#71ff2f" />
-        <stop offset="50%" stop-color="#13d8ff" />
-        <stop offset="100%" stop-color="#367cff" />
+      <linearGradient id="gauge-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#00d4ff" />
+        <stop offset="55%" stop-color="#367cff" />
+        <stop offset="100%" stop-color="#ff2fd0" />
+      </linearGradient>
+      <linearGradient id="gauge-unlimited" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#00d4ff" />
+        <stop offset="50%" stop-color="#ff2fd0" />
+        <stop offset="100%" stop-color="#00d4ff" />
+      </linearGradient>
+      <linearGradient id="spark-grad" x1="0%" y1="0%" x2="100%" y2="0%">
+        <stop offset="0%" stop-color="#00d4ff" />
+        <stop offset="100%" stop-color="#ff2fd0" />
+      </linearGradient>
+      <linearGradient id="spark-fill" x1="0%" y1="0%" x2="0%" y2="100%">
+        <stop offset="0%" stop-color="#00d4ff" stop-opacity="0.28" />
+        <stop offset="100%" stop-color="#00d4ff" stop-opacity="0" />
+      </linearGradient>
+      <linearGradient id="wifi-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#25d366" />
+        <stop offset="55%" stop-color="#00d4ff" />
+        <stop offset="100%" stop-color="#a855f7" />
       </linearGradient>
     </defs>
   </svg>
 
-  <!-- Sticky Header -->
-  <header class="portal-header">
-    <div class="brand-banner">
-      <img src="/images/preyonenoneglow-logo-optimized.png" alt="Preyone" class="brand-logo-img" width="1200"
-        height="600" decoding="async" />
-    </div>
-    <div class="brand-eyebrow">
-      <span class="brand-signature">Fadaya nePreyone UltraNet Wifi</span>
-    </div>
-  </header>
-
-  <main class="portal-shell">
-
-    <!-- Header card -->
-    <div class="card card--success">
-      <div class="brand">
-        <div class="success-icon-wrapper">
-          <svg class="wifi-icon--success" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-            <path d="M5 12.55a11 11 0 0 1 14.08 0" />
-            <path d="M1.42 9a16 16 0 0 1 21.16 0" />
-            <path d="M8.53 16.11a6 6 0 0 1 6.95 0" />
-            <line x1="12" y1="20" x2="12.01" y2="20" />
-          </svg>
+  <div class="data-app">
+    <!-- Sticky brand header: the status strip and the old banner/signature
+         stay on screen; the banner compacts once the page scrolls. -->
+    <div class="data-top" id="dataTop">
+      <div class="data-nav" id="dataNav">
+        <div class="data-nav-inner">
+          <div class="data-nav-actions">
+            <span class="wifi-success" id="wifiState" hidden aria-hidden="true">
+              <svg class="wifi-icon--success" viewBox="0 0 24 24" fill="none" stroke="url(#wifi-grad)" stroke-width="3">
+                <path d="M5 12.55a11 11 0 0 1 14.08 0" />
+                <path d="M1.42 9a16 16 0 0 1 21.16 0" />
+                <path d="M8.53 16.11a6 6 0 0 1 6.95 0" />
+                <circle cx="12" cy="20" r="1" fill="currentColor" stroke="none" />
+              </svg>
+            </span>
+            <span class="usage-badge" id="netBadge">CONNECTING…</span>
+          </div>
         </div>
-        <h1>DATA USAGE</h1>
-        <p class="subtitle">Live bundle balance for your Preyone UltraNet session.</p>
       </div>
 
-      <div class="usage-meta-row">
-        <span class="usage-badge" id="netBadge">CONNECTING…</span>
-        <span id="metaVoucher" style="display:none">VOUCHER ••••<span id="metaVoucherTail"></span></span>
-        <span id="metaTier" style="display:none"></span>
-      </div>
+      <header class="portal-header data-header">
+        <div class="brand-banner">
+          <a href="/" aria-label="Preyone UltraNet home">
+            <img src="/images/preyonenoneglow-logo-optimized.png" alt="Preyone UltraNet"
+              class="brand-logo-img" width="1200" height="600" decoding="async" />
+          </a>
+        </div>
+        <div class="brand-eyebrow">
+          <span class="brand-signature">Fadaya nePreyone UltraNet Wifi</span>
+        </div>
+      </header>
+    </div>
 
-      <!-- Advisory banner: exhausted / low / expired, with the buy path -->
+    <main class="app-main">
+
+      <!-- Advisory banner: exhausted / low / ended, with the buy path -->
       <section id="usageAlert" class="usage-alert" hidden aria-live="polite">
         <p class="usage-alert__eyebrow">ULTRANET ALERT</p>
         <h2 class="usage-alert__title" id="alertTitle"></h2>
@@ -319,258 +1095,372 @@
         </div>
       </section>
 
-      <!-- Metric cards: Used / Remaining / Total -->
-      <div class="status-grid">
-        <div class="status-item">
-          <span class="label">USED</span>
-          <span class="value usage-metric-value" id="metricUsed">—</span>
-        </div>
-        <div class="status-item">
-          <span class="label">REMAINING</span>
-          <span class="value usage-metric-value" id="metricRemaining">—</span>
-        </div>
-        <div class="status-item">
-          <span class="label">TOTAL MB</span>
-          <span class="value usage-metric-value" id="metricTotal">—</span>
-        </div>
-      </div>
-
-      <!-- Progress bar -->
-      <div class="data-usage-section">
-        <div class="data-usage-header">
-          <span class="data-usage-label">BUNDLE CONSUMED</span>
-          <span class="data-usage-numbers" id="dataUsageNumbers">— / —</span>
-        </div>
-        <div class="data-bar-track">
-          <div class="data-bar-fill" id="dataBarFill" style="width:0%"></div>
-        </div>
-        <div class="data-usage-footer">
-          <span id="dataUsagePct">0%</span>
-          <span id="dataUsageRemaining">— remaining</span>
-        </div>
-      </div>
-
-      <!-- Session details -->
-      <div class="session-details">
-        <div class="detail-row">
-          <span class="detail-label">Status</span>
-          <span class="detail-value" id="detailStatus">—</span>
-        </div>
-        <div class="detail-row">
-          <span class="detail-label">Session Expires</span>
-          <span class="detail-value" id="detailExpires">—</span>
-        </div>
-        <div class="detail-row">
-          <span class="detail-label">Network</span>
-          <span class="detail-value">Preyone UltraNet Wi-Fi</span>
-        </div>
-      </div>
-
-      <!-- Install App -->
-      <div class="usage-install-row">
-        <button type="button" id="installBtn" class="btn-primary" hidden>INSTALL APP</button>
-        <p id="installHint" class="subtitle" style="margin:0.75rem 0 0;display:none">
-          Add Preyone WiFi to your home screen for one-tap usage checks.
-        </p>
-      </div>
-
-      <!-- Manual fallback (shown when no mac/voucher available) -->
-      <section id="manualSection" class="usage-manual" hidden>
-        <h2>ENTER YOUR VOUCHER</h2>
-        <p class="hint">We couldn't detect your session. Type the voucher PIN from your SMS or receipt to see your
-          balance.</p>
+      <!-- Manual fallback, placed directly under the banner: when a stored
+           PIN dies (or the gateway withholds one) this is the next thing the
+           customer needs, not something below the install card. The gateway
+           passes the MAC automatically, so only the PIN is asked for. -->
+      <section id="manualSection" class="card manual" hidden>
+        <h2>Enter your voucher</h2>
+        <p class="muted small">We couldn't detect your session. Type the voucher PIN from your SMS or receipt to see your balance and records.</p>
         <form id="manualForm" novalidate>
           <div class="field">
             <label for="manualVoucher">Voucher PIN</label>
             <input id="manualVoucher" name="voucher" type="text" inputmode="text" autocomplete="off"
-              autocapitalize="none" spellcheck="false" placeholder="e.g. preyone-abcd1234" required />
+              autocapitalize="none" spellcheck="false" maxlength="6" minlength="6"
+              placeholder="abc123" required />
             <span class="field-error" id="manualError"></span>
-          </div>
-          <div class="field">
-            <label for="manualMac">Device MAC <span style="opacity:.6">(optional)</span></label>
-            <input id="manualMac" name="mac" type="text" inputmode="text" autocomplete="off" spellcheck="false"
-              placeholder="AA:BB:CC:DD:EE:FF" />
           </div>
           <button type="submit" class="btn-primary" style="width:100%">CHECK USAGE</button>
         </form>
+
+        <!-- The gateway passes client_mac automatically, so this is not a
+             credential and never has to be typed. It stays behind a
+             disclosure for the rare network that withholds it: without a MAC
+             the API can still report the voucher's own usage, only the
+             per-station "online now" signal is lost. -->
+        <details class="manual-adv">
+          <summary>Advanced: device MAC (optional)</summary>
+          <div class="field" style="margin-top:10px">
+            <label for="manualMac">Device MAC address</label>
+            <input id="manualMac" name="mac" type="text" inputmode="text" autocomplete="off"
+              autocapitalize="none" spellcheck="false" placeholder="e.g. A4:2B:8C:1D:2E:3F" />
+            <span class="field-error" id="manualMacError"></span>
+          </div>
+        </details>
+      </section>
+
+      <!-- Hero: gauge + plan identity -->
+      <section class="card hero" aria-label="Bundle overview">
+        <div class="hero-gauge">
+          <svg class="gauge" viewBox="0 0 200 200" role="img" aria-label="Bundle usage">
+            <circle class="gauge-track" cx="100" cy="100" r="84"></circle>
+            <circle class="gauge-value" id="gaugeValue" cx="100" cy="100" r="84"></circle>
+          </svg>
+          <div class="gauge-center">
+            <span class="gauge-figure" id="gaugeFigure">—</span>
+            <svg class="gauge-infinity" id="gaugeInfinity" viewBox="0 0 64 32" role="img"
+              aria-label="Unlimited data" hidden>
+              <path d="M32 16 C32 8 24 4 17 4 C7 4 2 10 2 16 C2 22 7 28 17 28 C24 28 32 24 32 16 C32 8 40 4 47 4 C57 4 62 10 62 16 C62 22 57 28 47 28 C40 28 32 24 32 16 Z" />
+            </svg>
+            <span class="gauge-label" id="gaugeLabel">USED</span>
+          </div>
+        </div>
+        <div class="hero-copy">
+          <p class="eyebrow" id="metaTier">PREYONE ULTRANET</p>
+          <h1 class="hero-title" id="heroTitle">Your data</h1>
+          <p class="hero-sub" id="heroSub">Checking your session…</p>
+          <div class="hero-chips">
+            <span class="chip" id="metaVoucher" style="display:none">PIN ••••<span id="metaVoucherTail"></span></span>
+            <span class="chip chip--plan" id="planChip" hidden>UNLIMITED</span>
+            <span class="chip" id="chipOnline" hidden>● ONLINE</span>
+          </div>
+          <p class="hero-updated" aria-live="polite"><span id="lastUpdated">Waiting for first update…</span></p>
+        </div>
+      </section>
+
+      <!-- Summary tiles -->
+      <section class="tiles" aria-label="Bundle summary">
+        <div class="tile">
+          <span class="tile-label">Used</span>
+          <strong class="tile-value" id="metricUsed">—</strong>
+          <span class="tile-foot" id="tileUsedFoot"></span>
+        </div>
+        <div class="tile">
+          <span class="tile-label">Remaining</span>
+          <strong class="tile-value" id="metricRemaining">—</strong>
+          <span class="tile-foot" id="tileRemainingFoot"></span>
+        </div>
+        <div class="tile">
+          <span class="tile-label">Total</span>
+          <strong class="tile-value" id="metricTotal">—</strong>
+          <span class="tile-foot" id="tileTotalFoot"></span>
+        </div>
+        <div class="tile">
+          <span class="tile-label">Expires</span>
+          <strong class="tile-value tile-value--sm" id="metricExpires">—</strong>
+          <span class="tile-foot" id="tileExpiresFoot"></span>
+        </div>
+      </section>
+
+      <!-- Progress -->
+      <section class="card progress" aria-label="Bundle consumption">
+        <div class="card-head">
+          <h2>Bundle consumed</h2>
+          <span id="dataUsagePct">0%</span>
+        </div>
+        <div class="data-bar-track">
+          <div class="data-bar-fill" id="dataBarFill" style="width:0%"></div>
+        </div>
+        <div class="progress-foot">
+          <span id="dataUsageNumbers">— / —</span>
+          <span id="dataUsageRemaining">— remaining</span>
+        </div>
+      </section>
+
+      <!-- Usage trend recorded on this device -->
+      <section class="card trend" aria-label="Usage trend">
+        <div class="card-head">
+          <h2>Usage trend</h2>
+          <span class="muted" id="trendRange">collecting…</span>
+        </div>
+        <svg id="trendChart" class="spark" viewBox="0 0 600 180" preserveAspectRatio="none" role="img"
+          aria-label="Recorded usage over time"></svg>
+        <div class="trend-stats">
+          <div><span class="tile-label">This record</span><strong id="trendDelta">—</strong></div>
+          <div><span class="tile-label">Today</span><strong id="trendToday">—</strong></div>
+          <div><span class="tile-label">Samples</span><strong id="trendSamples">0</strong></div>
+        </div>
+        <p class="muted small">Recorded on this device while the app is open, sampled every 15 seconds. The trend shows how fast the bundle is moving.</p>
+      </section>
+
+      <!-- Session details -->
+      <section class="card details" aria-label="Session details">
+        <div class="card-head">
+          <h2>Session</h2>
+          <span class="muted" id="detailSource"></span>
+        </div>
+        <dl class="detail-list">
+          <div><dt>Status</dt><dd id="detailStatus">—</dd></div>
+          <div><dt>Activated</dt><dd id="detailActivated">—</dd></div>
+          <div><dt>Expires</dt><dd id="detailExpires">—</dd></div>
+          <div><dt>Time left</dt><dd id="detailTimeLeft">—</dd></div>
+          <div><dt>Data cap</dt><dd id="detailCap">—</dd></div>
+          <div><dt>Devices</dt><dd id="detailDevices">—</dd></div>
+          <div><dt>Network</dt><dd>Preyone UltraNet Wi-Fi</dd></div>
+        </dl>
+      </section>
+
+      <!-- Records: saved vouchers, sessions, alerts, export -->
+      <section class="card records" aria-label="Records">
+        <div class="card-head">
+          <h2>Records</h2>
+          <button class="link-btn" id="exportBtn" type="button">EXPORT CSV</button>
+        </div>
+
+        <div class="record-group record-group--saved">
+          <h3>Saved vouchers</h3>
+          <div id="savedVouchers" class="chips"></div>
+        </div>
+
+        <div class="record-columns">
+          <div class="record-group record-group--sessions">
+            <h3>Session history</h3>
+            <ul id="sessionHistory" class="record-list">
+              <li class="is-empty">No sessions recorded yet.</li>
+            </ul>
+          </div>
+
+          <div class="record-group record-group--alerts">
+            <h3>Data alerts</h3>
+            <ul id="alertHistory" class="record-list">
+              <li class="is-empty">No alerts yet.</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="record-actions">
+          <button type="button" class="btn-secondary" id="copyBtn">COPY SUMMARY</button>
+          <button type="button" class="btn-secondary" id="printBtn">PRINT RECEIPT</button>
+        </div>
+      </section>
+
+      <!-- Alerts opt-in -->
+      <section class="card alerts-card" aria-label="Data alerts">
+        <div class="card-head">
+          <h2>Data alerts</h2>
+          <span class="muted">Push + in-app</span>
+        </div>
+        <p class="muted small">Get a nudge at 80% and 95% of a capped bundle, and the moment it runs out. Unlimited plans are never warned about a cap.</p>
+        <p class="muted small" id="alertChannel"></p>
+        <button type="button" id="alertsBtn" class="btn-primary" hidden>ENABLE DATA ALERTS</button>
+      </section>
+
+      <!-- Install -->
+      <section class="card install-card" aria-label="Install app">
+        <div class="card-head">
+          <h2>Install app</h2>
+          <span class="muted">Home screen</span>
+        </div>
+        <p class="muted small" id="installHint" style="display:none"></p>
+        <button type="button" id="installBtn" class="btn-secondary" hidden>INSTALL APP</button>
       </section>
 
       <div class="usage-actions">
-        <button type="button" id="refreshBtn" class="btn-secondary">REFRESH</button>
-        <button type="button" id="alertsBtn" class="btn-secondary" hidden>ENABLE DATA ALERTS</button>
-        <a href="/" class="btn-secondary">BACK TO PORTAL</a>
+        <button type="button" id="refreshBtn" class="btn-primary">REFRESH</button>
+        <a href="/#packages-section" class="btn-secondary">BUY DATA</a>
+        <a href="/" class="btn-secondary">PORTAL</a>
       </div>
-    </div>
 
-  </main>
+    </main>
 
-  <div class="portal-shell">
-    <footer class="portal-footer main-footer">
-            <div class="footer-grid">
-              <div class="footer-col brand-col">
-                <a aria-label="Preyone — home" href="https://wifi.preyone.com/" target="_blank" rel="noopener noreferrer">
-                  <img
-                    src="/images/preyonelogomainzw.png"
-                    alt="Preyone"
-                    class="footer-brand-mark"
-                    width="2048"
-                    height="1140"
-                    loading="lazy"
-                    decoding="async"
-                  />
+    <div class="portal-shell data-foot-shell">
+      <footer class="portal-footer main-footer">
+        <div class="footer-grid">
+          <div class="footer-col brand-col">
+            <a aria-label="Preyone — home" href="/">
+              <img
+                src="/images/preyonelogomainzw.png"
+                alt="Preyone"
+                class="footer-brand-mark"
+                width="2048"
+                height="1140"
+                loading="eager"
+                decoding="async"
+              />
+            </a>
+            <p class="footer-tagline">
+              High-speed satellite connectivity across Zimbabwe. Powered by Starlink Business
+              Priority infrastructure.
+            </p>
+          </div>
+
+          <div class="footer-col">
+            <h3>GET IN TOUCH</h3>
+            <div class="footer-contact-cards">
+              <a href="mailto:support@preyone.com" class="footer-card glass">
+                <span class="footer-card-icon footer-card-icon--cyan">
+                  <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="m22 7-8.991 5.727a2 2 0 0 1-2.009 0L2 7"></path>
+                    <rect x="2" y="4" width="20" height="16" rx="2"></rect>
+                  </svg>
+                </span>
+                <span class="footer-card-text">
+                  <span class="footer-card-label">Email</span>
+                  <span class="footer-card-value">support@preyone.com</span>
+                </span>
+              </a>
+              <a href="tel:+263771327202" class="footer-card glass">
+                <span class="footer-card-icon footer-card-icon--cyan">
+                  <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M13.832 16.568a1 1 0 0 0 1.213-.303l.355-.465A2 2 0 0 1 17 15h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2A18 18 0 0 1 2 4a2 2 0 0 1 2-2h3a2 2 0 0 1 2 2v3a2 2 0 0 1-.8 1.6l-.468.351a1 1 0 0 0-.292 1.233 14 14 0 0 0 6.392 6.384"></path>
+                  </svg>
+                </span>
+                <span class="footer-card-text">
+                  <span class="footer-card-label">Call Us</span>
+                  <span class="footer-card-value">+263 771 327 202</span>
+                </span>
+              </a>
+
+              <div class="footer-card glass">
+                <span class="footer-card-icon footer-card-icon--violet">
+                  <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0"></path>
+                    <circle cx="12" cy="10" r="3"></circle>
+                  </svg>
+                </span>
+                <span class="footer-card-text">
+                  <span class="footer-card-label">Location</span>
+                  <span class="footer-card-value">Harare, Zimbabwe</span>
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div class="footer-col footer-col--links">
+            <h3>QUICK LINKS</h3>
+            <ul class="footer-links">
+              <li>
+                <a href="/data">
+                  <svg class="icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M21 12a9 9 0 1 1-9-9" />
+                    <polyline points="21 3 21 9 15 9" />
+                    <path d="M12 7v5l3 3" />
+                  </svg>
+                  Check My Data
                 </a>
-                <p class="footer-tagline">
-                  High-speed satellite connectivity across Zimbabwe. Powered by Starlink Business
-                  Priority infrastructure.
-                </p>
-              </div>
+              </li>
+              <li>
+                <a href="/site/" target="_blank" rel="noopener">
+                  <svg class="icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <circle cx="12" cy="12" r="10" />
+                    <line x1="2" y1="12" x2="22" y2="12" />
+                    <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+                  </svg>
+                  Main Website
+                </a>
+              </li>
+              <li>
+                <a href="/terms.html" target="_blank" rel="noopener">
+                  <svg class="icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                    <polyline points="14 2 14 8 20 8" />
+                    <line x1="16" y1="13" x2="8" y2="13" />
+                    <line x1="16" y1="17" x2="8" y2="17" />
+                  </svg>
+                  Terms of Service
+                </a>
+              </li>
+              <li>
+                <a href="/#packages-section">
+                  <svg class="icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <rect x="3" y="3" width="7" height="7" rx="1" />
+                    <rect x="14" y="3" width="7" height="7" rx="1" />
+                    <rect x="3" y="14" width="7" height="7" rx="1" />
+                    <rect x="14" y="14" width="7" height="7" rx="1" />
+                  </svg>
+                  View Packages
+                </a>
+              </li>
+            </ul>
+          </div>
 
-              <div class="footer-col">
-                <h3>GET IN TOUCH</h3>
-                <div class="footer-contact-cards">
-                  <a href="mailto:support@preyone.com" class="footer-card glass">
-                    <span class="footer-card-icon footer-card-icon--cyan">
-                      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                        <path d="m22 7-8.991 5.727a2 2 0 0 1-2.009 0L2 7"></path>
-                        <rect x="2" y="4" width="20" height="16" rx="2"></rect>
-                      </svg>
-                    </span>
-                    <span class="footer-card-text">
-                      <span class="footer-card-label">Email</span>
-                      <span class="footer-card-value">support@preyone.com</span>
-                    </span>
-                  </a>
-                  <a href="tel:+263771327202" class="footer-card glass">
-                    <span class="footer-card-icon footer-card-icon--cyan">
-                      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                        <path d="M13.832 16.568a1 1 0 0 0 1.213-.303l.355-.465A2 2 0 0 1 17 15h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2A18 18 0 0 1 2 4a2 2 0 0 1 2-2h3a2 2 0 0 1 2 2v3a2 2 0 0 1-.8 1.6l-.468.351a1 1 0 0 0-.292 1.233 14 14 0 0 0 6.392 6.384"></path>
-                      </svg>
-                    </span>
-                    <span class="footer-card-text">
-                      <span class="footer-card-label">Call Us</span>
-                      <span class="footer-card-value">+263 771 327 202</span>
-                    </span>
-                  </a>
+          <div class="footer-col">
+            <h3>FOLLOW US</h3>
+            <div class="footer-follow-panel glass">
+              <div class="footer-follow-links">
 
-                  <div class="footer-card glass">
-                    <span class="footer-card-icon footer-card-icon--violet">
-                      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                        <path d="M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0"></path>
-                        <circle cx="12" cy="10" r="3"></circle>
-                      </svg>
-                    </span>
-                    <span class="footer-card-text">
-                      <span class="footer-card-label">Location</span>
-                      <span class="footer-card-value">Harare, Zimbabwe</span>
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              <div class="footer-col footer-col--links">
-                <h3>QUICK LINKS</h3>
-                <ul class="footer-links">
-                  <li>
-                    <a href="https://wifi.preyone.com/data">
-                      <svg class="icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                        <path d="M21 12a9 9 0 1 1-9-9" />
-                        <polyline points="21 3 21 9 15 9" />
-                        <path d="M12 7v5l3 3" />
-                      </svg>
-                      Check My Data
-                    </a>
-                  </li>
-                  <li>
-                    <a href="https://wifi.preyone.com/site/" target="_blank" rel="noopener">
-                      <svg class="icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                        <circle cx="12" cy="12" r="10" />
-                        <line x1="2" y1="12" x2="22" y2="12" />
-                        <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
-                      </svg>
-                      Main Website
-                    </a>
-                  </li>
-                  <li>
-                    <a href="https://wifi.preyone.com/terms.html" target="_blank" rel="noopener">
-                      <svg class="icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                        <polyline points="14 2 14 8 20 8" />
-                        <line x1="16" y1="13" x2="8" y2="13" />
-                        <line x1="16" y1="17" x2="8" y2="17" />
-                      </svg>
-                      Terms of Service
-                    </a>
-                  </li>
-                  <li>
-                    <a href="https://wifi.preyone.com/#packages-heading">
-                      <svg class="icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                        <rect x="3" y="3" width="7" height="7" rx="1" />
-                        <rect x="14" y="3" width="7" height="7" rx="1" />
-                        <rect x="3" y="14" width="7" height="7" rx="1" />
-                        <rect x="14" y="14" width="7" height="7" rx="1" />
-                      </svg>
-                      View Packages
-                    </a>
-                  </li>
-                </ul>
-              </div>
-
-              <div class="footer-col">
-                <h3>FOLLOW US</h3>
-                <div class="footer-follow-panel glass">
-                  <div class="footer-follow-links">
-
-                    <a href="https://www.facebook.com/preyoneenterprise" class="social-icon social-icon-facebook" title="Facebook" target="_blank" rel="noopener">
-                      <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
-                        <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
-                      </svg>
-                    </a>
-                    <a href="https://www.instagram.com/preyoneenterprise" class="social-icon social-icon-instagram" title="Instagram" target="_blank" rel="noopener">
-                      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <rect x="2" y="2" width="20" height="20" rx="5" ry="5" />
-                        <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z" />
-                        <line x1="17.5" y1="6.5" x2="17.51" y2="6.5" />
-                      </svg>
-                    </a>
-                    <a href="https://x.com/preyonetech" class="social-icon social-icon-x" title="X (Twitter)" target="_blank" rel="noopener">
-                      <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
-                        <path d="M18.901 1.153h3.68l-8.04 9.19L24 22.846h-7.406l-5.8-7.584-6.638 7.584H.474l8.6-9.83L0 1.154h7.594l5.243 6.932 6.064-6.932zm-1.292 19.494h2.039L6.486 3.24H4.298l13.311 17.407z" />
-                      </svg>
-                    </a>
-                    <a href="https://youtube.com/@preyonenterprises" class="social-icon social-icon-youtube" title="YouTube" target="_blank" rel="noopener">
-                      <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
-                        <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0.502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" />
-                      </svg>
-                    </a>
-                  </div>
-                </div>
+                <a href="https://www.facebook.com/preyoneenterprise" class="social-icon social-icon-facebook" title="Facebook" target="_blank" rel="noopener">
+                  <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+                    <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
+                  </svg>
+                </a>
+                <a href="https://www.instagram.com/preyoneenterprise" class="social-icon social-icon-instagram" title="Instagram" target="_blank" rel="noopener">
+                  <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="2" y="2" width="20" height="20" rx="5" ry="5" />
+                    <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z" />
+                    <line x1="17.5" y1="6.5" x2="17.51" y2="6.5" />
+                  </svg>
+                </a>
+                <a href="https://x.com/preyonetech" class="social-icon social-icon-x" title="X (Twitter)" target="_blank" rel="noopener">
+                  <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+                    <path d="M18.901 1.153h3.68l-8.04 9.19L24 22.846h-7.406l-5.8-7.584-6.638 7.584H.474l8.6-9.83L0 1.154h7.594l5.243 6.932 6.064-6.932zm-1.292 19.494h2.039L6.486 3.24H4.298l13.311 17.407z" />
+                  </svg>
+                </a>
+                <a href="https://youtube.com/@preyonenterprises" class="social-icon social-icon-youtube" title="YouTube" target="_blank" rel="noopener">
+                  <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+                    <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0.502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" />
+                  </svg>
+                </a>
               </div>
             </div>
+          </div>
+        </div>
 
-            <div class="footer-bottom">
-              <div class="legal-row">
-                <p>&copy; <span id="current-year"></span> Preyone Enterprises. All Rights Reserved.</p>
-                <div class="payment-badges">
-                  <span class="secure-pay-label">Secure Payments</span>
-                  <span class="pay-logos pay-logos--footer">
+        <div class="footer-bottom">
+          <div class="legal-row">
+            <p>&copy; <span id="current-year"></span> Preyone Enterprises. All Rights Reserved.</p>
+            <div class="payment-badges">
+              <span class="secure-pay-label">Secure Payments</span>
+              <span class="pay-logos pay-logos--footer">
 
-                    <span class="pay-logo pay-logo--img">
-                      <img src="/img/pay/ecocash.png?v=41" alt="EcoCash" loading="eager"
-                        decoding="async" width="1329" height="244" />
-                    </span>
-                    <span class="pay-logo pay-logo--img">
-                      <img src="/img/pay/innbucks.png?v=41" alt="InnBucks" loading="eager"
-                        decoding="async" width="631" height="134" />
-                    </span>
-                    <span class="pay-logo pay-logo--img">
-                      <img src="/img/pay/omari.webp?v=41" alt="O'mari" loading="eager"
-                        decoding="async" />
-                    </span>
-                  </span>
-                </div>
-              </div>
+                <span class="pay-logo pay-logo--img">
+                  <img src="/img/pay/ecocash.png?v=41" alt="EcoCash" loading="eager"
+                    decoding="async" width="1329" height="244" />
+                </span>
+                <span class="pay-logo pay-logo--img">
+                  <img src="/img/pay/innbucks.png?v=41" alt="InnBucks" loading="eager"
+                    decoding="async" width="631" height="134" />
+                </span>
+                <span class="pay-logo pay-logo--img">
+                  <img src="/img/pay/omari.webp?v=41" alt="O'mari" loading="eager"
+                    decoding="async" />
+                </span>
+              </span>
             </div>
-    </footer>
+          </div>
+        </div>
+      </footer>
+    </div>
   </div>
 
   <!-- Transient threshold toast — mirrored as a system notification when
@@ -588,29 +1478,54 @@
 
       var LS_MAC = 'user_mac';
       var LS_VOUCHER = 'user_voucher';
+      var LS_SAVED = 'preyone_vouchers';
+      var LS_SAMPLES = 'preyone_samples_';
       var POLL_MS = 15000;
+      var HISTORY_MS = 5 * 60 * 1000;
+      var MB = 1048576;
 
       var $ = function (id) { return document.getElementById(id); };
 
+      // A MAC is only useful to the usage API when it is a full 12-hex-digit
+      // address. A partial value (the gateway sometimes hands over a single
+      // character, and the optional advanced field invites typos) used to be
+      // stored and sent on every poll, which made /api/check-usage reject the
+      // whole request. Normalize at every entry point and drop junk.
+      function normalizeMac(raw) {
+        var m = String(raw || '').replace(/[^0-9a-fA-F]/g, '').toUpperCase();
+        return m.length === 12 ? m : '';
+      }
+
       // ── Query params → localStorage, with client_mac / clientMac aliases ──
       var params = new URLSearchParams(location.search);
-      var qMac = params.get('mac') || params.get('client_mac') || params.get('clientMac') || '';
+      var qMacRaw = params.get('mac') || params.get('client_mac') || params.get('clientMac') || '';
+      var qMac = normalizeMac(qMacRaw);
       var qVoucher = params.get('voucher') || params.get('code') || '';
 
-      if (qMac) { try { localStorage.setItem(LS_MAC, qMac); } catch (e) {} }
+      function lsGet(k) { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } }
+
+      var storedMacRaw = lsGet(LS_MAC);
+      var storedMac = normalizeMac(storedMacRaw);
+      if (qMac) {
+        try { localStorage.setItem(LS_MAC, qMac); } catch (e) {}
+      } else if (qMacRaw || (storedMacRaw && !storedMac)) {
+        // An invalid MAC from the URL, or a junk value left by an older visit,
+        // must be cleared so it cannot poison later lookups.
+        try { localStorage.removeItem(LS_MAC); } catch (e) {}
+      }
       // Voucher PINs are stored and issued lowercase (the migrate that
       // normalised every table did `UPDATE ... SET voucher_code = lower(...)`),
       // so normalise here too -- and never let a phone's autocapitalisation
       // turn a valid PIN into a failed lookup.
       if (qVoucher) { try { localStorage.setItem(LS_VOUCHER, qVoucher.toLowerCase()); } catch (e) {} }
 
-      function lsGet(k) { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } }
-
       var state = {
-        mac: qMac || lsGet(LS_MAC),
+        mac: qMac || storedMac,
         voucher: (qVoucher || lsGet(LS_VOUCHER)).toLowerCase(),
         timer: null,
         deferredPrompt: null,
+        last: null,
+        lastHistory: null,
         // Where the current PIN came from: 'stored' (link/localStorage, i.e.
         // possibly a dead PIN) or 'manual' (they just typed it — a 404 may be
         // a typo, so we keep their input instead of blanking it).
@@ -620,7 +1535,7 @@
       // ── Formatting ──
       function fmtMB(bytes) {
         if (bytes == null || isNaN(bytes)) return '—';
-        var mb = bytes / 1048576;
+        var mb = bytes / MB;
         if (mb >= 1024) return (mb / 1024).toFixed(2) + ' GB';
         if (mb >= 1) return mb.toFixed(mb < 10 ? 1 : 0) + ' MB';
         return (bytes / 1024).toFixed(1) + ' KB';
@@ -628,14 +1543,62 @@
 
       function fmtMBOnly(bytes) {
         if (bytes == null || isNaN(bytes)) return '—';
-        var mb = bytes / 1048576;
+        var mb = bytes / MB;
+        if (mb >= 1024) return (mb / 1024).toFixed(2) + ' GB';
         return mb >= 1 ? mb.toFixed(mb < 10 ? 1 : 0) + ' MB' : (bytes / 1024).toFixed(1) + ' KB';
+      }
+
+      // Alert rows carry megabytes, not bytes (voucher_alert_events.used_mb).
+      function fmtMBValue(mb) {
+        if (mb == null || isNaN(mb)) return '—';
+        return fmtMB(Number(mb) * MB);
+      }
+
+      function fmtWhen(iso) {
+        if (!iso) return '—';
+        var d = new Date(iso);
+        if (isNaN(d.getTime())) return '—';
+        return d.toLocaleString([], { hour12: false, dateStyle: 'medium', timeStyle: 'short' });
+      }
+
+      function fmtShortDate(iso) {
+        if (!iso) return '—';
+        var d = new Date(iso);
+        if (isNaN(d.getTime())) return '—';
+        return d.toLocaleDateString([], { day: '2-digit', month: 'short' });
+      }
+
+      function fmtClock(ts) {
+        var d = new Date(ts);
+        if (isNaN(d.getTime())) return '—';
+        return d.toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit' });
+      }
+
+      function timeLeft(iso) {
+        if (!iso) return '—';
+        var ms = new Date(iso).getTime() - Date.now();
+        if (!isFinite(ms)) return '—';
+        if (ms <= 0) return 'Ended';
+        var mins = Math.floor(ms / 60000);
+        var d = Math.floor(mins / 1440);
+        var h = Math.floor((mins % 1440) / 60);
+        var m = mins % 60;
+        if (d > 0) return d + 'd ' + h + 'h left';
+        if (h > 0) return h + 'h ' + m + 'm left';
+        return m + 'm left';
       }
 
       function setNetBadge(text, cls) {
         var b = $('netBadge');
         b.textContent = text;
         b.className = 'usage-badge' + (cls ? ' ' + cls : '');
+      }
+
+      // The old header's Wi-Fi success mark. Visible only while connected, so
+      // it never contradicts the status badge beside it.
+      function setWifi(online) {
+        var w = $('wifiState');
+        if (w) w.hidden = online !== true;
       }
 
       // ── Advisory banner, toast and threshold alerting ──────────────────
@@ -702,25 +1665,30 @@
 
       function refreshAlertsBtn() {
         var b = $('alertsBtn');
+        var ch = $('alertChannel');
         b.hidden = false;
         if (typeof Notification === 'undefined') {
           b.disabled = true;
           b.textContent = 'ALERTS UNSUPPORTED';
           b.title = 'This browser does not support notifications.';
+          if (ch) ch.textContent = 'This browser cannot show system notifications. In-app warnings still work.';
           return;
         }
         if (Notification.permission === 'granted') {
           b.disabled = true;
           b.textContent = 'DATA ALERTS: ON';
           b.title = 'Data alerts are enabled.';
+          if (ch) ch.textContent = 'System notifications are on. In-app warnings are always on.';
         } else if (Notification.permission === 'denied') {
           b.disabled = false;
           b.textContent = 'ALERTS BLOCKED';
           b.title = 'Allow notifications for this site in your browser settings.';
+          if (ch) ch.textContent = 'Notifications are blocked in your browser settings. In-app warnings still work.';
         } else {
           b.disabled = false;
           b.textContent = 'ENABLE DATA ALERTS';
           b.title = 'Allow alerts';
+          if (ch) ch.textContent = 'In-app warnings are on. Enable notifications for alerts while the app is closed.';
         }
       }
 
@@ -786,6 +1754,9 @@
 
       function fetchPendingAlerts() {
         if (!state.voucher) return;
+        // An unlimited plan can never cross a cap; a stray event would only
+        // confuse, so the banner channel stays silent for it.
+        if (state.last && (state.last.unlimited || state.last.isUncapped)) return;
         fetch('/api/alerts/pending?voucher=' + encodeURIComponent(state.voucher), { credentials: 'same-origin' })
           .then(function (r) { return r.ok ? r.json() : { alerts: [] }; })
           .then(function (j) {
@@ -800,22 +1771,237 @@
               top.tier >= 95 ? 'ALMOST OUT OF DATA' : 'DATA RUNNING LOW',
               top.body);
             pushToast(kind, top.title, top.body);
+            ackAlert(top.id);
           })
           .catch(function () { /* alerts are best-effort */ });
       }
 
+      // ── Local usage samples (this device only) ─────────────────────────
+      function samplesKey() { return LS_SAMPLES + (state.voucher || 'anon'); }
+
+      function loadSamples() {
+        try {
+          var a = JSON.parse(localStorage.getItem(samplesKey()) || '[]');
+          return Array.isArray(a) ? a : [];
+        } catch (e) { return []; }
+      }
+
+      function saveSamples(a) {
+        try { localStorage.setItem(samplesKey(), JSON.stringify(a.slice(-240))); } catch (e) {}
+      }
+
+      function recordSample(usedBytes) {
+        if (usedBytes == null || isNaN(usedBytes)) return;
+        var mb = Math.round((usedBytes / MB) * 10) / 10;
+        var a = loadSamples();
+        var now = Date.now();
+        var last = a[a.length - 1];
+        if (last && mb < last.mb) a = []; // counter reset (new PIN / plan)
+        last = a[a.length - 1];
+        if (last && now - last.t < 5 * 60 * 1000 && Math.abs(last.mb - mb) < 0.1) {
+          drawTrend(a);
+          return;
+        }
+        a.push({ t: now, mb: mb });
+        saveSamples(a);
+        drawTrend(a);
+      }
+
+      function drawTrend(samples) {
+        var svg = $('trendChart');
+        if (!svg) return;
+        var a = (samples || []).slice(-120);
+        $('trendSamples').textContent = String(a.length);
+        if (a.length < 2) {
+          svg.innerHTML = '<text class="spark-empty" x="300" y="94" text-anchor="middle">' +
+            'Collecting samples — keep this screen open</text>';
+          $('trendRange').textContent = a.length ? '1 sample' : 'collecting…';
+          $('trendDelta').textContent = '—';
+          $('trendToday').textContent = '—';
+          return;
+        }
+        var W = 600, top = 18, bottom = 150, padX = 8;
+        var t0 = a[0].t, t1 = a[a.length - 1].t;
+        var span = Math.max(t1 - t0, 1);
+        var vals = a.map(function (p) { return p.mb; });
+        var min = Math.min.apply(null, vals);
+        var maxReal = Math.max.apply(null, vals);
+        var max = maxReal;
+        if (max - min < 0.5) max = min + 0.5;
+        var x = function (t) { return padX + ((t - t0) / span) * (W - padX * 2); };
+        var y = function (mb) { return bottom - ((mb - min) / (max - min)) * (bottom - top); };
+        var d = a.map(function (p, i) {
+          return (i ? 'L' : 'M') + x(p.t).toFixed(1) + ' ' + y(p.mb).toFixed(1);
+        }).join(' ');
+        var area = d + ' L' + x(t1).toFixed(1) + ' ' + bottom +
+          ' L' + x(t0).toFixed(1) + ' ' + bottom + ' Z';
+        var grid = '';
+        for (var i = 1; i <= 3; i++) {
+          var gy = top + ((bottom - top) / 4) * i;
+          grid += '<line class="spark-grid" x1="' + padX + '" y1="' + gy.toFixed(1) +
+            '" x2="' + (W - padX) + '" y2="' + gy.toFixed(1) + '"/>';
+        }
+        var last = a[a.length - 1];
+        svg.innerHTML = grid +
+          '<path class="spark-area" d="' + area + '"/>' +
+          '<path class="spark-line" vector-effect="non-scaling-stroke" d="' + d + '"/>' +
+          '<circle class="spark-dot" cx="' + x(last.t).toFixed(1) + '" cy="' + y(last.mb).toFixed(1) + '" r="4"/>';
+
+        $('trendDelta').textContent = fmtMBOnly(Math.max(maxReal - min, 0) * MB);
+        var dayStart = new Date();
+        dayStart.setHours(0, 0, 0, 0);
+        var today = a.filter(function (p) { return p.t >= dayStart.getTime(); });
+        if (today.length >= 2) {
+          var tv = today.map(function (p) { return p.mb; });
+          $('trendToday').textContent = fmtMBOnly(Math.max(
+            Math.max.apply(null, tv) - Math.min.apply(null, tv), 0) * MB);
+        } else {
+          $('trendToday').textContent = '—';
+        }
+        $('trendRange').textContent = 'since ' + fmtClock(t0);
+      }
+
+      // ── Saved vouchers on this device ──────────────────────────────────
+      function savedList() {
+        try {
+          var a = JSON.parse(localStorage.getItem(LS_SAVED) || '[]');
+          return Array.isArray(a) ? a.filter(function (x) { return typeof x === 'string' && x; }) : [];
+        } catch (e) { return []; }
+      }
+
+      function rememberVoucher(v) {
+        if (!v) return;
+        var a = savedList();
+        // Already at the front (the common 15s-poll case): nothing to churn.
+        if (a[0] === v) return;
+        a = a.filter(function (x) { return x !== v; });
+        a.unshift(v);
+        try { localStorage.setItem(LS_SAVED, JSON.stringify(a.slice(0, 5))); } catch (e) {}
+        renderSaved();
+      }
+
+      function renderSaved() {
+        var box = $('savedVouchers');
+        if (!box) return;
+        var a = savedList();
+        box.innerHTML = '';
+        if (!a.length) {
+          var hint = document.createElement('span');
+          hint.className = 'muted small';
+          hint.textContent = 'Vouchers you check are saved on this device for quick switching.';
+          box.appendChild(hint);
+          return;
+        }
+        a.forEach(function (code) {
+          var b = document.createElement('button');
+          b.type = 'button';
+          b.className = 'chip-btn' + (code === state.voucher ? ' chip-btn--active' : '');
+          b.textContent = '•••• ' + code.slice(-4).toUpperCase();
+          b.title = 'Check this voucher';
+          b.addEventListener('click', function () {
+            state.voucher = code;
+            state.lastEntry = 'stored';
+            state.last = null;
+            historyAt = 0;
+            try { localStorage.setItem(LS_VOUCHER, code); } catch (e) {}
+            hideManual();
+            renderSaved();
+            drawTrend(loadSamples());
+            checkUsage();
+            startPolling();
+          });
+          box.appendChild(b);
+        });
+      }
+
+      // ── Server records (sessions + data alerts for this PIN) ───────────
+      var historyAt = 0;
+
+      function fetchHistory(force) {
+        if (!state.voucher) return;
+        var now = Date.now();
+        if (!force && now - historyAt < HISTORY_MS) return;
+        historyAt = now;
+        fetch('/api/check-usage/history?voucher=' + encodeURIComponent(state.voucher),
+          { credentials: 'same-origin' })
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (j) { if (j) renderHistory(j); })
+          .catch(function () { /* records are best-effort */ });
+      }
+
+      function listItem(label, value) {
+        var li = document.createElement('li');
+        var a = document.createElement('span');
+        var b = document.createElement('span');
+        a.textContent = label;
+        b.textContent = value;
+        li.appendChild(a);
+        li.appendChild(b);
+        return li;
+      }
+
+      function emptyItem(text) {
+        var li = document.createElement('li');
+        li.className = 'is-empty';
+        li.textContent = text;
+        return li;
+      }
+
+      function renderHistory(h) {
+        state.lastHistory = h;
+        var v = h.voucher || {};
+        var uncapped = !!(v.unlimited || v.isUncapped);
+
+        var sessions = h.sessions || [];
+        var sBox = $('sessionHistory');
+        sBox.innerHTML = '';
+        if (!sessions.length) {
+          sBox.appendChild(emptyItem('No sessions recorded for this voucher yet.'));
+        } else {
+          sessions.forEach(function (s) {
+            sBox.appendChild(listItem(
+              fmtWhen(s.at),
+              s.device ? s.device : 'device not recorded'
+            ));
+          });
+        }
+
+        var alerts = h.alerts || [];
+        var aBox = $('alertHistory');
+        aBox.innerHTML = '';
+        if (!alerts.length) {
+          aBox.appendChild(emptyItem(uncapped
+            ? 'Unlimited plans have no data cap, so no cap alerts are raised.'
+            : 'No data alerts yet.'));
+        } else {
+          alerts.forEach(function (a) {
+            var label = a.tier >= 100 ? 'Bundle exhausted'
+              : a.tier + '% threshold';
+            var total = uncapped ? 'Unlimited' : fmtMBValue(a.totalMB);
+            aBox.appendChild(listItem(
+              label + ' · ' + fmtMBValue(a.usedMB) + ' used',
+              fmtWhen(a.at) + ' · ' + total + ' plan'
+            ));
+          });
+        }
+      }
+
       // ── Render ──
       function render(j) {
+        state.last = j;
         var used = j.bytesUsed;
         var total = j.bytesTotal;
-        var isUncapped = !!j.isUncapped;
+        var isUncapped = !!(j.unlimited || j.isUncapped);
 
         var remaining = null;
         if (used != null && total != null) remaining = Math.max(total - used, 0);
 
+        // Every balance readout keys off the plan flag, never off a null
+        // total: an unlimited bundle must read "Unlimited" everywhere.
         $('metricUsed').textContent = fmtMBOnly(used);
         $('metricRemaining').textContent = isUncapped ? 'Unlimited' : fmtMBOnly(remaining);
         $('metricTotal').textContent = isUncapped ? 'Unlimited' : fmtMBOnly(total);
+        $('metricExpires').textContent = fmtShortDate(j.expiresAt);
 
         $('dataUsageNumbers').textContent = fmtMB(used) + ' / ' + (isUncapped ? 'Unlimited' : fmtMB(total));
 
@@ -835,22 +2021,70 @@
         $('dataUsagePct').className = isUncapped ? 'data-usage-pct--unlimited' : '';
         $('dataUsageRemaining').textContent = isUncapped ? 'Unlimited remaining' : fmtMB(remaining) + ' remaining';
 
-        // Colour the remaining metric as the bundle runs down.
+        // Gauge: an arc for a cap, a slowly rotating full ring for unlimited.
+        var C = 527.79;
+        var gv = $('gaugeValue');
+        if (isUncapped) {
+          // SVGElement.className is a read-only SVGAnimatedString, so it must
+          // be set as an attribute (a plain assignment throws in strict mode).
+          gv.setAttribute('class', 'gauge-value gauge-value--unlimited');
+          gv.style.strokeDasharray = '132 396';
+          gv.style.strokeDashoffset = '0';
+          // SVGElement has no reflective `hidden` property, so use the
+          // attribute directly or the [hidden] rule would keep it hidden.
+          $('gaugeFigure').setAttribute('hidden', '');
+          $('gaugeInfinity').removeAttribute('hidden');
+          $('gaugeLabel').textContent = 'UNLIMITED';
+        } else {
+          gv.setAttribute('class', 'gauge-value');
+          gv.style.strokeDasharray = String(C);
+          gv.style.strokeDashoffset = String(C * (1 - pct / 100));
+          $('gaugeFigure').removeAttribute('hidden');
+          $('gaugeInfinity').setAttribute('hidden', '');
+          $('gaugeFigure').textContent = Math.round(pct) + '%';
+          $('gaugeLabel').textContent = 'USED';
+        }
+
+        // Tiles: colour the remaining balance as a capped bundle runs down.
         var remEl = $('metricRemaining');
-        remEl.className = 'value usage-metric-value';
+        remEl.className = 'tile-value' + (isUncapped ? ' tile-value--unlimited' : '');
         if (!isUncapped && total > 0) {
           var ratio = remaining / total;
-          if (ratio <= 0) remEl.classList.add('usage-metric-value--over');
-          else if (ratio <= 0.15) remEl.classList.add('usage-metric-value--warn');
+          if (ratio <= 0) remEl.classList.add('tile-value--over');
+          else if (ratio <= 0.15) remEl.classList.add('tile-value--warn');
         }
+
+        var sourceLabel = {
+          ruijie_live: 'Live from your access point',
+          ruijie_voucher: 'Preyone Voucher Count',
+          voucher_accounting: 'Reconciled accounting',
+          none: 'Usage not reported yet',
+        }[j.usageSource] || '';
+
+        $('tileUsedFoot').textContent = sourceLabel;
+        $('tileRemainingFoot').textContent = isUncapped
+          ? 'No cap on this plan'
+          : (total != null ? 'of ' + fmtMB(total) : 'allowance unknown');
+        $('tileTotalFoot').textContent = isUncapped
+          ? 'Unlimited plan'
+          : (j.packageTier ? String(j.packageTier) : 'plan allowance');
+        $('tileExpiresFoot').textContent = timeLeft(j.expiresAt);
 
         $('detailStatus').textContent = j.active ? '● ACTIVE' : 'EXPIRED';
         $('detailStatus').style.color = j.active ? '#25D366' : '#f87171';
+        $('detailActivated').textContent = fmtWhen(j.activatedAt);
+        $('detailExpires').textContent = fmtWhen(j.expiresAt);
+        $('detailTimeLeft').textContent = timeLeft(j.expiresAt);
+        $('detailCap').textContent = isUncapped ? 'Unlimited' : fmtMB(total);
+        $('detailSource').textContent = sourceLabel;
 
-        if (j.expiresAt) {
-          var d = new Date(j.expiresAt);
-          $('detailExpires').textContent = isNaN(d) ? '—'
-            : d.toLocaleString([], { hour12: false, dateStyle: 'medium', timeStyle: 'short' });
+        var devices = j.boundDevices != null ? j.boundDevices : null;
+        if (devices == null && j.onlineNow != null) {
+          $('detailDevices').textContent = j.onlineNow ? 'Online now' : 'Not connected';
+        } else if (devices != null) {
+          $('detailDevices').textContent = devices + ' bound' + (j.onlineNow ? ' · online' : '');
+        } else {
+          $('detailDevices').textContent = '—';
         }
 
         if (j.voucherCode) {
@@ -859,8 +2093,20 @@
         }
         if (j.packageTier) {
           $('metaTier').style.display = '';
-          $('metaTier').textContent = String(j.packageTier).toUpperCase();
+          $('metaTier').textContent = isUncapped ? 'UNLIMITED PLAN' : 'CAPPED PLAN';
         }
+        $('planChip').hidden = !isUncapped;
+        $('chipOnline').hidden = j.onlineNow !== true;
+        $('chipOnline').className = 'chip chip--online';
+
+        $('heroTitle').textContent = j.packageTier ? String(j.packageTier) : 'Your data';
+        $('heroSub').textContent = isUncapped
+          ? 'Unlimited data on this plan. Usage is tracked — your balance never runs out.'
+          : (remaining != null
+            ? fmtMB(remaining) + ' left of ' + fmtMB(total) + '.'
+            : 'Usage is being reconciled with the network.');
+
+        $('lastUpdated').textContent = 'Updated ' + fmtClock(Date.now()) + ' · refreshes every 15s';
 
         // ── Advisory + threshold alerting ──
         if (exhausted) {
@@ -882,14 +2128,25 @@
           clearAlert();
         }
 
-        setNetBadge(j.active ? '● ONLINE' : '● SESSION ENDED', j.active ? 'usage-badge--online' : 'usage-badge--offline');
+        setNetBadge(j.onlineNow === false ? '● OFFLINE' : '● ONLINE',
+          j.onlineNow === false ? 'usage-badge--offline' : 'usage-badge--online');
+        // Wi-Fi success mark: shown while the session is live and the station
+        // is not explicitly offline.
+        setWifi(j.active === true && j.onlineNow !== false);
+
+        // Records + local trend follow the live figure.
+        if (j.voucherCode) rememberVoucher(String(j.voucherCode).toLowerCase());
+        recordSample(used);
+        fetchHistory(false);
       }
 
       function renderError(msg) {
         setNetBadge('● OFFLINE', 'usage-badge--offline');
+        setWifi(false);
         if (msg) {
           $('detailStatus').textContent = 'UNAVAILABLE';
           $('detailStatus').style.color = '#f87171';
+          $('lastUpdated').textContent = 'Offline — showing the last figures received.';
         }
       }
 
@@ -923,10 +2180,13 @@
       // ways forward: enter the voucher just bought, or buy one.
       function handleNotFound() {
         stopPolling();
+        state.last = null;
 
         $('metricUsed').textContent = '—';
         $('metricRemaining').textContent = '—';
         $('metricTotal').textContent = '—';
+        $('metricExpires').textContent = '—';
+        $('tileExpiresFoot').textContent = '';
         $('dataUsageNumbers').textContent = '— / —';
         var bar = $('dataBarFill');
         bar.className = 'data-bar-fill';
@@ -936,6 +2196,23 @@
         $('dataUsageRemaining').textContent = '— remaining';
         $('detailStatus').textContent = 'EXPIRED';
         $('detailStatus').style.color = '#f87171';
+        $('heroTitle').textContent = 'Voucher ended';
+        $('heroSub').textContent = 'Enter your new PIN below to see its balance and records.';
+        $('metaTier').textContent = 'PREYONE ULTRANET';
+        $('detailActivated').textContent = '—';
+        $('detailExpires').textContent = '—';
+        $('detailTimeLeft').textContent = '—';
+        $('detailDevices').textContent = '—';
+        $('detailCap').textContent = '—';
+        $('planChip').hidden = true;
+        $('chipOnline').hidden = true;
+        setWifi(false);
+        $('gaugeFigure').removeAttribute('hidden');
+        $('gaugeInfinity').setAttribute('hidden', '');
+        $('gaugeFigure').textContent = '—';
+        $('gaugeLabel').textContent = 'USED';
+        $('gaugeValue').setAttribute('class', 'gauge-value');
+        $('gaugeValue').style.strokeDashoffset = '527.79';
 
         setAlert('over', 'VOUCHER EXPIRED OR USED UP',
           'That voucher has ended — it expired, was fully used, or was disabled. Enter the PIN of a bundle you just bought, or grab a new one.');
@@ -955,6 +2232,7 @@
         if (firstTime) $('manualVoucher').focus({ preventScroll: true });
 
         setNetBadge('● VOUCHER ENDED', 'usage-badge--offline');
+        $('lastUpdated').textContent = 'No live session for this voucher.';
         notify('expired', 'ULTRANET // VOUCHER ENDED',
           'That voucher has expired or been used up. Enter your new PIN or buy a fresh bundle.', 'over');
       }
@@ -963,7 +2241,8 @@
       function showManual(msg) {
         $('manualSection').hidden = false;
         if (state.voucher) $('manualVoucher').value = state.voucher;
-        if (state.mac) $('manualMac').value = state.mac;
+        var macEl = $('manualMac');
+        if (macEl && state.mac) macEl.value = state.mac;
         if (msg) $('manualError').textContent = msg;
       }
 
@@ -972,22 +2251,46 @@
       $('manualForm').addEventListener('submit', function (e) {
         e.preventDefault();
         var v = $('manualVoucher').value.trim().toLowerCase();
-        var m = $('manualMac').value.trim();
-        if (!v) { $('manualError').textContent = 'Enter your voucher PIN.'; return; }
+        var macEl = $('manualMac');
+        var rawMac = macEl ? macEl.value.trim() : '';
+        var m = normalizeMac(rawMac);
         $('manualError').textContent = '';
+        $('manualMacError').textContent = '';
+        if (!v) { $('manualError').textContent = 'Enter your voucher PIN.'; return; }
+        if (!/^[a-z0-9]{6}$/.test(v)) {
+          $('manualError').textContent = 'Voucher PINs are 6 letters or numbers.';
+          return;
+        }
+        // The MAC is optional and not a credential. If it is not a full
+        // address, say so rather than sending junk that would be ignored.
+        if (rawMac && !m) {
+          $('manualMacError').textContent = 'That is not a full MAC address — leave it blank unless support asked for it.';
+          return;
+        }
         state.voucher = v;
         state.mac = m;
         // Fresh manual entry: a 404 from here is as likely a typo as a dead
         // voucher, so handleNotFound keeps this input for editing.
         state.lastEntry = 'manual';
+        historyAt = 0;
         try {
           localStorage.setItem(LS_VOUCHER, v);
           if (m) localStorage.setItem(LS_MAC, m);
+          else localStorage.removeItem(LS_MAC);
         } catch (err) {}
+        hideManual();
+        drawTrend(loadSamples());
         checkUsage();
         // Restart the 15s cadence for the newly entered voucher (a dead PIN
         // had stopped it in handleNotFound).
         startPolling();
+      });
+
+      $('manualVoucher').addEventListener('input', function () {
+        $('manualError').textContent = '';
+      });
+      $('manualMac').addEventListener('input', function () {
+        $('manualMacError').textContent = '';
       });
 
       $('alertEnter').addEventListener('click', function () {
@@ -1032,7 +2335,97 @@
         });
       });
 
-      $('refreshBtn').addEventListener('click', checkUsage);
+      $('refreshBtn').addEventListener('click', function () {
+        checkUsage();
+        fetchHistory(true);
+        fetchPendingAlerts();
+      });
+
+      // ── Records: copy, CSV, print ──────────────────────────────────────
+      function summaryText() {
+        var j = state.last;
+        if (!j) return 'Preyone UltraNet Wi-Fi — no usage loaded yet.';
+        var uncapped = !!(j.unlimited || j.isUncapped);
+        var remBytes = j.remainingMB != null ? Number(j.remainingMB) * MB : null;
+        var lines = [
+          'Preyone UltraNet Wi-Fi — data summary',
+          'Voucher: ' + (j.voucherCode || state.voucher || '—'),
+          'Plan: ' + (j.packageTier || '—') + (uncapped ? ' (Unlimited)' : ''),
+          'Used: ' + fmtMB(j.bytesUsed),
+          'Remaining: ' + (uncapped ? 'Unlimited' : fmtMB(remBytes)),
+          'Total: ' + (uncapped ? 'Unlimited' : fmtMB(j.bytesTotal)),
+          'Status: ' + (j.active ? 'Active' : 'Ended'),
+          'Expires: ' + fmtWhen(j.expiresAt),
+          'Checked: ' + new Date().toLocaleString([], { hour12: false }),
+        ];
+        return lines.join('\n');
+      }
+
+      function copyText(text) {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          return navigator.clipboard.writeText(text);
+        }
+        return new Promise(function (resolve, reject) {
+          var ta = document.createElement('textarea');
+          ta.value = text;
+          ta.style.position = 'fixed';
+          ta.style.opacity = '0';
+          document.body.appendChild(ta);
+          ta.select();
+          try { document.execCommand('copy'); resolve(); } catch (err) { reject(err); }
+          document.body.removeChild(ta);
+        });
+      }
+
+      $('copyBtn').addEventListener('click', function () {
+        copyText(summaryText()).then(function () {
+          pushToast('', 'SUMMARY COPIED', 'Your data summary is on the clipboard.');
+        }).catch(function () {
+          pushToast('', 'COPY FAILED', 'Select the figures on screen and copy them manually.');
+        });
+      });
+
+      $('printBtn').addEventListener('click', function () {
+        window.print();
+      });
+
+      function csvCell(v) {
+        var s = String(v == null ? '' : v);
+        return '"' + s.replace(/"/g, '""') + '"';
+      }
+
+      $('exportBtn').addEventListener('click', function () {
+        var j = state.last;
+        var uncapped = !!(j && (j.unlimited || j.isUncapped));
+        var rows = [['Field', 'Value']];
+        rows.push(['Voucher', j && j.voucherCode ? j.voucherCode : state.voucher]);
+        rows.push(['Plan', j && j.packageTier ? j.packageTier : '']);
+        rows.push(['Plan type', uncapped ? 'Unlimited' : 'Capped']);
+        rows.push(['Used', j ? fmtMB(j.bytesUsed) : '']);
+        rows.push(['Remaining', uncapped ? 'Unlimited' : (j ? fmtMB(j.remainingMB != null ? Number(j.remainingMB) * MB : null) : '')]);
+        rows.push(['Total', uncapped ? 'Unlimited' : (j ? fmtMB(j.bytesTotal) : '')]);
+        rows.push(['Status', j ? (j.active ? 'Active' : 'Ended') : '']);
+        rows.push(['Activated', j ? fmtWhen(j.activatedAt) : '']);
+        rows.push(['Expires', j ? fmtWhen(j.expiresAt) : '']);
+        rows.push(['Exported', new Date().toISOString()]);
+        rows.push([]);
+        rows.push(['Sample time', 'Used (MB)']);
+        loadSamples().forEach(function (s) {
+          rows.push([new Date(s.t).toISOString(), String(s.mb)]);
+        });
+        var csv = rows.map(function (r) {
+          return r.length ? r.map(csvCell).join(',') : '';
+        }).join('\r\n');
+        var blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = 'preyone-data-' + (state.voucher || 'usage') + '.csv';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+      });
 
       // ── Install prompt ──
       // Android/Chrome fires beforeinstallprompt; iOS Safari NEVER does, so
@@ -1098,17 +2491,37 @@
       }
 
       // ── Boot ──
-      $('currentYear').textContent = new Date().getFullYear();
+      var dataTop = $('dataTop');
+      function syncNav() {
+        if (!dataTop) return;
+        var y = window.scrollY || document.documentElement.scrollTop || 0;
+        // Glass + compact brand once the page moves; transparent at the top.
+        dataTop.classList.toggle('is-scrolled', y > 8);
+      }
+      window.addEventListener('scroll', syncNav, { passive: true });
+      window.addEventListener('resize', syncNav);
+      syncNav();
+
+      var year = String(new Date().getFullYear());
+      var yearEl = $('currentYear');
+      if (yearEl) yearEl.textContent = year;
+      var yearEls = document.querySelectorAll('#current-year');
+      for (var yi = 0; yi < yearEls.length; yi += 1) yearEls[yi].textContent = year;
       refreshAlertsBtn();
+      renderSaved();
+      drawTrend(loadSamples());
       // Re-arm the push subscription on every visit (idempotent server-side)
       // and surface any alert the backend fired while this device was away.
       ensurePushSubscription();
       fetchPendingAlerts();
       setInterval(fetchPendingAlerts, 5 * 60 * 1000);
 
-      if (!state.voucher && !state.mac) {
+      if (!state.voucher) {
+        // A MAC alone is not a credential (usage.ts rejects it), so the PIN
+        // form is the only honest first screen.
         showManual();
         setNetBadge('ENTER VOUCHER');
+        $('lastUpdated').textContent = 'Enter the PIN from your SMS or receipt.';
       } else {
         checkUsage();
         startPolling();
@@ -1116,13 +2529,19 @@
 
       // Refresh when the app returns to the foreground.
       document.addEventListener('visibilitychange', function () {
-        if (!document.hidden && (state.voucher || state.mac)) {
+        if (!document.hidden && state.voucher) {
           checkUsage();
+          fetchHistory(true);
           fetchPendingAlerts();
         }
       });
+
+      window.addEventListener('online', function () {
+        if (state.voucher) { checkUsage(); fetchHistory(true); }
+      });
     })();
   </script>
+
   <!-- WhatsApp FAB -->
   <a
     href="https://wa.me/263771327202"
@@ -1137,15 +2556,6 @@
     </svg>
   </a>
 
-  <!-- Footer parity: the copyright year is also filled by portal.js on pages
-       that load it; these two pages have no portal.js, so fill it here. -->
-  <script>
-    (function () {
-      var els = document.querySelectorAll('#current-year');
-      var year = String(new Date().getFullYear());
-      for (var i = 0; i < els.length; i += 1) els[i].textContent = year;
-    })();
-  </script>
   <script>(function(){var e=document.getElementById('bootLoading');if(!e)return;var h=function(){e.classList.add('is-hidden')};if(document.readyState==='complete')h();else window.addEventListener('load',h);setTimeout(h,8e3)})();</script>
 </body>
 

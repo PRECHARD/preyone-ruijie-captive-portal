@@ -20,7 +20,7 @@
  *   - The portal's own index.html and all other portal pages.
  */
 
-const VERSION = 'v2';
+const VERSION = 'v3';
 const SHELL_CACHE = `preyone-shell-${VERSION}`;
 const ASSET_CACHE = `preyone-assets-${VERSION}`;
 const ACTIVE_CACHES = [SHELL_CACHE, ASSET_CACHE];
@@ -54,6 +54,31 @@ function isNetworkOnly(pathname) {
   return NETWORK_ONLY_PREFIXES.some((p) => pathname === p || pathname.startsWith(p));
 }
 
+// A response is only safe to cache under `url` when the network actually
+// answered that same-origin path. A captive gateway can answer /data (or a
+// missing asset) with its login page after a redirect; caching that would
+// replace the offline shell with the portal interstitial.
+function isSamePath(res, url) {
+  try {
+    const got = new URL(res.url);
+    const want = new URL(url, self.location.origin);
+    return got.origin === self.location.origin && got.pathname === want.pathname;
+  } catch (e) {
+    return false;
+  }
+}
+
+async function precache(url) {
+  try {
+    const res = await fetch(new Request(url, { cache: 'no-cache' }));
+    if (!res.ok || !isSamePath(res, url)) return;
+    const cache = await caches.open(SHELL_CACHE);
+    await cache.put(url, res);
+  } catch (e) {
+    /* one missing asset must not abort installation */
+  }
+}
+
 // Only the usage portal is handled; any other navigation passes through so the
 // captive portal keeps loading live from the server.
 function isUsageNavigation(pathname) {
@@ -63,9 +88,9 @@ function isUsageNavigation(pathname) {
 self.addEventListener('install', (event) => {
   event.waitUntil(
     (async () => {
-      const cache = await caches.open(SHELL_CACHE);
       // allSettled, not all: one missing asset must not abort installation.
-      await Promise.allSettled(APP_SHELL.map((url) => cache.add(url).catch(() => null)));
+      // precache() also refuses redirected/captive responses.
+      await Promise.allSettled(APP_SHELL.map((url) => precache(url)));
       await self.skipWaiting();
     })()
   );
@@ -161,7 +186,10 @@ async function networkFirstNavigation(req) {
   const cache = await caches.open(SHELL_CACHE);
   try {
     const fresh = await fetch(req);
-    if (fresh && fresh.ok) cache.put('/data', fresh.clone());
+    // Only cache the real /data document. If the gateway redirected to the
+    // captive login page, return it to the browser but never store it as the
+    // offline shell.
+    if (fresh && fresh.ok && isSamePath(fresh, '/data')) cache.put('/data', fresh.clone());
     return fresh;
   } catch (err) {
     const cached = (await cache.match('/data')) || (await caches.match('/data'));
@@ -187,7 +215,7 @@ async function cacheFirst(req) {
     // Refresh in the background so the next load is current (stale-while-revalidate).
     fetch(req)
       .then((res) => {
-        if (res && res.ok) {
+        if (res && res.ok && isSamePath(res, req.url)) {
           const url = new URL(req.url);
           const cacheName = url.pathname.startsWith('/css/') || url.pathname.startsWith('/js/')
             ? ASSET_CACHE
@@ -200,7 +228,7 @@ async function cacheFirst(req) {
   }
 
   const res = await fetch(req);
-  if (res && res.ok) {
+  if (res && res.ok && isSamePath(res, req.url)) {
     const url = new URL(req.url);
     const cacheName = url.pathname.startsWith('/css/') || url.pathname.startsWith('/js/')
       ? ASSET_CACHE

@@ -403,6 +403,8 @@ export interface GetRuijieVouchersInput {
   start?: number;
   pageSize?: number;
   includeStatus?: string;
+  /** Periodic roster/sweep read: keep it inside the background quota share. */
+  background?: boolean;
 }
 
 export async function getRuijieVouchers(input: GetRuijieVouchersInput = {}): Promise<RuijieVoucher[]> {
@@ -419,7 +421,8 @@ export async function getRuijieVouchers(input: GetRuijieVouchersInput = {}): Pro
     return await withTokenRefresh(async (accessToken) => {
       const cfg = getConfig();
       const res = await client().get(
-        `${VOUCHER_GET_LIST_URL}/${cfg.groupId}?access_token=${encodeURIComponent(accessToken)}&start=${start}&pageSize=${pageSize}`
+        `${VOUCHER_GET_LIST_URL}/${cfg.groupId}?access_token=${encodeURIComponent(accessToken)}&start=${start}&pageSize=${pageSize}`,
+        input.background ? ({ ruijieBackground: true } as any) : undefined
       );
       failIfNotZero(res.data, `voucher/getList (groupId=${cfg.groupId}) -> HTTP ${res.status}`);
       const vd = resolveVoucherData(res.data);
@@ -466,7 +469,7 @@ export async function getAllRuijieVouchers(
   const maxPages = opts.maxPages ?? 50;
   const out: RuijieVoucher[] = [];
   for (let page = 0; page < maxPages; page++) {
-    const batch = await getRuijieVouchers({ start: page * pageSize, pageSize });
+    const batch = await getRuijieVouchers({ start: page * pageSize, pageSize, background: true });
     out.push(...batch);
     if (batch.length < pageSize) break;
   }

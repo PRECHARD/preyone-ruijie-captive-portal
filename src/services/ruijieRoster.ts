@@ -2,6 +2,7 @@ import type { PoolClient } from 'pg';
 import { pool } from '../db/pool';
 import { getAllRuijieVouchers, isRuijieCloudConfigured } from './ruijieCloud';
 import type { RuijieVoucher } from './ruijieCloud';
+import { hasBackgroundBudget } from './ruijieRateLimiter';
 
 /**
  * Shared Ruijie voucher roster.
@@ -120,6 +121,13 @@ export async function getRuijieRoster(): Promise<RuijieRoster> {
   }
 
   if (!pendingFetch) {
+    // A refresh is background work. With a snapshot to serve, skip this cycle
+    // once sweeps have spent their share of the minute budget: interactive
+    // sales and customer lookups keep the rest, and the roster is only stale,
+    // not unavailable (callers already handle `stale`).
+    if (cached && !(await hasBackgroundBudget())) {
+      return { vouchers: cached.vouchers, fetchedAt: cached.fetchedAt, stale: true };
+    }
     pendingFetch = (async (): Promise<RuijieRoster | null> => {
       let client: PoolClient | null = null;
       let locked = false;

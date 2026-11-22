@@ -57,7 +57,9 @@ import type { RuijieVoucher } from '../services/ruijieCloud';
  *    the same L2 segment. It is not a credential and not even a WHERE filter
  *    (see the note in the handler): it only selects which station's live
  *    usage to display, and only after a valid PIN has already authenticated
- *    the caller.
+ *    the caller. A malformed MAC is ignored, never a 400: /data stores
+ *    whatever the gateway/success page handed it, and one stray character
+ *    must not turn every poll into a failed lookup.
  *  - Errors are generic: a wrong PIN, an unredeemed voucher and an expired
  *    one all return the same `not_found`, so this cannot enumerate codes —
  *    and a Ruijie-only code answers only with customer activity on it, so
@@ -87,6 +89,30 @@ function normalizeMac(raw?: unknown): string | null {
   if (raw == null) return null;
   const cleaned = String(raw).replace(/[^0-9a-fA-F]/g, '').toUpperCase();
   return cleaned.length === 12 ? cleaned : null;
+}
+
+/**
+ * "This voucher belongs to a customer." The usage read and the records read
+ * share this exact predicate so they can never disagree about whether a PIN is
+ * entitled to data. Activated, redeemed or sold all count; unsold stock
+ * matches none and stays unprobeable (see the module header).
+ */
+const OWNED_VOUCHER_SQL = `
+       v.deleted_at IS NULL
+         AND v.is_disabled IS NOT TRUE
+         AND (v.expires_at IS NULL OR v.expires_at > NOW())
+         AND (
+           v.activated_at IS NOT NULL
+           OR v.used_count > 0
+           OR v.sold_by IS NOT NULL
+           OR EXISTS (SELECT 1 FROM sales s WHERE s.voucher_code = v.code)
+         )`;
+
+/** Last 4 hex digits only: enough to recognise a device, not to identify it. */
+function maskDevice(raw: unknown): string | null {
+  const hex = String(raw ?? '').replace(/[^0-9a-fA-F]/g, '').toUpperCase();
+  if (hex.length < 4) return null;
+  return '•••• ' + hex.slice(-4);
 }
 
 // ── Live usage straight from Ruijie Cloud ───────────────────────────────────
@@ -212,7 +238,11 @@ export function __resetUsageCachesForTests(): void {
 // null rather than invented.
 function ruijieOnlyResponse(rv: RuijieVoucher, typed: string) {
   const usedMB = rv.usedQuotaMb ?? null;
-  const totalMB = rv.quotaMb ?? null;
+  // Ruijie encodes an uncapped bundle as quota 0 (see the roster: every
+  // uncapped package reports quotaMb 0 while usedQuotaMb keeps counting).
+  // A missing quota is genuinely unknown, not unlimited, so only 0 flips it.
+  const isUncapped = rv.quotaMb === 0;
+  const totalMB = isUncapped ? null : (rv.quotaMb ?? null);
   const remainingMB =
     usedMB != null && totalMB != null ? Math.max(totalMB - usedMB, 0) : null;
   const percentUsed =
@@ -229,7 +259,10 @@ function ruijieOnlyResponse(rv: RuijieVoucher, typed: string) {
     remainingMB,
     totalMB,
     percentUsed: percentUsed != null ? Math.round(percentUsed * 10) / 10 : null,
-    isUncapped: false,
+    isUncapped,
+    // Explicit alias so a client never has to infer the plan type from a
+    // null total: "unlimited" is a plan property, not missing data.
+    unlimited: isUncapped,
     dataLimitGb: totalMB != null ? totalMB / 1024 : null,
     usageSource: usedMB != null ? ('ruijie_voucher' as const) : ('none' as const),
     onlineNow: rv.currentClients != null ? rv.currentClients > 0 : null,
@@ -242,11 +275,98 @@ function ruijieOnlyResponse(rv: RuijieVoucher, typed: string) {
   };
 }
 
+/**
+ * GET /history?voucher=… — the customer's own records for one PIN.
+ *
+ * Same credential and the same ownership predicate as the usage read: the PIN
+ * is the secret, so its holder may see the sessions that redeemed it and the
+ * data alerts it has crossed. Device identifiers are masked to their last four
+ * hex digits and no IP or name is ever returned — enough for record-keeping,
+ * nothing that identifies a person. Read-only, rate limited, never cached.
+ */
+usageRouter.get('/history', usageLimiter, async (req: Request, res: Response) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const voucher = typeof req.query.voucher === 'string' ? req.query.voucher.trim() : '';
+  if (!voucher) {
+    res.status(400).json({ error: 'missing_credentials' });
+    return;
+  }
+  try {
+    const { rows } = await pool.query(
+      `SELECT v.id, v.code, v.package_tier, v.is_uncapped, v.activated_at,
+              v.expires_at, v.data_limit_gb
+       FROM vouchers v
+       WHERE ${OWNED_VOUCHER_SQL}
+         AND UPPER(v.code) = UPPER($1)
+       LIMIT 1`,
+      [voucher]
+    );
+    if (rows.length === 0) {
+      res.status(404).json({ error: 'not_found' });
+      return;
+    }
+
+    const v = rows[0];
+    const [sessions, alerts] = await Promise.all([
+      pool.query(
+        `SELECT created_at, mac_address
+         FROM voucher_redemptions
+         WHERE voucher_id = $1
+         ORDER BY created_at DESC
+         LIMIT 10`,
+        [v.id]
+      ),
+      pool.query(
+        `SELECT tier, pct, used_mb, total_mb, created_at
+         FROM voucher_alert_events
+         WHERE voucher_code = $1
+         ORDER BY created_at DESC
+         LIMIT 10`,
+        [v.code]
+      ),
+    ]);
+
+    const isUncapped = v.is_uncapped === true;
+    res.json({
+      voucher: {
+        code: v.code,
+        tier: v.package_tier ?? null,
+        isUncapped,
+        unlimited: isUncapped,
+        activatedAt: v.activated_at,
+        expiresAt: v.expires_at,
+        dataLimitGb: isUncapped ? null : v.data_limit_gb,
+      },
+      sessions: sessions.rows.map((r) => ({
+        at: r.created_at,
+        device: maskDevice(r.mac_address),
+      })),
+      alerts: alerts.rows.map((r) => ({
+        tier: Number(r.tier),
+        pct: r.pct == null ? null : Number(r.pct),
+        usedMB: r.used_mb == null ? null : Number(r.used_mb),
+        totalMB: r.total_mb == null ? null : Number(r.total_mb),
+        at: r.created_at,
+      })),
+    });
+  } catch (err) {
+    console.error('usage history error:', err);
+    res.status(500).json({ error: 'history_check_failed' });
+  }
+});
+
 usageRouter.get('/', usageLimiter, async (req: Request, res: Response) => {
+  // Usage is live data. Without this the browser may revalidate with the ETag
+  // and serve a stale cached body to the 15s poll.
+  res.setHeader('Cache-Control', 'no-store');
   try {
     const token = typeof req.query.token === 'string' ? req.query.token.trim() : '';
     const voucher =
       typeof req.query.voucher === 'string' ? req.query.voucher.trim() : '';
+    // A malformed MAC is not a credential and must never block a valid PIN.
+    // /data can inherit a partial value from the gateway/success URL or the
+    // optional manual field (e.g. "H"); normalizeMac() returns null for it and
+    // the lookup proceeds from the PIN alone.
     const mac = normalizeMac(
       (req.query.mac as string) ??
         (req.query.client_mac as string) ??
@@ -258,15 +378,6 @@ usageRouter.get('/', usageLimiter, async (req: Request, res: Response) => {
     if (!token && !voucher) {
       res.status(400).json({ error: 'missing_credentials' });
       return;
-    }
-
-    // A supplied MAC must be well-formed: it selects which Ruijie station's
-    // usage to report, and garbage would silently yield "unknown" instead.
-    if (req.query.mac || req.query.client_mac || req.query.clientMac) {
-      if (!mac) {
-        res.status(400).json({ error: 'invalid_mac' });
-        return;
-      }
     }
 
     // NOTE: the MAC is deliberately NOT a WHERE-clause filter here. In WiFiDog
@@ -290,12 +401,7 @@ usageRouter.get('/', usageLimiter, async (req: Request, res: Response) => {
               (SELECT count(*)::int FROM voucher_devices d
                 WHERE d.voucher_id = v.id AND d.is_active) AS bound_devices
        FROM vouchers v
-       WHERE v.deleted_at IS NULL
-         AND v.is_disabled IS NOT TRUE
-         AND (v.expires_at IS NULL OR v.expires_at > NOW())
-         -- Only redeemed vouchers have a balance worth showing; an unsold
-         -- code is not a customer's session.
-         AND v.activated_at IS NOT NULL
+       WHERE ${OWNED_VOUCHER_SQL}
           AND (
             $1::text IS NULL OR UPPER(v.code) = UPPER($1)
             OR (
@@ -354,17 +460,21 @@ usageRouter.get('/', usageLimiter, async (req: Request, res: Response) => {
     let usageSource: 'ruijie_live' | 'ruijie_voucher' | 'voucher_accounting' | 'none' = 'none';
     const offer = (mb: unknown, source: typeof usageSource): void => {
       const n = typeof mb === 'number' ? mb : parseFloat(String(mb));
-      if (!Number.isFinite(n)) return;
+      // Negative and absurd values are upstream noise, not usage. The bound is
+      // 100 TB — far beyond any real plan — so a sentinel like -1 or 2^53 can
+      // never render as a customer's balance.
+      if (!Number.isFinite(n) || n < 0 || n > 100 * 1024 * 1024) return;
       if (usedMB == null || n > usedMB) {
         usedMB = n;
         usageSource = source;
       }
     };
-    // Ruijie's usedQuota is unreliable for uncapped vouchers (returns garbage).
-    // For uncapped, only use the locally reconciled data_consumed_mb.
-    if (!isUncapped) {
-      offer(rv?.usedQuotaMb, 'ruijie_voucher');
-    }
+    // Ruijie's per-voucher counter is the number the gateway enforces. It is
+    // also the only usage figure an uncapped plan exposes: quota 0 means
+    // unlimited, while usedQuota keeps counting the plan's real consumption.
+    // The locally reconciled column is frequently NULL, so it must not be the
+    // sole source or unlimited customers would never see usage.
+    offer(rv?.usedQuotaMb, 'ruijie_voucher');
     // data_consumed_mb is NUMERIC megabytes written by the Ruijie accounting
     // reconciliation; NULL for every voucher syncAccountingData() could not
     // attribute (see module header).
@@ -439,7 +549,10 @@ usageRouter.get('/', usageLimiter, async (req: Request, res: Response) => {
       totalMB: effectiveTotalMB,
       percentUsed: percentUsed != null ? Math.round(percentUsed * 10) / 10 : null,
       isUncapped,
-      dataLimitGb: row.data_limit_gb,
+      // Plan property, not a derived figure: every "remaining"/"total" readout
+      // in the PWA keys off this so an unlimited bundle is Unlimited everywhere.
+      unlimited: isUncapped,
+      dataLimitGb: isUncapped ? null : row.data_limit_gb,
       // Where the used figure came from. ruijie_voucher is Ruijie's own
       // per-voucher counter (what the gateway enforces); ruijie_live is the
       // station roster keyed by MAC; voucher_accounting is the (possibly
