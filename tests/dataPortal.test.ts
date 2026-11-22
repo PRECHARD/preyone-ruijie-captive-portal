@@ -235,15 +235,18 @@ describe('/data PWA — restored brand shell', () => {
     expect(html).toContain('setWifi(j.active === true && j.onlineNow !== false)');
   });
 
-  it('keeps the whole brand header sticky and frosted once scrolled', () => {
+  it('keeps the brand header sticky, compact and stable once scrolled', () => {
     expect(html).toContain('.data-top {');
     expect(html).toContain('position: sticky');
     expect(html).toContain('.data-top.is-scrolled');
-    expect(html).toContain('backdrop-filter: blur(20px)');
+    expect(html).toContain('backdrop-filter: blur(18px)');
+    expect(html).toContain('overflow-anchor: none');
     expect(html).toContain('function syncNav');
-    expect(html).toContain("dataTop.classList.toggle('is-scrolled', y > 8)");
+    // hysteresis + rAF: no threshold oscillation or scroll-anchoring shake
+    expect(html).toContain('var next = navCompact ? y > 14 : y > 48;');
+    expect(html).toContain("dataTop.classList.toggle('is-scrolled', navCompact)");
     // the banner compacts while stuck so it does not swallow the viewport
-    expect(html).toContain('.data-top.is-scrolled .brand-logo-img { max-height: 64px; }');
+    expect(html).toContain('.data-top.is-scrolled .brand-logo-img { max-height: 36px; }');
   });
 
   it('gives the Wi-Fi mark a green/purple pulsing halo', () => {
