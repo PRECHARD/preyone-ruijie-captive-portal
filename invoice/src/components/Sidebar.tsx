@@ -11,7 +11,7 @@ import { getToken, type Company, type DocType } from '../api';
  * without pushing the ledger or app switcher off-screen.
  */
 
-export type View = 'documents' | 'aging' | 'accounting' | 'settings';
+export type View = 'documents' | 'aging' | 'accounting' | 'zar' | 'settings';
 
 type IconName =
   | 'docs'
@@ -343,6 +343,7 @@ export default function Sidebar({
   const paidActive = onDocuments && statusFilter === 'paid';
   const agingActive = view === 'aging';
   const accountingActive = view === 'accounting';
+  const zarActive = view === 'zar';
   const settingsActive = view === 'settings';
 
   return (
@@ -451,6 +452,15 @@ export default function Sidebar({
           >
             <span className="nav-icon"><Icon name="accounting" /></span>
             <span className="nav-text">Accounting &amp; Financing</span>
+          </button>
+          <button
+            type="button"
+            className={`nav-item${zarActive ? ' active' : ''}`}
+            aria-current={zarActive ? 'page' : undefined}
+            onClick={() => onView('zar')}
+          >
+            <span className="nav-icon"><Icon name="wallet" /></span>
+            <span className="nav-text">Rand ledger (ZAR)</span>
           </button>
         </section>
 

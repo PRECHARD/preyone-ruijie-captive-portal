@@ -1278,6 +1278,24 @@ const SQL = `
   SELECT 'Preyone', 'Connecting People. Powering Business.', 'info@preyone.com', '+263771327202', 'USD', 0
   WHERE NOT EXISTS (SELECT 1 FROM companies);
 
+  -- Historical currency totals that were kept outside the itemised ledger
+  -- (e.g. the ZAR summary at the top of the ZIM client workbook). Keeping
+  -- these separate prevents ZAR totals being summed into USD revenue.
+  CREATE TABLE IF NOT EXISTS legacy_currency_totals (
+    id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id     UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    currency       TEXT NOT NULL,
+    sales_total    NUMERIC(14,2) NOT NULL DEFAULT 0,
+    funds_total    NUMERIC(14,2) NOT NULL DEFAULT 0,
+    balance_total  NUMERIC(14,2) NOT NULL DEFAULT 0,
+    source         TEXT,
+    as_of          DATE,
+    metadata       JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (company_id, currency)
+  );
+
   -- Company scoping for POS documents and shifts. pos.ts writes company_id on
   -- every checkout, but the columns were originally added by hand, so they are
   -- declared here to keep a fresh migrate() in step with the live database

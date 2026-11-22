@@ -18,6 +18,7 @@ import {
   type DocumentDetail,
   type DocumentEvent,
   type InvoiceTemplate,
+  type LegacyCurrencyTotal,
   type PosDocument,
   type ProductRecord,
   type ThemeResponse,
@@ -2174,6 +2175,108 @@ function SettingsPanel({
 
 /* ─────────────────────────────── app ───────────────────────────────── */
 
+function ZarLedgerPage() {
+  const [rows, setRows] = useState<LegacyCurrencyTotal[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    void api
+      .get<LegacyCurrencyTotal[]>('/api/pos/legacy-totals')
+      .then((data) => {
+        if (alive) setRows(data);
+      })
+      .catch((err) => {
+        if (alive) {
+          setRows([]);
+          setError(errorText(err));
+        }
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const zar = rows?.find((row) => row.currency === 'ZAR');
+  const sales = Number(zar?.sales_total) || 0;
+  const funds = Number(zar?.funds_total) || 0;
+  const balance = Number(zar?.balance_total) || 0;
+
+  return (
+    <>
+      <div className="topbar">
+        <div>
+          <h1 className="page-title">Rand ledger</h1>
+          <p className="page-sub">
+            Historical ZAR totals imported from the ZIM client workbook. Kept separate from USD
+            accounting so the two currencies never mix.
+          </p>
+        </div>
+        <div className="topbar-actions">
+          <span className="status-chip">
+            <span className="status-dot" aria-hidden />
+            ZAR ledger
+          </span>
+        </div>
+      </div>
+
+      {error && <div className="banner error">{error}</div>}
+
+      {!rows ? (
+        <div className="skeleton" style={{ height: 160 }} />
+      ) : !zar ? (
+        <div className="card panel">
+          <div className="empty">No rand totals have been imported yet.</div>
+        </div>
+      ) : (
+        <>
+          <div className="stats">
+            <div className="stat">
+              <div className="stat-label">ZAR sales</div>
+              <div className="stat-value">{money(sales, 'ZAR')}</div>
+              <div className="stat-foot">historical rand sales total</div>
+            </div>
+            <div className="stat">
+              <div className="stat-label">Funds received</div>
+              <div className="stat-value">{money(funds, 'ZAR')}</div>
+              <div className="stat-foot">historical rand funds recorded</div>
+            </div>
+            <div className="stat">
+              <div className="stat-label">Balance</div>
+              <div className={`stat-value ${balance > 0 ? 'warn' : ''}`}>{money(balance, 'ZAR')}</div>
+              <div className="stat-foot">rand sales less funds received</div>
+            </div>
+          </div>
+
+          <div className="card panel" style={{ marginTop: 18 }}>
+            <div className="panel-head">
+              <div className="panel-title">Source record</div>
+            </div>
+            <div className="drawer-list">
+              <div className="drawer-item">
+                <span>Imported from</span>
+                <span>{zar.source || 'Preyone ZIM Clients Account Record'}</span>
+              </div>
+              <div className="drawer-item">
+                <span>As of</span>
+                <span>{zar.as_of ? dateLabel(zar.as_of) : '—'}</span>
+              </div>
+              <div className="drawer-item">
+                <span>Currency</span>
+                <span>ZAR</span>
+              </div>
+            </div>
+            <p className="muted small" style={{ margin: '12px 0 0' }}>
+              ZAR totals are recorded here as their own currency tab and are not added to the USD
+              ledger/P&amp;L. USD invoices and payments remain in the Documents and Accounting tabs.
+            </p>
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
 const AR_BUCKETS: Array<{ key: keyof ArAging['buckets']; label: string; tone?: string }> = [
   { key: 'current', label: 'Current' },
   { key: 'd1_30', label: '1–30 days', tone: 'warn' },
@@ -2188,6 +2291,7 @@ function viewFromPath(pathname: string): View {
   if (clean.endsWith('/settings')) return 'settings';
   if (clean.endsWith('/aging')) return 'aging';
   if (clean.endsWith('/accounting') || clean.endsWith('/financing')) return 'accounting';
+  if (clean.endsWith('/zar') || clean.endsWith('/rand')) return 'zar';
   return 'documents';
 }
 
@@ -2195,6 +2299,7 @@ function pathForView(view: View): string {
   if (view === 'settings') return '/settings';
   if (view === 'aging') return '/aging';
   if (view === 'accounting') return '/accounting';
+  if (view === 'zar') return '/zar';
   return '/';
 }
 
@@ -2465,7 +2570,7 @@ export default function App() {
       />
 
       <main className="main">
-        {view !== 'settings' && view !== 'accounting' && (
+        {view !== 'settings' && view !== 'accounting' && view !== 'zar' && (
         <div className="topbar">
           <div>
             <h1 className="page-title">
@@ -2494,9 +2599,9 @@ export default function App() {
         </div>
         )}
 
-        {error && view !== 'accounting' && <div className="banner error">{error}</div>}
+        {error && view !== 'accounting' && view !== 'zar' && <div className="banner error">{error}</div>}
 
-        {view !== 'settings' && view !== 'accounting' && (
+        {view !== 'settings' && view !== 'accounting' && view !== 'zar' && (
           <div className="stats">
             <div className="stat">
               <div className="stat-label">Documents</div>
@@ -2529,6 +2634,7 @@ export default function App() {
         )}
 
         {view === 'accounting' && <AccountingPage />}
+        {view === 'zar' && <ZarLedgerPage />}
 
         {view === 'documents' && (
           <div className="card panel">

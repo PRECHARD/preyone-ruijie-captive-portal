@@ -374,6 +374,23 @@ router.patch('/theme', requireRole(...MANAGER_ROLES), async (req, res) => {
   res.json({ theme, css: themeCssVariables(theme as any), cssBlock: themeCssBlock(theme as any) });
 });
 
+/**
+ * Historical currency totals imported from spreadsheets (currently ZAR).
+ * Intentionally separate from accounting_ledger: summing mixed currencies in
+ * one P&L figure would be wrong. The invoice workspace shows these on their own
+ * currency tab and USD documents remain the source of the USD ledger.
+ */
+router.get('/legacy-totals', async (req, res) => {
+  const { rows } = await pool.query(
+    `SELECT currency, sales_total, funds_total, balance_total, source, as_of, metadata, updated_at
+       FROM legacy_currency_totals
+      WHERE company_id = $1
+      ORDER BY currency`,
+    [tenantId(req)]
+  );
+  res.json(rows);
+});
+
 router.get('/catalog', async (req, res) => {
   const cid = tenantId(req);
   const [companyRes, templatesRes, themesRes] = await Promise.all([

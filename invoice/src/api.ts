@@ -304,6 +304,17 @@ export interface DocumentEvent {
   created_at: string;
 }
 
+export interface LegacyCurrencyTotal {
+  currency: string;
+  sales_total: string | number;
+  funds_total: string | number;
+  balance_total: string | number;
+  source?: string | null;
+  as_of?: string | null;
+  metadata?: Record<string, unknown>;
+  updated_at?: string;
+}
+
 export interface ArAging {
   buckets: { current: number; d1_30: number; d31_60: number; d61_90: number; d90plus: number };
   detail: Array<PosDocument & { balance: number; daysOverdue: number; bucket: string }>;
