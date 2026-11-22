@@ -16,7 +16,8 @@
     "cleanup-logs": "node -r ts-node/register src/cleanup-logs.ts",
     "test": "vitest run",
     "test:e2e": "vitest run --config vitest.e2e.config.ts",
-    "verify:route-templates": "ts-node -T scripts/verify-route-templates.ts"
+    "verify:route-templates": "ts-node -T scripts/verify-route-templates.ts",
+    "verify:data-lock": "node scripts/verify-data-pwa-lock.mjs"
   },
   "dependencies": {
     "axios": "^1.18.1",

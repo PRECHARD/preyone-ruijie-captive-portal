@@ -3,6 +3,23 @@
 ## Project Overview
 Ruijie captive portal system for Preyone UltraNet Wi-Fi. Voucher-based internet access with gateway integration via RADIUS and ext_login.
 
+## SCOPE LOCK — /data Data-Usage PWA FROZEN (2026-11-22)
+
+> **DO NOT MODIFY** the files listed in `docs/frozen-data-pwa.lock.json` without
+> **explicit user approval**. The user locked this feature on 2026-11-22 after the
+> voucher-switching and record-retention work was deployed.
+>
+> Frozen scope:
+> - `/data` usage PWA (`public/data.html`)
+> - its success-page hand-off (`public/success.html`)
+> - `/api/check-usage` backend (`src/routes/usage.ts`)
+> - the lock/contract tests (`tests/dataPortal.test.ts`, `tests/usageRoute.test.ts`)
+>
+> Verify the freeze at any time with `npm run verify:data-lock`. A hash mismatch
+> means the lock was broken. To unlock, the user must explicitly approve it, then
+> update `docs/frozen-data-pwa.lock.json` with the new SHA-256 hashes in the same
+> change. Do not silently bypass this lock.
+
 ## SCOPE LOCK — Admin console UNLOCKED for Global Settings Hub (2026-10-15)
 
 > **Status change (2026-10-15):** The admin console was permanently frozen at the 12:00 2026-10-13

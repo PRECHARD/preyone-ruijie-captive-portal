@@ -1,0 +1,13 @@
+{
+  "lock": "data-usage-pwa",
+  "lockedAt": "2026-11-22T19:54:20.188Z",
+  "reason": "User-approved freeze of the /data usage PWA, voucher switching across Wi-Fi bands and record retention.",
+  "unlock": "Explicit user approval required. Update this manifest with the new SHA-256 hashes when unlocking.",
+  "files": {
+    "public/data.html": "35363502641b20386329d89c62455bc56230c87b2316f6a99fffecece211392d",
+    "public/success.html": "31a4d37e63a39af0262cf341e9bbe13b759eeb3eca30cf62cfea819116eda76b",
+    "src/routes/usage.ts": "fdc5ba42220d87b90edd940a4b274784c1cc1e5acb158dae603a837e8efb7630",
+    "tests/dataPortal.test.ts": "60f4f03dfd56ddcd116ef3d0618adfc1bee72c46007f9d2e47d07bf4cd5a78fc",
+    "tests/usageRoute.test.ts": "297d4e7131b6d796efa90e201534cc4f6672046e6a80b1a8696f652eb1cf6d88"
+  }
+}
