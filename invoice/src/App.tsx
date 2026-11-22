@@ -2230,7 +2230,7 @@ function ZarLedgerPage() {
         </div>
       ) : (
         <>
-          <div className="stats">
+          <div className="stats zar-kpis">
             <div className="stat">
               <div className="stat-label">ZAR sales</div>
               <div className="stat-value">{money(sales, 'ZAR')}</div>
@@ -2252,7 +2252,7 @@ function ZarLedgerPage() {
             <div className="panel-head">
               <div className="panel-title">Source record</div>
             </div>
-            <div className="drawer-list">
+            <div className="drawer-list zar-source">
               <div className="drawer-item">
                 <span>Imported from</span>
                 <span>{zar.source || 'Preyone ZIM Clients Account Record'}</span>
@@ -2266,7 +2266,7 @@ function ZarLedgerPage() {
                 <span>ZAR</span>
               </div>
             </div>
-            <p className="muted small" style={{ margin: '12px 0 0' }}>
+            <p className="muted small zar-note" style={{ margin: '12px 0 0' }}>
               ZAR totals are recorded here as their own currency tab and are not added to the USD
               ledger/P&amp;L. USD invoices and payments remain in the Documents and Accounting tabs.
             </p>
