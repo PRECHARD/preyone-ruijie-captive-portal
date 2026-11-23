@@ -200,6 +200,7 @@ a:focus-visible {
   flex: none;
   display: grid;
   place-items: center;
+  overflow: hidden;
   border-radius: 12px;
   border: 1px solid rgba(0, 240, 255, 0.2);
   background:
@@ -211,18 +212,16 @@ a:focus-visible {
 }
 
 .brand-logo {
-  height: 32px;
-  width: 32px;
+  height: 100%;
+  width: 100%;
   flex: none;
-  object-fit: contain;
-  object-position: center;
-  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.5)) drop-shadow(0 0 10px rgba(0, 240, 255, 0.22));
-  transition: filter 0.3s var(--pos-ease-out), transform 0.3s var(--pos-ease-out);
+  display: block;
+  object-fit: cover;
+  object-position: 50% 50%;
+  border-radius: inherit;
+  transition: transform 0.3s var(--pos-ease-out);
 }
-.brand:hover .brand-logo {
-  transform: scale(1.04);
-  filter: drop-shadow(0 2px 7px rgba(0, 0, 0, 0.5)) drop-shadow(0 0 14px rgba(0, 240, 255, 0.34));
-}
+.brand:hover .brand-logo { transform: scale(1.04); }
 
 .brand-copy {
   display: flex;
