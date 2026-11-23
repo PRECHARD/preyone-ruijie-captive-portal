@@ -134,6 +134,7 @@ a:focus-visible {
     24px 0 70px rgba(0, 0, 0, 0.28);
   overflow-y: auto;
   scrollbar-width: none;
+  container-type: inline-size;
 }
 .sidebar::-webkit-scrollbar { width: 0; }
 
@@ -152,12 +153,20 @@ a:focus-visible {
 .brand {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 4px 6px 16px;
+  gap: 10px;
+  padding: 4px 4px 16px;
   border-bottom: 1px solid var(--pos-glass-edge);
   position: relative;
+  min-width: 0;
 }
 .brand > div { min-width: 0; }
+.brand-copy {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  flex: 1 1 auto;
+  min-width: 0;
+}
 
 .brand-mark {
   width: 40px;
@@ -200,11 +209,13 @@ a:focus-visible {
 
 .brand-name {
   font-weight: 700;
-  letter-spacing: 0.2px;
+  font-size: clamp(12.5px, 5.2cqw, 15px);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   line-height: 1.15;
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
+  overflow: visible;
+  text-overflow: clip;
 }
 .brand-sub {
   font-size: 10px;

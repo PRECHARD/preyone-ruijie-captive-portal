@@ -2023,6 +2023,18 @@ router.get('/documents/:id', async (req, res) => {
   res.json({ ...doc.rows[0], items: items.rows, payments: pays.rows, customer: customer.rows[0] || null });
 });
 
+/**
+ * Normalise a company-configured document prefix for the shared numbering
+ * series. The Settings hub stores `INV` (no trailing dash), but legacy rows may
+ * still carry `INV-`. Both must resolve to a single, clean `INV`.
+ */
+function normaliseDocPrefix(value: unknown, fallback: string): string {
+  const cleaned = str(value)
+    .replace(/[^A-Za-z0-9._/-]+/g, '')
+    .replace(/[-/._]+$/, '');
+  return cleaned || fallback;
+}
+
 // One-click quotation/sale → invoice conversion. Only a non-voided quotation
 // or sale owned by this tenant can be converted; the doc_number is re-issued
 // from the shared sequence so the UNIQUE constraint keeps holding.
@@ -2054,6 +2066,242 @@ router.post('/documents/:id/convert-to-invoice', async (req, res) => {
     [docNumber, req.params.id]
   );
   res.json(updated.rows[0]);
+});
+
+/**
+ * Issue a brand-new invoice from a quotation without destroying the source.
+ *
+ * World-class conversion model:
+ *  - the quotation remains readable and is stamped with `doc_meta.conversion`;
+ *  - a new invoice is created in the same tenant, with the next number from the
+ *    live invoice series (company prefix + `pos_doc_number_seq`);
+ *  - customer, currency, template, tax/discount, notes and every line + detail
+ *    bullet are copied across;
+ *  - no payments are copied (an invoice issues a fresh receivable) and stock is
+ *    only carried over when the source already consumed it, so a payment on the
+ *    invoice can never decrement inventory twice;
+ *  - the operation is idempotent: repeating it returns the invoice already
+ *    linked to that quotation instead of minting a duplicate.
+ */
+router.post('/documents/:id/issue-invoice', async (req, res) => {
+  const blocked = invoiceBlock(req.company!);
+  if (blocked) {
+    res.status(403).json(blocked);
+    return;
+  }
+
+  const cid = tenantId(req);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const sourceRes = await client.query(
+      `SELECT * FROM pos_documents
+        WHERE id = $1 AND company_id = $2
+          AND doc_type IN ('quotation', 'quote', 'estimate', 'proforma')
+          AND status <> 'void'
+        FOR UPDATE`,
+      [req.params.id, cid]
+    );
+    if (sourceRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      res.status(404).json({ error: 'Quotation not found or it is not convertible.' });
+      return;
+    }
+    const source = sourceRes.rows[0] as any;
+    const sourceMeta =
+      source.doc_meta && typeof source.doc_meta === 'object' && !Array.isArray(source.doc_meta)
+        ? (source.doc_meta as Record<string, any>)
+        : {};
+    const existingId = sourceMeta?.conversion?.invoiceId;
+
+    // Idempotent replay: if this quote already produced a live invoice, hand it
+    // back instead of allocating another number.
+    if (typeof existingId === 'string' && existingId) {
+      const existing = await client.query(
+        `SELECT * FROM pos_documents
+          WHERE id = $1 AND company_id = $2 AND doc_type = 'invoice' AND status <> 'void'`,
+        [existingId, cid]
+      );
+      if (existing.rows.length > 0) {
+        await client.query('COMMIT');
+        res.json({
+          ...existing.rows[0],
+          alreadyConverted: true,
+          sourceDocumentId: source.id,
+          sourceDocumentNumber: source.doc_number,
+        });
+        return;
+      }
+    }
+
+    const itemRes = await client.query(
+      `SELECT product_id, description, details, price, qty, line_total, position
+         FROM pos_document_items
+        WHERE document_id = $1
+        ORDER BY position, id`,
+      [source.id]
+    );
+    if (itemRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      res.status(409).json({
+        error: 'This quotation has no line items. Add at least one item before issuing an invoice.',
+        code: 'DOCUMENT_EMPTY',
+      });
+      return;
+    }
+
+    const companyRes = await client.query(
+      `SELECT invoice_prefix FROM companies WHERE id = $1`,
+      [cid]
+    );
+    const prefix = normaliseDocPrefix(companyRes.rows[0]?.invoice_prefix, DOC_PREFIX.invoice);
+    const seq = await client.query(`SELECT nextval('pos_doc_number_seq') AS v`);
+    const docNumber = `${prefix}-${String(seq.rows[0].v).padStart(4, '0')}`;
+
+    const total = round2(num(source.total));
+    const netDays = Number.isFinite(Number(req.body?.netDays))
+      ? Math.max(0, Math.min(365, Math.floor(Number(req.body.netDays))))
+      : 30;
+    const status = total <= 0 ? 'paid' : 'unpaid';
+
+    // Carry commercial metadata forward, but never the source's conversion or
+    // historical-import markers: an invoice is a new commercial document.
+    const carried: Record<string, unknown> = {};
+    for (const key of ['poNumber', 'reference', 'terms', 'paymentTerms', 'taxAmount', 'credit']) {
+      if (sourceMeta[key] !== undefined && sourceMeta[key] !== null) carried[key] = sourceMeta[key];
+    }
+    const convertedAt = new Date().toISOString();
+    const invoiceMeta = {
+      ...carried,
+      source: {
+        documentId: source.id,
+        documentNumber: source.doc_number,
+        docType: source.doc_type,
+      },
+      netDays,
+      conversion: { convertedAt },
+    };
+
+    const inserted = await client.query(
+      `INSERT INTO pos_documents
+         (doc_number, doc_type, channel, status, customer_id, cashier_id, issue_date, due_date,
+          subtotal, discount_pct, tax_pct, total, amount_paid, notes, company_id,
+          currency, exchange_rate, template_id, doc_meta, stock_applied)
+       VALUES ($1,'invoice','office',$2,$3,$4,CURRENT_DATE,
+               CURRENT_DATE + ($5::int * INTERVAL '1 day'),
+               $6,$7,$8,$9,0,$10,$11,$12,$13,$14,$15,$16)
+       RETURNING *`,
+      [
+        docNumber,
+        status,
+        source.customer_id,
+        req.adminUser?.id ?? null,
+        netDays,
+        source.subtotal,
+        source.discount_pct,
+        source.tax_pct,
+        total,
+        source.notes,
+        cid,
+        source.currency || 'USD',
+        source.exchange_rate || 1,
+        source.template_id,
+        JSON.stringify(invoiceMeta),
+        Boolean(source.stock_applied),
+      ]
+    );
+
+    const verified = await client.query(
+      `UPDATE pos_documents SET verify_code = $1 WHERE id = $2 RETURNING *`,
+      [generateDocumentVerifyCode(), inserted.rows[0].id]
+    );
+    const invoice = verified.rows[0] as any;
+
+    for (let i = 0; i < itemRes.rows.length; i++) {
+      const item = itemRes.rows[i] as any;
+      await client.query(
+        `INSERT INTO pos_document_items
+           (document_id, product_id, description, details, price, qty, line_total, position)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+        [
+          invoice.id,
+          item.product_id ?? null,
+          str(item.description) || 'Item',
+          Array.isArray(item.details) ? item.details : [],
+          item.price,
+          item.qty,
+          item.line_total,
+          i,
+        ]
+      );
+    }
+
+    await client.query(
+      `UPDATE pos_documents
+          SET doc_meta = COALESCE(doc_meta, '{}'::jsonb)
+                         || jsonb_build_object('conversion', $1::jsonb),
+              updated_at = NOW()
+        WHERE id = $2`,
+      [
+        JSON.stringify({
+          invoiceId: invoice.id,
+          invoiceNumber: invoice.doc_number,
+          convertedAt,
+        }),
+        source.id,
+      ]
+    );
+
+    await client.query(
+      `INSERT INTO pos_document_events (document_id, company_id, event, detail, actor_id)
+       VALUES ($1,$2,'created',$3,$4)`,
+      [
+        invoice.id,
+        cid,
+        JSON.stringify({
+          docType: 'invoice',
+          total,
+          currency: invoice.currency,
+          sourceDocumentNumber: source.doc_number,
+        }),
+        req.adminUser?.id ?? null,
+      ]
+    ).catch(() => undefined);
+
+    await client.query(
+      `INSERT INTO pos_document_events (document_id, company_id, event, detail, actor_id)
+       VALUES ($1,$2,'converted',$3,$4)`,
+      [
+        source.id,
+        cid,
+        JSON.stringify({ invoiceId: invoice.id, invoiceNumber: invoice.doc_number }),
+        req.adminUser?.id ?? null,
+      ]
+    ).catch(() => undefined);
+
+    await client.query('COMMIT');
+    res.status(201).json({
+      ...invoice,
+      items: itemRes.rows,
+      alreadyConverted: false,
+      sourceDocumentId: source.id,
+      sourceDocumentNumber: source.doc_number,
+    });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    if ((err as { code?: string })?.code === '23505') {
+      res.status(409).json({
+        error: `Document number ${'allocation'} collided. Try again.`,
+        code: 'DOC_NUMBER_TAKEN',
+      });
+      return;
+    }
+    console.error('Issue invoice from quotation error:', (err as Error).message);
+    res.status(500).json({ error: 'Could not issue an invoice from this quotation.' });
+  } finally {
+    client.release();
+  }
 });
 
 // Atomic checkout: creates document + items + payments, decrements stock

@@ -71,42 +71,104 @@ function DonutChart({
   if (total <= 0) {
     return <div className="fin-area-empty">No collections in this period.</div>;
   }
+  const centreText = money(total);
+  // The amount is the one value that must never touch the ring. Scale it from
+  // the character count and, for genuinely long figures, constrain the final
+  // advance so the glyphs stay inside the inner plate.
+  const centreSize =
+    centreText.length >= 15
+      ? 7.5
+      : centreText.length >= 13
+        ? 8.5
+        : centreText.length >= 11
+          ? 9.5
+          : centreText.length >= 9
+            ? 11
+            : 13;
+  const estimatedWidth = centreText.length * centreSize * 0.6;
+  const fittedLength = estimatedWidth > 72 ? 72 : undefined;
   let offset = 0;
   return (
     <div className="fin-donut-wrap">
-      <svg className="fin-donut" viewBox="0 0 160 160" role="img" aria-label="Collections by payment rail">
-        <circle cx="80" cy="80" r="54" fill="none" stroke="rgba(168,85,247,0.12)" strokeWidth="16" />
-        {data.map((item) => {
-          const pct = (Math.max(0, item.value) / total) * 100;
-          const visible = Math.max(pct - 1.1, 0.4);
-          const segment = (
-            <circle
-              key={item.label}
-              className="segment"
-              cx="80"
-              cy="80"
-              r="54"
-              fill="none"
-              stroke={item.color}
-              strokeWidth="16"
-              pathLength={100}
-              strokeDasharray={`${visible} ${100 - visible}`}
-              strokeDashoffset={-offset}
-              transform="rotate(-90 80 80)"
-            >
-              <title>{`${item.label}: ${money(item.value)} (${pct.toFixed(1)}%)`}</title>
-            </circle>
-          );
-          offset += pct;
-          return segment;
-        })}
-        <text x="80" y="78" className="fin-donut-centre">
-          {money(total)}
-        </text>
-        <text x="80" y="94" className="fin-donut-centre-label">
-          {centreLabel}
-        </text>
-      </svg>
+      <div className="fin-donut-stage">
+        <svg className="fin-donut" viewBox="0 0 160 160" role="img" aria-label={`Collections by payment rail: ${centreText}`}>
+          <defs>
+            <radialGradient id="fin-donut-core" cx="50%" cy="38%" r="68%">
+              <stop offset="0%" stopColor="#14243c" />
+              <stop offset="58%" stopColor="#0a1322" />
+              <stop offset="100%" stopColor="#050910" />
+            </radialGradient>
+            <linearGradient id="fin-donut-rim" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stopColor="#00F0FF" stopOpacity="0.6" />
+              <stop offset="52%" stopColor="#34D399" stopOpacity="0.18" />
+              <stop offset="100%" stopColor="#00F0FF" stopOpacity="0.45" />
+            </linearGradient>
+            <filter id="fin-donut-glow" x="-35%" y="-35%" width="170%" height="170%">
+              <feGaussianBlur stdDeviation="2.4" result="blur" />
+              <feMerge>
+                <feMergeNode in="blur" />
+                <feMergeNode in="SourceGraphic" />
+              </feMerge>
+            </filter>
+          </defs>
+
+          {/* HUD tick ring + recessed track gives the dial physical depth. */}
+          <circle
+            cx="80"
+            cy="80"
+            r="64"
+            fill="none"
+            stroke="rgba(103,232,249,0.26)"
+            strokeWidth="0.8"
+            strokeDasharray="1 4.6"
+          />
+          <circle cx="80" cy="80" r="54" fill="none" stroke="rgba(148,178,214,0.12)" strokeWidth="16" />
+
+          {data.map((item) => {
+            const pct = (Math.max(0, item.value) / total) * 100;
+            const visible = Math.max(pct - 1.1, 0.4);
+            const segment = (
+              <circle
+                key={item.label}
+                className="segment"
+                cx="80"
+                cy="80"
+                r="54"
+                fill="none"
+                stroke={item.color}
+                strokeWidth="16"
+                pathLength={100}
+                strokeDasharray={`${visible} ${100 - visible}`}
+                strokeDashoffset={-offset}
+                transform="rotate(-90 80 80)"
+                filter="url(#fin-donut-glow)"
+              >
+                <title>{`${item.label}: ${money(item.value)} (${pct.toFixed(1)}%)`}</title>
+              </circle>
+            );
+            offset += pct;
+            return segment;
+          })}
+
+          <circle cx="80" cy="80" r="54" fill="none" stroke="url(#fin-donut-rim)" strokeWidth="1.2" />
+          <circle cx="80" cy="80" r="43.5" fill="none" stroke="rgba(255,255,255,0.09)" strokeWidth="1" />
+          <circle cx="80" cy="80" r="41.5" fill="url(#fin-donut-core)" stroke="rgba(0,240,255,0.2)" strokeWidth="1" />
+          <text
+            x="80"
+            y="78"
+            className="fin-donut-centre"
+            style={{ fontSize: centreSize }}
+            textLength={fittedLength}
+            lengthAdjust="spacingAndGlyphs"
+          >
+            {centreText}
+          </text>
+          <text x="80" y="91" className="fin-donut-centre-label">
+            {centreLabel}
+          </text>
+        </svg>
+        <span className="fin-donut-scan" aria-hidden />
+      </div>
       <div className="fin-legend">
         {data.map((item) => (
           <div className="fin-legend-row" key={item.label}>
@@ -141,6 +203,7 @@ function RevenuePulse({ points }: { points: Array<{ label: string; value: number
     .map(([x, y], index) => `${index === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`)
     .join(' ');
   const area = `${line} L${(width - padX).toFixed(1)},${height - padBottom} L${padX},${height - padBottom} Z`;
+  const [lastX, lastY] = coords[coords.length - 1];
   return (
     <svg className="fin-area" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Revenue pulse by day">
       <defs>
@@ -150,15 +213,30 @@ function RevenuePulse({ points }: { points: Array<{ label: string; value: number
           <stop offset="100%" stopColor="#22D3EE" />
         </linearGradient>
         <linearGradient id="fin-area-fill" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#00F0FF" stopOpacity="0.26" />
+          <stop offset="0%" stopColor="#00F0FF" stopOpacity="0.28" />
+          <stop offset="55%" stopColor="#34D399" stopOpacity="0.1" />
           <stop offset="100%" stopColor="#00F0FF" stopOpacity="0" />
         </linearGradient>
+        <linearGradient id="fin-area-floor" x1="0" x2="1">
+          <stop offset="0%" stopColor="#00F0FF" stopOpacity="0" />
+          <stop offset="50%" stopColor="#34D399" stopOpacity="0.55" />
+          <stop offset="100%" stopColor="#00F0FF" stopOpacity="0" />
+        </linearGradient>
+        <filter id="fin-line-glow" x="-20%" y="-40%" width="140%" height="180%">
+          <feGaussianBlur stdDeviation="3.2" result="blur" />
+          <feMerge>
+            <feMergeNode in="blur" />
+            <feMergeNode in="SourceGraphic" />
+          </feMerge>
+        </filter>
       </defs>
+
+      {/* HUD grid: dashed horizontals, faint vertical beats, glowing floor. */}
       {[0, 1, 2, 3].map((lineIndex) => {
         const y = padTop + ((height - padTop - padBottom) / 3) * lineIndex;
         return (
           <line
-            key={lineIndex}
+            key={`h-${lineIndex}`}
             className="grid"
             x1={padX}
             x2={width - padX}
@@ -168,13 +246,38 @@ function RevenuePulse({ points }: { points: Array<{ label: string; value: number
           />
         );
       })}
+      {coords.map(([x], index) =>
+        index % Math.max(1, Math.ceil(points.length / 8)) === 0 ? (
+          <line
+            key={`v-${index}`}
+            className="grid-v"
+            x1={x}
+            x2={x}
+            y1={padTop}
+            y2={height - padBottom}
+          />
+        ) : null
+      )}
+      <line
+        x1={padX}
+        x2={width - padX}
+        y1={height - padBottom}
+        y2={height - padBottom}
+        stroke="url(#fin-area-floor)"
+        strokeWidth="1"
+      />
       <path d={area} fill="url(#fin-area-fill)" />
+      <path d={line} className="line-glow" filter="url(#fin-line-glow)" />
       <path d={line} className="line" />
       {coords.map(([x, y], index) => (
-        <circle className="dot" key={points[index].label} cx={x} cy={y} r="3.2">
+        <circle className="dot" key={points[index].label} cx={x} cy={y} r="3.1">
           <title>{`${points[index].label}: ${money(points[index].value)}`}</title>
         </circle>
       ))}
+      <circle className="dot-halo" cx={lastX} cy={lastY} r="7.5" />
+      <circle className="dot dot-last" cx={lastX} cy={lastY} r="3.6">
+        <title>{`${points[points.length - 1].label}: ${money(points[points.length - 1].value)}`}</title>
+      </circle>
       <text className="axis" x={padX} y={height - 6}>
         {points[0].label}
       </text>

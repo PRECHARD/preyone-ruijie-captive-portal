@@ -181,6 +181,7 @@ export default function StockManager({ onChanged }: { onChanged?: () => void }) 
         </button>
       </div>
 
+      <div className="stock-table-wrap">
       <table className="stock-table">
         <thead>
           <tr>
@@ -223,6 +224,7 @@ export default function StockManager({ onChanged }: { onChanged?: () => void }) 
           })}
         </tbody>
       </table>
+      </div>
 
       {filtered.length === 0 && <div className="empty-note">No products yet — add your first one.</div>}
 

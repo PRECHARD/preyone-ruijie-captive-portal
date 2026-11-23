@@ -1,0 +1,189 @@
+/* ─────────────────────────────────────────────────────────────────────────
+   Preyone Invoicing — responsive layer.
+   Loaded after every other stylesheet so these layout rules win. The goal is
+   a workspace that never clips, never overlaps and never traps a control off
+   screen, from a 360px phone to an ultrawide till.
+   ───────────────────────────────────────────────────────────────────────── */
+
+/* Tables are the widest content we render. The glass theme hides overflow so
+   cards keep their rounded edges — restore horizontal scrolling for data
+   tables while leaving decorative panels clipped. */
+.glass-shell .table-wrap,
+.glass-shell .card.panel .table-wrap,
+.card.panel .table-wrap {
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+}
+.table-wrap > table {
+  min-width: 620px;
+}
+
+/* Never let a flex/grid child force the page wider than the viewport. */
+.main,
+.topbar,
+.panel,
+.card,
+.sheet,
+.stat,
+.composer-layout,
+.split,
+.stats {
+  min-width: 0;
+}
+
+/* ── Tablet landscape ─────────────────────────────────────────────────── */
+
+@media (max-width: 1180px) {
+  .main { padding: 0 22px 60px; }
+  .glass-shell .topbar { margin: 0 -22px 22px; padding: 20px 22px 16px; }
+  .glass-shell .topbar::after { left: 22px; right: 22px; }
+
+  .composer-preview,
+  .settings-preview { position: static; }
+}
+
+/* ── Tablet portrait / stacked rail ───────────────────────────────────── */
+
+@media (max-width: 980px) {
+  .sidebar {
+    gap: 10px 12px;
+    padding: 12px 16px;
+  }
+  .brand { flex: none; }
+  .brand-logo { height: 42px; width: 42px; }
+
+  /* One swipeable nav row beats a five-row wrap. */
+  .side-nav {
+    flex: 1 1 100%;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-bottom: 2px;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .side-nav::-webkit-scrollbar { height: 0; }
+  .side-group,
+  .side-group:last-child,
+  .side-nav > .side-group { flex: 0 0 auto; flex-wrap: nowrap; }
+  .nav-item { white-space: nowrap; flex: none; }
+  .profile-card { margin-left: 0; }
+
+  .main { padding: 0 18px 56px; }
+  .glass-shell .topbar {
+    margin: 0 -18px 20px;
+    padding: 16px 18px 12px;
+    align-items: flex-start;
+    gap: 12px;
+  }
+  .glass-shell .topbar::after { left: 18px; right: 18px; }
+  .glass-shell .page-title { font-size: 24px; }
+  .glass-shell .page-sub { font-size: 12.5px; }
+  .glass-shell .topbar-actions { flex: 1 1 100%; }
+
+  .sheet { padding: 20px 20px 48px; }
+  .sheet.wide { width: 100%; }
+}
+
+/* ── Phones & small tablets ───────────────────────────────────────────── */
+
+@media (max-width: 760px) {
+  /* A sticky 190px rail would cover a quarter of a phone screen (and let the
+     page bleed through its glass). Let the chrome scroll away instead. */
+  .sidebar { position: static; }
+  .main { padding: 0 14px 48px; }
+  .glass-shell .topbar {
+    margin: 0 -14px 18px;
+    padding: 14px 14px 10px;
+  }
+  .glass-shell .topbar::after { left: 14px; right: 14px; }
+  .glass-shell .page-title { font-size: 21px; letter-spacing: -0.3px; }
+  .glass-shell .page-sub { font-size: 12px; line-height: 1.5; }
+
+  .topbar-actions > * { min-width: 0; }
+  .glass-shell .topbar-actions .input { width: 100%; min-width: 0; }
+
+  .stats { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
+  .stat { padding: 15px 16px 14px; }
+  .stat-value { font-size: 22px; }
+
+  .sheet { padding: 18px 15px 44px; }
+  .sheet-head { flex-wrap: wrap; gap: 10px; }
+  .sheet-title { font-size: 17px; width: 100%; }
+  .doc-number-edit { width: 100%; }
+  .doc-number-edit .input { width: 100%; }
+  .icon-btn { margin-left: auto; }
+
+  .form-grid { grid-template-columns: 1fr; }
+  .field.span-2 { grid-column: auto; }
+  .summary-box { width: 100%; }
+
+  .panel-head { padding: 13px 14px; }
+  .panel-tools { width: 100%; }
+  .panel-tools > * { flex: 1 1 auto; }
+
+  .drawer-doc-card { padding: 10px; }
+  .drawer-list { gap: 0; }
+  .drawer-item { gap: 8px; font-size: 12px; flex-wrap: wrap; }
+
+  .modal-backdrop { padding: 10px; align-items: flex-start; }
+  .modal-card { padding: 18px 16px 20px; max-height: calc(100vh - 20px); border-radius: 14px; }
+  .send-overlay { padding: 10px; }
+  .send-panel { width: 100%; padding: 18px 16px 20px; }
+
+  /* Accounting cockpit */
+  .fin-hero { padding: 18px 16px; gap: 16px; }
+  .fin-hero h1 { font-size: 22px; }
+  .fin-hero-side { width: 100%; }
+  .fin-date-inputs { flex-wrap: wrap; }
+  .fin-date-inputs .input { flex: 1 1 130px; width: auto; min-width: 0; }
+  .fin-export-actions { width: 100%; }
+  .fin-export-actions .btn { flex: 1 1 auto; }
+  .fin-card { padding: 14px; }
+  .fin-donut-wrap { justify-content: center; gap: 14px; }
+  .fin-donut { width: 164px; height: 164px; }
+  .fin-legend { flex: 1 1 100%; min-width: 0; }
+  .fin-bar-row { grid-template-columns: minmax(84px, 104px) minmax(0, 1fr) auto; gap: 8px; }
+  .fin-bar-value { font-size: 11px; }
+  .fin-rail-value { font-size: 11px; }
+  .zar-source { padding: 5px 14px 0; }
+  .zar-note { padding: 0 14px 14px; }
+}
+
+/* ── Narrow phones ────────────────────────────────────────────────────── */
+
+@media (max-width: 480px) {
+  .sidebar { padding: 10px 12px; }
+  .brand-logo { height: 38px; width: 38px; }
+  .profile-card { margin-left: 0; }
+
+  .glass-shell .page-title { font-size: 19px; }
+  .topbar-actions .btn { flex: 1 1 auto; }
+
+  .table-wrap > table { min-width: 540px; }
+  thead th, tbody td { padding-left: 10px; padding-right: 10px; }
+
+  .line-row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto 34px;
+    row-gap: 8px;
+  }
+  .line-row > :first-child { grid-column: 1 / -1; }
+  .line-row .line-total { align-self: center; }
+  .line-row > .icon-btn { justify-self: end; }
+
+  .stats { grid-template-columns: 1fr 1fr; }
+  .stat-value { font-size: 19px; }
+
+  .fin-kpis { grid-template-columns: 1fr; }
+  .fin-donut { width: 148px; height: 148px; }
+  .fin-bar-row { grid-template-columns: 1fr auto; }
+  .fin-bar-track { grid-column: 1 / -1; grid-row: 2; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar,
+  .topbar,
+  .sheet { scroll-behavior: auto; }
+}

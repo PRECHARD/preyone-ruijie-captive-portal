@@ -95,6 +95,7 @@ export interface PosDocument {
   cashier_name: string | null;
   customer_name?: string | null;
   item_count?: number;
+  doc_meta?: Record<string, unknown>;
   items?: Array<{
     description: string;
     details?: string[];
@@ -401,7 +402,11 @@ export const api = {
     }),
 
   // Quotation/sale → invoice conversion (one click from document history)
-  convertToInvoice: (id: string) => req<PosDocument>(`/documents/${id}/convert-to-invoice`, { method: 'POST' }),
+  convertToInvoice: (id: string, docType?: string) =>
+    req<PosDocument>(
+      `/documents/${id}/${docType === 'sale' ? 'convert-to-invoice' : 'issue-invoice'}`,
+      { method: 'POST' }
+    ),
 
   // Cash drawer audit: logs the exact ESC/POS kick bytes against the shift
   drawerAudit: (payload: { event?: 'open' | 'close' | 'test'; shiftId?: string | null }) =>

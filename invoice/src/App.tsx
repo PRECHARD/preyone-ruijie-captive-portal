@@ -1554,6 +1554,7 @@ function DocumentDrawer({
   company,
   onClose,
   onChanged,
+  onOpenDocument,
   action,
   onActionDone,
 }: {
@@ -1563,6 +1564,7 @@ function DocumentDrawer({
   company: Company;
   onClose: () => void;
   onChanged: () => void | Promise<void>;
+  onOpenDocument?: (id: string) => void;
   action?: DocumentAction | null;
   onActionDone?: () => void;
 }) {
@@ -1759,6 +1761,19 @@ function DocumentDrawer({
 
   const raw = doc as unknown as { discount_pct?: string | number; tax_pct?: string | number } | null;
   const meta = (doc?.doc_meta ?? {}) as Record<string, unknown>;
+  const conversionMeta =
+    meta.conversion && typeof meta.conversion === 'object' && !Array.isArray(meta.conversion)
+      ? (meta.conversion as { invoiceId?: string; invoiceNumber?: string; convertedAt?: string })
+      : null;
+  const sourceMeta =
+    meta.source && typeof meta.source === 'object' && !Array.isArray(meta.source)
+      ? (meta.source as { documentId?: string; documentNumber?: string; docType?: string })
+      : null;
+  const convertible =
+    !!doc &&
+    ['quotation', 'quote', 'estimate', 'proforma'].includes(doc.doc_type) &&
+    doc.status !== 'void' &&
+    !conversionMeta?.invoiceId;
   const drawerSheet: SheetDoc | null = doc
     ? {
         docType: doc.doc_type,
@@ -1853,6 +1868,29 @@ function DocumentDrawer({
         await api.post(`/api/pos/documents/${doc.id}/void`, { reason });
         await load();
         onChanged();
+      },
+    });
+  };
+
+  const askConvert = () => {
+    if (!doc) return;
+    setConfirm({
+      title: `Issue an invoice from ${doc.doc_number}?`,
+      message:
+        'A new invoice takes the next number in your live invoice series. Every line, detail bullet, customer, currency and tax setting is copied across. The quotation stays on file and is marked as converted.',
+      confirmLabel: 'Issue invoice',
+      tone: 'primary',
+      onConfirm: async () => {
+        const invoice = await api.post<PosDocument & { alreadyConverted?: boolean }>(
+          `/api/pos/documents/${doc.id}/issue-invoice`,
+          {}
+        );
+        await onChanged();
+        if (invoice?.id) {
+          onOpenDocument?.(invoice.id);
+        } else {
+          await load();
+        }
       },
     });
   };
@@ -1983,10 +2021,49 @@ function DocumentDrawer({
 
         {doc && (
           <>
+            {(conversionMeta?.invoiceNumber || sourceMeta?.documentNumber) && (
+              <div className={`doc-link-banner${conversionMeta?.invoiceNumber ? ' is-converted' : ''}`}>
+                <span className="doc-link-orb" aria-hidden />
+                <div className="doc-link-copy">
+                  <strong>
+                    {conversionMeta?.invoiceNumber ? 'Converted to invoice' : 'Issued from quotation'}
+                  </strong>
+                  <span>
+                    {conversionMeta?.invoiceNumber ? (
+                      <>
+                        Invoice <b className="mono">{conversionMeta.invoiceNumber}</b> now carries this
+                        receivable. The quotation is retained for your audit trail.
+                      </>
+                    ) : (
+                      <>
+                        This invoice was generated from quotation{' '}
+                        <b className="mono">{sourceMeta?.documentNumber}</b>.
+                      </>
+                    )}
+                  </span>
+                </div>
+                {conversionMeta?.invoiceId && onOpenDocument && (
+                  <button className="btn ghost" type="button" onClick={() => onOpenDocument(conversionMeta.invoiceId!)}>
+                    Open invoice
+                  </button>
+                )}
+                {sourceMeta?.documentId && onOpenDocument && (
+                  <button className="btn ghost" type="button" onClick={() => onOpenDocument(sourceMeta.documentId!)}>
+                    View quotation
+                  </button>
+                )}
+              </div>
+            )}
+
             <div className="topbar-actions" style={{ marginBottom: 18 }}>
               {canManage && doc.status !== 'void' && !editMode && (
-                <button className="btn primary" type="button" onClick={startEdit}>
+                <button className={`btn${convertible ? '' : ' primary'}`} type="button" onClick={startEdit}>
                   Edit document
+                </button>
+              )}
+              {canManage && convertible && !editMode && (
+                <button className="btn primary" type="button" disabled={busy} onClick={askConvert}>
+                  Convert to invoice
                 </button>
               )}
               {balance > 0.005 && doc.status !== 'void' && (
@@ -3797,6 +3874,7 @@ export default function App() {
           company={catalog.company}
           action={openDocAction}
           onActionDone={() => setOpenDocAction(null)}
+          onOpenDocument={openDocument}
           onClose={() => {
             setOpenDocId(null);
             setOpenDocAction(null);

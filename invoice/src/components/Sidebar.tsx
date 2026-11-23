@@ -189,15 +189,14 @@ function clearAuthStorage(): void {
   }
 }
 
-export function Brand({ company }: { company?: Company | null }) {
+export function Brand() {
   // The workspace chrome always carries the house mark. Tenant branding is
   // personal, not navigational: it lives on the signed-in profile avatar.
   return (
     <div className="brand">
       <img className="brand-logo" src="/images/preyonelogomainzw-email.png" alt="Preyone logo" />
-      <div>
-        <div className="brand-name">{company?.name || 'Preyone'}</div>
-        <div className="brand-sub">Invoicing</div>
+      <div className="brand-copy">
+        <div className="brand-name">Preyone Invoicing</div>
       </div>
     </div>
   );
@@ -358,7 +357,7 @@ export default function Sidebar({
 
   return (
     <aside className="sidebar" aria-label="Primary navigation">
-      <Brand company={company} />
+      <Brand />
 
       <nav className="side-nav" aria-label="Invoicing navigation">
         <section className="side-group" aria-label="Workspace">

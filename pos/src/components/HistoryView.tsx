@@ -134,7 +134,7 @@ export default function HistoryView({ notify, onApiError }: HistoryViewProps) {
   const convert = async (d: PosDocument) => {
     setConvertingId(d.id);
     try {
-      const updated = await api.convertToInvoice(d.id);
+      const updated = await api.convertToInvoice(d.id, d.doc_type);
       notify(`${d.doc_number} converted to ${updated.doc_number}`, 'ok');
       await load();
     } catch (e) {
@@ -183,9 +183,11 @@ export default function HistoryView({ notify, onApiError }: HistoryViewProps) {
           {visible.map((d) => {
             const due = balanceOf(d);
             const payable = due > 0 && d.status !== 'void';
+            const conversion = d.doc_meta?.conversion as { invoiceId?: string } | undefined;
             const convertible =
               ['quotation', 'quote', 'estimate', 'proforma', 'sale'].includes(d.doc_type) &&
-              d.status !== 'void';
+              d.status !== 'void' &&
+              !conversion?.invoiceId;
             return (
               <div className="history-item" key={d.id}>
                 <button className="history-row" onClick={() => openDoc(d)}>
