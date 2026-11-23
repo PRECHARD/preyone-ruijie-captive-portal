@@ -873,6 +873,24 @@ a:focus-visible {
 }
 .btn:active { transform: translateY(0) scale(0.98); }
 
+/* High-tech print action: violet→cyan circuit-printer mark. */
+.print-action {
+  border-color: rgba(168, 85, 247, 0.42);
+  background:
+    radial-gradient(120% 150% at 12% 0%, rgba(168, 85, 247, 0.22), transparent 62%),
+    linear-gradient(180deg, rgba(37, 52, 80, 0.9), rgba(19, 30, 51, 0.95));
+}
+.print-action .print-icon {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  transition: transform 0.25s var(--pos-ease), filter 0.25s var(--pos-ease);
+}
+.print-action:hover .print-icon {
+  transform: translateY(-1px) scale(1.06);
+  filter: drop-shadow(0 0 6px rgba(168, 85, 247, 0.7));
+}
+
 .btn.primary {
   background: linear-gradient(135deg, var(--pos-primary), var(--pos-primary-strong) 58%, #2a0b4e);
   border-color: color-mix(in srgb, var(--pos-primary) 60%, transparent);
@@ -1355,10 +1373,11 @@ tbody tr:last-child td { border-bottom: none; }
   background: rgba(168, 85, 247, .12);
 }
 .line-details-input {
-  min-height: 52px;
+  min-height: 122px;
+  padding: 11px 13px;
   font-family: var(--pos-mono, ui-monospace, SFMono-Regular, Consolas, monospace);
-  font-size: 12px;
-  line-height: 1.5;
+  font-size: 12.5px;
+  line-height: 1.6;
   resize: vertical;
 }
 .stock-tools {

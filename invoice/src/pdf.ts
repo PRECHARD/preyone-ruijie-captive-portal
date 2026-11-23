@@ -80,6 +80,17 @@ function safeFilename(name: string): string {
   return plain(name).replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, ' ').trim() || 'document';
 }
 
+/**
+ * Client-facing download name: "INV-0042 - Acme Trading (Pvt) Ltd.pdf".
+ * The document number comes first so files sort chronologically in a folder,
+ * and the client name makes a shared file immediately identifiable.
+ */
+function documentFilename(doc: SheetDoc, extension: string): string {
+  const number = safeFilename(doc.number || 'document');
+  const client = String(doc.customerName || '').trim() ? safeFilename(String(doc.customerName)) : '';
+  return `${client ? `${number} - ${client}` : number}.${extension}`;
+}
+
 function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = window.setTimeout(() => reject(new Error(message)), ms);
@@ -525,7 +536,7 @@ export async function buildInvoicePdf({ doc, company, template, title }: Invoice
 }
 
 export async function downloadInvoicePdf(input: InvoicePdfInput): Promise<void> {
-  const filename = `${safeFilename(input.doc.number || 'document')}.pdf`;
+  const filename = documentFilename(input.doc, 'pdf');
   const sheet =
     input.element ??
     (document.querySelector('.a4-print-host .a4-sheet') as HTMLElement | null);
@@ -555,7 +566,7 @@ export async function buildDocumentPdf(
   const pdf = await sheetToPdf(sheet, { pixelRatio: input.pixelRatio ?? 2.2 });
   return {
     blob: pdf.output('blob'),
-    filename: `${safeFilename(input.doc.number || 'document')}.pdf`,
+    filename: documentFilename(input.doc, 'pdf'),
   };
 }
 

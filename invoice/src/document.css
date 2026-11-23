@@ -728,22 +728,33 @@
     background: #fff !important;
     margin: 0 !important;
     padding: 0 !important;
+    width: 210mm;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
-  .a4-print-host { display: block !important; }
-  body * { visibility: hidden; }
-  .a4-print,
-  .a4-print * { visibility: visible; }
+
+  /* The A4 sheet is portalled straight to <body>. Remove the app UI from the
+     print flow entirely — `visibility:hidden` still lays it out, which is what
+     produced blank trailing pages in the print preview. */
+  body:has(> .a4-print-host) #root,
+  body:has(> .a4-print-host) #boot-loader { display: none !important; }
+  body:has(> .a4-print-host) > .a4-print-host { display: none !important; }
+  body:has(> .a4-print-host) > .a4-print-host:last-of-type { display: block !important; }
+
+  /* A receipt lives inside #root and keeps its own print path. */
+  body:has(.receipt-overlay) #root { display: block !important; }
+  body:has(.receipt-overlay) > .a4-print-host.a4-print-host { display: none !important; }
+
   .a4-print {
-    position: absolute;
-    inset: 0;
+    position: static;
     display: block !important;
     background: #fff;
   }
   .a4-print .a4-sheet {
     box-shadow: none;
-    margin: 0;
+    margin: 0 auto;
+    /* Slightly under 297mm so sub-pixel rounding cannot spill a blank page. */
+    min-height: 296.6mm;
     zoom: 1 !important;
   }
   .no-print { display: none !important; }

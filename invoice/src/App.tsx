@@ -6,7 +6,6 @@ import {
   SESSION_EVENT,
   api,
   clearToken,
-  download,
   getToken,
   installSessionHeartbeat,
   type SessionSignal,
@@ -1128,7 +1127,7 @@ function Composer({
                   </span>
                   <textarea
                     className="textarea line-details-input"
-                    rows={Math.min(8, Math.max(2, detailCount + 1))}
+                    rows={Math.min(10, Math.max(5, detailCount + 2))}
                     value={line.details}
                     onChange={(e) => setLine(line.key, { details: e.target.value })}
                     placeholder={'One detail per line — e.g.\n5 m heavy duty cable\n16 A rated\n2-year warranty'}
@@ -1910,18 +1909,32 @@ function DocumentDrawer({
               <button className="btn" type="button" onClick={() => setSendChannel('whatsapp')}>
                 WhatsApp
               </button>
-              <button className="btn" onClick={() => window.print()} type="button">
-                Print / PDF
+              <button
+                className="btn print-action"
+                onClick={() => window.print()}
+                type="button"
+                title="Print this document"
+                aria-label="Print this document"
+              >
+                <svg className="print-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <defs>
+                    <linearGradient id="preyone-print-grad" x1="3" y1="3" x2="21" y2="21" gradientUnits="userSpaceOnUse">
+                      <stop stopColor="#c084fc" />
+                      <stop offset="0.55" stopColor="#a855f7" />
+                      <stop offset="1" stopColor="#22d3ee" />
+                    </linearGradient>
+                  </defs>
+                  <path d="M7.2 8.4V4.4h9.6v4" stroke="url(#preyone-print-grad)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                  <rect x="3.1" y="8.4" width="17.8" height="8.5" rx="2.3" stroke="url(#preyone-print-grad)" strokeWidth="1.5" />
+                  <path d="M6.7 14.1h10.6v5.1H6.7z" stroke="url(#preyone-print-grad)" strokeWidth="1.5" strokeLinejoin="round" />
+                  <path d="M17.6 11.2h.01" stroke="#22d3ee" strokeWidth="2.1" strokeLinecap="round" />
+                  <path d="M1.4 12.6h1.2M21.4 12.6h1.2" stroke="#22d3ee" strokeWidth="1.3" strokeLinecap="round" />
+                  <path d="M8.8 16.5h5.5" stroke="#c084fc" strokeWidth="1.2" strokeLinecap="round" />
+                </svg>
+                <span>Print</span>
               </button>
               <button className="btn" type="button" disabled={pdfBusy} onClick={() => void savePdf()}>
                 {pdfBusy ? 'Preparing PDF…' : 'Download PDF'}
-              </button>
-              <button
-                className="btn"
-                type="button"
-                onClick={() => download(`/api/pos/documents/${doc.id}/ubl`, `${doc.doc_number}.xml`).catch((e) => setError(errorText(e)))}
-              >
-                UBL / Peppol XML
               </button>
               <button
                 className="btn"
@@ -2169,7 +2182,7 @@ function DocumentDrawer({
                             </span>
                             <textarea
                               className="textarea line-details-input"
-                              rows={2}
+                              rows={5}
                               value={line.details}
                               onChange={(e) =>
                                 setEdit((prev) =>
