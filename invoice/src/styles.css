@@ -134,7 +134,6 @@ a:focus-visible {
     24px 0 70px rgba(0, 0, 0, 0.28);
   overflow-y: auto;
   scrollbar-width: none;
-  container-type: inline-size;
 }
 .sidebar::-webkit-scrollbar { width: 0; }
 
@@ -150,79 +149,138 @@ a:focus-visible {
   pointer-events: none;
 }
 
+/* ── Portal brand lockup ────────────────────────────────────────────────
+   The auth hero pairs its mark with a wide-tracked division label. We keep
+   that mark + division hierarchy but express it on a dark glass card — no
+   white wordmark plate — so the rail stays in the #0D0F18 glass language.
+   The Preyone mark is hard-coded in Brand(); tenant logo uploads never feed
+   this component. The active client/company sits on its own full-width line
+   so long legal names wrap cleanly instead of clipping at 264px. */
 .brand {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 11px 12px 10px;
+  border: 1px solid rgba(0, 240, 255, 0.14);
+  border-radius: 16px;
+  background:
+    radial-gradient(120% 150% at 0% 0%, rgba(0, 240, 255, 0.09), transparent 58%),
+    radial-gradient(130% 160% at 100% 110%, rgba(16, 185, 129, 0.07), transparent 60%),
+    linear-gradient(155deg, rgba(22, 33, 54, 0.78), rgba(9, 14, 26, 0.9));
+  box-shadow:
+    0 14px 32px rgba(0, 0, 0, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.055);
+  backdrop-filter: blur(16px) saturate(130%);
+  -webkit-backdrop-filter: blur(16px) saturate(130%);
+  min-width: 0;
+}
+.brand::after {
+  content: '';
+  position: absolute;
+  inset: 0 12px auto;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(0, 240, 255, 0.5), rgba(16, 185, 129, 0.35), transparent);
+  pointer-events: none;
+}
+.brand > div { min-width: 0; }
+
+.brand-lockup {
+  position: relative;
+  z-index: 1;
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 4px 4px 16px;
-  border-bottom: 1px solid var(--pos-glass-edge);
-  position: relative;
   min-width: 0;
 }
-.brand > div { min-width: 0; }
+
+.brand-tile {
+  width: 40px;
+  height: 40px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  border: 1px solid rgba(0, 240, 255, 0.2);
+  background:
+    radial-gradient(circle at 32% 22%, rgba(255, 255, 255, 0.11), transparent 46%),
+    linear-gradient(160deg, rgba(14, 22, 38, 0.96), rgba(6, 10, 20, 0.96));
+  box-shadow:
+    0 0 18px rgba(0, 240, 255, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.brand-logo {
+  height: 32px;
+  width: 32px;
+  flex: none;
+  object-fit: contain;
+  object-position: center;
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.5)) drop-shadow(0 0 10px rgba(0, 240, 255, 0.22));
+  transition: filter 0.3s var(--pos-ease-out), transform 0.3s var(--pos-ease-out);
+}
+.brand:hover .brand-logo {
+  transform: scale(1.04);
+  filter: drop-shadow(0 2px 7px rgba(0, 0, 0, 0.5)) drop-shadow(0 0 14px rgba(0, 240, 255, 0.34));
+}
+
 .brand-copy {
   display: flex;
   flex-direction: column;
   justify-content: center;
+  gap: 5px;
   flex: 1 1 auto;
   min-width: 0;
 }
 
-.brand-mark {
-  width: 40px;
-  height: 40px;
-  border-radius: 13px;
-  display: grid;
-  place-items: center;
-  font-weight: 800;
-  font-size: 18px;
-  color: var(--pos-on-primary);
-  background: linear-gradient(135deg, var(--pos-primary), var(--pos-accent));
-  box-shadow:
-    0 0 24px var(--pos-glow),
-    inset 0 1px 0 rgba(255, 255, 255, 0.28),
-    inset 0 -8px 18px rgba(0, 0, 0, 0.22);
-  position: relative;
-  transition: transform 0.35s var(--pos-ease-out), box-shadow 0.35s var(--pos-ease-out);
-}
-.brand:hover .brand-mark {
-  transform: rotate(-6deg) scale(1.05);
-  box-shadow:
-    0 0 34px var(--pos-glow),
-    inset 0 1px 0 rgba(255, 255, 255, 0.32),
-    inset 0 -8px 18px rgba(0, 0, 0, 0.22);
-}
-
-.brand-logo {
-  height: 50px;
-  width: 50px;
-  object-fit: cover;
-  object-position: center;
-  flex: none;
-  object-fit: contain;
-  /* Transparent marks sit straight on the rail — no white plate. The glow is
-     built from the active palette so the logo blends with any theme. */
-  filter: drop-shadow(0 3px 10px rgba(0, 0, 0, 0.45)) drop-shadow(0 0 16px var(--pos-glow));
-  transition: filter 0.3s var(--pos-ease-out), transform 0.3s var(--pos-ease-out);
-}
-.brand:hover .brand-logo { transform: scale(1.03); }
-
 .brand-name {
-  font-weight: 700;
-  font-size: clamp(12.5px, 5.2cqw, 15px);
-  letter-spacing: 0.06em;
+  font-weight: 800;
+  font-size: 14.5px;
+  line-height: 1;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
-  line-height: 1.15;
+  color: #f5feff;
   white-space: nowrap;
   overflow: visible;
   text-overflow: clip;
 }
 .brand-sub {
-  font-size: 10px;
-  color: var(--pos-text-muted);
-  letter-spacing: 0.24em;
+  font-size: 8.8px;
+  line-height: 1;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
-  margin-top: 2px;
+  color: #67e8f9;
+  white-space: nowrap;
+  margin: 0;
+  text-shadow: 0 0 14px rgba(0, 240, 255, 0.25);
+}
+
+.brand-client {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  padding-top: 8px;
+  border-top: 1px dashed rgba(148, 163, 184, 0.16);
+  min-width: 0;
+}
+.brand-client-dot {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  margin-top: 3px;
+  border-radius: 50%;
+  background: #34d399;
+  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.14), 0 0 8px rgba(16, 185, 129, 0.55);
+}
+.brand-client-name {
+  min-width: 0;
+  font-size: 10.2px;
+  line-height: 1.4;
+  letter-spacing: 0.015em;
+  color: #aebdd2;
+  overflow-wrap: anywhere;
 }
 
 /* ── Grouped navigation ──────────────────────────────────────────────── */
@@ -1922,7 +1980,7 @@ tbody tr:last-child td { border-bottom: none; }
     box-shadow: 0 18px 50px rgba(0, 0, 0, 0.3);
   }
   .sidebar::after { display: none; }
-  .brand { border-bottom: none; padding: 0; }
+  .brand { flex: 0 0 auto; width: min(320px, 100%); }
 
   .side-nav { flex: 1 1 100%; flex-direction: row; flex-wrap: wrap; gap: 4px; }
   .side-group { flex-direction: row; flex-wrap: wrap; gap: 4px; }

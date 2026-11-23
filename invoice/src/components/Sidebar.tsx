@@ -189,15 +189,29 @@ function clearAuthStorage(): void {
   }
 }
 
-export function Brand() {
-  // The workspace chrome always carries the house mark. Tenant branding is
-  // personal, not navigational: it lives on the signed-in profile avatar.
+export function Brand({ company }: { company?: Company | null }) {
+  // The platform mark is a house asset and is intentionally hard-coded: tenant
+  // logo uploads live on invoices/receipts, never on the workspace chrome.
+  // The lockup mirrors the auth hero's mark + division hierarchy, but on a
+  // dark glass card instead of the hero's white wordmark plate.
+  const companyName = String(company?.name || '').trim();
   return (
     <div className="brand">
-      <img className="brand-logo" src="/images/preyonelogomainzw-email.png" alt="Preyone logo" />
-      <div className="brand-copy">
-        <div className="brand-name">Preyone Invoicing</div>
+      <div className="brand-lockup">
+        <span className="brand-tile">
+          <img className="brand-logo" src="/images/preyonelogomainzw-email.png" alt="Preyone" />
+        </span>
+        <span className="brand-copy">
+          <span className="brand-name">Preyone</span>
+          <span className="brand-sub">Invoicing &amp; Finance</span>
+        </span>
       </div>
+      {companyName && (
+        <div className="brand-client" title={companyName}>
+          <span className="brand-client-dot" aria-hidden />
+          <span className="brand-client-name">{companyName}</span>
+        </div>
+      )}
     </div>
   );
 }
@@ -357,7 +371,7 @@ export default function Sidebar({
 
   return (
     <aside className="sidebar" aria-label="Primary navigation">
-      <Brand />
+      <Brand company={company} />
 
       <nav className="side-nav" aria-label="Invoicing navigation">
         <section className="side-group" aria-label="Workspace">
