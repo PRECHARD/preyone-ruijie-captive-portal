@@ -1,4 +1,4 @@
-import { Fragment, type CSSProperties } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import type { InvoiceTemplate } from './api';
 
 /**
@@ -213,6 +213,10 @@ function fmtDate(iso?: string | null): string {
 
 /* ── component ──────────────────────────────────────────────────────── */
 
+function round2(value: number): number {
+  return Math.round((Number(value) || 0) * 100) / 100;
+}
+
 export function DocumentSheet({
   doc,
   company,
@@ -231,20 +235,43 @@ export function DocumentSheet({
 }) {
   const quote = isQuoteFamily(doc.docType);
   const items = Array.isArray(doc.items) ? doc.items : [];
-  const subtotal =
-    Number.isFinite(doc.subtotal) ? doc.subtotal : items.reduce((s, it) => s + (Number(it.price) || 0) * (Number(it.qty) || 0), 0);
+
+  // The subtotal must be the sum of exactly what the Total column shows. Use
+  // the stored line_total when present (rounded per line), otherwise a rounded
+  // price x qty, and only fall back to the saved subtotal for item-less legacy
+  // documents. This prevents the printed subtotal drifting a cent from the
+  // visible line totals.
+  const lineTotalOf = (item: SheetItem) => {
+    const stored = Number(item.line_total);
+    if (Number.isFinite(stored)) return round2(stored);
+    return round2((Number(item.price) || 0) * (Number(item.qty) || 0));
+  };
+  const computedSubtotal = round2(items.reduce((sum, item) => sum + lineTotalOf(item), 0));
+  const storedSubtotal = Number(doc.subtotal);
+  const subtotal = items.length
+    ? computedSubtotal
+    : Number.isFinite(storedSubtotal)
+      ? round2(storedSubtotal)
+      : 0;
   const discountPct = Number(doc.discountPct) || 0;
   const taxPct = Number(doc.taxPct) || 0;
-  const discountAmount = (subtotal * discountPct) / 100;
-  const net = subtotal - discountAmount;
-  const taxAmount = taxPct > 0 ? (net * taxPct) / (100 + taxPct) : 0;
-  const total = Number.isFinite(doc.total) ? doc.total : net;
+  const discountAmount = round2((subtotal * discountPct) / 100);
+  const net = round2(subtotal - discountAmount);
+  const taxAmount = taxPct > 0 ? round2((net * taxPct) / (100 + taxPct)) : 0;
+  const netOfTax = round2(net - taxAmount);
+  const storedTotal = Number(doc.total);
+  const total = items.length
+    ? net
+    : Number.isFinite(storedTotal)
+      ? round2(storedTotal)
+      : net;
   const amountPaid = Number(doc.amountPaid) || 0;
-  const balance = Math.max(total - amountPaid, 0);
+  const balance = Math.max(round2(total - amountPaid), 0);
   const paid = doc.status === 'paid' || (total > 0 && amountPaid >= total - 0.005);
+
   const addressLines = String(company.address || '')
     .split(/\r?\n/)
-    .map((l) => l.trim())
+    .map((line) => line.trim())
     .filter(Boolean);
   const bandAddress = [company.name, ...addressLines].filter(Boolean) as string[];
   const hasContact = Boolean(company.support_phone || company.email || company.website);
@@ -257,8 +284,358 @@ export function DocumentSheet({
   const docLabel = quote ? 'Quotation' : 'Invoice';
 
   const customerLines = [doc.customerAddress, doc.customerEmail, doc.customerPhone]
-    .filter((v) => String(v || '').trim())
+    .filter((value) => String(value || '').trim())
     .join('\n');
+
+  const [pageChunks, setPageChunks] = useState<Array<{ start: number; end: number }> | null>(null);
+  const sheetRef = useRef<HTMLDivElement>(null);
+
+  const signature = useMemo(
+    () =>
+      JSON.stringify({
+        number: doc.number,
+        status: doc.status,
+        issueDate: doc.issueDate,
+        dueDate: doc.dueDate,
+        customerName: doc.customerName,
+        customerAddress: doc.customerAddress,
+        customerEmail: doc.customerEmail,
+        customerPhone: doc.customerPhone,
+        notes: doc.notes,
+        poNumber: doc.poNumber,
+        reference: doc.reference,
+        subtotal: doc.subtotal,
+        discountPct: doc.discountPct,
+        taxPct: doc.taxPct,
+        total: doc.total,
+        amountPaid: doc.amountPaid,
+        currency: doc.currency,
+        items: items.map((item) => ({
+          description: item.description,
+          details: item.details || [],
+          qty: item.qty,
+          price: item.price,
+          line_total: item.line_total,
+        })),
+        company: {
+          name: company.name,
+          tagline: company.tagline,
+          address: company.address,
+          email: company.email,
+          support_phone: company.support_phone,
+          website: company.website,
+          logo_url: company.logo_url,
+          logo_path: company.logo_path,
+          terms_text: company.terms_text,
+          receipt_footer: company.receipt_footer,
+          currency: company.currency,
+        },
+        template: template
+          ? {
+              id: template.id,
+              accentColor: template.accentColor,
+              layout: template.layout,
+              showLogo: template.showLogo,
+            }
+          : null,
+      }),
+    [doc, company, template, items]
+  );
+
+  // Content changed: rebuild the page split from a single continuous sheet.
+  useLayoutEffect(() => {
+    setPageChunks(null);
+  }, [signature]);
+
+  // Measure the real rendered sheet and split it into A4 pages. This keeps the
+  // preview, browser print and generated PDF identical: items flow onto extra
+  // pages, totals follow the last item, and every page gets the footer.
+  useLayoutEffect(() => {
+    if (pageChunks !== null) return;
+    const sheet = sheetRef.current;
+    if (!sheet) return;
+
+    const groups = Array.from(sheet.querySelectorAll<HTMLElement>('[data-item-group]'));
+    if (items.length === 0 || groups.length !== items.length) {
+      setPageChunks([{ start: 0, end: items.length }]);
+      return;
+    }
+
+    const sheetRect = sheet.getBoundingClientRect();
+    if (sheetRect.width < 1 || sheetRect.height < 1) return;
+
+    const mm = sheetRect.width / 210;
+    const pageHeight = 297 * mm;
+    const header = sheet.querySelector<HTMLElement>('.a4-doc-head');
+    const thead = sheet.querySelector<HTMLElement>('.a4-items-table thead');
+    const footer = sheet.querySelector<HTMLElement>('.a4-sheet-footer');
+    const totals = sheet.querySelector<HTMLElement>('.a4-totals-wrap');
+    const notes = sheet.querySelector<HTMLElement>('.a4-notes-block');
+
+    const headerTop = header ? header.getBoundingClientRect().top - sheetRect.top : 0;
+    const headerHeight = header ? header.getBoundingClientRect().height : 0;
+    const theadHeight = thead ? thead.getBoundingClientRect().height : 0;
+    const footerHeight = footer ? footer.getBoundingClientRect().height : 0;
+    const totalsHeight = totals ? totals.getBoundingClientRect().height : 0;
+    const notesHeight = notes ? notes.getBoundingClientRect().height : 0;
+
+    // Reserve the totals/notes block on every page. The last page then always
+    // has room for it, even when the final item ends near the bottom edge.
+    const tailHeight = totalsHeight + notesHeight + 10 * mm;
+    const safety = 6 * mm;
+    const tableGap = 9 * mm;
+
+    const capacityFirst = Math.max(
+      30 * mm,
+      pageHeight - headerTop - footerHeight - tailHeight - safety
+    );
+    const capacityNext = Math.max(
+      30 * mm,
+      pageHeight - headerTop - headerHeight - tableGap - theadHeight - footerHeight - tailHeight - safety
+    );
+
+    const heights = groups.map((group) => Math.max(1, group.getBoundingClientRect().height));
+    const chunks: Array<{ start: number; end: number }> = [];
+    let index = 0;
+    while (index < heights.length) {
+      const capacity = chunks.length === 0 ? capacityFirst : capacityNext;
+      const start = index;
+      let used = 0;
+      while (index < heights.length) {
+        const height = heights[index];
+        if (used + height > capacity && index > start) break;
+        used += height;
+        index += 1;
+        // A single item taller than the page still gets its own page.
+        if (used > capacity && index === start + 1) break;
+      }
+      chunks.push({ start, end: index });
+    }
+
+    setPageChunks(chunks.length ? chunks : [{ start: 0, end: items.length }]);
+  }, [items.length, pageChunks, signature]);
+
+  const totalPages = pageChunks?.length ?? 1;
+  const renderedChunks = pageChunks ?? [{ start: 0, end: items.length }];
+
+  const renderHeader = () => (
+    <header className="a4-doc-head">
+      <div className="a4-brand">
+        {showLogo ? (
+          <img
+            className="a4-brand-logo"
+            src={logo}
+            alt={company.name || 'Company logo'}
+            crossOrigin="anonymous"
+          />
+        ) : (
+          <div className="a4-brand-fallback">{(company.name || 'P').slice(0, 1).toUpperCase()}</div>
+        )}
+      </div>
+      <div className="a4-doc-mark">
+        {legacy ? (
+          <img
+            className="a4-wordmark"
+            src={quote ? '/brand/quotation-wordmark.svg' : '/brand/invoice-wordmark.svg'}
+            alt={docLabel}
+          />
+        ) : (
+          <span className="a4-wordmark-text">{docLabel}</span>
+        )}
+        <div className="a4-number-bar">No. {doc.number}</div>
+      </div>
+    </header>
+  );
+
+  const renderMeta = () => (
+    <section className="a4-doc-meta">
+      <div className="a4-bill-to">
+        <div className="a4-meta-label">Bill To</div>
+        <div className="a4-client-name">{doc.customerName || '—'}</div>
+        <div className="a4-client-lines">{customerLines}</div>
+      </div>
+      <div>
+        <div className="a4-meta-label">{quote ? 'Quote Details' : 'Invoice Details'}</div>
+        <dl className="a4-meta-grid">
+          <dt>Date</dt>
+          <dd>{fmtDate(doc.issueDate)}</dd>
+          {doc.dueDate && (
+            <>
+              <dt>{quote ? 'Valid Until' : 'Due Date'}</dt>
+              <dd>{fmtDate(doc.dueDate)}</dd>
+            </>
+          )}
+          <dt>Status</dt>
+          <dd style={{ textTransform: 'capitalize' }}>{doc.status}</dd>
+          {doc.poNumber && (
+            <>
+              <dt>PO No.</dt>
+              <dd>{doc.poNumber}</dd>
+            </>
+          )}
+          {doc.reference && (
+            <>
+              <dt>Reference</dt>
+              <dd>{doc.reference}</dd>
+            </>
+          )}
+        </dl>
+      </div>
+    </section>
+  );
+
+  const renderItems = (chunk: { start: number; end: number }) => (
+    <table className="a4-items-table">
+      <colgroup>
+        <col className="a4-c-product" />
+        <col className="a4-c-price" />
+        <col className="a4-c-qty" />
+        <col className="a4-c-total" />
+      </colgroup>
+      <thead>
+        <tr>
+          <th>{quote ? 'Description' : 'Product'}</th>
+          <th>Price</th>
+          <th>Qty</th>
+          <th>Total</th>
+        </tr>
+      </thead>
+      {items.slice(chunk.start, chunk.end).map((item, localIndex) => {
+        const index = chunk.start + localIndex;
+        const details = Array.isArray(item.details)
+          ? item.details.map((detail) => String(detail || '').trim()).filter(Boolean)
+          : [];
+        const alt = index % 2 === 0;
+        return (
+          <tbody key={index} data-item-group={index}>
+            <tr className={`a4-item-main${alt ? ' a4-item-alt' : ''}`}>
+              <td className={`a4-item-cell${details.length ? ' has-details' : ''}`}>
+                <div className="a4-item-name">{item.description || '—'}</div>
+              </td>
+              <td className="a4-num">{money(item.price, doc.currency)}</td>
+              <td className="a4-num">{Number(item.qty) || 0}</td>
+              <td className="a4-num">
+                {money(lineTotalOf(item), doc.currency)}
+              </td>
+            </tr>
+            {details.length > 0 && (
+              <tr className="a4-item-detail-row">
+                <td colSpan={4}>
+                  <div className="a4-item-details">
+                    <div className="a4-detail-head">
+                      <span className="a4-detail-label">Details</span>
+                      <span className="a4-detail-rule" aria-hidden />
+                    </div>
+                    <ul className={details.length > 4 ? 'is-columns' : ''}>
+                      {details.map((detail, detailIndex) => (
+                        <li key={detailIndex}>
+                          <span className="a4-detail-mark" aria-hidden>
+                            <span />
+                          </span>
+                          <span>{detail}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </td>
+              </tr>
+            )}
+          </tbody>
+        );
+      })}
+    </table>
+  );
+
+  const renderTotals = () => (
+    <div className="a4-totals-wrap">
+      <div className="a4-totals">
+        <div className="a4-row">
+          <span className="a4-lbl">Subtotal{taxPct > 0 ? ' (incl. VAT)' : ''}</span>
+          <span className="a4-val">{money(subtotal, doc.currency)}</span>
+        </div>
+        {discountPct > 0 && (
+          <div className="a4-row">
+            <span className="a4-lbl">Discount ({discountPct}%)</span>
+            <span className="a4-val">−{money(discountAmount, doc.currency)}</span>
+          </div>
+        )}
+        {taxPct > 0 && (
+          <>
+            <div className="a4-row a4-info">
+              <span className="a4-lbl">Net of VAT</span>
+              <span className="a4-val">{money(netOfTax, doc.currency)}</span>
+            </div>
+            <div className="a4-row a4-info">
+              <span className="a4-lbl">VAT ({taxPct}%) included</span>
+              <span className="a4-val">{money(taxAmount, doc.currency)}</span>
+            </div>
+          </>
+        )}
+        <div className="a4-row a4-grand">
+          <span className="a4-lbl">Total</span>
+          <span className="a4-val">{money(total, doc.currency)}</span>
+        </div>
+        {amountPaid > 0 && (
+          <>
+            <div className="a4-row a4-paid-row">
+              <span className="a4-lbl">Amount Paid</span>
+              <span className="a4-val">−{money(amountPaid, doc.currency)}</span>
+            </div>
+            <div className="a4-row a4-balance">
+              <span className="a4-lbl">Balance Due</span>
+              <span className="a4-val">{money(balance, doc.currency)}</span>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+
+  const renderNotes = () =>
+    doc.notes ? (
+      <div className="a4-notes-block">
+        <div className="a4-meta-label">Payment Information</div>
+        <p>{doc.notes}</p>
+      </div>
+    ) : null;
+
+  const renderFooter = (page: number, pages: number) => (
+    <footer className="a4-sheet-footer">
+      <div className="a4-page-marker">
+        Page {page} of {pages}
+      </div>
+      <div className="a4-thanks">THANKS FOR YOUR PURCHASE</div>
+      <div className="a4-terms-note">Terms &amp; conditions</div>
+      {company.terms_text && <p className="a4-terms-text">{company.terms_text}</p>}
+      {company.tagline && <div className="a4-tagline">{company.tagline}</div>}
+      <div className={`a4-footer-band ${legacy ? 'a4-legacy-band' : ''}`}>
+        {doc.verifyCode && (
+          <div className="a4-band-verify">
+            <span className="a4-band-verify-line">
+              <span className="a4-band-verify-label">Document ID</span>
+              <span className="a4-band-verify-code">{doc.verifyCode}</span>
+            </span>
+            <span className="a4-band-verify-url">preyone.com/verify</span>
+          </div>
+        )}
+        {bandAddress.length > 0 && (
+          <div className="a4-band-col a4-band-address">
+            {bandAddress.map((line, lineIndex) => (
+              <span key={lineIndex}>{line}</span>
+            ))}
+          </div>
+        )}
+        {(bandAddress.length > 0 || hasContact) && <div className="a4-band-divider" />}
+        {hasContact && (
+          <div className="a4-band-col a4-band-contact">
+            {contactLine && <span>{contactLine}</span>}
+            {company.email && <span className="a4-email">{company.email}</span>}
+            {company.website && <span>{company.website}</span>}
+          </div>
+        )}
+      </div>
+    </footer>
+  );
 
   return (
     <div
@@ -266,209 +643,27 @@ export function DocumentSheet({
       className={`a4-doc ${templateClass(template)} ${printRoot ? 'a4-print' : ''} ${className}`.trim()}
       style={templateVars(template)}
     >
-      <div className="a4-sheet" data-type={doc.docType}>
-        {paid && <img src="/brand/PAID.svg" alt="PAID" className="a4-stamp" />}
-
-        <header className="a4-doc-head">
-          <div className="a4-brand">
-            {showLogo ? (
-              <img
-                className="a4-brand-logo"
-                src={logo}
-                alt={company.name || 'Company logo'}
-                crossOrigin="anonymous"
-              />
-            ) : (
-              <div className="a4-brand-fallback">{(company.name || 'P').slice(0, 1).toUpperCase()}</div>
-            )}
+      {renderedChunks.map((chunk, index) => {
+        const first = index === 0;
+        const last = index === totalPages - 1;
+        return (
+          <div
+            className="a4-sheet"
+            data-page={index + 1}
+            data-pages={totalPages}
+            key={index}
+            ref={first ? sheetRef : undefined}
+          >
+            {first && paid && <img src="/brand/PAID.svg" alt="PAID" className="a4-stamp" />}
+            {renderHeader()}
+            {first && renderMeta()}
+            {renderItems(chunk)}
+            {last && renderTotals()}
+            {last && renderNotes()}
+            {renderFooter(index + 1, totalPages)}
           </div>
-          <div className="a4-doc-mark">
-            {legacy ? (
-              <img
-                className="a4-wordmark"
-                src={quote ? '/brand/quotation-wordmark.svg' : '/brand/invoice-wordmark.svg'}
-                alt={docLabel}
-              />
-            ) : (
-              <span className="a4-wordmark-text">{docLabel}</span>
-            )}
-            <div className="a4-number-bar">No. {doc.number}</div>
-          </div>
-        </header>
-
-        <section className="a4-doc-meta">
-          <div className="a4-bill-to">
-            <div className="a4-meta-label">Bill To</div>
-            <div className="a4-client-name">{doc.customerName || '—'}</div>
-            <div className="a4-client-lines">{customerLines}</div>
-          </div>
-          <div>
-            <div className="a4-meta-label">{quote ? 'Quote Details' : 'Invoice Details'}</div>
-            <dl className="a4-meta-grid">
-              <dt>Date</dt>
-              <dd>{fmtDate(doc.issueDate)}</dd>
-              {doc.dueDate && (
-                <>
-                  <dt>{quote ? 'Valid Until' : 'Due Date'}</dt>
-                  <dd>{fmtDate(doc.dueDate)}</dd>
-                </>
-              )}
-              <dt>Status</dt>
-              <dd style={{ textTransform: 'capitalize' }}>{doc.status}</dd>
-              {doc.poNumber && (
-                <>
-                  <dt>PO No.</dt>
-                  <dd>{doc.poNumber}</dd>
-                </>
-              )}
-              {doc.reference && (
-                <>
-                  <dt>Reference</dt>
-                  <dd>{doc.reference}</dd>
-                </>
-              )}
-            </dl>
-          </div>
-        </section>
-
-        <table className="a4-items-table">
-          <colgroup>
-            <col className="a4-c-product" />
-            <col className="a4-c-price" />
-            <col className="a4-c-qty" />
-            <col className="a4-c-total" />
-          </colgroup>
-          <thead>
-            <tr>
-              <th>{quote ? 'Description' : 'Product'}</th>
-              <th>Price</th>
-              <th>Qty</th>
-              <th>Total</th>
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((it, i) => {
-              const details = Array.isArray(it.details)
-                ? it.details.map((d) => String(d || '').trim()).filter(Boolean)
-                : [];
-              const alt = i % 2 === 0;
-              return (
-                <Fragment key={i}>
-                  <tr className={`a4-item-main${alt ? ' a4-item-alt' : ''}`}>
-                    <td className={`a4-item-cell${details.length ? ' has-details' : ''}`}>
-                      <div className="a4-item-name">{it.description || '—'}</div>
-                    </td>
-                    <td className="a4-num">{money(it.price, doc.currency)}</td>
-                    <td className="a4-num">{Number(it.qty) || 0}</td>
-                    <td className="a4-num">
-                      {money(it.line_total ?? (Number(it.price) || 0) * (Number(it.qty) || 0), doc.currency)}
-                    </td>
-                  </tr>
-                  {details.length > 0 && (
-                    <tr className="a4-item-detail-row">
-                      <td colSpan={4}>
-                        <div className="a4-item-details">
-                          <div className="a4-detail-head">
-                            <span className="a4-detail-label">Details</span>
-                            <span className="a4-detail-rule" aria-hidden />
-                          </div>
-                          <ul className={details.length > 4 ? 'is-columns' : ''}>
-                            {details.map((detail, j) => (
-                              <li key={j}>
-                                <span className="a4-detail-mark" aria-hidden>
-                                  <span />
-                                </span>
-                                <span>{detail}</span>
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                      </td>
-                    </tr>
-                  )}
-                </Fragment>
-              );
-            })}
-          </tbody>
-        </table>
-
-        <div className="a4-totals-wrap">
-          <div className="a4-totals">
-            <div className="a4-row">
-              <span className="a4-lbl">Subtotal</span>
-              <span className="a4-val">{money(subtotal, doc.currency)}</span>
-            </div>
-            {discountPct > 0 && (
-              <div className="a4-row">
-                <span className="a4-lbl">Discount ({discountPct}%)</span>
-                <span className="a4-val">−{money(discountAmount, doc.currency)}</span>
-              </div>
-            )}
-            {taxPct > 0 && (
-              <div className="a4-row">
-                <span className="a4-lbl">VAT ({taxPct}%) Incl.</span>
-                <span className="a4-val">{money(taxAmount, doc.currency)}</span>
-              </div>
-            )}
-            <div className="a4-row a4-grand">
-              <span className="a4-lbl">Total</span>
-              <span className="a4-val">{money(total, doc.currency)}</span>
-            </div>
-            {amountPaid > 0 && (
-              <>
-                <div className="a4-row a4-paid-row">
-                  <span className="a4-lbl">Amount Paid</span>
-                  <span className="a4-val">−{money(amountPaid, doc.currency)}</span>
-                </div>
-                <div className="a4-row a4-balance">
-                  <span className="a4-lbl">Balance Due</span>
-                  <span className="a4-val">{money(balance, doc.currency)}</span>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-
-        {doc.notes && (
-          <div className="a4-notes-block">
-            <div className="a4-meta-label">Payment Information</div>
-            <p>{doc.notes}</p>
-          </div>
-        )}
-
-        <footer className="a4-sheet-footer">
-          <div className="a4-thanks">THANKS FOR YOUR PURCHASE</div>
-          <div className="a4-terms-note">Terms &amp; conditions</div>
-          {company.terms_text && <p className="a4-terms-text">{company.terms_text}</p>}
-          {company.tagline && <div className="a4-tagline">{company.tagline}</div>}
-          <div className={`a4-footer-band ${legacy ? 'a4-legacy-band' : ''}`}>
-            {doc.verifyCode && (
-              <div className="a4-band-verify">
-                <span className="a4-band-verify-line">
-                  <span className="a4-band-verify-label">Document ID</span>
-                  <span className="a4-band-verify-code">{doc.verifyCode}</span>
-                </span>
-                <span className="a4-band-verify-url">preyone.com/verify</span>
-              </div>
-            )}
-            {bandAddress.length > 0 && (
-              <div className="a4-band-col a4-band-address">
-                {bandAddress.map((line, i) => (
-                  <span key={i}>{line}</span>
-                ))}
-              </div>
-            )}
-            {(bandAddress.length > 0 || hasContact) && <div className="a4-band-divider" />}
-            {hasContact && (
-              <div className="a4-band-col a4-band-contact">
-                {contactLine && <span>{contactLine}</span>}
-                {company.email && <span className="a4-email">{company.email}</span>}
-                {company.website && <span>{company.website}</span>}
-              </div>
-            )}
-          </div>
-        </footer>
-      </div>
+        );
+      })}
     </div>
   );
 }

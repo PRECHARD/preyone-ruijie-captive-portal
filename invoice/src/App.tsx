@@ -660,7 +660,13 @@ function Composer({
   }, []);
 
   const subtotal = useMemo(
-    () => lines.reduce((sum, l) => sum + (Number(l.qty) || 0) * (Number(l.price) || 0), 0),
+    () =>
+      Math.round(
+        lines.reduce(
+          (sum, l) => sum + Math.round((Number(l.qty) || 0) * (Number(l.price) || 0) * 100) / 100,
+          0
+        ) * 100
+      ) / 100,
     [lines]
   );
   const discount = (subtotal * (Number(discountPct) || 0)) / 100;

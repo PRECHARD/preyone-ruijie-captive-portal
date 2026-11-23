@@ -350,6 +350,15 @@
 }
 .a4-totals .a4-row.a4-balance .a4-lbl { font-weight: 700; color: var(--doc-ink); }
 .a4-totals .a4-row.a4-balance .a4-val { font-weight: 700; font-size: 10.5pt; }
+/* VAT is included in the total, not added to it. These rows explain the
+   composition without breaking the Subtotal − Discount = Total ladder. */
+.a4-totals .a4-row.a4-info {
+  padding-top: 1.2mm;
+  padding-bottom: 1.2mm;
+  opacity: .72;
+}
+.a4-totals .a4-row.a4-info .a4-lbl { font-size: 8pt; }
+.a4-totals .a4-row.a4-info .a4-val { font-size: 8.5pt; font-weight: 500; }
 
 .a4-notes-block { margin-top: 8mm; max-width: 120mm; }
 .a4-notes-block .a4-meta-label { margin-bottom: 1mm; }
@@ -395,6 +404,16 @@
   letter-spacing: .02em;
   color: var(--doc-ink);
   opacity: .53;
+}
+.a4-page-marker {
+  margin: 0 4mm 1.4mm;
+  text-align: right;
+  font-size: 6.2pt;
+  font-weight: 600;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--doc-muted);
+  opacity: .75;
 }
 .a4-footer-band {
   position: relative;
@@ -514,6 +533,7 @@
     0 30px 70px rgba(0, 0, 0, .55),
     0 0 0 1px rgba(255, 255, 255, .05);
 }
+.a4-preview-shell .a4-sheet + .a4-sheet { margin-top: 9mm; }
 
 /* A4 thumbnail used by the template pickers: same proportions and band
    positions as the real sheet, built from divs so 20 of them stay cheap. */
@@ -717,8 +737,18 @@
   color: var(--pos-text-muted);
 }
 
-/* The print copy lives in a portal on <body>, hidden until Ctrl+P. */
-.a4-print-host { display: none; }
+/* The print copy lives in a portal on <body>. Keep it laid out off-screen
+   rather than display:none so long documents can be measured and split into
+   real A4 pages before printing or exporting. */
+.a4-print-host {
+  position: fixed;
+  left: -10000px;
+  top: 0;
+  width: 210mm;
+  z-index: -1;
+  pointer-events: none;
+  background: #fff;
+}
 
 /* ── print: only the tagged A4 sheet reaches the printer ──────────────── */
 @page { size: A4; margin: 0; }
@@ -739,7 +769,15 @@
   body:has(> .a4-print-host) #root,
   body:has(> .a4-print-host) #boot-loader { display: none !important; }
   body:has(> .a4-print-host) > .a4-print-host { display: none !important; }
-  body:has(> .a4-print-host) > .a4-print-host:last-of-type { display: block !important; }
+  body:has(> .a4-print-host) > .a4-print-host:last-of-type {
+    display: block !important;
+    position: static !important;
+    left: auto !important;
+    top: auto !important;
+    width: auto !important;
+    z-index: auto !important;
+    pointer-events: auto !important;
+  }
 
   /* A receipt lives inside #root and keeps its own print path. */
   body:has(.receipt-overlay) #root { display: block !important; }
@@ -753,9 +791,20 @@
   .a4-print .a4-sheet {
     box-shadow: none;
     margin: 0 auto;
-    /* Slightly under 297mm so sub-pixel rounding cannot spill a blank page. */
-    min-height: 296.6mm;
+    /* Each sheet is exactly one printed page. Pagination already moved the
+       totals and footer into the right sheet, so nothing may reflow here. */
+    width: 210mm;
+    height: 296.6mm;
+    min-height: 0;
+    overflow: hidden;
     zoom: 1 !important;
+    break-after: page;
+    page-break-after: always;
+  }
+  .a4-print .a4-sheet + .a4-sheet { margin-top: 0; }
+  .a4-print .a4-sheet:last-child {
+    break-after: auto;
+    page-break-after: auto;
   }
   .no-print { display: none !important; }
 }

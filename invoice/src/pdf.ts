@@ -176,18 +176,34 @@ export async function buildInvoicePdf({ doc, company, template, title }: Invoice
   const soft = tint(accent, 0.12);
   const logo = template?.showLogo === false ? null : await loadLogo(company);
 
+  const round2 = (value: unknown) => Math.round((Number(value) || 0) * 100) / 100;
   const items = Array.isArray(doc.items) ? doc.items : [];
-  const subtotal = Number.isFinite(doc.subtotal)
-    ? doc.subtotal
-    : items.reduce((sum, it) => sum + (Number(it.price) || 0) * (Number(it.qty) || 0), 0);
+  const lineTotal = (item: SheetDoc['items'][number]) => {
+    const stored = Number(item.line_total);
+    if (Number.isFinite(stored)) return round2(stored);
+    return round2((Number(item.price) || 0) * (Number(item.qty) || 0));
+  };
+  const computedSubtotal = round2(items.reduce((sum, item) => sum + lineTotal(item), 0));
+  const storedSubtotal = Number(doc.subtotal);
+  const subtotal = items.length
+    ? computedSubtotal
+    : Number.isFinite(storedSubtotal)
+      ? round2(storedSubtotal)
+      : 0;
   const discountPct = Number(doc.discountPct) || 0;
   const taxPct = Number(doc.taxPct) || 0;
-  const discountAmount = (subtotal * discountPct) / 100;
-  const net = subtotal - discountAmount;
-  const taxAmount = taxPct > 0 ? (net * taxPct) / (100 + taxPct) : 0;
-  const total = Number.isFinite(doc.total) ? doc.total : net;
+  const discountAmount = round2((subtotal * discountPct) / 100);
+  const net = round2(subtotal - discountAmount);
+  const taxAmount = taxPct > 0 ? round2((net * taxPct) / (100 + taxPct)) : 0;
+  const netOfTax = round2(net - taxAmount);
+  const storedTotal = Number(doc.total);
+  const total = items.length
+    ? net
+    : Number.isFinite(storedTotal)
+      ? round2(storedTotal)
+      : net;
   const amountPaid = Number(doc.amountPaid) || 0;
-  const balance = Math.max(total - amountPaid, 0);
+  const balance = Math.max(round2(total - amountPaid), 0);
   const paid = doc.status === 'paid' || (total > 0 && amountPaid >= total - 0.005);
 
   const companyName = plain(company.name || 'Preyone');
@@ -395,7 +411,7 @@ export async function buildInvoicePdf({ doc, company, template, title }: Invoice
     pdf.text(money(item.price, doc.currency), 133, y + 5.4, { align: 'right' });
     pdf.text(plain(Number(item.qty) || 0), 158, y + 5.4, { align: 'right' });
     font('bold', 8.2);
-    pdf.text(money(item.line_total ?? (Number(item.price) || 0) * (Number(item.qty) || 0), doc.currency), RIGHT - 3, y + 5.4, {
+    pdf.text(money(lineTotal(item), doc.currency), RIGHT - 3, y + 5.4, {
       align: 'right',
     });
 
@@ -408,13 +424,14 @@ export async function buildInvoicePdf({ doc, company, template, title }: Invoice
   /* ── totals ───────────────────────────────────────────────────────── */
 
   const rows: Array<{ label: string; value: string; kind?: 'muted' | 'grand' | 'paid' | 'balance' }> = [
-    { label: 'Subtotal', value: money(subtotal, doc.currency) },
+    { label: `Subtotal${taxPct > 0 ? ' (incl. VAT)' : ''}`, value: money(subtotal, doc.currency) },
   ];
   if (discountPct > 0) {
     rows.push({ label: `Discount (${discountPct}%)`, value: `-${money(discountAmount, doc.currency)}`, kind: 'muted' });
   }
   if (taxPct > 0) {
-    rows.push({ label: `VAT (${taxPct}%) Incl.`, value: money(taxAmount, doc.currency), kind: 'muted' });
+    rows.push({ label: 'Net of VAT', value: money(netOfTax, doc.currency), kind: 'muted' });
+    rows.push({ label: `VAT (${taxPct}%) included`, value: money(taxAmount, doc.currency), kind: 'muted' });
   }
   rows.push({ label: 'Total', value: money(total, doc.currency), kind: 'grand' });
   if (amountPaid > 0) {
@@ -535,19 +552,27 @@ export async function buildInvoicePdf({ doc, company, template, title }: Invoice
   return pdf;
 }
 
+function findPrintSheets(element?: HTMLElement | null): HTMLElement[] {
+  if (element) {
+    const root = element.closest('.a4-doc') ?? element.closest('.a4-print-host') ?? element;
+    return Array.from(root.querySelectorAll<HTMLElement>('.a4-sheet'));
+  }
+  const hosts = Array.from(document.querySelectorAll<HTMLElement>('.a4-print-host'));
+  const host = hosts.pop();
+  return host ? Array.from(host.querySelectorAll<HTMLElement>('.a4-sheet')) : [];
+}
+
 export async function downloadInvoicePdf(input: InvoicePdfInput): Promise<void> {
   const filename = documentFilename(input.doc, 'pdf');
-  const sheet =
-    input.element ??
-    (document.querySelector('.a4-print-host .a4-sheet') as HTMLElement | null);
+  const sheets = findPrintSheets(input.element);
 
-  if (!sheet) {
+  if (sheets.length === 0) {
     throw new Error('Could not find the rendered invoice to export.');
   }
 
   // No silent vector fallback: a different-looking PDF is worse than a clear
   // error, and the user must get exactly what the preview shows.
-  const pdf = await sheetToPdf(sheet);
+  const pdf = await sheetToPdf(sheets);
   pdf.save(filename);
 }
 
@@ -559,11 +584,9 @@ export async function downloadInvoicePdf(input: InvoicePdfInput): Promise<void> 
 export async function buildDocumentPdf(
   input: InvoicePdfInput & { pixelRatio?: number }
 ): Promise<{ blob: Blob; filename: string }> {
-  const sheet =
-    input.element ??
-    (document.querySelector('.a4-print-host .a4-sheet') as HTMLElement | null);
-  if (!sheet) throw new Error('Could not find the rendered invoice to export.');
-  const pdf = await sheetToPdf(sheet, { pixelRatio: input.pixelRatio ?? 2.2 });
+  const sheets = findPrintSheets(input.element);
+  if (sheets.length === 0) throw new Error('Could not find the rendered invoice to export.');
+  const pdf = await sheetToPdf(sheets, { pixelRatio: input.pixelRatio ?? 2.2 });
   return {
     blob: pdf.output('blob'),
     filename: documentFilename(input.doc, 'pdf'),
@@ -571,23 +594,24 @@ export async function buildDocumentPdf(
 }
 
 /**
- * Snapshot the exact preview sheet with html-to-image and lay the bitmap over
- * A4 pages. The sheet is painted by the browser inside an SVG <foreignObject>,
- * so gradients, layered tints, the SVG wordmark, the PAID stamp, fonts and
- * spacing are byte-for-byte what the preview shows.
+ * Snapshot each rendered A4 page with html-to-image and lay the bitmaps over
+ * PDF pages. DocumentSheet has already split long invoices into `.a4-sheet`
+ * pages, so every page — including the footer and the final totals — is
+ * captured exactly as it prints.
  */
 export async function sheetToPdf(
-  sheet: HTMLElement,
+  input: HTMLElement | HTMLElement[],
   options: { pixelRatio?: number } = {}
 ): Promise<jsPDF> {
-  const host = sheet.closest('.a4-print-host') as HTMLElement | null;
+  const sheets = (Array.isArray(input) ? input : [input]).filter(Boolean);
+  if (sheets.length === 0) throw new Error('Could not find the rendered invoice to export.');
+
+  const host = sheets[0].closest('.a4-print-host') as HTMLElement | null;
   const previousStyle = host?.getAttribute('style') ?? null;
 
   if (host) {
-    // `.a4-print-host` is display:none on screen (it only exists for print),
-    // so expose it to layout for the duration of the capture. Render it far
-    // off-screen — never over the app — so clicking Download never flashes a
-    // full-size invoice behind the page.
+    // The print host is kept off-screen for layout measurement; expose it for
+    // the duration of the capture without ever flashing it over the app.
     host.style.display = 'block';
     host.style.position = 'fixed';
     host.style.left = '-10000px';
@@ -600,82 +624,87 @@ export async function sheetToPdf(
 
   try {
     await document.fonts?.ready?.catch(() => undefined);
-    await Promise.all(
-      Array.from(sheet.querySelectorAll('img')).map(
-        (img) =>
-          new Promise<void>((resolve) => {
-            if (img.complete) return resolve();
-            img.addEventListener('load', () => resolve(), { once: true });
-            img.addEventListener('error', () => resolve(), { once: true });
-          })
-      )
-    );
 
-    // Never pass width/height/windowWidth/windowHeight: html2canvas resizes the
-    // clone to those values, which stretches the sheet when the numbers differ
-    // from the element's real box. Let it measure the DOM itself so the bitmap
-    // has exactly the preview's aspect ratio.
-    const rect = sheet.getBoundingClientRect();
-    const cssWidth = rect.width || sheet.scrollWidth || 794;
-    const cssHeight = rect.height || sheet.scrollHeight || 1123;
-
-    // ~300 DPI at A4 width (210mm ≈ 794 CSS px) for a crisp, "full HD" page,
-    // then back off for very long invoices so the canvas cannot exhaust memory.
-    let pixelRatio = Math.min(3, Math.max(2, 2380 / Math.max(cssWidth, 1)));
-    pixelRatio = Math.min(pixelRatio, Math.sqrt(28_000_000 / Math.max(cssWidth * cssHeight, 1)));
-    pixelRatio = Math.max(1.5, pixelRatio);
-    if (options.pixelRatio) pixelRatio = Math.max(1, Math.min(4, options.pixelRatio));
-
-    // html-to-image renders the real DOM in an SVG <foreignObject>; the browser
-    // paints it with the same layout engine as the preview (gradients, layered
-    // tints, SVG wordmark, PAID stamp, Poppins), unlike html2canvas which
-    // mis-parsed the sheet's multi-layer backgrounds and SVG images.
-    const fontEmbedCSS = await withTimeout(getFontEmbedCSS(sheet), 10_000, 'timeout').catch(() => '');
-    const canvas = await withTimeout(
-      toCanvas(sheet, {
-        pixelRatio,
-        backgroundColor: '#ffffff',
-        fontEmbedCSS,
-        cacheBust: true,
-      }),
-      45_000,
-      'PDF capture timed out. Try again or use Print / PDF.'
-    );
-
+    // One font embed pass for every page; the stylesheets are identical.
+    const fontEmbedCSS = await withTimeout(getFontEmbedCSS(sheets[0]), 10_000, 'timeout').catch(() => '');
     const pdf = new jsPDF({ unit: 'mm', format: 'a4', compress: true });
-    const pageHeightMm = 297;
-    const mmPerPx = PAGE_W / canvas.width;
-    const pageHeightPx = Math.max(1, Math.ceil(pageHeightMm / mmPerPx));
-    let pages = Math.max(1, Math.ceil(canvas.height / pageHeightPx));
-    // A perfect A4 sheet lands one or two pixels over the computed page height;
-    // don't let rounding emit a blank trailing page.
-    if (pages > 1 && canvas.height - (pages - 1) * pageHeightPx <= 2) pages -= 1;
+    let outputPages = 0;
 
-    for (let page = 0; page < pages; page += 1) {
-      if (page > 0) pdf.addPage();
-      const slice = document.createElement('canvas');
-      slice.width = canvas.width;
-      slice.height = Math.min(pageHeightPx, canvas.height - page * pageHeightPx);
-      const ctx = slice.getContext('2d');
-      if (!ctx) throw new Error('Canvas 2D context unavailable');
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(0, 0, slice.width, slice.height);
-      ctx.drawImage(canvas, 0, -page * pageHeightPx);
-      // Lossless PNG: JPEG artefacts make small invoice type look distorted.
-      pdf.addImage(
-        slice.toDataURL('image/png'),
-        'PNG',
-        0,
-        0,
-        PAGE_W,
-        slice.height * mmPerPx,
-        undefined,
-        'FAST'
+    for (const sheet of sheets) {
+      await Promise.all(
+        Array.from(sheet.querySelectorAll('img')).map(
+          (img) =>
+            new Promise<void>((resolve) => {
+              if (img.complete) return resolve();
+              img.addEventListener('load', () => resolve(), { once: true });
+              img.addEventListener('error', () => resolve(), { once: true });
+            })
+        )
       );
+
+      // Never pass width/height/windowWidth/windowHeight: html-to-image resizes
+      // the clone to those values, which stretches the sheet when the numbers
+      // differ from the element's real box.
+      const rect = sheet.getBoundingClientRect();
+      const cssWidth = rect.width || sheet.scrollWidth || 794;
+      const cssHeight = rect.height || sheet.scrollHeight || 1123;
+
+      // ~300 DPI at A4 width (210mm ≈ 794 CSS px) for a crisp page, then back
+      // off for very long invoices so the canvas cannot exhaust memory.
+      let pixelRatio = Math.min(3, Math.max(2, 2380 / Math.max(cssWidth, 1)));
+      pixelRatio = Math.min(pixelRatio, Math.sqrt(28_000_000 / Math.max(cssWidth * cssHeight, 1)));
+      pixelRatio = Math.max(1.5, pixelRatio);
+      if (options.pixelRatio) pixelRatio = Math.max(1, Math.min(4, options.pixelRatio));
+
+      // html-to-image renders the real DOM in an SVG <foreignObject>; the
+      // browser paints it with the same layout engine as the preview.
+      const canvas = await withTimeout(
+        toCanvas(sheet, {
+          pixelRatio,
+          backgroundColor: '#ffffff',
+          fontEmbedCSS,
+          cacheBust: true,
+        }),
+        45_000,
+        'PDF capture timed out. Try again or use Print / PDF.'
+      );
+
+      const pageHeightMm = 297;
+      const mmPerPx = PAGE_W / canvas.width;
+      const pageHeightPx = Math.max(1, Math.ceil(pageHeightMm / mmPerPx));
+      let pages = Math.max(1, Math.ceil(canvas.height / pageHeightPx));
+      // A perfect A4 sheet lands one or two pixels over the computed page
+      // height; don't let rounding emit a blank trailing page.
+      if (pages > 1 && canvas.height - (pages - 1) * pageHeightPx <= 2) pages -= 1;
+
+      for (let page = 0; page < pages; page += 1) {
+        if (outputPages > 0) pdf.addPage();
+        const slice = document.createElement('canvas');
+        slice.width = canvas.width;
+        slice.height = Math.min(pageHeightPx, canvas.height - page * pageHeightPx);
+        const ctx = slice.getContext('2d');
+        if (!ctx) throw new Error('Canvas 2D context unavailable');
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, slice.width, slice.height);
+        ctx.drawImage(canvas, 0, -page * pageHeightPx);
+        // Lossless PNG: JPEG artefacts make small invoice type look distorted.
+        pdf.addImage(
+          slice.toDataURL('image/png'),
+          'PNG',
+          0,
+          0,
+          PAGE_W,
+          slice.height * mmPerPx,
+          undefined,
+          'FAST'
+        );
+        outputPages += 1;
+      }
     }
 
     return pdf;
-  } finally {    if (host) {
+  } finally {
+    if (host) {
       if (previousStyle === null) host.removeAttribute('style');
       else host.setAttribute('style', previousStyle);
     }
