@@ -805,15 +805,21 @@ router.put('/documents/:id', requireRole(...MANAGER_ROLES), async (req, res) => 
       }
       set('customer_id', customerId, 'customerId');
     } else if (b.customer && typeof b.customer === 'object') {
-      // The edit form sends name/email/address directly. Upsert keeps the
-      // client book clean and links the document to the resulting record.
-      const customerId = await upsertCustomer(client, b.customer);
-      if (!customerId) {
-        await client.query('ROLLBACK');
-        res.status(422).json({ error: 'Customer name is required.' });
-        return;
+      // The edit form sends name/email/address/phone directly. A blank name is
+      // a walk-in document, not an error: the rest of the document must still
+      // save. Existing customer data is only replaced when a name is supplied.
+      const customerName = str((b.customer as Record<string, unknown>).name);
+      if (customerName) {
+        const customerId = await upsertCustomer(client, b.customer as Record<string, unknown>, {
+          replace: true,
+        });
+        if (!customerId) {
+          await client.query('ROLLBACK');
+          res.status(422).json({ error: 'Could not save the client details.' });
+          return;
+        }
+        set('customer_id', customerId, 'customer');
       }
-      set('customer_id', customerId, 'customer');
     }
 
     let editedItems = 0;
@@ -1545,7 +1551,11 @@ router.get('/customers', async (req, res) => {
   res.json(rows);
 });
 
-async function upsertCustomer(client: import('pg').PoolClient, c: Record<string, unknown>): Promise<string | null> {
+async function upsertCustomer(
+  client: import('pg').PoolClient,
+  c: Record<string, unknown>,
+  options: { replace?: boolean } = {}
+): Promise<string | null> {
   const name = str(c?.name);
   if (!name) return null;
   const existing = await client.query(
@@ -1553,14 +1563,22 @@ async function upsertCustomer(client: import('pg').PoolClient, c: Record<string,
     [name]
   );
   if (existing.rows.length > 0) {
+    const replace = options.replace === true;
+    // The document editor sends the complete client record, including empty
+    // strings for fields the user deliberately cleared. Other callers keep the
+    // old COALESCE behaviour so a partial update never wipes data.
+    const phoneValue = replace ? `NULLIF($2,'')` : `COALESCE(NULLIF($2,''), phone)`;
+    const emailValue = replace ? `NULLIF($3,'')` : `COALESCE(NULLIF($3,''), email)`;
+    const addressValue = replace ? `NULLIF($4,'')` : `COALESCE(NULLIF($4,''), address)`;
     await client.query(
       `UPDATE pos_customers
-          SET phone = COALESCE(NULLIF($2,''), phone),
-              email = COALESCE(NULLIF($3,''), email),
-              address = COALESCE(NULLIF($4,''), address),
+          SET name = $5,
+              phone = ${phoneValue},
+              email = ${emailValue},
+              address = ${addressValue},
               updated_at = NOW()
         WHERE id = $1`,
-      [existing.rows[0].id, str(c.phone), str(c.email), str(c.address)]
+      [existing.rows[0].id, str(c.phone), str(c.email), str(c.address), name]
     );
     return existing.rows[0].id as string;
   }
@@ -1858,13 +1876,15 @@ function normalizeDetails(value: unknown): string[] {
     const text = String(entry ?? '')
       .replace(/^\s*(?:[-\u2013\u2014*]|\d+[.)])\s*/, '')
       .trim()
-      .slice(0, 300);
+      .slice(0, 1000);
     if (!text) continue;
     const key = text.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(text);
-    if (out.length >= 20) break;
+    // Long product specs routinely exceed 20 bullets. Do not silently drop
+    // the user's edits beyond the old arbitrary cap.
+    if (out.length >= 100) break;
   }
   return out;
 }
@@ -1958,7 +1978,10 @@ router.get('/documents/:id', async (req, res) => {
   // missing rather than forbidden, so the endpoint cannot be used to probe
   // which document UUIDs exist.
   const doc = await pool.query(
-    `SELECT * FROM pos_documents WHERE id = $1 AND company_id = $2`,
+    `SELECT d.*, c.name AS customer_name
+       FROM pos_documents d
+       LEFT JOIN pos_customers c ON c.id = d.customer_id
+      WHERE d.id = $1 AND d.company_id = $2`,
     [req.params.id, tenantId(req)]
   );
   if (doc.rows.length === 0) {

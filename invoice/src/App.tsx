@@ -113,13 +113,14 @@ function parseDetails(value: string | string[] | null | undefined): string[] {
     const text = String(entry ?? '')
       .replace(/^\s*(?:[-\u2013\u2014*]|\d+[.)])\s*/, '')
       .trim()
-      .slice(0, 300);
+      .slice(0, 1000);
     if (!text) continue;
     const key = text.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(text);
-    if (out.length >= 20) break;
+    // Product specs can run well past 20 lines; never drop a user's edits.
+    if (out.length >= 100) break;
   }
   return out;
 }
@@ -1518,6 +1519,7 @@ interface EditDocLine {
 interface EditDocState {
   customerName: string;
   customerEmail: string;
+  customerPhone: string;
   customerAddress: string;
   issueDate: string;
   dueDate: string;
@@ -1542,7 +1544,7 @@ function DocumentDrawer({
   types: DocType[];
   company: Company;
   onClose: () => void;
-  onChanged: () => void;
+  onChanged: () => void | Promise<void>;
 }) {
   const [doc, setDoc] = useState<DocumentDetail | null>(null);
   const [events, setEvents] = useState<DocumentEvent[]>([]);
@@ -1562,6 +1564,7 @@ function DocumentDrawer({
   const [editMode, setEditMode] = useState(false);
   const [editSaving, setEditSaving] = useState(false);
   const [edit, setEdit] = useState<EditDocState | null>(null);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
   const printHostRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
@@ -1596,6 +1599,12 @@ function DocumentDrawer({
     };
   }, []);
 
+  useEffect(() => {
+    if (!savedAt) return;
+    const timer = window.setTimeout(() => setSavedAt(null), 6000);
+    return () => window.clearTimeout(timer);
+  }, [savedAt]);
+
   const startEdit = () => {
     if (!doc) return;
     const rawMeta = (doc.doc_meta ?? {}) as Record<string, unknown>;
@@ -1603,6 +1612,7 @@ function DocumentDrawer({
     setEdit({
       customerName: doc.customer?.name || doc.customer_name || '',
       customerEmail: doc.customer?.email || '',
+      customerPhone: doc.customer?.phone || '',
       customerAddress: doc.customer?.address || '',
       issueDate: String(doc.issue_date || '').slice(0, 10),
       dueDate: doc.due_date ? String(doc.due_date).slice(0, 10) : '',
@@ -1626,7 +1636,13 @@ function DocumentDrawer({
 
   const saveEdits = async () => {
     if (!doc || !edit) return;
+    const issueDate = edit.issueDate.trim();
+    if (!issueDate) {
+      setError('Issue date is required.');
+      return;
+    }
     const locked = Number(doc.amount_paid) > 0;
+    const customerName = edit.customerName.trim();
     const items = edit.items
       .filter((line) => line.description.trim())
       .map((line) => ({
@@ -1640,10 +1656,22 @@ function DocumentDrawer({
       setError('Add at least one line item with a description.');
       return;
     }
+    // A blank client name means a walk-in document. Do not send an empty
+    // customer object: the server would have no record to link and the whole
+    // save used to be rejected.
+    const customer = customerName
+      ? {
+          name: customerName,
+          email: edit.customerEmail.trim(),
+          phone: edit.customerPhone.trim(),
+          address: edit.customerAddress.trim(),
+        }
+      : undefined;
+
     setEditSaving(true);
     setError(null);
     try {
-      await api.put(`/api/pos/documents/${doc.id}`, {
+      const saved = await api.put<PosDocument>(`/api/pos/documents/${doc.id}`, {
         ...(locked
           ? {}
           : {
@@ -1651,20 +1679,51 @@ function DocumentDrawer({
               taxPct: Number(edit.taxPct) || 0,
               discountPct: Number(edit.discountPct) || 0,
             }),
-        customer: {
-          name: edit.customerName.trim(),
-          email: edit.customerEmail.trim() || undefined,
-          address: edit.customerAddress.trim() || undefined,
-        },
-        issueDate: edit.issueDate || String(doc.issue_date || '').slice(0, 10),
-        dueDate: edit.dueDate || undefined,
-        notes: edit.notes || '',
+        ...(customer ? { customer } : {}),
+        issueDate,
+        // An empty due date is a deliberate clear, not "leave unchanged".
+        dueDate: edit.dueDate,
+        notes: edit.notes,
         poNumber: edit.poNumber,
         reference: edit.reference,
       });
+
+      // Paint the saved values immediately. The follow-up GET only reconciles
+      // server-computed fields such as tax amounts; it can never leave the
+      // drawer showing the pre-edit document.
+      setDoc((prev) => {
+        if (!prev) return prev;
+        const nextItems = locked
+          ? prev.items
+          : items.map((line, index) => ({
+              ...(prev.items[index] || {}),
+              description: line.description,
+              details: line.details,
+              qty: line.qty,
+              price: line.price,
+              line_total: Math.round(line.qty * line.price * 100) / 100,
+              product_id: line.productId ?? null,
+            }));
+        return {
+          ...prev,
+          ...saved,
+          customer: customer
+            ? {
+                ...(prev.customer || {}),
+                id: saved.customer_id || prev.customer?.id || '',
+                name: customer.name,
+                email: customer.email || null,
+                phone: customer.phone || null,
+                address: customer.address || null,
+              }
+            : prev.customer,
+          items: nextItems,
+        };
+      });
       setEditMode(false);
+      setSavedAt(Date.now());
       await load();
-      onChanged();
+      await onChanged();
     } catch (err) {
       setError(errorText(err));
     } finally {
@@ -1691,6 +1750,7 @@ function DocumentDrawer({
         customerName: doc.customer?.name || doc.customer_name || 'Walk-in customer',
         customerAddress: doc.customer?.address || null,
         customerEmail: doc.customer?.email || null,
+        customerPhone: doc.customer?.phone || null,
         items: doc.items.map((it) => ({
           description: it.description,
           details: it.details || [],
@@ -1883,6 +1943,7 @@ function DocumentDrawer({
         </div>
 
         {error && <div className="banner error">{error}</div>}
+        {savedAt && !error && <div className="banner ok">All changes saved.</div>}
         {!doc && !error && <div className="skeleton" style={{ height: 120 }} />}
 
         {doc && (
@@ -2011,6 +2072,15 @@ function DocumentDrawer({
                         type="email"
                         value={edit.customerEmail}
                         onChange={(e) => setEdit({ ...edit, customerEmail: e.target.value })}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Client phone</span>
+                      <input
+                        className="input"
+                        type="tel"
+                        value={edit.customerPhone}
+                        onChange={(e) => setEdit({ ...edit, customerPhone: e.target.value })}
                       />
                     </label>
                     <label className="field">
@@ -2867,9 +2937,8 @@ export default function App() {
     void loadAging();
   }, [catalog, loadAging]);
 
-  const refreshAll = useCallback(() => {
-    void loadDocs();
-    void loadAging();
+  const refreshAll = useCallback(async () => {
+    await Promise.all([loadDocs(), loadAging()]);
   }, [loadDocs, loadAging]);
 
   const totals = useMemo(() => {
