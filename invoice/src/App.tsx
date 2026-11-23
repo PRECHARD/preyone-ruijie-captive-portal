@@ -35,6 +35,7 @@ import AccountingPage from './pages/Accounting';
 import DashboardPage, { type DocumentAction } from './pages/Dashboard';
 import UpgradeModal from './components/UpgradeModal';
 import './document.css';
+import './glass-theme.css';
 
 /* ────────────────────────────── helpers ────────────────────────────── */
 
@@ -3108,9 +3109,10 @@ function ZarLedgerPage() {
   const balance = Number(zar?.balance_total) || 0;
 
   return (
-    <>
+    <div className="glass-page zar-page">
       <div className="topbar">
         <div>
+          <span className="page-eyebrow">Rand ledger · ZAR</span>
           <h1 className="page-title">Rand ledger</h1>
           <p className="page-sub">
             Historical ZAR totals imported from the ZIM client workbook. Kept separate from USD
@@ -3118,7 +3120,7 @@ function ZarLedgerPage() {
           </p>
         </div>
         <div className="topbar-actions">
-          <span className="status-chip">
+          <span className="status-chip status-chip--zar">
             <span className="status-dot" aria-hidden />
             ZAR ledger
           </span>
@@ -3178,7 +3180,7 @@ function ZarLedgerPage() {
           </div>
         </>
       )}
-    </>
+    </div>
   );
 }
 
@@ -3378,6 +3380,21 @@ export default function App() {
     return { outstanding, paid, count: docs.length, collectionRate: billed > 0 ? Math.round((paid / billed) * 100) : 0 };
   }, [docs]);
 
+  const documentsHeadline =
+    statusFilter === 'unpaid' ? 'Outstanding' : statusFilter === 'paid' ? 'Paid ledger' : 'Documents';
+  const documentsEyebrow =
+    statusFilter === 'unpaid'
+      ? 'Receivables · outstanding'
+      : statusFilter === 'paid'
+        ? 'Receivables · paid ledger'
+        : 'Workspace ledger';
+  const documentsSub =
+    statusFilter === 'unpaid'
+      ? 'Open balances, filtered to documents still awaiting collection.'
+      : statusFilter === 'paid'
+        ? 'Settled documents and the payments behind them.'
+        : 'Every quote, invoice, credit note and receipt for this company.';
+
   if (locked) {
     return (
       <UnlockPanel
@@ -3487,17 +3504,20 @@ export default function App() {
         onNewDocument={() => openComposer()}
       />
 
-      <main className="main">
+      <main className="main glass-shell">
         {view !== 'settings' && view !== 'accounting' && view !== 'zar' && view !== 'dashboard' && (
         <div className="topbar">
           <div>
+            <span className="page-eyebrow">
+              {view === 'documents' ? documentsEyebrow : 'Receivables · aging'}
+            </span>
             <h1 className="page-title">
-              {view === 'documents' && 'Documents'}
-              {view === 'aging' && 'Accounts receivable'}
+              {view === 'documents' ? documentsHeadline : 'Accounts receivable'}
             </h1>
             <p className="page-sub">
-              {view === 'documents' && 'Every quote, invoice, credit note and receipt for this company.'}
-              {view === 'aging' && 'Outstanding balances by days overdue, recalculated from due dates.'}
+              {view === 'documents'
+                ? documentsSub
+                : 'Outstanding balances by days overdue, recalculated from due dates.'}
             </p>
           </div>
           <div className="topbar-actions">
@@ -3521,7 +3541,7 @@ export default function App() {
           <div className="banner error">{error}</div>
         )}
 
-        {view !== 'settings' && view !== 'accounting' && view !== 'zar' && view !== 'dashboard' && (
+        {view !== 'settings' && view !== 'accounting' && view !== 'zar' && view !== 'dashboard' && view !== 'aging' && (
           <div className="stats">
             <div className="stat">
               <div className="stat-label">Documents</div>
@@ -3568,7 +3588,13 @@ export default function App() {
           <div className="card panel">
             <div className="panel-head">
               <div className="panel-title">
-                {typeFilter === 'all' ? 'All documents' : typeLabel(types, typeFilter)}
+                {typeFilter !== 'all'
+                  ? typeLabel(types, typeFilter)
+                  : statusFilter === 'unpaid'
+                    ? 'Outstanding documents'
+                    : statusFilter === 'paid'
+                      ? 'Paid documents'
+                      : 'All documents'}
               </div>
               <div className="panel-tools">
                 <input
@@ -3701,7 +3727,22 @@ export default function App() {
                           <td>{dateLabel(d.due_date || d.issue_date)}</td>
                           <td className="num">{d.daysOverdue}</td>
                           <td className="num mono">{money(d.balance, d.currency || 'USD')}</td>
-                          <td>{AR_BUCKETS.find((b) => b.key === d.bucket)?.label ?? d.bucket}</td>
+                          <td>
+                            {(() => {
+                              const bucket = AR_BUCKETS.find((b) => b.key === d.bucket);
+                              const tone =
+                                bucket?.tone === 'danger'
+                                  ? 'danger'
+                                  : bucket?.tone === 'warn'
+                                    ? 'warn'
+                                    : 'current';
+                              return (
+                                <span className={`bucket-pill bucket-pill--${tone}`}>
+                                  {bucket?.label ?? d.bucket}
+                                </span>
+                              );
+                            })()}
+                          </td>
                         </tr>
                       ))}
                     </tbody>

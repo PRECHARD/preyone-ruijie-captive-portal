@@ -58,7 +58,7 @@ const PESEPAY_RAILS = ['ecocash', 'omari', 'innbucks', 'paygo', 'pesepay'];
 const money = (n: number | undefined) =>
   `$${(Number(n) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-const CHART_COLORS = ['#a855f7', '#d946ef', '#22d3ee', '#f59e0b', '#34d399', '#60a5fa', '#fb7185', '#fbbf24'];
+const CHART_COLORS = ['#00F0FF', '#34D399', '#22D3EE', '#FBBF24', '#FB7185', '#A7F3D0', '#60A5FA', '#FDE68A'];
 
 function DonutChart({
   data,
@@ -145,13 +145,13 @@ function RevenuePulse({ points }: { points: Array<{ label: string; value: number
     <svg className="fin-area" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Revenue pulse by day">
       <defs>
         <linearGradient id="fin-line-grad" x1="0" x2="1">
-          <stop offset="0%" stopColor="#22d3ee" />
-          <stop offset="55%" stopColor="#a855f7" />
-          <stop offset="100%" stopColor="#d946ef" />
+          <stop offset="0%" stopColor="#00F0FF" />
+          <stop offset="55%" stopColor="#34D399" />
+          <stop offset="100%" stopColor="#22D3EE" />
         </linearGradient>
         <linearGradient id="fin-area-fill" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#a855f7" stopOpacity="0.3" />
-          <stop offset="100%" stopColor="#a855f7" stopOpacity="0" />
+          <stop offset="0%" stopColor="#00F0FF" stopOpacity="0.26" />
+          <stop offset="100%" stopColor="#00F0FF" stopOpacity="0" />
         </linearGradient>
       </defs>
       {[0, 1, 2, 3].map((lineIndex) => {
@@ -213,6 +213,7 @@ export default function AccountingPage() {
   const [tab, setTab] = useState<Tab>('overview');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
+  const [rangePreset, setRangePreset] = useState<'all' | 'month' | '30' | 'year' | 'custom'>('all');
   const [overview, setOverview] = useState<Overview | null>(null);
   const [pnl, setPnl] = useState<PnL | null>(null);
   const [ledger, setLedger] = useState<LedgerRow[]>([]);
@@ -287,6 +288,7 @@ export default function AccountingPage() {
   };
 
   const applyRange = (preset: 'all' | 'month' | '30' | 'year') => {
+    setRangePreset(preset);
     if (preset === 'all') {
       setFrom('');
       setTo('');
@@ -362,16 +364,16 @@ export default function AccountingPage() {
             cockpit for Preyone Enterprises.
           </p>
           <div className="fin-range">
-            <button type="button" onClick={() => applyRange('all')}>All time</button>
-            <button type="button" onClick={() => applyRange('month')}>This month</button>
-            <button type="button" onClick={() => applyRange('30')}>Last 30 days</button>
-            <button type="button" onClick={() => applyRange('year')}>This year</button>
+            <button type="button" className={rangePreset === 'all' ? 'on' : ''} onClick={() => applyRange('all')}>All time</button>
+            <button type="button" className={rangePreset === 'month' ? 'on' : ''} onClick={() => applyRange('month')}>This month</button>
+            <button type="button" className={rangePreset === '30' ? 'on' : ''} onClick={() => applyRange('30')}>Last 30 days</button>
+            <button type="button" className={rangePreset === 'year' ? 'on' : ''} onClick={() => applyRange('year')}>This year</button>
           </div>
         </div>
         <div className="fin-hero-side">
           <div className="fin-date-inputs">
-            <input className="input" type="date" value={from} onChange={(e) => setFrom(e.target.value)} aria-label="From date" />
-            <input className="input" type="date" value={to} onChange={(e) => setTo(e.target.value)} aria-label="To date" />
+            <input className="input" type="date" value={from} onChange={(e) => { setFrom(e.target.value); setRangePreset('custom'); }} aria-label="From date" />
+            <input className="input" type="date" value={to} onChange={(e) => { setTo(e.target.value); setRangePreset('custom'); }} aria-label="To date" />
             <button className="btn ghost" type="button" onClick={() => void load()} disabled={loading}>
               {loading ? <span className="spinner" aria-hidden /> : null}
               {loading ? 'Loading…' : 'Refresh'}
