@@ -281,6 +281,7 @@ export interface PosDocument {
 
 export interface DocumentLine {
   id?: string;
+  product_id?: string | null;
   description: string;
   details?: string[] | null;
   price: string | number;

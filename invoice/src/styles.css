@@ -1296,6 +1296,18 @@ tbody tr:last-child td { border-bottom: none; }
   align-items: end;
   margin-bottom: 8px;
 }
+.doc-edit { margin-bottom: 18px; }
+.doc-edit-body { padding: 16px 18px 18px; }
+.doc-edit-items {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 18px;
+}
+.doc-edit-items > .panel-title { margin-bottom: 2px; }
+.doc-edit-line { margin-bottom: 0; }
+.doc-edit-line .line-total { padding-bottom: 8px; }
+
 .line-card {
   position: relative;
   margin-bottom: 10px;

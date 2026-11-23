@@ -1507,6 +1507,29 @@ function SendDocumentModal({
   );
 }
 
+interface EditDocLine {
+  key: number;
+  description: string;
+  details: string;
+  qty: string;
+  price: string;
+  productId?: string | null;
+}
+
+interface EditDocState {
+  customerName: string;
+  customerEmail: string;
+  customerAddress: string;
+  issueDate: string;
+  dueDate: string;
+  notes: string;
+  taxPct: string;
+  discountPct: string;
+  poNumber: string;
+  reference: string;
+  items: EditDocLine[];
+}
+
 function DocumentDrawer({
   id,
   templates,
@@ -1536,6 +1559,10 @@ function DocumentDrawer({
   const [editingNumber, setEditingNumber] = useState(false);
   const [numberDraft, setNumberDraft] = useState('');
   const [confirm, setConfirm] = useState<ConfirmOptions | null>(null);
+  const [canManage, setCanManage] = useState(false);
+  const [editMode, setEditMode] = useState(false);
+  const [editSaving, setEditSaving] = useState(false);
+  const [edit, setEdit] = useState<EditDocState | null>(null);
   const printHostRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
@@ -1557,7 +1584,99 @@ function DocumentDrawer({
     void load();
   }, [load]);
 
+  useEffect(() => {
+    let alive = true;
+    void api
+      .get<{ role?: string | null }>('/api/admin/auth/me')
+      .then((me) => {
+        if (alive) setCanManage(me.role === 'CEO' || me.role === 'Manager');
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const startEdit = () => {
+    if (!doc) return;
+    const rawMeta = (doc.doc_meta ?? {}) as Record<string, unknown>;
+    const rawDoc = doc as unknown as { tax_pct?: string | number; discount_pct?: string | number };
+    setEdit({
+      customerName: doc.customer?.name || doc.customer_name || '',
+      customerEmail: doc.customer?.email || '',
+      customerAddress: doc.customer?.address || '',
+      issueDate: String(doc.issue_date || '').slice(0, 10),
+      dueDate: doc.due_date ? String(doc.due_date).slice(0, 10) : '',
+      notes: doc.notes || '',
+      taxPct: String(Number(rawDoc.tax_pct) || 0),
+      discountPct: String(Number(rawDoc.discount_pct) || 0),
+      poNumber: String(rawMeta.poNumber || rawMeta.po_number || ''),
+      reference: String(rawMeta.reference || ''),
+      items: doc.items.map((item, index) => ({
+        key: index + 1,
+        description: item.description,
+        details: (item.details || []).join('\n'),
+        qty: String(item.qty),
+        price: String(item.price),
+        productId: item.product_id || null,
+      })),
+    });
+    setEditMode(true);
+    setError(null);
+  };
+
+  const saveEdits = async () => {
+    if (!doc || !edit) return;
+    const locked = Number(doc.amount_paid) > 0;
+    const items = edit.items
+      .filter((line) => line.description.trim())
+      .map((line) => ({
+        description: line.description.trim(),
+        details: parseDetails(line.details),
+        qty: Number(line.qty) || 1,
+        price: Number(line.price) || 0,
+        productId: line.productId || undefined,
+      }));
+    if (!locked && items.length === 0) {
+      setError('Add at least one line item with a description.');
+      return;
+    }
+    setEditSaving(true);
+    setError(null);
+    try {
+      await api.put(`/api/pos/documents/${doc.id}`, {
+        ...(locked
+          ? {}
+          : {
+              items,
+              taxPct: Number(edit.taxPct) || 0,
+              discountPct: Number(edit.discountPct) || 0,
+            }),
+        customer: {
+          name: edit.customerName.trim(),
+          email: edit.customerEmail.trim() || undefined,
+          address: edit.customerAddress.trim() || undefined,
+        },
+        issueDate: edit.issueDate || String(doc.issue_date || '').slice(0, 10),
+        dueDate: edit.dueDate || undefined,
+        notes: edit.notes || '',
+        poNumber: edit.poNumber,
+        reference: edit.reference,
+      });
+      setEditMode(false);
+      await load();
+      onChanged();
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
   const balance = doc ? Number(doc.total) - Number(doc.amount_paid) : 0;
+  // Once money is recorded the items and totals are locked; metadata remains
+  // editable. A credit note/refund is the correct correction path.
+  const itemsLocked = !!doc && Number(doc.amount_paid) > 0;
   const template = templates.find((t) => t.id === Number(doc?.template_id)) ?? templates[0];
 
   const raw = doc as unknown as { discount_pct?: string | number; tax_pct?: string | number } | null;
@@ -1726,7 +1845,7 @@ function DocumentDrawer({
                 ) : (
                   <>
                     <span className="mono">{doc.doc_number}</span>
-                    {doc.status !== 'void' && (
+                    {canManage && doc.status !== 'void' && (
                       <button
                         className="icon-btn"
                         type="button"
@@ -1770,6 +1889,11 @@ function DocumentDrawer({
         {doc && (
           <>
             <div className="topbar-actions" style={{ marginBottom: 18 }}>
+              {canManage && doc.status !== 'void' && !editMode && (
+                <button className="btn primary" type="button" onClick={startEdit}>
+                  Edit document
+                </button>
+              )}
               {balance > 0.005 && doc.status !== 'void' && (
                 <button className="btn primary" type="button" onClick={() => setOnlineOpen(true)}>
                   Take payment
@@ -1807,20 +1931,302 @@ function DocumentDrawer({
               >
                 Mark sent
               </button>
-              <button
-                className="btn danger"
-                type="button"
-                disabled={busy || doc.status === 'void'}
-                onClick={askVoid}
-              >
-                Void
-              </button>
-              {doc.status === 'draft' && (
+              {canManage && (
+                <button
+                  className="btn danger"
+                  type="button"
+                  disabled={busy || doc.status === 'void'}
+                  onClick={askVoid}
+                >
+                  Void
+                </button>
+              )}
+              {canManage && doc.status === 'draft' && (
                 <button className="btn danger" type="button" disabled={busy} onClick={askDeleteDraft}>
                   Delete draft
                 </button>
               )}
             </div>
+
+            {editMode && edit && (
+              <div className="card doc-edit no-print">
+                <div className="panel-head">
+                  <div className="panel-title">Edit document</div>
+                  <div className="panel-tools">
+                    <button
+                      className="btn ghost"
+                      type="button"
+                      onClick={() => {
+                        setEditMode(false);
+                        setError(null);
+                      }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      className="btn primary"
+                      type="button"
+                      disabled={editSaving}
+                      onClick={() => void saveEdits()}
+                    >
+                      {editSaving ? 'Saving…' : 'Save changes'}
+                    </button>
+                  </div>
+                </div>
+                <div className="doc-edit-body">
+                  {itemsLocked && (
+                    <div className="banner error">
+                      Payments are recorded on this document, so its items and totals are locked.
+                      You can still edit the client, dates and notes. Use a credit note or refund to
+                      change the amount.
+                    </div>
+                  )}
+
+                  <div className="form-grid">
+                    <label className="field span-2">
+                      <span>Client name</span>
+                      <input
+                        className="input"
+                        value={edit.customerName}
+                        onChange={(e) => setEdit({ ...edit, customerName: e.target.value })}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Client email</span>
+                      <input
+                        className="input"
+                        type="email"
+                        value={edit.customerEmail}
+                        onChange={(e) => setEdit({ ...edit, customerEmail: e.target.value })}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Client address</span>
+                      <textarea
+                        className="textarea"
+                        rows={2}
+                        value={edit.customerAddress}
+                        onChange={(e) => setEdit({ ...edit, customerAddress: e.target.value })}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Issue date</span>
+                      <input
+                        className="input"
+                        type="date"
+                        value={edit.issueDate}
+                        onChange={(e) => setEdit({ ...edit, issueDate: e.target.value })}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Due date</span>
+                      <input
+                        className="input"
+                        type="date"
+                        value={edit.dueDate}
+                        onChange={(e) => setEdit({ ...edit, dueDate: e.target.value })}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Tax % (inclusive)</span>
+                      <input
+                        className="input"
+                        type="number"
+                        step="0.01"
+                        min={0}
+                        disabled={itemsLocked}
+                        value={edit.taxPct}
+                        onChange={(e) => setEdit({ ...edit, taxPct: e.target.value })}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Discount %</span>
+                      <input
+                        className="input"
+                        type="number"
+                        step="0.01"
+                        min={0}
+                        disabled={itemsLocked}
+                        value={edit.discountPct}
+                        onChange={(e) => setEdit({ ...edit, discountPct: e.target.value })}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>PO number</span>
+                      <input
+                        className="input"
+                        value={edit.poNumber}
+                        onChange={(e) => setEdit({ ...edit, poNumber: e.target.value })}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Reference</span>
+                      <input
+                        className="input"
+                        value={edit.reference}
+                        onChange={(e) => setEdit({ ...edit, reference: e.target.value })}
+                      />
+                    </label>
+                  </div>
+
+                  {!itemsLocked && (
+                    <div className="doc-edit-items">
+                      <div className="panel-title">Line items</div>
+                      {edit.items.map((line) => (
+                        <div className="line-card doc-edit-line" key={line.key}>
+                          <div className="line-row">
+                            <label className="field">
+                              <span>Description</span>
+                              <input
+                                className="input"
+                                value={line.description}
+                                onChange={(e) =>
+                                  setEdit((prev) =>
+                                    prev
+                                      ? {
+                                          ...prev,
+                                          items: prev.items.map((item) =>
+                                            item.key === line.key
+                                              ? { ...item, description: e.target.value }
+                                              : item
+                                          ),
+                                        }
+                                      : prev
+                                  )
+                                }
+                              />
+                            </label>
+                            <label className="field">
+                              <span>Qty</span>
+                              <input
+                                className="input"
+                                type="number"
+                                min={0}
+                                step="0.01"
+                                value={line.qty}
+                                onChange={(e) =>
+                                  setEdit((prev) =>
+                                    prev
+                                      ? {
+                                          ...prev,
+                                          items: prev.items.map((item) =>
+                                            item.key === line.key ? { ...item, qty: e.target.value } : item
+                                          ),
+                                        }
+                                      : prev
+                                  )
+                                }
+                              />
+                            </label>
+                            <label className="field">
+                              <span>Price</span>
+                              <input
+                                className="input"
+                                type="number"
+                                min={0}
+                                step="0.01"
+                                value={line.price}
+                                onChange={(e) =>
+                                  setEdit((prev) =>
+                                    prev
+                                      ? {
+                                          ...prev,
+                                          items: prev.items.map((item) =>
+                                            item.key === line.key
+                                              ? { ...item, price: e.target.value }
+                                              : item
+                                          ),
+                                        }
+                                      : prev
+                                  )
+                                }
+                              />
+                            </label>
+                            <div className="line-total">
+                              {money((Number(line.qty) || 0) * (Number(line.price) || 0), doc.currency || 'USD')}
+                            </div>
+                            <button
+                              className="icon-btn"
+                              type="button"
+                              aria-label="Remove line"
+                              onClick={() =>
+                                setEdit((prev) =>
+                                  prev && prev.items.length > 1
+                                    ? { ...prev, items: prev.items.filter((item) => item.key !== line.key) }
+                                    : prev
+                                )
+                              }
+                            >
+                              −
+                            </button>
+                          </div>
+                          <label className="line-details-field">
+                            <span className="line-details-head">
+                              <span>Detail bullets</span>
+                              <span className={`line-details-count${parseDetails(line.details).length ? ' has' : ''}`}>
+                                {parseDetails(line.details).length || 'optional'}
+                              </span>
+                            </span>
+                            <textarea
+                              className="textarea line-details-input"
+                              rows={2}
+                              value={line.details}
+                              onChange={(e) =>
+                                setEdit((prev) =>
+                                  prev
+                                    ? {
+                                        ...prev,
+                                        items: prev.items.map((item) =>
+                                          item.key === line.key ? { ...item, details: e.target.value } : item
+                                        ),
+                                      }
+                                    : prev
+                                )
+                              }
+                              placeholder={'One detail per line — e.g.\n5 m heavy duty cable\n16 A rated'}
+                            />
+                          </label>
+                        </div>
+                      ))}
+                      <button
+                        className="btn ghost"
+                        type="button"
+                        onClick={() =>
+                          setEdit((prev) =>
+                            prev
+                              ? {
+                                  ...prev,
+                                  items: [
+                                    ...prev.items,
+                                    {
+                                      key: Math.max(...prev.items.map((item) => item.key), 0) + 1,
+                                      description: '',
+                                      details: '',
+                                      qty: '1',
+                                      price: '0',
+                                    },
+                                  ],
+                                }
+                              : prev
+                          )
+                        }
+                      >
+                        + Add line
+                      </button>
+                    </div>
+                  )}
+
+                  <label className="field" style={{ marginTop: 18 }}>
+                    <span>Notes / payment instructions</span>
+                    <textarea
+                      className="textarea"
+                      value={edit.notes}
+                      onChange={(e) => setEdit({ ...edit, notes: e.target.value })}
+                    />
+                  </label>
+                </div>
+              </div>
+            )}
 
             <div className="split">
               <div>

@@ -725,6 +725,25 @@ router.put('/documents/:id', requireRole(...MANAGER_ROLES), async (req, res) => 
       return;
     }
 
+    // Payments are financial facts. Their amount and COGS are already in the
+    // ledger, so line items/totals are locked once money has been recorded.
+    const paidRow = await client.query(
+      `SELECT COALESCE(SUM(amount), 0)::numeric AS paid
+         FROM pos_document_payments WHERE document_id = $1`,
+      [current.id]
+    );
+    const paidTotal = num(paidRow.rows[0]?.paid);
+    const editsItems = Array.isArray(b.items);
+    if (editsItems && paidTotal > 0) {
+      await client.query('ROLLBACK');
+      res.status(409).json({
+        error:
+          'This document has payments recorded, so its items are locked. Issue a credit note or refund instead of changing the items.',
+        code: 'DOCUMENT_HAS_PAYMENTS',
+      });
+      return;
+    }
+
     const patches: string[] = [];
     const values: unknown[] = [];
     const changed: string[] = [];
@@ -785,11 +804,133 @@ router.put('/documents/:id', requireRole(...MANAGER_ROLES), async (req, res) => 
         }
       }
       set('customer_id', customerId, 'customerId');
+    } else if (b.customer && typeof b.customer === 'object') {
+      // The edit form sends name/email/address directly. Upsert keeps the
+      // client book clean and links the document to the resulting record.
+      const customerId = await upsertCustomer(client, b.customer);
+      if (!customerId) {
+        await client.query('ROLLBACK');
+        res.status(422).json({ error: 'Customer name is required.' });
+        return;
+      }
+      set('customer_id', customerId, 'customer');
+    }
+
+    let editedItems = 0;
+    let itemTaxAmount: number | null = null;
+    if (editsItems) {
+      const rawItems = b.items as any[];
+      const items = rawItems
+        .map((it: any) => ({
+          description: str(it?.description),
+          details: normalizeDetails(it?.details),
+          price: round2(num(it?.price)),
+          qty: round2(num(it?.qty)) || 1,
+          productId: str(it?.productId) || undefined,
+        }))
+        .filter((it) => it.description.length > 0);
+      if (items.length === 0) {
+        await client.query('ROLLBACK');
+        res.status(422).json({ error: 'At least one line item with a description is required.' });
+        return;
+      }
+
+      const taxPct = 'taxPct' in b ? num(b.taxPct) : num(current.tax_pct);
+      const discountPct = 'discountPct' in b ? num(b.discountPct) : num(current.discount_pct);
+      const totals = computeTotals(items, discountPct, taxPct);
+      itemTaxAmount = totals.taxAmount;
+      editedItems = items.length;
+
+      // If this document already moved stock, reverse the old quantities and
+      // apply the edited quantities in the same transaction.
+      if (current.stock_applied === true) {
+        const oldItems = await client.query(
+          `SELECT product_id, qty FROM pos_document_items
+            WHERE document_id = $1 AND product_id IS NOT NULL`,
+          [current.id]
+        );
+        for (const old of oldItems.rows) {
+          await client.query(
+            `UPDATE pos_products
+                SET stock_qty = stock_qty + $1, updated_at = NOW()
+              WHERE id = $2 AND track_stock = TRUE`,
+            [num(old.qty), old.product_id]
+          );
+        }
+        for (const item of items) {
+          if (!item.productId) continue;
+          const product = await client.query(
+            `SELECT name, track_stock, stock_qty FROM pos_products WHERE id = $1 FOR UPDATE`,
+            [item.productId]
+          );
+          if (product.rows.length === 0) {
+            await client.query('ROLLBACK');
+            res.status(422).json({ error: 'One of the selected stock items no longer exists.' });
+            return;
+          }
+          if (product.rows[0].track_stock && Number(product.rows[0].stock_qty) < item.qty) {
+            await client.query('ROLLBACK');
+            res.status(409).json({
+              error: `Insufficient stock for ${product.rows[0].name}: have ${Number(product.rows[0].stock_qty)}, need ${item.qty}.`,
+              code: 'INSUFFICIENT_STOCK',
+            });
+            return;
+          }
+          await client.query(
+            `UPDATE pos_products
+                SET stock_qty = stock_qty - $1, updated_at = NOW()
+              WHERE id = $2 AND track_stock = TRUE`,
+            [item.qty, item.productId]
+          );
+        }
+      }
+
+      const nextStatus =
+        current.status === 'draft'
+          ? 'draft'
+          : current.status === 'sent'
+            ? 'sent'
+            : statusForPaid(current.doc_type, totals.total, 0);
+
+      set('subtotal', totals.subtotal, 'items');
+      set('discount_pct', round2(discountPct), 'items');
+      set('tax_pct', round2(taxPct), 'items');
+      set('total', totals.total, 'items');
+      set('amount_paid', 0, 'items');
+      set('status', nextStatus, 'items');
+      if (current.stock_applied === true) {
+        set('stock_applied', items.some((item) => !!item.productId), 'stock');
+      }
+
+      await client.query('DELETE FROM pos_document_items WHERE document_id = $1', [current.id]);
+      for (let index = 0; index < totals.lines.length; index += 1) {
+        const line = totals.lines[index] as any;
+        await client.query(
+          `INSERT INTO pos_document_items
+             (document_id, product_id, description, details, price, qty, line_total, position)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+          [
+            current.id,
+            line.productId ?? null,
+            line.description,
+            line.details ?? [],
+            line.price,
+            line.qty,
+            line.lineTotal,
+            index,
+          ]
+        );
+      }
     }
 
     const metaPatch: Record<string, unknown> = {};
     for (const key of ['poNumber', 'reference', 'netDays'] as const) {
       if (key in b) metaPatch[key] = key === 'netDays' ? num(b[key]) : str(b[key]) || null;
+    }
+    if (editsItems) {
+      metaPatch.taxAmount = itemTaxAmount;
+      metaPatch.lastEditedAt = new Date().toISOString();
+      metaPatch.lastEditedBy = req.adminUser!.fullName ?? req.adminUser!.email ?? null;
     }
     if (Object.keys(metaPatch).length > 0) {
       values.push(JSON.stringify(metaPatch));
@@ -820,6 +961,8 @@ router.put('/documents/:id', requireRole(...MANAGER_ROLES), async (req, res) => 
           fields: changed,
           from: current.doc_number,
           to: updated.rows[0].doc_number,
+          items: editedItems || undefined,
+          total: editedItems ? num(updated.rows[0].total) : undefined,
         }),
         req.adminUser!.id,
       ]
