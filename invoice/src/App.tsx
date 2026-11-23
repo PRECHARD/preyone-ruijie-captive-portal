@@ -32,6 +32,7 @@ import { ConfirmDialog, type ConfirmOptions } from './ConfirmDialog';
 import Sidebar, { type View } from './components/Sidebar';
 import SettingsPage from './pages/Settings';
 import AccountingPage from './pages/Accounting';
+import DashboardPage, { type DocumentAction } from './pages/Dashboard';
 import UpgradeModal from './components/UpgradeModal';
 import './document.css';
 
@@ -596,15 +597,21 @@ function Composer({
   onClose,
   onCreated,
   onOpenSettings,
+  initialType,
 }: {
   catalog: Catalog;
   onClose: () => void;
   onCreated: (id: string) => void;
   onOpenSettings: () => void;
+  initialType?: string;
 }) {
   const types = catalog.documentTypes.length ? catalog.documentTypes : FALLBACK_TYPES;
   const templates = catalog.templates;
-  const [docType, setDocType] = useState(types[0]?.type ?? 'invoice');
+  const [docType, setDocType] = useState(
+    initialType && types.some((type) => type.type === initialType)
+      ? initialType
+      : types[0]?.type ?? 'invoice'
+  );
   const [docNumber, setDocNumber] = useState('');
   const [customerName, setCustomerName] = useState('');
   const [customerEmail, setCustomerEmail] = useState('');
@@ -1546,6 +1553,8 @@ function DocumentDrawer({
   company,
   onClose,
   onChanged,
+  action,
+  onActionDone,
 }: {
   id: string;
   templates: InvoiceTemplate[];
@@ -1553,6 +1562,8 @@ function DocumentDrawer({
   company: Company;
   onClose: () => void;
   onChanged: () => void | Promise<void>;
+  action?: DocumentAction | null;
+  onActionDone?: () => void;
 }) {
   const [doc, setDoc] = useState<DocumentDetail | null>(null);
   const [events, setEvents] = useState<DocumentEvent[]>([]);
@@ -1864,6 +1875,21 @@ function DocumentDrawer({
       setPdfBusy(false);
     }
   };
+
+  // Quick actions from the dashboard open the drawer with an intent. Wait for
+  // the document and its print host to render, then run the action once.
+  const autoActionRef = useRef<string | null>(null);
+  useEffect(() => {
+    autoActionRef.current = null;
+  }, [id, action]);
+  useEffect(() => {
+    if (!action || !doc || !drawerSheet) return;
+    if (autoActionRef.current === action) return;
+    autoActionRef.current = action;
+    if (action === 'pdf') void savePdf();
+    else setSendChannel(action);
+    onActionDone?.();
+  }, [action, doc, drawerSheet, onActionDone, savePdf]);
 
   const recordPayment = () =>
     act(async () => {
@@ -3167,6 +3193,7 @@ const AR_BUCKETS: Array<{ key: keyof ArAging['buckets']; label: string; tone?: s
 /** The invoice SPA is served by the Express fallback, so `/settings` is a real URL. */
 function viewFromPath(pathname: string): View {
   const clean = pathname.replace(/\/+$/, '').toLowerCase();
+  if (clean.endsWith('/dashboard')) return 'dashboard';
   if (clean.endsWith('/settings')) return 'settings';
   if (clean.endsWith('/aging')) return 'aging';
   if (clean.endsWith('/accounting') || clean.endsWith('/financing')) return 'accounting';
@@ -3175,6 +3202,7 @@ function viewFromPath(pathname: string): View {
 }
 
 function pathForView(view: View): string {
+  if (view === 'dashboard') return '/dashboard';
   if (view === 'settings') return '/settings';
   if (view === 'aging') return '/aging';
   if (view === 'accounting') return '/accounting';
@@ -3198,7 +3226,19 @@ export default function App() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [query, setQuery] = useState('');
   const [composerOpen, setComposerOpen] = useState(false);
+  const [composerType, setComposerType] = useState<string | undefined>(undefined);
   const [openDocId, setOpenDocId] = useState<string | null>(null);
+  const [openDocAction, setOpenDocAction] = useState<DocumentAction | null>(null);
+
+  const openComposer = useCallback((type?: string) => {
+    setComposerType(type);
+    setComposerOpen(true);
+  }, []);
+
+  const openDocument = useCallback((id: string, action?: DocumentAction) => {
+    setOpenDocId(id);
+    setOpenDocAction(action ?? null);
+  }, []);
 
   const navigate = useCallback((next: View) => {
     setView(next);
@@ -3444,11 +3484,11 @@ export default function App() {
           navigate('documents');
           setStatusFilter((prev) => (prev === status ? 'all' : status));
         }}
-        onNewDocument={() => setComposerOpen(true)}
+        onNewDocument={() => openComposer()}
       />
 
       <main className="main">
-        {view !== 'settings' && view !== 'accounting' && view !== 'zar' && (
+        {view !== 'settings' && view !== 'accounting' && view !== 'zar' && view !== 'dashboard' && (
         <div className="topbar">
           <div>
             <h1 className="page-title">
@@ -3469,7 +3509,7 @@ export default function App() {
               {docsLoading ? <span className="spinner" aria-hidden /> : <span className="btn-glyph" aria-hidden>↻</span>}
               {docsLoading ? 'Syncing…' : 'Refresh'}
             </button>
-            <button className="btn primary" type="button" onClick={() => setComposerOpen(true)}>
+            <button className="btn primary" type="button" onClick={() => openComposer()}>
               <span className="btn-plus" aria-hidden>+</span>
               New document
             </button>
@@ -3477,9 +3517,11 @@ export default function App() {
         </div>
         )}
 
-        {error && view !== 'accounting' && view !== 'zar' && <div className="banner error">{error}</div>}
+        {error && view !== 'accounting' && view !== 'zar' && view !== 'dashboard' && (
+          <div className="banner error">{error}</div>
+        )}
 
-        {view !== 'settings' && view !== 'accounting' && view !== 'zar' && (
+        {view !== 'settings' && view !== 'accounting' && view !== 'zar' && view !== 'dashboard' && (
           <div className="stats">
             <div className="stat">
               <div className="stat-label">Documents</div>
@@ -3511,6 +3553,14 @@ export default function App() {
           </div>
         )}
 
+        {view === 'dashboard' && (
+          <DashboardPage
+            company={catalog.company}
+            onNewDocument={openComposer}
+            onOpenDocument={openDocument}
+            onView={navigate}
+          />
+        )}
         {view === 'accounting' && <AccountingPage />}
         {view === 'zar' && <ZarLedgerPage />}
 
@@ -3549,7 +3599,7 @@ export default function App() {
               <div className="empty">Loading documents…</div>
             ) : docs.length === 0 ? (
               <div className="empty">
-                No documents yet. <button className="btn" type="button" onClick={() => setComposerOpen(true)}>Create the first one</button>
+                No documents yet. <button className="btn" type="button" onClick={() => openComposer()}>Create the first one</button>
               </div>
             ) : (
               <div className="table-wrap">
@@ -3573,11 +3623,11 @@ export default function App() {
                         tabIndex={0}
                         role="button"
                         aria-label={`Open ${d.doc_number}`}
-                        onClick={() => setOpenDocId(d.id)}
+                        onClick={() => openDocument(d.id)}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter' || e.key === ' ') {
                             e.preventDefault();
-                            setOpenDocId(d.id);
+                            openDocument(d.id);
                           }
                         }}
                       >
@@ -3638,11 +3688,11 @@ export default function App() {
                           tabIndex={0}
                           role="button"
                           aria-label={`Open ${d.doc_number}`}
-                          onClick={() => setOpenDocId(d.id)}
+                          onClick={() => openDocument(d.id)}
                           onKeyDown={(e) => {
                             if (e.key === 'Enter' || e.key === ' ') {
                               e.preventDefault();
-                              setOpenDocId(d.id);
+                              openDocument(d.id);
                             }
                           }}
                         >
@@ -3674,20 +3724,26 @@ export default function App() {
       {composerOpen && catalog && (
         <Composer
           catalog={catalog}
-          onClose={() => setComposerOpen(false)}
+          initialType={composerType}
+          onClose={() => {
+            setComposerOpen(false);
+            setComposerType(undefined);
+          }}
           onOpenSettings={() => {
             setComposerOpen(false);
+            setComposerType(undefined);
             navigate('settings');
           }}
           onCreated={(id) => {
             setComposerOpen(false);
+            setComposerType(undefined);
             // A newly issued document must be visible when the drawer closes,
             // even if the list was filtering to a different type or status.
             setTypeFilter('all');
             setStatusFilter('all');
             setQuery('');
             refreshAll();
-            setOpenDocId(id);
+            openDocument(id);
           }}
         />
       )}
@@ -3698,7 +3754,12 @@ export default function App() {
           templates={templates}
           types={types}
           company={catalog.company}
-          onClose={() => setOpenDocId(null)}
+          action={openDocAction}
+          onActionDone={() => setOpenDocAction(null)}
+          onClose={() => {
+            setOpenDocId(null);
+            setOpenDocAction(null);
+          }}
           onChanged={refreshAll}
         />
       )}

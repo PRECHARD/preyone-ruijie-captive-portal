@@ -265,13 +265,18 @@ function dateBounds(from?: string, to?: string): { fromSql: string; toSql: strin
   const params: string[] = [];
   let fromSql = `-infinity`;
   let toSql = `infinity`;
+  // All callers prepend `company_id = $1`, so the date placeholders start at
+  // $2. Previously they started at $1, which made PostgreSQL try to cast the
+  // company UUID to a date whenever a from/to range was supplied.
+  let index = 2;
   if (from) {
     params.push(from);
-    fromSql = `$${params.length}::date`;
+    fromSql = `$${index}::date`;
+    index += 1;
   }
   if (to) {
     params.push(to);
-    toSql = `($${params.length}::date + INTERVAL '1 day')`;
+    toSql = `($${index}::date + INTERVAL '1 day')`;
   }
   return { fromSql, toSql, params };
 }

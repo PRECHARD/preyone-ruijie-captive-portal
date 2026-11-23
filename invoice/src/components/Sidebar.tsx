@@ -11,9 +11,10 @@ import { getToken, type Company, type DocType } from '../api';
  * without pushing the ledger or app switcher off-screen.
  */
 
-export type View = 'documents' | 'aging' | 'accounting' | 'zar' | 'settings';
+export type View = 'dashboard' | 'documents' | 'aging' | 'accounting' | 'zar' | 'settings';
 
 type IconName =
+  | 'dashboard'
   | 'docs'
   | 'plus'
   | 'aging'
@@ -28,6 +29,14 @@ type IconName =
   | 'external';
 
 const ICONS: Record<IconName, ReactNode> = {
+  dashboard: (
+    <>
+      <rect x="3.5" y="3.5" width="7" height="7" rx="1.6" />
+      <rect x="13.5" y="3.5" width="7" height="4.2" rx="1.4" />
+      <rect x="13.5" y="10.7" width="7" height="9.8" rx="1.6" />
+      <rect x="3.5" y="13.5" width="7" height="7" rx="1.6" />
+    </>
+  ),
   docs: (
     <>
       <path d="M7.5 3.75h6.25L18 8v11.25a1.5 1.5 0 0 1-1.5 1.5h-9a1.5 1.5 0 0 1-1.5-1.5v-14a1.5 1.5 0 0 1 1.5-1.5Z" />
@@ -337,6 +346,7 @@ export default function Sidebar({
     }
   };
 
+  const dashboardActive = view === 'dashboard';
   const onDocuments = view === 'documents';
   const allDocumentsActive = onDocuments && typeFilter === 'all' && statusFilter === 'all';
   const outstandingActive = onDocuments && statusFilter === 'unpaid';
@@ -355,6 +365,16 @@ export default function Sidebar({
           <div className="side-group-head">
             <span>Workspace</span>
           </div>
+          <button
+            type="button"
+            className={`nav-item nav-item--dashboard${dashboardActive ? ' active' : ''}`}
+            aria-current={dashboardActive ? 'page' : undefined}
+            onClick={() => onView('dashboard')}
+          >
+            <span className="nav-icon"><Icon name="dashboard" /></span>
+            <span className="nav-text">Dashboard</span>
+            <span className="nav-live-dot" aria-hidden />
+          </button>
           <button
             type="button"
             className={`nav-item${allDocumentsActive ? ' active' : ''}`}
