@@ -206,11 +206,25 @@ export async function buildInvoicePdf({ doc, company, template, title }: Invoice
   const balance = Math.max(round2(total - amountPaid), 0);
   const paid = doc.status === 'paid' || (total > 0 && amountPaid >= total - 0.005);
 
-  const companyName = plain(company.name || 'Preyone');
+  const companyName = plain(company.name || 'Company');
   const addressLines = plain(company.address || '')
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean);
+  const inlineBranding =
+    company.invoice_settings && typeof company.invoice_settings === 'object'
+      ? (company.invoice_settings.branding as Record<string, unknown> | undefined)
+      : undefined;
+  const taxId = String(inlineBranding?.taxId || company.branding?.taxId || '').trim();
+  const registrationNumber = String(
+    inlineBranding?.registrationNumber || company.branding?.registrationNumber || ''
+  ).trim();
+  const bandTaxText = [
+    taxId ? `VAT: ${plain(taxId)}` : '',
+    registrationNumber ? `Reg: ${plain(registrationNumber)}` : '',
+  ]
+    .filter(Boolean)
+    .join('  |  ');
   const titleText = plain(title || (isQuoteType(doc.docType) ? 'Quotation' : 'Invoice')).toUpperCase();
 
   let page = 1;
@@ -538,9 +552,13 @@ export async function buildInvoicePdf({ doc, company, template, title }: Invoice
     pdf.setTextColor(255, 255, 255);
     font('bold', 6.4);
     pdf.text(companyName, M, 283.2);
-    if (addressLines.length) {
+    if (addressLines.length || bandTaxText) {
       font('normal', 5.9);
-      pdf.text(addressLines.slice(0, 2).join('  |  '), M, 286.4);
+      pdf.text(
+        [addressLines.slice(0, 2).join('  |  '), bandTaxText].filter(Boolean).join('  |  '),
+        M,
+        286.4
+      );
     }
     font('normal', 6);
     const bandContact = [company.support_phone, company.email, company.website].map(plain).filter(Boolean).join('  |  ');
@@ -669,37 +687,40 @@ export async function sheetToPdf(
         'PDF capture timed out. Try again or use Print / PDF.'
       );
 
-      const pageHeightMm = 297;
       const mmPerPx = PAGE_W / canvas.width;
-      const pageHeightPx = Math.max(1, Math.ceil(pageHeightMm / mmPerPx));
-      let pages = Math.max(1, Math.ceil(canvas.height / pageHeightPx));
-      // A perfect A4 sheet lands one or two pixels over the computed page
-      // height; don't let rounding emit a blank trailing page.
-      if (pages > 1 && canvas.height - (pages - 1) * pageHeightPx <= 2) pages -= 1;
+      const naturalHeightMm = canvas.height * mmPerPx;
 
-      for (let page = 0; page < pages; page += 1) {
-        if (outputPages > 0) pdf.addPage();
-        const slice = document.createElement('canvas');
-        slice.width = canvas.width;
-        slice.height = Math.min(pageHeightPx, canvas.height - page * pageHeightPx);
-        const ctx = slice.getContext('2d');
-        if (!ctx) throw new Error('Canvas 2D context unavailable');
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, slice.width, slice.height);
-        ctx.drawImage(canvas, 0, -page * pageHeightPx);
-        // Lossless PNG: JPEG artefacts make small invoice type look distorted.
+      // One rendered `.a4-sheet` is exactly one PDF page. If a sheet is a few
+      // pixels taller than A4 (browser rounding or a dense spec block), scale
+      // the whole sheet down instead of slicing it. That guarantees the footer
+      // and totals can never be split onto a phantom second page.
+      if (outputPages > 0) pdf.addPage();
+      if (naturalHeightMm <= 297.5) {
         pdf.addImage(
-          slice.toDataURL('image/png'),
+          canvas.toDataURL('image/png'),
           'PNG',
           0,
           0,
           PAGE_W,
-          slice.height * mmPerPx,
+          naturalHeightMm,
           undefined,
           'FAST'
         );
-        outputPages += 1;
+      } else {
+        const scale = 297 / naturalHeightMm;
+        const widthMm = PAGE_W * scale;
+        pdf.addImage(
+          canvas.toDataURL('image/png'),
+          'PNG',
+          (PAGE_W - widthMm) / 2,
+          0,
+          widthMm,
+          297,
+          undefined,
+          'FAST'
+        );
       }
+      outputPages += 1;
     }
 
     return pdf;

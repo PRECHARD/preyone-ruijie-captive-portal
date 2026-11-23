@@ -15,6 +15,7 @@ import { POS_THEMES, CURRENCIES, type PosTheme } from '../catalog/ecosystem';
 import { themeCssVariables, themeCssBlock } from '../utils/themeVars';
 import { sendTransactionalEmail } from '../services/notificationService';
 import { generateDocumentVerifyCode } from '../utils/documentVerifyCode';
+import { withCompanyBranding } from '../utils/companyBranding';
 
 /**
  * Preyone POS module — additive only.
@@ -245,7 +246,11 @@ const PAYMENT_METHODS = [
 // Single source of truth for receipts / invoices / support phone.
 router.get('/company', async (_req, res) => {
   const { rows } = await pool.query('SELECT * FROM companies ORDER BY created_at LIMIT 1');
-  res.json(rows[0] || { name: 'Preyone', currency: 'USD', tax_pct: 0, support_phone: '' });
+  res.json(
+    withCompanyBranding(
+      rows[0] || { name: 'Preyone', currency: 'USD', tax_pct: 0, support_phone: '' }
+    )
+  );
 });
 
 // ── Company subscriptions (tenancy) — which modules this company owns ─
@@ -419,7 +424,7 @@ router.get('/catalog', async (req, res) => {
       `SELECT ${THEME_COLUMNS} FROM pos_themes WHERE is_active ORDER BY id`
     ).catch(() => ({ rows: [] as any[] })),
   ]);
-  const company = companyRes.rows[0] ?? {};
+  const company = withCompanyBranding(companyRes.rows[0] ?? {});
   const templates = templatesRes.rows.length
     ? templatesRes.rows.map((t: any) => ({
         id: t.id,
@@ -512,8 +517,7 @@ router.patch('/invoice-settings', requireRole(...MANAGER_ROLES), async (req, res
             tagline             = COALESCE($7, tagline),
             updated_at          = NOW()
       WHERE id = $8
-      RETURNING id, name, tagline, logo_url, logo_path, currency, tax_pct, invoice_template_id,
-                terms_text, receipt_footer, invoice_settings`,
+      RETURNING *`,
     [
       templateId,
       currency,
@@ -526,7 +530,7 @@ router.patch('/invoice-settings', requireRole(...MANAGER_ROLES), async (req, res
       receiptSettings === null ? null : JSON.stringify(receiptSettings),
     ]
   );
-  res.json(rows[0] ?? {});
+  res.json(withCompanyBranding(rows[0] ?? {}));
 });
 
 // ── Office-created documents (invoicing workspace) ───────────────────

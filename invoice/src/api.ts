@@ -175,6 +175,22 @@ export async function download(path: string, filename: string): Promise<void> {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+export interface CompanyBranding {
+  name?: string;
+  tagline?: string;
+  address?: string;
+  phone?: string;
+  email?: string;
+  website?: string;
+  logoUrl?: string | null;
+  logoPath?: string | null;
+  taxId?: string;
+  registrationNumber?: string;
+  termsText?: string;
+  footerText?: string;
+  receipt?: ReceiptSettings;
+}
+
 export interface Company {
   id: string;
   name: string;
@@ -197,6 +213,9 @@ export interface Company {
   invoice_prefix?: string | null;
   quote_prefix?: string | null;
   invoice_settings?: Record<string, unknown> | null;
+  /** Server-resolved branding shared by every document/receipt surface. */
+  branding?: CompanyBranding | null;
+  receipt_settings?: ReceiptSettings | null;
 }
 
 /**
@@ -220,10 +239,18 @@ export interface ReceiptSettings {
 }
 
 export function receiptSettingsOf(company?: Company | null): ReceiptSettings {
+  const direct = company?.receipt_settings;
+  if (direct && typeof direct === 'object') return direct;
+  // Prefer the live JSONB object over the server-resolved snapshot: the
+  // Settings panel updates invoice_settings immediately after Save.
   const raw = company?.invoice_settings;
-  if (!raw || typeof raw !== 'object') return {};
-  const receipt = (raw as Record<string, unknown>).receipt;
-  return receipt && typeof receipt === 'object' ? (receipt as ReceiptSettings) : {};
+  if (raw && typeof raw === 'object') {
+    const receipt = (raw as Record<string, unknown>).receipt;
+    if (receipt && typeof receipt === 'object') return receipt as ReceiptSettings;
+  }
+  const branded = company?.branding?.receipt;
+  if (branded && typeof branded === 'object') return branded;
+  return {};
 }
 
 export interface InvoiceTemplate {

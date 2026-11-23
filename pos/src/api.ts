@@ -274,6 +274,22 @@ export interface ShiftHistoryRow {
   cashier_name: string | null;
 }
 
+export interface CompanyBranding {
+  name: string;
+  tagline: string;
+  address: string;
+  phone: string;
+  email: string;
+  website: string;
+  logoUrl: string | null;
+  logoPath: string | null;
+  taxId: string;
+  registrationNumber: string;
+  termsText: string;
+  footerText: string;
+  receipt: Record<string, unknown>;
+}
+
 export interface CompanyProfile {
   name: string;
   tagline: string | null;
@@ -287,6 +303,9 @@ export interface CompanyProfile {
   quote_prefix: string | null;
   receipt_footer: string | null;
   terms_text: string | null;
+  logo_url?: string | null;
+  logo_path?: string | null;
+  branding?: CompanyBranding | null;
 }
 
 export const api = {

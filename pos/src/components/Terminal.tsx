@@ -311,12 +311,7 @@ export default function Terminal({ user, notify, onApiError, onShiftChanged, shi
         <ReceiptModal
           result={receipt}
           cashierName={user.fullName}
-          company={{
-            name: company?.name || 'Preyone enterprise',
-            phone: company?.support_phone || '+263 77 132 7202',
-            website: company?.website || 'www.preyone.com',
-            email: company?.email || 'info@preyone.com',
-          }}
+          company={company}
           onDone={() => setReceipt(null)}
         />
       )}

@@ -5,6 +5,7 @@ import { pool } from '../db/pool';
 import { requireAdminAuth, requireRole } from '../middleware/adminAuth';
 import { PERMISSIONS, requirePermission, scopeUserVoucherCodeCondition, scopeVoucherCondition } from '../middleware/rbac';
 import { recordAuditLog } from './adminAuth';
+import { withCompanyBranding } from '../utils/companyBranding';
 import {
   sendAdminApprovedNotification,
   sendAdminRejectedNotification,
@@ -3427,7 +3428,9 @@ adminRouter.post('/company/logo', requireRole('CEO', 'Manager'), async (req: Req
 
 adminRouter.get('/company', requireRole('CEO'), async (_req: Request, res: Response) => {
   const { rows } = await pool.query('SELECT * FROM companies ORDER BY created_at LIMIT 1');
-  res.json(rows[0] || { name: 'Preyone', currency: 'USD', tax_pct: 0 });
+  res.json(
+    withCompanyBranding(rows[0] || { name: 'Preyone', currency: 'USD', tax_pct: 0 })
+  );
 });
 
 adminRouter.put('/company', requireRole('CEO'), async (req: Request, res: Response) => {
@@ -3468,7 +3471,7 @@ adminRouter.put('/company', requireRole('CEO'), async (req: Request, res: Respon
      req.adminUser!.id]
   );
   await recordAuditLog(req.adminUser!.id, req.adminUser!.fullName, 'company_update', 'companies', rows[0]?.id, `Company profile updated`);
-  res.json(rows[0]);
+  res.json(withCompanyBranding(rows[0]));
 });
 
 // ═══════════════════════════════════════════════════════

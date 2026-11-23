@@ -436,7 +436,11 @@ export default function SettingsPage({
   }, [team]);
 
   const readSettings = useCallback((): InvoiceConfig => {
+    // Preserve every key the invoice/receipt designers have stored (notably
+    // invoice_settings.receipt) while updating the company/tax fields below.
+    const base = (company.invoice_settings ?? {}) as Record<string, unknown>;
     return {
+      ...base,
       branding: { taxId: taxId.trim(), registrationNumber: registrationNumber.trim() },
       taxLabel: taxLabel.trim() || 'VAT',
       taxPct: taxValue,
@@ -446,7 +450,7 @@ export default function SettingsPage({
       payments,
       roles,
     };
-  }, [taxId, registrationNumber, taxLabel, taxValue, taxInclusive, roundTotals, numbering, payments, roles]);
+  }, [company, taxId, registrationNumber, taxLabel, taxValue, taxInclusive, roundTotals, numbering, payments, roles]);
 
   const save = async () => {
     setBusy(true);
@@ -467,7 +471,14 @@ export default function SettingsPage({
           quotePrefix: (numbering.quote?.prefix ?? 'QUO-').replace(/-+$/, '') || 'QUO',
           invoiceSettings: settings,
         });
-        onCatalog({ ...catalog, company: { ...company, ...saved, invoice_settings: settings } });
+        onCatalog({
+          ...catalog,
+          company: {
+            ...company,
+            ...saved,
+            invoice_settings: { ...(company.invoice_settings ?? {}), ...settings },
+          },
+        });
         setNotice({ kind: 'ok', text: 'Company profile, tax and payment configuration saved.' });
       } else {
         const saved = await api.patch<Company>('/api/pos/invoice-settings', {
@@ -476,7 +487,14 @@ export default function SettingsPage({
           tagline: tagline.trim(),
           settings,
         });
-        onCatalog({ ...catalog, company: { ...company, ...saved, invoice_settings: settings } });
+        onCatalog({
+          ...catalog,
+          company: {
+            ...company,
+            ...saved,
+            invoice_settings: { ...(company.invoice_settings ?? {}), ...settings },
+          },
+        });
         setNotice({ kind: 'ok', text: 'Workspace settings saved. Legal company details are CEO-only.' });
       }
     } catch (err) {

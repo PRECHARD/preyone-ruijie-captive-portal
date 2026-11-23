@@ -32,6 +32,11 @@ export interface SheetCompany {
   terms_text?: string | null;
   receipt_footer?: string | null;
   currency?: string | null;
+  branding?: {
+    taxId?: string | null;
+    registrationNumber?: string | null;
+  } | null;
+  invoice_settings?: Record<string, unknown> | null;
 }
 
 export interface SheetItem {
@@ -273,7 +278,20 @@ export function DocumentSheet({
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean);
-  const bandAddress = [company.name, ...addressLines].filter(Boolean) as string[];
+  const inlineBranding =
+    company.invoice_settings && typeof company.invoice_settings === 'object'
+      ? (company.invoice_settings.branding as Record<string, unknown> | undefined)
+      : undefined;
+  const taxId = String(inlineBranding?.taxId || company.branding?.taxId || '').trim();
+  const registrationNumber = String(
+    inlineBranding?.registrationNumber || company.branding?.registrationNumber || ''
+  ).trim();
+  const bandAddress = [
+    company.name,
+    ...addressLines,
+    taxId ? `VAT: ${taxId}` : '',
+    registrationNumber ? `Reg: ${registrationNumber}` : '',
+  ].filter(Boolean) as string[];
   const hasContact = Boolean(company.support_phone || company.email || company.website);
   const contactLine = [company.support_phone].filter(Boolean).join('  |  ');
 
@@ -658,9 +676,15 @@ export function DocumentSheet({
             {renderHeader()}
             {first && renderMeta()}
             {renderItems(chunk)}
-            {last && renderTotals()}
-            {last && renderNotes()}
-            {renderFooter(index + 1, totalPages)}
+            {last ? (
+              <div className="a4-close-block">
+                {renderTotals()}
+                {renderNotes()}
+                {renderFooter(index + 1, totalPages)}
+              </div>
+            ) : (
+              renderFooter(index + 1, totalPages)
+            )}
           </div>
         );
       })}

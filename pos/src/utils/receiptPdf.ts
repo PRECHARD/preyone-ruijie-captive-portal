@@ -17,7 +17,17 @@ export function generateReceiptPdf(opts: {
   balanceDue: number;
   amountPaid: number;
   payments: Array<{ amount: number; method: string }>;
-  company: { name: string; phone: string; website: string; email: string };
+  company: {
+    name: string;
+    phone: string;
+    website: string;
+    email: string;
+    address?: string;
+    taxId?: string;
+    registrationNumber?: string;
+    tagline?: string;
+    footerText?: string;
+  };
   logoDataUri?: string;
   logoNatural?: { w: number; h: number };
 }): jsPDF {
@@ -69,8 +79,26 @@ export function generateReceiptPdf(opts: {
   y += 3;
 
   // Phone · Website
-  doc.text(opts.company.phone + ' · ' + opts.company.website, pw / 2, y + 2, { align: 'center' });
-  y += 4;
+  doc.text([opts.company.phone, opts.company.website].filter(Boolean).join(' · '), pw / 2, y + 2, { align: 'center' });
+  y += 3;
+
+  // Address / tax registration, resolved from the company branding settings.
+  if (opts.company.address) {
+    var addressLines = doc.splitTextToSize(opts.company.address.replace(/\r?\n/g, ' · '), pw - m * 2);
+    for (var a = 0; a < addressLines.length && a < 2; a++) {
+      doc.text(String(addressLines[a]), pw / 2, y + 2, { align: 'center' });
+      y += 2.6;
+    }
+  }
+  var taxLine = [
+    opts.company.taxId ? 'VAT: ' + opts.company.taxId : '',
+    opts.company.registrationNumber ? 'Reg: ' + opts.company.registrationNumber : '',
+  ].filter(Boolean).join(' · ');
+  if (taxLine) {
+    doc.text(taxLine, pw / 2, y + 2, { align: 'center' });
+    y += 2.6;
+  }
+  y += 1;
 
   // Dashed rule
   doc.setDrawColor(153, 153, 153);
@@ -266,14 +294,14 @@ export function generateReceiptPdf(opts: {
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(7);
   doc.setTextColor(0, 0, 0);
-  doc.text('THANKS FOR YOUR PURCHASE', pw / 2, y + 2, { align: 'center' });
+  doc.text(opts.company.footerText || 'THANKS FOR YOUR PURCHASE', pw / 2, y + 2, { align: 'center' });
   y += 4;
 
-  // Terms
+  // Tagline / terms line
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(5.5);
   doc.setTextColor(68, 68, 68);
-  doc.text('Terms & Conditions Apply', pw / 2, y + 2, { align: 'center' });
+  doc.text(opts.company.tagline || 'Terms & Conditions Apply', pw / 2, y + 2, { align: 'center' });
   y += 4;
 
   // Company footer

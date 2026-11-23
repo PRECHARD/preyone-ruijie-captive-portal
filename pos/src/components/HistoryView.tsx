@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { api, type PosDocument } from '../api';
+import { api, type CompanyProfile, type PosDocument } from '../api';
 import ReceiptModal from './ReceiptModal';
 import PaymentModal from './PaymentModal';
 
@@ -35,13 +35,6 @@ export interface HistoryViewProps {
   onApiError: (e: unknown) => boolean;
 }
 
-const COMPANY = {
-  name: 'Preyone enterprise',
-  phone: '+263 77 132 7202',
-  website: 'www.preyone.com',
-  email: 'info@preyone.com',
-};
-
 const balanceOf = (d: PosDocument): number =>
   Math.max((Number(d.total) || 0) - (Number(d.amount_paid) || 0), 0);
 
@@ -53,6 +46,22 @@ export default function HistoryView({ notify, onApiError }: HistoryViewProps) {
   const [payFor, setPayFor] = useState<PosDocument | null>(null);
   const [convertingId, setConvertingId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [company, setCompany] = useState<CompanyProfile | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    api
+      .company()
+      .then((fresh) => {
+        if (alive) setCompany(fresh);
+      })
+      .catch(() => {
+        /* ReceiptModal retries the live company on open. */
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   const load = useCallback(
     async (f: Filter = filter) => {
@@ -248,7 +257,7 @@ export default function HistoryView({ notify, onApiError }: HistoryViewProps) {
             customer_name: open.customer_name || undefined,
           }}
           cashierName={open.cashier_name || '—'}
-          company={COMPANY}
+          company={company}
           date={open.created_at}
           onDone={() => setOpen(null)}
         />

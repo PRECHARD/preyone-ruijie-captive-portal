@@ -497,21 +497,43 @@ export function ReceiptSheet({
   id?: string;
 }) {
   const configured = { ...receiptSettingsOf(company), ...(settings || {}) };
+  const branded = company?.branding;
   const paid = Number(doc.amount_paid) || 0;
   const balance = Math.max(0, Number(doc.total) - paid);
   const currency = doc.currency || 'USD';
   const logo =
     configured.logoUrl ||
+    branded?.logoUrl ||
     company?.logo_url ||
     (company?.logo_path ? `/images/${company.logo_path}` : null);
-  const brandName = configured.brandName || company?.name || 'PREYONE';
-  const tagline = configured.tagline || company?.tagline || 'Connecting People. Powering Business.';
-  const address = configured.address || company?.address || '';
-  const phone = configured.phone || company?.support_phone || '';
-  const email = configured.email || company?.email || '';
-  const website = configured.website || company?.website || '';
-  const footerNote = configured.footerNote || company?.receipt_footer || '';
-  const thankYou = configured.thankYou || 'Thank you for your business — preyone.com';
+  const brandName = configured.brandName || branded?.name || company?.name || 'Receipt';
+  const tagline = configured.tagline || branded?.tagline || company?.tagline || '';
+  const address = configured.address || branded?.address || company?.address || '';
+  const phone = configured.phone || branded?.phone || company?.support_phone || '';
+  const email = configured.email || branded?.email || company?.email || '';
+  const website = configured.website || branded?.website || company?.website || '';
+  const footerNote =
+    configured.footerNote ||
+    branded?.footerText ||
+    company?.receipt_footer ||
+    '';
+  const thankYou =
+    configured.thankYou ||
+    (website ? `Thank you for your business — ${website}` : 'Thank you for your business.');
+  const inlineBranding =
+    company?.invoice_settings && typeof company.invoice_settings === 'object'
+      ? (company.invoice_settings.branding as Record<string, unknown> | undefined)
+      : undefined;
+  const taxId = String(inlineBranding?.taxId || branded?.taxId || '').trim();
+  const registrationNumber = String(
+    inlineBranding?.registrationNumber || branded?.registrationNumber || ''
+  ).trim();
+  const taxLine = [
+    taxId ? `VAT: ${taxId}` : '',
+    registrationNumber ? `Reg: ${registrationNumber}` : '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
   const showLogo = configured.showLogo !== false;
   const showAddress = configured.showAddress !== false && Boolean(address.trim());
   const showContact = configured.showContact !== false && Boolean(phone || email || website);
@@ -529,6 +551,7 @@ export function ReceiptSheet({
             {tagline && <div className="receipt-muted">{tagline}</div>}
             {showAddress && <div className="receipt-info">{address}</div>}
             {showContact && <div className="receipt-info">{contactLine}</div>}
+            {taxLine && <div className="receipt-info">{taxLine}</div>}
           </div>
         </div>
         <div className="receipt-stamp">{balance <= 0 ? 'PAID' : 'PART PAID'}</div>
