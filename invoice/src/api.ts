@@ -199,6 +199,33 @@ export interface Company {
   invoice_settings?: Record<string, unknown> | null;
 }
 
+/**
+ * Receipt-specific branding. Stored under `invoice_settings.receipt` so it
+ * travels with the company catalogue and does not need a second settings
+ * endpoint. Empty values fall back to the company invoice branding.
+ */
+export interface ReceiptSettings {
+  logoUrl?: string | null;
+  showLogo?: boolean;
+  brandName?: string | null;
+  tagline?: string | null;
+  address?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  website?: string | null;
+  footerNote?: string | null;
+  thankYou?: string | null;
+  showAddress?: boolean;
+  showContact?: boolean;
+}
+
+export function receiptSettingsOf(company?: Company | null): ReceiptSettings {
+  const raw = company?.invoice_settings;
+  if (!raw || typeof raw !== 'object') return {};
+  const receipt = (raw as Record<string, unknown>).receipt;
+  return receipt && typeof receipt === 'object' ? (receipt as ReceiptSettings) : {};
+}
+
 export interface InvoiceTemplate {
   id: number;
   name: string;

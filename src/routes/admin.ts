@@ -3389,13 +3389,26 @@ adminRouter.post('/company/logo', requireRole('CEO', 'Manager'), async (req: Req
 
   const publicUrl = `/images/${filename}`;
   const companyId = targetCompanyId(req);
+  const slot = req.body?.slot === 'receipt' ? 'receipt' : 'company';
   const { rows } = await pool.query(
-    `UPDATE companies
-        SET logo_url = $1, logo_path = $2, updated_at = NOW()
-      WHERE ($3::uuid IS NULL AND id = (SELECT id FROM companies ORDER BY created_at LIMIT 1))
-         OR id = $3::uuid
-      RETURNING id`,
-    [publicUrl, filename, companyId]
+    slot === 'receipt'
+      ? `UPDATE companies
+            SET invoice_settings = COALESCE(invoice_settings, '{}'::jsonb)
+                  || jsonb_build_object(
+                       'receipt',
+                       COALESCE(invoice_settings->'receipt', '{}'::jsonb)
+                         || jsonb_build_object('logoUrl', $1::text)
+                     ),
+                updated_at = NOW()
+          WHERE ($2::uuid IS NULL AND id = (SELECT id FROM companies ORDER BY created_at LIMIT 1))
+             OR id = $2::uuid
+          RETURNING id`
+      : `UPDATE companies
+            SET logo_url = $1, logo_path = $2, updated_at = NOW()
+          WHERE ($3::uuid IS NULL AND id = (SELECT id FROM companies ORDER BY created_at LIMIT 1))
+             OR id = $3::uuid
+          RETURNING id`,
+    slot === 'receipt' ? [publicUrl, companyId] : [publicUrl, filename, companyId]
   );
   if (rows.length === 0) {
     res.status(404).json({ error: 'Company not found' });
@@ -3404,12 +3417,12 @@ adminRouter.post('/company/logo', requireRole('CEO', 'Manager'), async (req: Req
   await recordAuditLog(
     req.adminUser!.id,
     req.adminUser!.fullName,
-    'company_logo_update',
+    slot === 'receipt' ? 'company_receipt_logo_update' : 'company_logo_update',
     'companies',
     rows[0].id,
-    `Company logo updated (${filename})`
+    `${slot === 'receipt' ? 'Receipt' : 'Company'} logo updated (${filename})`
   );
-  res.json({ logoUrl: publicUrl, filename, bytes: bytes.length });
+  res.json({ logoUrl: publicUrl, filename, bytes: bytes.length, slot });
 });
 
 adminRouter.get('/company', requireRole('CEO'), async (_req: Request, res: Response) => {

@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ApiError, api, type Company, type DocumentDetail } from './api';
+import {
+  ApiError,
+  api,
+  receiptSettingsOf,
+  type Company,
+  type DocumentDetail,
+  type ReceiptSettings,
+} from './api';
 
 /**
  * Customer-facing payment surfaces for the invoicing workspace.
@@ -478,6 +485,125 @@ export function OnlinePaymentModal({
 
 /* ─────────────────────────────── receipt ────────────────────────────── */
 
+export function ReceiptSheet({
+  doc,
+  company,
+  settings,
+  id,
+}: {
+  doc: DocumentDetail;
+  company?: Company | null;
+  settings?: ReceiptSettings | null;
+  id?: string;
+}) {
+  const configured = { ...receiptSettingsOf(company), ...(settings || {}) };
+  const paid = Number(doc.amount_paid) || 0;
+  const balance = Math.max(0, Number(doc.total) - paid);
+  const currency = doc.currency || 'USD';
+  const logo =
+    configured.logoUrl ||
+    company?.logo_url ||
+    (company?.logo_path ? `/images/${company.logo_path}` : null);
+  const brandName = configured.brandName || company?.name || 'PREYONE';
+  const tagline = configured.tagline || company?.tagline || 'Connecting People. Powering Business.';
+  const address = configured.address || company?.address || '';
+  const phone = configured.phone || company?.support_phone || '';
+  const email = configured.email || company?.email || '';
+  const website = configured.website || company?.website || '';
+  const footerNote = configured.footerNote || company?.receipt_footer || '';
+  const thankYou = configured.thankYou || 'Thank you for your business — preyone.com';
+  const showLogo = configured.showLogo !== false;
+  const showAddress = configured.showAddress !== false && Boolean(address.trim());
+  const showContact = configured.showContact !== false && Boolean(phone || email || website);
+  const contactLine = [phone, email, website].filter(Boolean).join(' · ');
+
+  return (
+    <div className="receipt-paper" id={id}>
+      <div className="receipt-head">
+        <div className="receipt-identity">
+          {showLogo && logo && (
+            <img className="receipt-logo" src={logo} alt={`${brandName} logo`} />
+          )}
+          <div className="receipt-org">
+            <div className="receipt-brand">{brandName}</div>
+            {tagline && <div className="receipt-muted">{tagline}</div>}
+            {showAddress && <div className="receipt-info">{address}</div>}
+            {showContact && <div className="receipt-info">{contactLine}</div>}
+          </div>
+        </div>
+        <div className="receipt-stamp">{balance <= 0 ? 'PAID' : 'PART PAID'}</div>
+      </div>
+
+      <div className="receipt-meta">
+        <div>
+          <span>Receipt</span>
+          <strong className="mono">{doc.doc_number}</strong>
+        </div>
+        <div>
+          <span>Issued</span>
+          <strong>{dateLabel(doc.issue_date)}</strong>
+        </div>
+        <div>
+          <span>Customer</span>
+          <strong>{doc.customer?.name || doc.customer_name || 'Walk-in customer'}</strong>
+        </div>
+      </div>
+
+      <table className="receipt-table">
+        <thead>
+          <tr>
+            <th>Description</th>
+            <th className="num">Qty</th>
+            <th className="num">Amount</th>
+          </tr>
+        </thead>
+        <tbody>
+          {doc.items.map((item, i) => (
+            <tr key={item.id ?? i}>
+              <td>{item.description}</td>
+              <td className="num">{Number(item.qty) || 0}</td>
+              <td className="num">
+                {money(Number(item.line_total ?? Number(item.qty) * Number(item.price)), currency)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      <div className="receipt-totals">
+        <div>
+          <span>Total</span>
+          <strong className="mono">{money(Number(doc.total), currency)}</strong>
+        </div>
+        <div>
+          <span>Paid</span>
+          <strong className="mono">{money(paid, currency)}</strong>
+        </div>
+        <div className="grand">
+          <span>Balance</span>
+          <strong className="mono">{money(balance, currency)}</strong>
+        </div>
+      </div>
+
+      {doc.payments.length > 0 && (
+        <div className="receipt-payments">
+          {doc.payments.map((p) => (
+            <div key={p.id}>
+              <span>
+                {p.method} · {dateLabel(p.paid_at)}
+              </span>
+              <strong className="mono">{money(Number(p.amount), currency)}</strong>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {footerNote && <p className="receipt-footnote">{footerNote}</p>}
+      <p className="receipt-foot">{thankYou}</p>
+    </div>
+  );
+}
+
 export function ReceiptPreview({
   doc,
   company,
@@ -487,11 +613,6 @@ export function ReceiptPreview({
   company?: Company | null;
   onClose: () => void;
 }) {
-  const paid = Number(doc.amount_paid) || 0;
-  const balance = Math.max(0, Number(doc.total) - paid);
-  const currency = doc.currency || 'USD';
-  const logo = company?.logo_url || (company?.logo_path ? `/images/${company.logo_path}` : null);
-
   return (
     <div className="overlay receipt-overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="receipt-shell">
@@ -503,89 +624,7 @@ export function ReceiptPreview({
             Print receipt
           </button>
         </div>
-
-        <div className="receipt-paper" id="print-receipt">
-          <div className="receipt-head">
-            <div className="receipt-identity">
-              {logo && (
-                <img className="receipt-logo" src={logo} alt={`${company?.name || 'Company'} logo`} />
-              )}
-              <div className="receipt-org">
-                <div className="receipt-brand">{company?.name || 'PREYONE'}</div>
-                <div className="receipt-muted">
-                  {company?.tagline || 'Connecting People. Powering Business.'}
-                </div>
-              </div>
-            </div>
-            <div className="receipt-stamp">{balance <= 0 ? 'PAID' : 'PART PAID'}</div>
-          </div>
-
-          <div className="receipt-meta">
-            <div>
-              <span>Receipt</span>
-              <strong className="mono">{doc.doc_number}</strong>
-            </div>
-            <div>
-              <span>Issued</span>
-              <strong>{dateLabel(doc.issue_date)}</strong>
-            </div>
-            <div>
-              <span>Customer</span>
-              <strong>{doc.customer?.name || doc.customer_name || 'Walk-in customer'}</strong>
-            </div>
-          </div>
-
-          <table className="receipt-table">
-            <thead>
-              <tr>
-                <th>Description</th>
-                <th className="num">Qty</th>
-                <th className="num">Amount</th>
-              </tr>
-            </thead>
-            <tbody>
-              {doc.items.map((item, i) => (
-                <tr key={item.id ?? i}>
-                  <td>{item.description}</td>
-                  <td className="num">{Number(item.qty) || 0}</td>
-                  <td className="num">
-                    {money(Number(item.line_total ?? Number(item.qty) * Number(item.price)), currency)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-
-          <div className="receipt-totals">
-            <div>
-              <span>Total</span>
-              <strong className="mono">{money(Number(doc.total), currency)}</strong>
-            </div>
-            <div>
-              <span>Paid</span>
-              <strong className="mono">{money(paid, currency)}</strong>
-            </div>
-            <div className="grand">
-              <span>Balance</span>
-              <strong className="mono">{money(balance, currency)}</strong>
-            </div>
-          </div>
-
-          {doc.payments.length > 0 && (
-            <div className="receipt-payments">
-              {doc.payments.map((p) => (
-                <div key={p.id}>
-                  <span>
-                    {p.method} · {dateLabel(p.paid_at)}
-                  </span>
-                  <strong className="mono">{money(Number(p.amount), currency)}</strong>
-                </div>
-              ))}
-            </div>
-          )}
-
-          <p className="receipt-foot">Thank you for your business — preyone.com</p>
-        </div>
+        <ReceiptSheet doc={doc} company={company} id="print-receipt" />
       </div>
     </div>
   );

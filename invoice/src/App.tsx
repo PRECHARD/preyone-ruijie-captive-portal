@@ -8,6 +8,8 @@ import {
   clearToken,
   getToken,
   installSessionHeartbeat,
+  receiptSettingsOf,
+  type ReceiptSettings,
   type SessionSignal,
   type ArAging,
   type Catalog,
@@ -24,7 +26,7 @@ import {
   type ThemeTokens,
 } from './api';
 import { applyCssVars } from './theme';
-import { OnlinePaymentModal, ReceiptPreview } from './payments';
+import { OnlinePaymentModal, ReceiptPreview, ReceiptSheet } from './payments';
 import { DocumentSheet, TemplateThumb, type SheetDoc } from './DocumentSheet';
 import { ConfirmDialog, type ConfirmOptions } from './ConfirmDialog';
 import Sidebar, { type View } from './components/Sidebar';
@@ -2460,6 +2462,80 @@ function DocumentDrawer({
 
 /* ───────────────────────────── settings ────────────────────────────── */
 
+function readImageFile(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    if (!/^image\/(png|jpe?g|webp)$/i.test(file.type)) {
+      reject(new Error('Choose a PNG, JPG or WebP image.'));
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      reject(new Error('Logo must be smaller than 2 MB.'));
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(reader.error || new Error('Could not read that image.'));
+    reader.readAsDataURL(file);
+  });
+}
+
+function LogoPicker({
+  label,
+  value,
+  busy,
+  hint,
+  clearLabel,
+  onPick,
+  onClear,
+}: {
+  label: string;
+  value?: string | null;
+  busy?: boolean;
+  hint?: string;
+  clearLabel?: string;
+  onPick: (file: File) => void;
+  onClear?: () => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  return (
+    <div className="logo-picker">
+      <div className="logo-picker-label">{label}</div>
+      <div className="logo-picker-body">
+        <div className="logo-picker-preview">
+          {value ? <img src={value} alt={`${label} preview`} /> : <span>No logo uploaded</span>}
+        </div>
+        <div className="logo-picker-actions">
+          <button
+            className="btn"
+            type="button"
+            disabled={busy}
+            onClick={() => inputRef.current?.click()}
+          >
+            {busy ? 'Uploading…' : value ? 'Replace logo' : 'Upload logo'}
+          </button>
+          {value && onClear && (
+            <button className="btn ghost" type="button" disabled={busy} onClick={onClear}>
+              {clearLabel || 'Remove logo'}
+            </button>
+          )}
+          <span className="muted small">{hint || 'PNG, JPG or WebP · max 2 MB'}</span>
+          <input
+            ref={inputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            hidden
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              e.target.value = '';
+              if (file) onPick(file);
+            }}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SettingsPanel({
   catalog,
   onCatalog,
@@ -2474,8 +2550,11 @@ function SettingsPanel({
   const [themeId, setThemeId] = useState(Number(catalog.company.pos_theme_id) || 1);
   const [currency, setCurrency] = useState(catalog.company.currency || 'USD');
   const [taxPct, setTaxPct] = useState(String(Number(catalog.company.tax_pct) || 0));
+  const [tagline, setTagline] = useState(catalog.company.tagline || '');
   const [terms, setTerms] = useState(catalog.company.terms_text || '');
-  const [footer, setFooter] = useState(catalog.company.receipt_footer || '');
+  const [designTab, setDesignTab] = useState<'invoice' | 'receipt'>('invoice');
+  const [receipt, setReceipt] = useState<ReceiptSettings>(() => ({ ...receiptSettingsOf(catalog.company) }));
+  const [logoBusy, setLogoBusy] = useState<'invoice' | 'receipt' | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
 
@@ -2510,6 +2589,34 @@ function SettingsPanel({
     currency,
   };
 
+  const sampleReceiptDoc = {
+    id: 'sample-receipt',
+    doc_number: 'RCPT-0042',
+    doc_type: 'receipt',
+    status: 'paid',
+    issue_date: today(),
+    total: 1250,
+    amount_paid: 1250,
+    currency,
+    customer_name: 'Acme Trading (Pvt) Ltd',
+    customer: {
+      id: 'sample-customer',
+      name: 'Acme Trading (Pvt) Ltd',
+      email: 'accounts@acme.co.zw',
+      address: '14 Borrowdale Road\nHarare',
+    },
+    items: [
+      { id: 'sample-1', description: 'Managed Wi-Fi — October', qty: 1, price: 850, line_total: 850 },
+      { id: 'sample-2', description: 'Additional access point', qty: 2, price: 125, line_total: 250 },
+      { id: 'sample-3', description: 'On-site installation', qty: 1, price: 150, line_total: 150 },
+    ],
+    payments: [
+      { id: 'sample-payment', amount: 1250, method: 'Bank transfer', paid_at: today() },
+    ],
+    doc_meta: {},
+    created_at: new Date().toISOString(),
+  } as unknown as DocumentDetail;
+
   const save = async () => {
     setBusy(true);
     setNotice(null);
@@ -2518,11 +2625,86 @@ function SettingsPanel({
         templateId,
         currency,
         taxPct: Number(taxPct) || 0,
+        tagline,
         termsText: terms,
-        footer,
       });
       onCatalog({ ...catalog, company: { ...catalog.company, ...saved, invoice_template_id: templateId } });
-      setNotice({ kind: 'ok', text: 'Invoicing defaults saved.' });
+      setNotice({ kind: 'ok', text: 'Invoice design saved.' });
+    } catch (err) {
+      setNotice({ kind: 'error', text: errorText(err) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const persistReceipt = async (next: ReceiptSettings, message: string) => {
+    const saved = await api.patch<Company>('/api/pos/invoice-settings', { receiptSettings: next });
+    const invoiceSettings = {
+      ...(catalog.company.invoice_settings || {}),
+      receipt: next,
+    };
+    setReceipt(next);
+    onCatalog({
+      ...catalog,
+      company: { ...catalog.company, ...saved, invoice_settings: invoiceSettings },
+    });
+    setNotice({ kind: 'ok', text: message });
+  };
+
+  const saveReceipt = async () => {
+    setBusy(true);
+    setNotice(null);
+    try {
+      await persistReceipt(receipt, 'Receipt design saved.');
+    } catch (err) {
+      setNotice({ kind: 'error', text: errorText(err) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const uploadLogo = async (slot: 'invoice' | 'receipt', file: File) => {
+    setLogoBusy(slot);
+    setNotice(null);
+    try {
+      const dataUrl = await readImageFile(file);
+      const res = await api.post<{ logoUrl: string; filename: string; slot?: string }>(
+        '/api/admin/company/logo',
+        { dataUrl, slot }
+      );
+      if (slot === 'receipt') {
+        const next = { ...receipt, logoUrl: res.logoUrl };
+        setReceipt(next);
+        onCatalog({
+          ...catalog,
+          company: {
+            ...catalog.company,
+            invoice_settings: { ...(catalog.company.invoice_settings || {}), receipt: next },
+          },
+        });
+        setNotice({ kind: 'ok', text: 'Receipt logo updated.' });
+      } else {
+        onCatalog({
+          ...catalog,
+          company: { ...catalog.company, logo_url: res.logoUrl, logo_path: res.filename },
+        });
+        setNotice({ kind: 'ok', text: 'Invoice logo updated.' });
+      }
+    } catch (err) {
+      setNotice({ kind: 'error', text: errorText(err) });
+    } finally {
+      setLogoBusy(null);
+    }
+  };
+
+  const clearReceiptLogo = async () => {
+    setBusy(true);
+    setNotice(null);
+    try {
+      await persistReceipt(
+        { ...receipt, logoUrl: '' },
+        'Receipt logo now follows the company logo.'
+      );
     } catch (err) {
       setNotice({ kind: 'error', text: errorText(err) });
     } finally {
@@ -2555,90 +2737,292 @@ function SettingsPanel({
     }
   };
 
+  const invoiceLogo =
+    catalog.company.logo_url ||
+    (catalog.company.logo_path ? `/images/${catalog.company.logo_path}` : '');
+
   return (
     <div>
       {notice && <div className={`banner ${notice.kind === 'ok' ? 'ok' : 'error'}`}>{notice.text}</div>}
 
-      {!designOnly && (
-      <div className="card" style={{ padding: 20, marginBottom: 18 }}>
-        <div className="panel-head" style={{ padding: 0, border: 'none', marginBottom: 14 }}>
-          <div className="panel-title">Brand & defaults</div>
-          <button className="btn primary" type="button" disabled={busy} onClick={() => void save()}>
-            {busy && <span className="spinner" aria-hidden />}
-            {busy ? 'Saving…' : 'Save defaults'}
-          </button>
-        </div>
-        <div className="form-grid">
-            <label className="field">
-              <span>Default currency</span>
-              <select className="select" value={currency} onChange={(e) => setCurrency(e.target.value)}>
-                {CURRENCIES.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="field">
-              <span>Default tax %</span>
-              <input className="input" type="number" step="0.01" value={taxPct} onChange={(e) => setTaxPct(e.target.value)} />
-            </label>
-            <label className="field span-2">
-              <span>Terms & conditions</span>
-              <textarea className="textarea" value={terms} onChange={(e) => setTerms(e.target.value)} />
-            </label>
-            <label className="field span-2">
-              <span>Footer note</span>
-              <input className="input" value={footer} onChange={(e) => setFooter(e.target.value)} />
-            </label>
-          </div>
+      <div className="settings-design-tabs" role="tablist" aria-label="Document design">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={designTab === 'invoice'}
+          className={`settings-design-tab${designTab === 'invoice' ? ' is-active' : ''}`}
+          onClick={() => setDesignTab('invoice')}
+        >
+          <span>Invoice</span>
+          <small>A4 document</small>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={designTab === 'receipt'}
+          className={`settings-design-tab${designTab === 'receipt' ? ' is-active' : ''}`}
+          onClick={() => setDesignTab('receipt')}
+        >
+          <span>Receipt</span>
+          <small>Payment proof</small>
+        </button>
       </div>
+
+      {designTab === 'invoice' && (
+        <>
+          <div className="card" style={{ padding: 20, marginBottom: 18 }}>
+            <div className="panel-head" style={{ padding: 0, border: 'none', marginBottom: 14 }}>
+              <div>
+                <div className="panel-title">Invoice logo &amp; information</div>
+                <p className="muted small" style={{ margin: '4px 0 0' }}>
+                  Used on invoices, quotations and credit notes. Legal company details live in Company &amp; branding.
+                </p>
+              </div>
+              <button className="btn primary" type="button" disabled={busy} onClick={() => void save()}>
+                {busy && <span className="spinner" aria-hidden />}
+                {busy ? 'Saving…' : 'Save invoice design'}
+              </button>
+            </div>
+
+            <LogoPicker
+              label="Invoice logo"
+              value={invoiceLogo}
+              busy={logoBusy === 'invoice'}
+              onPick={(file) => void uploadLogo('invoice', file)}
+              hint="PNG, JPG or WebP · max 2 MB"
+            />
+
+            <div className="form-grid" style={{ marginTop: 16 }}>
+              {!designOnly && (
+                <>
+                  <label className="field">
+                    <span>Default currency</span>
+                    <select className="select" value={currency} onChange={(e) => setCurrency(e.target.value)}>
+                      {CURRENCIES.map((c) => (
+                        <option key={c} value={c}>
+                          {c}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="field">
+                    <span>Default tax %</span>
+                    <input className="input" type="number" step="0.01" value={taxPct} onChange={(e) => setTaxPct(e.target.value)} />
+                  </label>
+                </>
+              )}
+              <label className="field span-2">
+                <span>Invoice tagline</span>
+                <input
+                  className="input"
+                  value={tagline}
+                  maxLength={120}
+                  onChange={(e) => setTagline(e.target.value)}
+                  placeholder="Connecting People. Powering Business."
+                />
+              </label>
+              <label className="field span-2">
+                <span>Terms &amp; conditions</span>
+                <textarea className="textarea" rows={3} value={terms} onChange={(e) => setTerms(e.target.value)} />
+              </label>
+            </div>
+          </div>
+
+          <div className="card" style={{ padding: 20, marginBottom: 18 }}>
+            <div className="panel-title" style={{ marginBottom: 4 }}>PDF templates</div>
+            <p className="muted small" style={{ marginTop: 0, marginBottom: 14 }}>
+              One A4 house design, 20 finishes. Every template keeps the same structure — gradient masthead,
+              ruled item table and footer band — and only the palette, wordmark and density change.
+            </p>
+            <div className="settings-templates">
+              <div className="template-grid">
+                {catalog.templates.map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    className={`template-card ${templateId === t.id ? 'selected' : ''}`}
+                    onClick={() => void pickTemplate(t.id)}
+                    title={t.description}
+                  >
+                    <TemplateThumb template={t} />
+                    <h4>{t.name}</h4>
+                    <p>{t.description}</p>
+                  </button>
+                ))}
+              </div>
+              <aside className="settings-preview">
+                <div className="settings-preview-head">
+                  <div>
+                    <div className="panel-title" style={{ marginBottom: 2 }}>
+                      {selectedTemplate ? selectedTemplate.name : 'House template'}
+                    </div>
+                    <div className="muted small">A4 proof · updates with the template, logo and copy</div>
+                  </div>
+                  <span className="muted small">{selectedTemplate ? `#${selectedTemplate.id}` : ''}</span>
+                </div>
+                <div className="a4-preview-shell">
+                  <DocumentSheet
+                    doc={sampleDoc}
+                    company={{
+                      ...catalog.company,
+                      tagline: tagline || catalog.company.tagline,
+                      terms_text: terms || catalog.company.terms_text,
+                    }}
+                    template={selectedTemplate}
+                  />
+                </div>
+                <div className="muted small" style={{ marginTop: 8 }}>
+                  Save invoice design to keep this template and copy for every new document.
+                </div>
+              </aside>
+            </div>
+          </div>
+        </>
       )}
 
-      <div className="card" style={{ padding: 20, marginBottom: 18 }}>
-        <div className="panel-title" style={{ marginBottom: 4 }}>PDF templates</div>
-        <p className="muted small" style={{ marginTop: 0, marginBottom: 14 }}>
-          One A4 house design, 20 finishes. Every template keeps the same structure — gradient masthead, ruled item table and footer band — and only the palette, wordmark and density change.
-        </p>
-        <div className="settings-templates">
-          <div className="template-grid">
-            {catalog.templates.map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                className={`template-card ${templateId === t.id ? 'selected' : ''}`}
-                onClick={() => void pickTemplate(t.id)}
-                title={t.description}
-              >
-                <TemplateThumb template={t} />
-                <h4>{t.name}</h4>
-                <p>{t.description}</p>
-              </button>
-            ))}
-          </div>
-          <aside className="settings-preview">
-            <div className="settings-preview-head">
+      {designTab === 'receipt' && (
+        <div className="settings-two-col">
+          <div className="card" style={{ padding: 20 }}>
+            <div className="panel-head" style={{ padding: 0, border: 'none', marginBottom: 14 }}>
               <div>
-                <div className="panel-title" style={{ marginBottom: 2 }}>
-                  {selectedTemplate ? selectedTemplate.name : 'House template'}
-                </div>
-                <div className="muted small">A4 proof · updates with the template and terms</div>
+                <div className="panel-title">Receipt logo &amp; information</div>
+                <p className="muted small" style={{ margin: '4px 0 0' }}>
+                  Shown on every payment receipt, print proof and PDF.
+                </p>
               </div>
-              <span className="muted small">{selectedTemplate ? `#${selectedTemplate.id}` : ''}</span>
+              <button className="btn primary" type="button" disabled={busy} onClick={() => void saveReceipt()}>
+                {busy && <span className="spinner" aria-hidden />}
+                {busy ? 'Saving…' : 'Save receipt design'}
+              </button>
             </div>
-            <div className="a4-preview-shell">
-              <DocumentSheet
-                doc={sampleDoc}
-                company={{ ...catalog.company, terms_text: terms || catalog.company.terms_text }}
-                template={selectedTemplate}
-              />
+
+            <LogoPicker
+              label="Receipt logo"
+              value={receipt.logoUrl || ''}
+              busy={logoBusy === 'receipt'}
+              onPick={(file) => void uploadLogo('receipt', file)}
+              onClear={() => void clearReceiptLogo()}
+              clearLabel="Use company logo"
+              hint="Defaults to the invoice logo when empty"
+            />
+
+            <div className="form-grid" style={{ marginTop: 16 }}>
+              <label className="field span-2">
+                <span>Receipt brand name</span>
+                <input
+                  className="input"
+                  value={receipt.brandName || ''}
+                  onChange={(e) => setReceipt({ ...receipt, brandName: e.target.value })}
+                  placeholder={catalog.company.name}
+                />
+              </label>
+              <label className="field span-2">
+                <span>Tagline</span>
+                <input
+                  className="input"
+                  value={receipt.tagline || ''}
+                  onChange={(e) => setReceipt({ ...receipt, tagline: e.target.value })}
+                  placeholder={catalog.company.tagline || 'Connecting People. Powering Business.'}
+                />
+              </label>
+              <label className="field span-2">
+                <span>Address</span>
+                <textarea
+                  className="textarea"
+                  rows={2}
+                  value={receipt.address || ''}
+                  onChange={(e) => setReceipt({ ...receipt, address: e.target.value })}
+                  placeholder={catalog.company.address || '14 Borrowdale Road, Harare'}
+                />
+              </label>
+              <label className="field">
+                <span>Phone</span>
+                <input
+                  className="input"
+                  value={receipt.phone || ''}
+                  onChange={(e) => setReceipt({ ...receipt, phone: e.target.value })}
+                  placeholder={catalog.company.support_phone || '+263 77 000 0000'}
+                />
+              </label>
+              <label className="field">
+                <span>Email</span>
+                <input
+                  className="input"
+                  type="email"
+                  value={receipt.email || ''}
+                  onChange={(e) => setReceipt({ ...receipt, email: e.target.value })}
+                  placeholder={catalog.company.email || 'info@preyone.com'}
+                />
+              </label>
+              <label className="field">
+                <span>Website</span>
+                <input
+                  className="input"
+                  value={receipt.website || ''}
+                  onChange={(e) => setReceipt({ ...receipt, website: e.target.value })}
+                  placeholder={catalog.company.website || 'www.preyone.com'}
+                />
+              </label>
+              <label className="field">
+                <span>Footer note</span>
+                <input
+                  className="input"
+                  value={receipt.footerNote || ''}
+                  onChange={(e) => setReceipt({ ...receipt, footerNote: e.target.value })}
+                  placeholder={catalog.company.receipt_footer || 'Payment received with thanks.'}
+                />
+              </label>
+              <label className="field span-2">
+                <span>Thank-you message</span>
+                <input
+                  className="input"
+                  value={receipt.thankYou || ''}
+                  onChange={(e) => setReceipt({ ...receipt, thankYou: e.target.value })}
+                  placeholder="Thank you for your business — preyone.com"
+                />
+              </label>
             </div>
-            <div className="muted small" style={{ marginTop: 8 }}>
-              Save defaults to make this the template for every new document.
+
+            <div className="settings-toggle-row">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={receipt.showLogo !== false}
+                  onChange={(e) => setReceipt({ ...receipt, showLogo: e.target.checked })}
+                />
+                Show logo
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={receipt.showAddress !== false}
+                  onChange={(e) => setReceipt({ ...receipt, showAddress: e.target.checked })}
+                />
+                Show address
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={receipt.showContact !== false}
+                  onChange={(e) => setReceipt({ ...receipt, showContact: e.target.checked })}
+                />
+                Show contact details
+              </label>
+            </div>
+          </div>
+
+          <aside className="receipt-settings-preview">
+            <div className="panel-title" style={{ marginBottom: 4 }}>Receipt preview</div>
+            <p className="muted small" style={{ marginTop: 0, marginBottom: 12 }}>
+              Live proof of payment · updates as you type.
+            </p>
+            <ReceiptSheet doc={sampleReceiptDoc} company={catalog.company} settings={receipt} />
+            <div className="muted small" style={{ marginTop: 10 }}>
+              The printed and PDF receipts use this exact design.
             </div>
           </aside>
         </div>
-      </div>
+      )}
 
       <div className="card" style={{ padding: 20 }}>
         <div className="panel-title" style={{ marginBottom: 4 }}>Workspace theme</div>

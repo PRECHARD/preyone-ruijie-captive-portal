@@ -487,6 +487,14 @@ router.patch('/invoice-settings', requireRole(...MANAGER_ROLES), async (req, res
   // legal identity fields stay CEO-only. `undefined` means "leave unchanged";
   // an empty string clears it.
   const tagline = b.tagline === undefined ? null : str(b.tagline).slice(0, 120);
+  // Receipt branding lives beside the other invoice settings, under the
+  // `receipt` key, so the existing admin configuration is preserved.
+  const receiptSettings =
+    b.receiptSettings === undefined
+      ? null
+      : b.receiptSettings && typeof b.receiptSettings === 'object'
+        ? (b.receiptSettings as Record<string, unknown>)
+        : {};
   const { rows } = await pool.query(
     `UPDATE companies
         SET invoice_template_id = COALESCE($1, invoice_template_id),
@@ -494,11 +502,17 @@ router.patch('/invoice-settings', requireRole(...MANAGER_ROLES), async (req, res
             tax_pct             = COALESCE($3, tax_pct),
             terms_text          = COALESCE($4, terms_text),
             receipt_footer      = COALESCE($5, receipt_footer),
-            invoice_settings    = COALESCE($6::jsonb, invoice_settings),
+            invoice_settings    = CASE
+              WHEN $6::jsonb IS NULL AND $9::jsonb IS NULL THEN invoice_settings
+              ELSE COALESCE(invoice_settings, '{}'::jsonb)
+                   || COALESCE($6::jsonb, '{}'::jsonb)
+                   || CASE WHEN $9::jsonb IS NULL THEN '{}'::jsonb
+                           ELSE jsonb_build_object('receipt', $9::jsonb) END
+            END,
             tagline             = COALESCE($7, tagline),
             updated_at          = NOW()
       WHERE id = $8
-      RETURNING id, name, tagline, logo_url, currency, tax_pct, invoice_template_id,
+      RETURNING id, name, tagline, logo_url, logo_path, currency, tax_pct, invoice_template_id,
                 terms_text, receipt_footer, invoice_settings`,
     [
       templateId,
@@ -509,6 +523,7 @@ router.patch('/invoice-settings', requireRole(...MANAGER_ROLES), async (req, res
       b.settings === undefined ? null : JSON.stringify(b.settings),
       tagline,
       cid,
+      receiptSettings === null ? null : JSON.stringify(receiptSettings),
     ]
   );
   res.json(rows[0] ?? {});
