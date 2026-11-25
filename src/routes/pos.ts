@@ -128,7 +128,10 @@ async function resolveOperatorTenant(req: Request): Promise<string | null> {
   return rows.length === 1 ? (rows[0].id as string) : null;
 }
 
-router.get('/auth/operators', operatorLimiter, async (req, res) => {
+async function loadOperatorRoster(
+  req: Request,
+  res: Response
+): Promise<{ companyId: string; operators: unknown[] } | null> {
   const companyId = await resolveOperatorTenant(req);
   if (!companyId) {
     res.status(400).json({
@@ -136,7 +139,7 @@ router.get('/auth/operators', operatorLimiter, async (req, res) => {
         'This till is not linked to a company. Enter the till code from Invoice → Settings → Client Tenants.',
       code: 'TENANT_REQUIRED',
     });
-    return;
+    return null;
   }
   const { rows } = await pool.query(
     `SELECT id, full_name, email, role
@@ -145,7 +148,27 @@ router.get('/auth/operators', operatorLimiter, async (req, res) => {
       ORDER BY full_name`,
     [companyId]
   );
-  res.json({ companyId, operators: rows });
+  return { companyId, operators: rows };
+}
+
+/**
+ * Legacy operator shape: a plain array.
+ *
+ * POS shells are long-lived, so a cached bundle that predates the tenant hint
+ * must not receive an object and crash on `.map`. It still gets only its own
+ * tenant's roster (or TENANT_REQUIRED), just in the old JSON shape.
+ */
+router.get('/auth/operators', operatorLimiter, async (req, res) => {
+  const roster = await loadOperatorRoster(req, res);
+  if (!roster) return;
+  res.json(roster.operators);
+});
+
+/** Current shape: the tenant id lets the till remember its company. */
+router.get('/auth/operator-roster', operatorLimiter, async (req, res) => {
+  const roster = await loadOperatorRoster(req, res);
+  if (!roster) return;
+  res.json(roster);
 });
 
 router.post('/auth/pin', pinLimiter, async (req, res) => {

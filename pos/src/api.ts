@@ -317,7 +317,7 @@ export const api = {
    */
   tillOperators: (companyId?: string) =>
     req<{ companyId: string; operators: TillOperator[] }>(
-      `/auth/operators${companyId ? `?company=${encodeURIComponent(companyId)}` : ''}`
+      `/auth/operator-roster${companyId ? `?company=${encodeURIComponent(companyId)}` : ''}`
     ),
 
   company: () => req<CompanyProfile>('/company'),

@@ -49,6 +49,7 @@ const COMPANY_A = 'company-a';
 const COMPANY_B = 'company-b';
 const DOC_A = 'doc-a';
 const DOC_B = 'doc-b';
+const TENANT_UUID = '11111111-1111-4111-8111-111111111111';
 
 function createApp() {
   const app = express();
@@ -210,6 +211,35 @@ describe('POS cross-tenant isolation', () => {
     );
     expect(docCall![1][1]).toBe(COMPANY_B);
     expect(docCall![1]).not.toContain('some-transit-company-id');
+  });
+
+  it('keeps the legacy operator array while the new roster returns the tenant id', async () => {
+    (pool.query as any).mockImplementation(async (sql: string) => {
+      if (/SELECT id FROM companies WHERE id = \$1/.test(sql)) {
+        return { rows: [{ id: TENANT_UUID }], rowCount: 1 };
+      }
+      if (/FROM admin_users/.test(sql)) {
+        return {
+          rows: [{ id: 'u1', full_name: 'Till Operator', email: 'op@test', role: 'CEO' }],
+          rowCount: 1,
+        };
+      }
+      return { rows: [], rowCount: 0 };
+    });
+
+    const legacy = await request(createApp()).get(
+      `/api/pos/auth/operators?company=${TENANT_UUID}`
+    );
+    expect(legacy.status).toBe(200);
+    expect(Array.isArray(legacy.body)).toBe(true);
+    expect(legacy.body[0].full_name).toBe('Till Operator');
+
+    const roster = await request(createApp()).get(
+      `/api/pos/auth/operator-roster?company=${TENANT_UUID}`
+    );
+    expect(roster.status).toBe(200);
+    expect(roster.body.companyId).toBe(TENANT_UUID);
+    expect(roster.body.operators).toHaveLength(1);
   });
 });
 

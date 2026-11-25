@@ -4,7 +4,7 @@ import bcrypt from 'bcryptjs';
 import rateLimit from 'express-rate-limit';
 import { pool } from '../db/pool';
 import { requireAdminAuth, requireRole } from '../middleware/adminAuth';
-import { requireHouseCeo } from '../middleware/houseCeo';
+import { houseCompanyId, requireHouseCeo } from '../middleware/houseCeo';
 import { isPlanTier, syncPlanModules, tierById } from '../plans/entitlements';
 import { syncSaleToLedgerAndStock } from '../db/accounting';
 import { generateDocumentVerifyCode } from '../utils/documentVerifyCode';
@@ -3984,15 +3984,57 @@ adminRouter.post(
 // POS: Devices & Endpoints (desktop / web / android)
 // ═══════════════════════════════════════════════════════
 
+/**
+ * Which devices may this console session see or mutate?
+ *
+ * House staff (CEO/Manager bound to the first-created Preyone company) keep
+ * the platform-wide registry. A client CEO/Manager only ever sees and mutates
+ * rows whose company_id is their own. Unbound accounts fall back only while a
+ * single company exists, mirroring requireCompany.
+ */
+async function adminDeviceScope(
+  req: Request
+): Promise<{ house: boolean; companyId: string | null }> {
+  const houseId = await houseCompanyId();
+  const portal = req.adminUser?.portalCompanyId ?? null;
+  if (portal && houseId && portal === houseId) return { house: true, companyId: houseId };
+  if (portal) return { house: false, companyId: portal };
+  const { rows } = await pool.query('SELECT id FROM companies ORDER BY created_at ASC LIMIT 2');
+  if (rows.length === 1) return { house: true, companyId: rows[0].id as string };
+  return { house: false, companyId: null };
+}
+
+function noDeviceScope(res: Response): void {
+  res.status(403).json({
+    error: 'No company assigned to this account.',
+    code: 'NO_COMPANY_SCOPE',
+  });
+}
+
 adminRouter.get('/devices', requireRole('CEO', 'Manager'), async (req: Request, res: Response) => {
+  const scope = await adminDeviceScope(req);
+  if (!scope.companyId) {
+    noDeviceScope(res);
+    return;
+  }
   const type = typeof req.query.type === 'string' ? req.query.type : undefined;
+  const params: unknown[] = [];
+  const where: string[] = [];
+  if (!scope.house) {
+    params.push(scope.companyId);
+    where.push(`d.company_id = $${params.length}`);
+  }
+  if (type) {
+    params.push(type);
+    where.push(`d.device_type = $${params.length}`);
+  }
   const { rows } = await pool.query(
     `SELECT d.*, c.name AS company_name
        FROM pos_devices d
        LEFT JOIN companies c ON c.id = d.company_id
-       ${type ? 'WHERE d.device_type = $1' : ''}
+       ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
        ORDER BY d.last_seen DESC NULLS LAST, d.created_at DESC`,
-    type ? [type] : []
+    params
   );
   res.json(rows);
 });
@@ -4002,9 +4044,14 @@ adminRouter.post('/devices', requireRole('CEO', 'Manager'), async (req: Request,
   if (!deviceId || !['desktop', 'web', 'android'].includes(deviceType)) {
     res.status(422).json({ error: 'deviceId and deviceType (desktop|web|android) are required' }); return;
   }
+  const scope = await adminDeviceScope(req);
+  if (!scope.companyId) {
+    noDeviceScope(res);
+    return;
+  }
   const { rows } = await pool.query(
-    `INSERT INTO pos_devices (device_id, device_type, name, branch, app_version, server_url, status, notes)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+    `INSERT INTO pos_devices (device_id, device_type, name, branch, app_version, server_url, status, notes, company_id)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
      ON CONFLICT (device_id) DO UPDATE SET
        device_type = EXCLUDED.device_type,
        name = EXCLUDED.name,
@@ -4013,10 +4060,24 @@ adminRouter.post('/devices', requireRole('CEO', 'Manager'), async (req: Request,
        server_url = EXCLUDED.server_url,
        status = EXCLUDED.status,
        notes = EXCLUDED.notes,
+       company_id = COALESCE(pos_devices.company_id, EXCLUDED.company_id),
        updated_at = NOW()
+     WHERE pos_devices.company_id IS NULL
+        OR pos_devices.company_id = EXCLUDED.company_id
+        OR $10::boolean
      RETURNING *`,
-    [deviceId, deviceType, name || deviceId, branch ?? null, appVersion ?? null, serverUrl ?? null, status || 'registered', notes ?? null]
+    [
+      deviceId, deviceType, name || deviceId, branch ?? null, appVersion ?? null,
+      serverUrl ?? null, status || 'registered', notes ?? null, scope.companyId, scope.house,
+    ]
   );
+  if (rows.length === 0) {
+    res.status(409).json({
+      error: 'This device is already registered to another company.',
+      code: 'DEVICE_ALREADY_PAIRED',
+    });
+    return;
+  }
   await recordAuditLog(req.adminUser!.id, req.adminUser!.fullName, 'pos_device_register', 'pos_device', rows[0].id, `Registered ${deviceType} device ${deviceId}`);
   res.status(201).json(rows[0]);
 });
@@ -4024,26 +4085,61 @@ adminRouter.post('/devices', requireRole('CEO', 'Manager'), async (req: Request,
 adminRouter.put('/devices/:id', requireRole('CEO', 'Manager'), async (req: Request, res: Response) => {
   const { id } = req.params;
   const { deviceId, deviceType, name, branch, appVersion, serverUrl, status, notes } = req.body as any;
-  const sets: string[] = []; const vals: any[] = []; let idx = 1;
-  if (deviceId)          { sets.push(`device_id = $${idx++}`); vals.push(deviceId); }
-  if (deviceType)        { sets.push(`device_type = $${idx++}`); vals.push(deviceType); }
-  if (name !== undefined){ sets.push(`name = $${idx++}`); vals.push(name); }
-  if (branch !== undefined)  { sets.push(`branch = $${idx++}`); vals.push(branch); }
-  if (appVersion !== undefined){ sets.push(`app_version = $${idx++}`); vals.push(appVersion); }
-  if (serverUrl !== undefined){ sets.push(`server_url = $${idx++}`); vals.push(serverUrl); }
-  if (status)            { sets.push(`status = $${idx++}`); vals.push(status); }
-  if (notes !== undefined)   { sets.push(`notes = $${idx++}`); vals.push(notes); }
+  if (
+    deviceId === undefined && deviceType === undefined && name === undefined &&
+    branch === undefined && appVersion === undefined && serverUrl === undefined &&
+    status === undefined && notes === undefined
+  ) {
+    res.status(422).json({ error: 'No fields to update' });
+    return;
+  }
+  const scope = await adminDeviceScope(req);
+  if (!scope.companyId) {
+    noDeviceScope(res);
+    return;
+  }
+  const sets: string[] = []; const vals: any[] = [];
+  const setField = (column: string, value: unknown) => {
+    vals.push(value);
+    sets.push(`${column} = $${vals.length}`);
+  };
+  if (deviceId)                 setField('device_id', deviceId);
+  if (deviceType)               setField('device_type', deviceType);
+  if (name !== undefined)       setField('name', name);
+  if (branch !== undefined)     setField('branch', branch);
+  if (appVersion !== undefined) setField('app_version', appVersion);
+  if (serverUrl !== undefined)  setField('server_url', serverUrl);
+  if (status)                   setField('status', status);
+  if (notes !== undefined)      setField('notes', notes);
   sets.push('updated_at = NOW()');
   vals.push(id);
-  if (sets.length === 1) { res.status(422).json({ error: 'No fields to update' }); return; }
-  const { rows } = await pool.query(`UPDATE pos_devices SET ${sets.join(', ')} WHERE id = $${idx} RETURNING *`, vals);
+  const whereId = `$${vals.length}`;
+  let filter = `id = ${whereId}`;
+  if (!scope.house) {
+    vals.push(scope.companyId);
+    filter += ` AND company_id = $${vals.length}`;
+  }
+  const { rows } = await pool.query(
+    `UPDATE pos_devices SET ${sets.join(', ')} WHERE ${filter} RETURNING *`,
+    vals
+  );
   if (rows.length === 0) { res.status(404).json({ error: 'Device not found' }); return; }
   res.json(rows[0]);
 });
 
 adminRouter.post('/devices/:id/suspend', requireRole('CEO', 'Manager'), async (req: Request, res: Response) => {
   const { id } = req.params;
-  const { rows } = await pool.query(`UPDATE pos_devices SET status = 'suspended', updated_at = NOW() WHERE id = $1 RETURNING *`, [id]);
+  const scope = await adminDeviceScope(req);
+  if (!scope.companyId) {
+    noDeviceScope(res);
+    return;
+  }
+  const params = scope.house ? [id] : [id, scope.companyId];
+  const filter = scope.house ? 'id = $1' : 'id = $1 AND company_id = $2';
+  const { rows } = await pool.query(
+    `UPDATE pos_devices SET status = 'suspended', updated_at = NOW() WHERE ${filter} RETURNING *`,
+    params
+  );
   if (rows.length === 0) { res.status(404).json({ error: 'Device not found' }); return; }
   await recordAuditLog(req.adminUser!.id, req.adminUser!.fullName, 'pos_device_suspend', 'pos_device', id, `Suspended device ${rows[0].device_id}`);
   res.json(rows[0]);
@@ -4051,7 +4147,17 @@ adminRouter.post('/devices/:id/suspend', requireRole('CEO', 'Manager'), async (r
 
 adminRouter.post('/devices/:id/activate', requireRole('CEO', 'Manager'), async (req: Request, res: Response) => {
   const { id } = req.params;
-  const { rows } = await pool.query(`UPDATE pos_devices SET status = 'active', updated_at = NOW() WHERE id = $1 RETURNING *`, [id]);
+  const scope = await adminDeviceScope(req);
+  if (!scope.companyId) {
+    noDeviceScope(res);
+    return;
+  }
+  const params = scope.house ? [id] : [id, scope.companyId];
+  const filter = scope.house ? 'id = $1' : 'id = $1 AND company_id = $2';
+  const { rows } = await pool.query(
+    `UPDATE pos_devices SET status = 'active', updated_at = NOW() WHERE ${filter} RETURNING *`,
+    params
+  );
   if (rows.length === 0) { res.status(404).json({ error: 'Device not found' }); return; }
   await recordAuditLog(req.adminUser!.id, req.adminUser!.fullName, 'pos_device_activate', 'pos_device', id, `Activated device ${rows[0].device_id}`);
   res.json(rows[0]);
@@ -4059,7 +4165,17 @@ adminRouter.post('/devices/:id/activate', requireRole('CEO', 'Manager'), async (
 
 adminRouter.delete('/devices/:id', requireRole('CEO'), async (req: Request, res: Response) => {
   const { id } = req.params;
-  const { rows } = await pool.query('DELETE FROM pos_devices WHERE id = $1 RETURNING id, device_id', [id]);
+  const scope = await adminDeviceScope(req);
+  if (!scope.companyId) {
+    noDeviceScope(res);
+    return;
+  }
+  const params = scope.house ? [id] : [id, scope.companyId];
+  const filter = scope.house ? 'id = $1' : 'id = $1 AND company_id = $2';
+  const { rows } = await pool.query(
+    `DELETE FROM pos_devices WHERE ${filter} RETURNING id, device_id`,
+    params
+  );
   if (rows.length === 0) { res.status(404).json({ error: 'Device not found' }); return; }
   await recordAuditLog(req.adminUser!.id, req.adminUser!.fullName, 'pos_device_delete', 'pos_device', id, `Removed device ${rows[0].device_id}`);
   res.json({ message: 'Device removed' });
