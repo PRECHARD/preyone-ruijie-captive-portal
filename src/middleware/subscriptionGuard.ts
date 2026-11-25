@@ -16,6 +16,16 @@ import { planNameFor } from '../plans/entitlements';
 // subscription still blocks it. Companies with no plan row yet — or a NULL
 // max_devices — are grandfathered: there is nothing to enforce against.
 // Returns true when the caller may proceed; false once a response was sent.
+/** Suggest only tiers above the current cap, never the plan already in use. */
+function deviceUpgradeHint(max: number): string {
+  if (max <= 1) {
+    return 'Upgrade to PreBiz (3 devices), PrePro (6 devices) or PreUnlimited (unlimited devices).';
+  }
+  if (max <= 3) return 'Upgrade to PrePro (6 devices) or PreUnlimited (unlimited devices).';
+  if (max <= 6) return 'Upgrade to PreUnlimited for unlimited devices.';
+  return 'Remove an unused device to free a slot.';
+}
+
 export async function enforceSubscriptionGuard(
   res: Response,
   companyId: string,
@@ -42,7 +52,7 @@ export async function enforceSubscriptionGuard(
       res.status(403).json({
         error:
           `${planLabel} allows ${max} active device${max === 1 ? '' : 's'} and all of them are registered. ` +
-          'Upgrade to PrePro (6 devices) or PreUnlimited (unlimited devices) to pair another till.',
+          deviceUpgradeHint(max),
         code: 'DEVICE_LIMIT_REACHED',
         max_devices: max,
         active_devices: active,
