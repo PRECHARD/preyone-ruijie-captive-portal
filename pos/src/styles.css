@@ -1575,3 +1575,12 @@ select option,
 }
 .pin-recover:hover { text-decoration: underline; }
 [data-preyone-theme='light'] .pin-recover { color: #047857; }
+
+.pin-setup-btn {
+  background: linear-gradient(120deg, #047857, #10b981 58%, #34d399) !important;
+  border-color: rgba(52, 211, 153, 0.55) !important;
+  color: #04120d !important;
+  box-shadow: 0 12px 26px rgba(16, 185, 129, 0.22);
+}
+.pin-change-tenant { display: block; margin: 0.9rem auto 0; }
+.pin-recover { display: block; margin: 0.45rem auto 0; text-align: center; }

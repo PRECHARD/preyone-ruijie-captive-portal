@@ -2778,7 +2778,7 @@ tbody tr:last-child td { border-bottom: none; }
 
 .auth-link {
   align-self: flex-start;
-  margin: -2px 0 12px;
+  margin: 10px 0 12px;
   padding: 0;
   border: 0;
   background: none;

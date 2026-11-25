@@ -173,12 +173,21 @@ export default function PinLogin({ onLoggedIn }: { onLoggedIn: (token: string, u
             <button type="submit" className="pin-setup-btn">
               Link this till
             </button>
+            {tenant && (
+              <button
+                type="button"
+                className="pin-change-tenant"
+                onClick={() => setSetupOpen(false)}
+              >
+                Cancel
+              </button>
+            )}
           </form>
         )}
 
         {loadErr && !setupOpen && <div className="err-msg">{loadErr}</div>}
 
-        {!operator ? (
+        {!setupOpen && (!operator ? (
           <>
             <div className="pin-hint">Select your name</div>
             <div className="op-list">
@@ -199,14 +208,6 @@ export default function PinLogin({ onLoggedIn }: { onLoggedIn: (token: string, u
             >
               Company till code
             </button>
-            <a
-              className="pin-recover"
-              href="https://invoice.preyone.com/?recover=1"
-              target="_blank"
-              rel="noreferrer"
-            >
-              Forgot password?
-            </a>
           </>
         ) : (
           <>
@@ -233,7 +234,16 @@ export default function PinLogin({ onLoggedIn }: { onLoggedIn: (token: string, u
               ))}
             </div>
           </>
-        )}
+        ))}
+
+        <a
+          className="pin-recover"
+          href="https://invoice.preyone.com/?recover=1"
+          target="_blank"
+          rel="noreferrer"
+        >
+          Forgot password?
+        </a>
       </div>
     </div>
   );

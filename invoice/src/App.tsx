@@ -3548,8 +3548,10 @@ export default function App() {
         }
         if (err.status === 401 || err.status === 403) {
           // A bearer that no longer works must not shadow the next sign-in.
+          // A first-time visitor also lands here with a plain 401; never show
+          // the word "Unauthorized" as if it were a helpful message.
           clearToken();
-          setAuthNotice(err.status === 401 ? err.message : null);
+          setAuthNotice(null);
           setAuthError(true);
           return;
         }
