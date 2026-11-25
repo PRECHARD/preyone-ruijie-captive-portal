@@ -3471,6 +3471,21 @@ adminRouter.put('/company', requireRole('CEO'), async (req: Request, res: Respon
     currency, taxPct, invoicePrefix, quotePrefix, receiptFooter, termsText,
     logoUrl, businessProfile, invoiceTemplateId, posThemeId, posHardware, invoiceSettings,
   } = req.body as any;
+  if (invoiceTemplateId != null) {
+    const [tpl, houseId] = await Promise.all([
+      pool.query('SELECT is_house_only FROM invoice_templates WHERE id = $1', [invoiceTemplateId]).catch(() => ({
+        rows: [] as any[],
+      })),
+      houseCompanyId(),
+    ]);
+    if (tpl.rows[0]?.is_house_only && houseId !== companyId) {
+      res.status(422).json({
+        error: 'Preyone Classic is the house template and cannot be used by a client company.',
+        code: 'HOUSE_TEMPLATE_ONLY',
+      });
+      return;
+    }
+  }
   const { rows } = await pool.query(
     `UPDATE companies SET
        name                = COALESCE($1,  name),
@@ -3669,10 +3684,10 @@ adminRouter.post(
     const tier = tierById(planType)!;
     const invoicePrefix = cleanTenantPrefix(body.invoicePrefix, 'INV');
     const quotePrefix = cleanTenantPrefix(body.quotePrefix, 'QUO');
-    const invoiceTemplateId = Math.min(
-      20,
-      Math.max(1, Math.floor(Number(body.invoiceTemplateId) || 1))
-    );
+    let invoiceTemplateId =
+      body.invoiceTemplateId == null || body.invoiceTemplateId === ''
+        ? null
+        : Math.min(20, Math.max(1, Math.floor(Number(body.invoiceTemplateId))));
     const posThemeId = Math.min(20, Math.max(1, Math.floor(Number(body.posThemeId) || 1)));
 
     const client = await pool.connect();
@@ -3690,6 +3705,40 @@ adminRouter.post(
           code: 'EMAIL_IN_USE',
         });
         return;
+      }
+
+      // Tenants must never receive the Preyone Classic sheet. When the caller
+      // does not choose a template, give this tenant the least-used public
+      // design so consecutive clients do not look identical.
+      try {
+        if (invoiceTemplateId === null) {
+          const pick = await client.query(
+            `SELECT t.id
+               FROM invoice_templates t
+               LEFT JOIN companies c ON c.invoice_template_id = t.id
+              WHERE t.is_active AND NOT t.is_house_only
+              GROUP BY t.id
+              ORDER BY COUNT(c.id) ASC, t.id ASC
+              LIMIT 1`
+          );
+          invoiceTemplateId = Number(pick.rows[0]?.id) || 2;
+        } else {
+          const tpl = await client.query(
+            'SELECT is_house_only FROM invoice_templates WHERE id = $1 AND is_active',
+            [invoiceTemplateId]
+          );
+          if (tpl.rows[0]?.is_house_only) {
+            await client.query('ROLLBACK');
+            res.status(422).json({
+              error: 'Preyone Classic is the house template and cannot be assigned to a client.',
+              code: 'HOUSE_TEMPLATE_ONLY',
+            });
+            return;
+          }
+        }
+      } catch {
+        /* pre-migration database: keep the public default */
+        invoiceTemplateId = invoiceTemplateId ?? 2;
       }
 
       const companyRes = await client.query(

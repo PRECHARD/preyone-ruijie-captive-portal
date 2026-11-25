@@ -3,6 +3,7 @@ import {
   useEffect,
   useMemo,
   useState,
+  type FormEvent,
   type ReactNode,
 } from 'react';
 import { api, getToken, type Catalog, type Company } from '../api';
@@ -68,6 +69,119 @@ interface TeamMember {
   role: string;
   approved?: boolean;
   has_pin?: boolean;
+}
+
+/** CEO/Manager creates a tenant-bound staff login and emails the credentials. */
+function AddTeammateForm({
+  canCreateManager,
+  onClose,
+  onCreated,
+}: {
+  canCreateManager: boolean;
+  onClose: () => void;
+  onCreated: (message: string) => void;
+}) {
+  const [fullName, setFullName] = useState('');
+  const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
+  const [role, setRole] = useState<'Cashier' | 'Staff' | 'Manager'>('Cashier');
+  const [password, setPassword] = useState('');
+  const [pin, setPin] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  const generate = () => {
+    const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$';
+    const bytes = new Uint32Array(12);
+    if (typeof crypto !== 'undefined' && crypto.getRandomValues) crypto.getRandomValues(bytes);
+    setPassword(Array.from(bytes, (n) => alphabet[n % alphabet.length]).join(''));
+  };
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setError('');
+    try {
+      const res = await api.post<{ email_sent: boolean }>('/api/pos/cashiers', {
+        fullName: fullName.trim(),
+        email: email.trim(),
+        phone: phone.trim(),
+        role,
+        password,
+        pin: pin.trim() || undefined,
+      });
+      onCreated(
+        res.email_sent
+          ? `${fullName.trim()} was added and the credentials were emailed.`
+          : `${fullName.trim()} was added. Email delivery failed — share the temporary password securely.`
+      );
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <form className="settings-add-member" onSubmit={submit}>
+      <div className="settings-add-member-head">
+        <div>
+          <strong>Add teammate</strong>
+          <small>Creates a login bound to this company. Credentials are emailed.</small>
+        </div>
+        <button type="button" className="btn ghost" onClick={onClose} disabled={busy}>
+          Cancel
+        </button>
+      </div>
+      {error && <div className="banner error">{error}</div>}
+      <div className="settings-add-member-grid">
+        <label className="settings-field">
+          <span>Full name</span>
+          <input className="input" value={fullName} onChange={(e) => setFullName(e.target.value)} required />
+        </label>
+        <label className="settings-field">
+          <span>Email</span>
+          <input className="input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+        </label>
+        <label className="settings-field">
+          <span>Phone</span>
+          <input className="input" value={phone} onChange={(e) => setPhone(e.target.value)} required />
+        </label>
+        <label className="settings-field">
+          <span>Role</span>
+          <select className="select" value={role} onChange={(e) => setRole(e.target.value as typeof role)}>
+            <option value="Cashier">Cashier</option>
+            <option value="Staff">Staff</option>
+            {canCreateManager && <option value="Manager">Manager</option>}
+          </select>
+        </label>
+        <label className="settings-field">
+          <span>Temporary password</span>
+          <span className="settings-add-password">
+            <input className="input" value={password} onChange={(e) => setPassword(e.target.value)} minLength={8} required />
+            <button type="button" className="btn ghost" onClick={generate}>
+              Generate
+            </button>
+          </span>
+        </label>
+        <label className="settings-field">
+          <span>Till PIN (optional)</span>
+          <input
+            className="input"
+            value={pin}
+            onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 8))}
+            inputMode="numeric"
+            placeholder="4–8 digits"
+          />
+        </label>
+      </div>
+      <div className="settings-add-member-actions">
+        <button className="btn primary" type="submit" disabled={busy}>
+          {busy ? 'Creating…' : 'Create login'}
+        </button>
+      </div>
+    </form>
+  );
 }
 
 const CURRENCIES = ['USD', 'ZWG', 'ZiG', 'ZAR', 'GBP', 'EUR'];
@@ -345,6 +459,7 @@ export default function SettingsPage({
   const [team, setTeam] = useState<TeamMember[] | null>(null);
   const [teamLoading, setTeamLoading] = useState(false);
   const [teamError, setTeamError] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
 
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
@@ -431,6 +546,23 @@ export default function SettingsPage({
     ? sampleSubtotal * (taxValue / 100)
     : sampleSubtotal - sampleSubtotal / (1 + taxValue / 100);
   const sampleTotal = taxInclusive ? sampleSubtotal : sampleSubtotal + sampleTax;
+
+  const resetTeamMember = async (member: TeamMember) => {
+    setNotice(null);
+    try {
+      const res = await api.post<{ sent: boolean; email: string }>(
+        `/api/pos/cashiers/${member.id}/password-reset`
+      );
+      setNotice({
+        kind: res.sent ? 'ok' : 'error',
+        text: res.sent
+          ? `A password reset link was emailed to ${res.email}.`
+          : 'The reset link was created, but the email could not be sent.',
+      });
+    } catch (err) {
+      setNotice({ kind: 'error', text: errorText(err) });
+    }
+  };
 
   const groupedTeam = useMemo(() => {
     const source = team ?? [];
@@ -1134,16 +1266,35 @@ export default function SettingsPage({
                 <h4>Team directory</h4>
                 <p>Active accounts with access to this company’s invoicing workspace.</p>
               </div>
-              <span className="settings-chip">
-                {team
-                  ? `${team.length} ${team.length === 1 ? 'person' : 'people'}`
-                  : role === null
-                    ? 'Syncing…'
-                    : isManager
-                      ? 'Loading…'
-                      : 'Restricted'}
-              </span>
+              <div className="settings-team-head-actions">
+                <span className="settings-chip">
+                  {team
+                    ? `${team.length} ${team.length === 1 ? 'person' : 'people'}`
+                    : role === null
+                      ? 'Syncing…'
+                      : isManager
+                        ? 'Loading…'
+                        : 'Restricted'}
+                </span>
+                {isManager && !adding && (
+                  <button type="button" className="btn primary" onClick={() => setAdding(true)}>
+                    + Add teammate
+                  </button>
+                )}
+              </div>
             </div>
+
+            {adding && (
+              <AddTeammateForm
+                canCreateManager={isCeo}
+                onClose={() => setAdding(false)}
+                onCreated={(message) => {
+                  setAdding(false);
+                  setNotice({ kind: 'ok', text: message });
+                  setTeam(null);
+                }}
+              />
+            )}
 
             {role !== null && !isManager && !teamError && (
               <div className="settings-empty">The team directory is available to CEOs and Managers.</div>
@@ -1175,6 +1326,15 @@ export default function SettingsPage({
                       <span className="settings-member-pin" title={member.has_pin ? 'PIN configured' : 'No PIN'}>
                         {member.has_pin ? 'PIN' : '—'}
                       </span>
+                      {isManager && member.role !== 'CEO' && (
+                        <button
+                          type="button"
+                          className="settings-member-action"
+                          onClick={() => void resetTeamMember(member)}
+                        >
+                          Reset
+                        </button>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -1184,8 +1344,9 @@ export default function SettingsPage({
 
           <div className="settings-note">
             <SettingsIcon name="info" className="settings-lock-icon" />
-            Add or deactivate teammates from the Preyone console. This tab controls what each role can
-            do once they are inside invoicing.
+            Use <strong>Add teammate</strong> to create a company-bound staff login. The temporary
+            password is emailed; the database stores only a bcrypt hash. Use <strong>Reset</strong> to
+            send a one-hour recovery link.
           </div>
         </section>
       )}

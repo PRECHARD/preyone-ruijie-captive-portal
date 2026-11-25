@@ -224,6 +224,8 @@ export interface Company {
  * endpoint. Empty values fall back to the company invoice branding.
  */
 export interface ReceiptSettings {
+  /** 1–10 published receipt designs. */
+  design?: number;
   logoUrl?: string | null;
   showLogo?: boolean;
   brandName?: string | null;
@@ -260,6 +262,8 @@ export interface InvoiceTemplate {
   layout: 'standard' | 'minimal' | 'compact' | string;
   accentColor: string;
   showLogo: boolean;
+  /** True only for the house Preyone Classic sheet. */
+  houseOnly?: boolean;
 }
 
 export interface DocType {

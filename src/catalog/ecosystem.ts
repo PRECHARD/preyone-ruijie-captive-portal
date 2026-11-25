@@ -10,6 +10,8 @@ export interface InvoiceTemplate {
   layout: 'standard' | 'minimal' | 'compact';
   accentColor: string;
   showLogo: boolean;
+  /** House-only identity sheet; never offered to client tenants. */
+  houseOnly?: boolean;
 }
 
 export interface PosTheme {
@@ -47,7 +49,7 @@ export const CURRENCIES = [
 ] as const;
 
 export const INVOICE_TEMPLATES: InvoiceTemplate[] = [
-  { id: 1, name: 'Classic Business', description: 'Traditional two-column invoice with ruled totals.', layout: 'standard', accentColor: '#0f766e', showLogo: true },
+  { id: 1, name: 'Classic Business', description: 'Traditional two-column invoice with ruled totals.', layout: 'standard', accentColor: '#0f766e', showLogo: true, houseOnly: true },
   { id: 2, name: 'Modern Minimal', description: 'Airy single-column layout, generous whitespace.', layout: 'minimal', accentColor: '#2563eb', showLogo: true },
   { id: 3, name: 'Corporate Elegant', description: 'Serif headings and a banded subtotal block.', layout: 'standard', accentColor: '#1e293b', showLogo: true },
   { id: 4, name: 'Compact Receipt', description: 'Thermal-friendly narrow layout for small paper.', layout: 'compact', accentColor: '#334155', showLogo: false },

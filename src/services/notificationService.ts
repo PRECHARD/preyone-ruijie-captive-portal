@@ -193,7 +193,11 @@ export function buildEmeraldEmail(opts: {
 }): string {
   const invoiceUrl = appBaseUrl('invoice');
   const posUrl = appBaseUrl('pos');
-  const logo = `${appBaseUrl('invoice')}/images/preyonelogomainzw-email.png`;
+  // Same header wordmark and footer mark as the admin.console templates:
+  // the horizontal inverse wordmark belongs in the header, the square house
+  // mark belongs in the footer. Using the footer mark twice looked wrong.
+  const headerLogo = `${appBaseUrl('invoice')}/images/preyone-logo-mainInverse-optimized.png`;
+  const footerLogo = `${appBaseUrl('invoice')}/images/preyonelogomainzw-email.png`;
   const sans = "'Segoe UI',-apple-system,BlinkMacSystemFont,Roboto,Arial,sans-serif";
   const eyebrow = opts.eyebrow || 'Preyone Invoice & POS';
   return `<!DOCTYPE html>
@@ -212,13 +216,10 @@ export function buildEmeraldEmail(opts: {
       <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width:540px;width:100%">
         <tr><td style="background:${EMERALD.panel};border:1px solid ${EMERALD.line};border-radius:18px;overflow:hidden">
           <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
-            <tr><td style="height:3px;background:linear-gradient(90deg,${EMERALD.accentDeep},${EMERALD.accent},${EMERALD.cyan});font-size:1px;line-height:1px">&nbsp;</td></tr>
-          </table>
-          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
             <tr><td align="center" style="padding:30px 28px 2px">
-              <img src="${logo}" width="170" alt="Preyone" style="display:block;width:170px;max-width:100%;height:auto;border:0;outline:none;text-decoration:none">
+              <img src="${headerLogo}" width="170" height="96" alt="Preyone" style="display:block;width:170px;max-width:100%;height:auto;border:0;outline:none;text-decoration:none">
             </td></tr>
-            <tr><td align="center" style="padding:16px 28px 0">
+            <tr><td align="center" style="padding:14px 28px 0">
               <div style="font-family:${sans};font-size:10px;font-weight:700;letter-spacing:2.4px;text-transform:uppercase;color:${EMERALD.accent}">${escapeEmailHtml(
                 eyebrow
               )}</div>
@@ -227,6 +228,11 @@ export function buildEmeraldEmail(opts: {
               <h1 style="margin:0;font-family:${sans};font-size:24px;line-height:1.3;font-weight:700;color:${EMERALD.text};letter-spacing:-0.2px">${escapeEmailHtml(
                 opts.title
               )}</h1>
+            </td></tr>
+            <tr><td align="center" style="padding:16px 28px 0">
+              <table role="presentation" width="180" cellpadding="0" cellspacing="0" border="0" style="width:180px;margin:0 auto;border-collapse:collapse">
+                <tr><td style="height:3px;line-height:3px;font-size:0;background:linear-gradient(90deg,${EMERALD.accentDeep},${EMERALD.accent},${EMERALD.cyan});border-radius:3px">&nbsp;</td></tr>
+              </table>
             </td></tr>
           </table>
           <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
@@ -258,7 +264,10 @@ export function buildEmeraldEmail(opts: {
             <tr><td style="padding:26px 30px 0"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0"><tr><td style="border-top:1px solid ${EMERALD.line};font-size:1px;line-height:1px">&nbsp;</td></tr></table></td></tr>
           </table>
           <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
-            <tr><td align="center" style="padding:20px 30px 4px;font-family:${sans};font-size:12px;line-height:1.7;color:${EMERALD.dim}">
+            <tr><td align="center" style="padding:20px 30px 2px">
+              <img src="${footerLogo}" width="120" alt="Preyone Enterprises" style="display:block;width:120px;max-width:100%;height:auto;border:0;outline:none;text-decoration:none">
+            </td></tr>
+            <tr><td align="center" style="padding:10px 30px 4px;font-family:${sans};font-size:12px;line-height:1.7;color:${EMERALD.dim}">
               <a href="${invoiceUrl}" style="color:${EMERALD.accent};text-decoration:none">Invoice</a>
               <span style="color:${EMERALD.line}">&nbsp;|&nbsp;</span>
               <a href="${posUrl}" style="color:${EMERALD.accent};text-decoration:none">POS</a>
@@ -347,6 +356,75 @@ export async function sendClientProvisionedEmail(opts: {
   return sendMail(
     opts.to,
     `Welcome to Preyone — ${opts.companyName} is ready`,
+    html,
+    'Preyone Invoice',
+    'support@preyone.com',
+    undefined,
+    undefined,
+    text
+  );
+}
+
+/** Welcome mail for a staff/cashier account created by a tenant CEO. */
+export async function sendStaffWelcomeEmail(opts: {
+  to: string;
+  fullName: string;
+  companyName: string;
+  role: string;
+  tempPassword: string;
+  pin?: string | null;
+}): Promise<boolean> {
+  const invoiceUrl = `${appBaseUrl('invoice')}/`;
+  const posUrl = `${appBaseUrl('pos')}/`;
+  const html = buildEmeraldEmail({
+    title: 'Your Preyone workspace access',
+    eyebrow: 'Team invitation',
+    preheader: `${opts.companyName} added you to Preyone Invoice & POS.`,
+    bodyHtml: `<p style="margin:0 0 12px">Hi <strong style="color:${EMERALD.text}">${escapeEmailHtml(
+      opts.fullName
+    )}</strong>,</p>
+      <p style="margin:0">${escapeEmailHtml(opts.companyName)} has created a ${escapeEmailHtml(
+        opts.role
+      )} account for you in Preyone Invoice and POS.</p>`,
+    details: [
+      ['Company', escapeEmailHtml(opts.companyName)],
+      ['Role', escapeEmailHtml(opts.role)],
+      ['Sign-in email', escapeEmailHtml(opts.to)],
+      [
+        'Temporary password',
+        `<span style="font-family:Consolas,monospace;font-size:14px;letter-spacing:0.4px">${escapeEmailHtml(
+          opts.tempPassword
+        )}</span>`,
+      ],
+      ...(opts.pin
+        ? ([['Till PIN', `<span style="font-family:Consolas,monospace">${escapeEmailHtml(opts.pin)}</span>`]] as Array<
+            [string, string]
+          >)
+        : []),
+    ],
+    cta: { label: 'Sign in to Invoice', url: invoiceUrl },
+    secondaryCta: { label: 'Open POS', url: posUrl },
+    noteHtml:
+      'Change the temporary password after your first sign-in. On a new till, enter the company till code once.',
+    footerNote: 'Preyone Invoice & POS · team access',
+  });
+  const text = [
+    `Hi ${opts.fullName},`,
+    '',
+    `${opts.companyName} added you as ${opts.role} in Preyone Invoice & POS.`,
+    `Invoice: ${invoiceUrl}`,
+    `POS: ${posUrl}`,
+    `Sign-in email: ${opts.to}`,
+    `Temporary password: ${opts.tempPassword}`,
+    opts.pin ? `Till PIN: ${opts.pin}` : '',
+    '',
+    'Preyone Enterprises · support@preyone.com',
+  ]
+    .filter(Boolean)
+    .join('\n');
+  return sendMail(
+    opts.to,
+    `Your ${opts.companyName} Preyone workspace access`,
     html,
     'Preyone Invoice',
     'support@preyone.com',

@@ -22,6 +22,26 @@ import {
  * not the console behind it.
  */
 
+/** Ten distinct A4 receipt designs, selectable in Settings → Receipt design. */
+export const RECEIPT_TEMPLATES: Array<{
+  id: number;
+  name: string;
+  blurb: string;
+  accent: string;
+  paper: string;
+}> = [
+  { id: 1, name: 'Emerald Ledger', blurb: 'House emerald, clean columns', accent: '#047857', paper: '#ffffff' },
+  { id: 2, name: 'Midnight Slate', blurb: 'Dark paper, luminous totals', accent: '#22d3ee', paper: '#0f172a' },
+  { id: 3, name: 'Gold Foil', blurb: 'Warm cream, formal gold', accent: '#b45309', paper: '#fffdf5' },
+  { id: 4, name: 'Minimal Mono', blurb: 'Black and white, no ink waste', accent: '#111827', paper: '#ffffff' },
+  { id: 5, name: 'Ocean Receipt', blurb: 'Cool blue, airy meta grid', accent: '#0369a1', paper: '#f0f9ff' },
+  { id: 6, name: 'Rose Boutique', blurb: 'Soft rose, rounded stamp', accent: '#be123c', paper: '#fff1f2' },
+  { id: 7, name: 'Tech Grid', blurb: 'Cyan grid, terminal energy', accent: '#00f0ff', paper: '#06121a' },
+  { id: 8, name: 'Warm Kraft', blurb: 'Kraft paper, earthy ink', accent: '#92400e', paper: '#f5efe3' },
+  { id: 9, name: 'Royal Violet', blurb: 'Violet, boutique ledger', accent: '#6d28d9', paper: '#faf5ff' },
+  { id: 10, name: 'Transit Ticket', blurb: 'Mupota navy + amber ticket', accent: '#ca9a2d', paper: '#ffffff' },
+];
+
 export type PesepayRail = 'ecocash' | 'omari' | 'innbucks' | 'paygo';
 
 interface RailOption {
@@ -497,6 +517,7 @@ export function ReceiptSheet({
   id?: string;
 }) {
   const configured = { ...receiptSettingsOf(company), ...(settings || {}) };
+  const design = Math.min(10, Math.max(1, Math.floor(Number(configured.design) || 1)));
   const branded = company?.branding;
   const paid = Number(doc.amount_paid) || 0;
   const balance = Math.max(0, Number(doc.total) - paid);
@@ -540,7 +561,7 @@ export function ReceiptSheet({
   const contactLine = [phone, email, website].filter(Boolean).join(' · ');
 
   return (
-    <div className="receipt-paper" id={id}>
+    <div className={`receipt-paper receipt-theme-${design}`} id={id}>
       <div className="receipt-head">
         <div className="receipt-identity">
           {showLogo && logo && (

@@ -2792,3 +2792,174 @@ tbody tr:last-child td { border-bottom: none; }
 @media (max-width: 980px) {
   .sidebar-appearance { display: none; }
 }
+
+/* ── Selectable receipt designs ───────────────────────────────────────── */
+.receipt-template-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0 0 18px;
+}
+.receipt-template-chip {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 10px;
+  text-align: left;
+  border-radius: 11px;
+  border: 1px solid var(--pos-glass-edge);
+  background: rgba(148, 163, 184, 0.06);
+  color: var(--pos-text);
+  cursor: pointer;
+}
+.receipt-template-chip:hover { border-color: var(--pos-glass-edge-strong); }
+.receipt-template-chip.is-active {
+  border-color: color-mix(in srgb, var(--pos-primary) 60%, transparent);
+  background: color-mix(in srgb, var(--pos-primary) 12%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--pos-primary) 22%, transparent);
+}
+.receipt-template-swatch {
+  width: 42px;
+  height: 32px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 5px;
+  border-radius: 7px;
+  border: 1px solid;
+}
+.receipt-template-swatch i { display: block; height: 5px; border-radius: 2px; }
+.receipt-template-swatch i:last-child { width: 65%; }
+.receipt-template-copy { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.receipt-template-copy strong { font-size: 11px; font-weight: 700; }
+.receipt-template-copy small { font-size: 9.5px; color: var(--pos-text-muted); line-height: 1.3; }
+
+/* 1 · Emerald Ledger */
+.receipt-theme-1 .receipt-head { border-bottom-color: #047857; }
+.receipt-theme-1 .receipt-brand { color: #064e3b; }
+.receipt-theme-1 .receipt-stamp { color: #065f46; background: #d1fae5; border-color: #6ee7b7; }
+.receipt-theme-1 .receipt-table th { color: #047857; border-bottom-color: #a7f3d0; }
+.receipt-theme-1 .receipt-totals .grand { border-top-color: #047857; color: #064e3b; }
+
+/* 2 · Midnight Slate */
+.receipt-theme-2 { background: #0f172a; color: #e2e8f0; }
+.receipt-theme-2 .receipt-brand,
+.receipt-theme-2 .receipt-meta strong,
+.receipt-theme-2 .receipt-table td,
+.receipt-theme-2 .receipt-totals .grand { color: #f8fafc; }
+.receipt-theme-2 .receipt-muted,
+.receipt-theme-2 .receipt-info,
+.receipt-theme-2 .receipt-meta span,
+.receipt-theme-2 .receipt-totals > div,
+.receipt-theme-2 .receipt-payments,
+.receipt-theme-2 .receipt-footnote,
+.receipt-theme-2 .receipt-foot { color: #94a3b8; }
+.receipt-theme-2 .receipt-head { border-bottom-color: #334155; }
+.receipt-theme-2 .receipt-table th { color: #67e8f9; border-bottom-color: #334155; }
+.receipt-theme-2 .receipt-table td { border-bottom-color: #334155; }
+.receipt-theme-2 .receipt-totals .grand { border-top-color: #22d3ee; }
+.receipt-theme-2 .receipt-stamp { color: #03110b; background: #22d3ee; border-color: #67e8f9; }
+.receipt-theme-2 .receipt-logo { filter: brightness(0) invert(1); }
+
+/* 3 · Gold Foil */
+.receipt-theme-3 { background: #fffdf5; color: #78350f; }
+.receipt-theme-3 .receipt-head { border-bottom-color: #b45309; }
+.receipt-theme-3 .receipt-brand { color: #78350f; }
+.receipt-theme-3 .receipt-stamp { color: #92400e; background: #fef3c7; border-color: #fcd34d; }
+.receipt-theme-3 .receipt-table th { color: #92400e; border-bottom-color: #fcd34d; }
+.receipt-theme-3 .receipt-table td { color: #451a03; border-bottom-color: #f5e6c8; }
+.receipt-theme-3 .receipt-totals .grand { border-top-color: #b45309; color: #78350f; }
+
+/* 4 · Minimal Mono */
+.receipt-theme-4 { background: #ffffff; color: #111827; }
+.receipt-theme-4 .receipt-head { border-bottom: 1px solid #111827; }
+.receipt-theme-4 .receipt-brand { color: #111827; letter-spacing: 0.2em; }
+.receipt-theme-4 .receipt-stamp { color: #111827; background: #ffffff; border: 1px solid #111827; border-radius: 2px; }
+.receipt-theme-4 .receipt-table th { color: #111827; border-bottom: 1px solid #111827; }
+.receipt-theme-4 .receipt-table td { color: #111827; border-bottom: 1px dashed #9ca3af; }
+.receipt-theme-4 .receipt-totals .grand { border-top: 2px double #111827; color: #111827; }
+.receipt-theme-4 .receipt-footnote { border-top-color: #111827; color: #374151; }
+
+/* 5 · Ocean Receipt */
+.receipt-theme-5 { background: #f0f9ff; color: #0c4a6e; }
+.receipt-theme-5 .receipt-head { border-bottom-color: #0284c7; }
+.receipt-theme-5 .receipt-brand { color: #0c4a6e; }
+.receipt-theme-5 .receipt-stamp { color: #075985; background: #e0f2fe; border-color: #7dd3fc; }
+.receipt-theme-5 .receipt-table th { color: #0369a1; border-bottom-color: #bae6fd; }
+.receipt-theme-5 .receipt-table td { color: #0c4a6e; border-bottom-color: #bae6fd; }
+.receipt-theme-5 .receipt-totals .grand { border-top-color: #0284c7; color: #0c4a6e; }
+
+/* 6 · Rose Boutique */
+.receipt-theme-6 { background: #fff1f2; color: #881337; }
+.receipt-theme-6 .receipt-head { border-bottom-color: #fb7185; }
+.receipt-theme-6 .receipt-brand { color: #881337; }
+.receipt-theme-6 .receipt-stamp { color: #9f1239; background: #ffe4e6; border-color: #fda4af; }
+.receipt-theme-6 .receipt-table th { color: #be123c; border-bottom-color: #fecdd3; }
+.receipt-theme-6 .receipt-table td { color: #881337; border-bottom-color: #fecdd3; }
+.receipt-theme-6 .receipt-totals .grand { border-top-color: #be123c; color: #881337; }
+.receipt-theme-6 .receipt-stamp { border-radius: 14px; }
+
+/* 7 · Tech Grid */
+.receipt-theme-7 {
+  background: #06121a;
+  background-image:
+    linear-gradient(rgba(34, 211, 238, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(34, 211, 238, 0.06) 1px, transparent 1px);
+  background-size: 18px 18px;
+  color: #d1fae5;
+}
+.receipt-theme-7 .receipt-head { border-bottom-color: #155e75; }
+.receipt-theme-7 .receipt-brand,
+.receipt-theme-7 .receipt-meta strong,
+.receipt-theme-7 .receipt-table td,
+.receipt-theme-7 .receipt-totals .grand { color: #ecfeff; }
+.receipt-theme-7 .receipt-muted,
+.receipt-theme-7 .receipt-info,
+.receipt-theme-7 .receipt-meta span,
+.receipt-theme-7 .receipt-totals > div,
+.receipt-theme-7 .receipt-payments,
+.receipt-theme-7 .receipt-footnote,
+.receipt-theme-7 .receipt-foot { color: #67e8f9; }
+.receipt-theme-7 .receipt-table th { color: #22d3ee; border-bottom-color: #155e75; }
+.receipt-theme-7 .receipt-table td { border-bottom-color: #155e75; }
+.receipt-theme-7 .receipt-totals .grand { border-top-color: #22d3ee; }
+.receipt-theme-7 .receipt-stamp { color: #06121a; background: #22d3ee; border-color: #67e8f9; }
+.receipt-theme-7 .receipt-logo { filter: brightness(0) invert(1); }
+
+/* 8 · Warm Kraft */
+.receipt-theme-8 { background: #f5efe3; color: #78350f; }
+.receipt-theme-8 .receipt-head { border-bottom-color: #b45309; }
+.receipt-theme-8 .receipt-brand { color: #78350f; }
+.receipt-theme-8 .receipt-stamp { color: #92400e; background: #fde68a; border-color: #f59e0b; }
+.receipt-theme-8 .receipt-table th { color: #92400e; border-bottom-color: #d6b98c; }
+.receipt-theme-8 .receipt-table td { color: #451a03; border-bottom-color: #e7d7bd; }
+.receipt-theme-8 .receipt-totals .grand { border-top-color: #92400e; color: #78350f; }
+
+/* 9 · Royal Violet */
+.receipt-theme-9 { background: #faf5ff; color: #4c1d95; }
+.receipt-theme-9 .receipt-head { border-bottom-color: #7c3aed; }
+.receipt-theme-9 .receipt-brand { color: #4c1d95; }
+.receipt-theme-9 .receipt-stamp { color: #5b21b6; background: #ede9fe; border-color: #c4b5fd; }
+.receipt-theme-9 .receipt-table th { color: #6d28d9; border-bottom-color: #ddd6fe; }
+.receipt-theme-9 .receipt-table td { color: #4c1d95; border-bottom-color: #ddd6fe; }
+.receipt-theme-9 .receipt-totals .grand { border-top-color: #6d28d9; color: #4c1d95; }
+
+/* 10 · Transit Ticket (Mupota navy + amber) */
+.receipt-theme-10 { position: relative; background: #ffffff; color: #26323f; overflow: hidden; }
+.receipt-theme-10::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto;
+  height: 7px;
+  background: linear-gradient(90deg, #14253a 0 62%, #ca9a2d 62% 100%);
+}
+.receipt-theme-10 .receipt-head { border-bottom: 2px dashed #14253a; padding-top: 6px; }
+.receipt-theme-10 .receipt-brand { color: #14253a; letter-spacing: 0.16em; }
+.receipt-theme-10 .receipt-stamp { color: #fbbf24; background: #14253a; border-color: #14253a; border-radius: 3px; }
+.receipt-theme-10 .receipt-meta { border-bottom: 1px dashed #ca9a2d; }
+.receipt-theme-10 .receipt-table th { color: #fbbf24; background: #14253a; border-bottom-color: #14253a; padding: 7px 8px; }
+.receipt-theme-10 .receipt-table td { color: #26323f; border-bottom-color: #d8dee6; }
+.receipt-theme-10 .receipt-totals .grand { border-top: 2px solid #ca9a2d; color: #14253a; }
+.receipt-theme-10 .receipt-foot { color: #ca9a2d; font-weight: 700; letter-spacing: 0.08em; }
+.receipt-theme-10 .receipt-footnote { border-top: 1px dashed #ca9a2d; color: #14253a; }

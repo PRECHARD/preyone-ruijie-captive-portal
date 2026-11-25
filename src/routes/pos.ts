@@ -13,7 +13,11 @@ import { markStockApplied, syncSaleToLedgerAndStock } from '../db/accounting';
 import { INVOICE_DOCUMENT_TYPES, ALL_DOCUMENT_TYPES } from '../services/pesepay';
 import { POS_THEMES, CURRENCIES, type PosTheme } from '../catalog/ecosystem';
 import { themeCssVariables, themeCssBlock } from '../utils/themeVars';
-import { sendTransactionalEmail } from '../services/notificationService';
+import {
+  sendPasswordResetEmail,
+  sendStaffWelcomeEmail,
+  sendTransactionalEmail,
+} from '../services/notificationService';
 import { generateDocumentVerifyCode } from '../utils/documentVerifyCode';
 import { withCompanyBranding } from '../utils/companyBranding';
 
@@ -281,6 +285,138 @@ router.get(
   }
 );
 
+/** Create a team member bound to the signed-in tenant. */
+router.post(
+  '/cashiers',
+  requireAdminAuth,
+  requireRole(...MANAGER_ROLES),
+  requireCompany,
+  async (req, res) => {
+    const me = req.adminUser!;
+    const fullName = str(req.body?.fullName);
+    const email = str(req.body?.email).toLowerCase();
+    const phone = str(req.body?.phone);
+    const role = str(req.body?.role) || 'Cashier';
+    const password = String(req.body?.password ?? '');
+    const pin = str(req.body?.pin);
+
+    if (!fullName || !email || !phone || !password) {
+      res.status(422).json({ error: 'Name, email, phone and temporary password are required.' });
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      res.status(422).json({ error: 'Enter a valid email address.' });
+      return;
+    }
+    if (password.length < 8) {
+      res.status(422).json({ error: 'Temporary password must be at least 8 characters.' });
+      return;
+    }
+    if (!['Manager', 'Staff', 'Cashier'].includes(role)) {
+      res.status(422).json({ error: 'Role must be Manager, Staff or Cashier.' });
+      return;
+    }
+    if (role === 'Manager' && me.role !== 'CEO') {
+      res.status(403).json({ error: 'Only the CEO can create a Manager account.' });
+      return;
+    }
+    if (pin && !/^\d{4,8}$/.test(pin)) {
+      res.status(422).json({ error: 'PIN must be 4–8 digits.' });
+      return;
+    }
+
+    const duplicate = await pool.query(
+      'SELECT 1 FROM admin_users WHERE lower(email) = lower($1) LIMIT 1',
+      [email]
+    );
+    if (duplicate.rows.length > 0) {
+      res.status(409).json({
+        error: 'An account with that email already exists.',
+        code: 'EMAIL_IN_USE',
+      });
+      return;
+    }
+
+    const passwordHash = await bcrypt.hash(password, 12);
+    const pinHash = pin ? await bcrypt.hash(pin, 10) : null;
+    const { rows } = await pool.query(
+      `INSERT INTO admin_users
+         (full_name, email, phone, role, password_hash, pin_hash,
+          approved, email_verified, status, portal_company_id)
+       VALUES ($1,$2,$3,$4,$5,$6,TRUE,TRUE,'active',$7)
+       RETURNING id, full_name, email, phone, role, approved, pin_hash IS NOT NULL AS has_pin`,
+      [fullName, email, phone, role, passwordHash, pinHash, req.company!.id]
+    );
+    const user = rows[0];
+
+    await pool.query(
+      `INSERT INTO admin_audit_log (admin_id, admin_name, action, target_type, target_id, detail)
+       VALUES ($1,$2,'pos.staff_create','admin_user',$3,$4)`,
+      [me.id, me.fullName ?? null, user.id, `${role} account created (${email})`]
+    ).catch(() => undefined);
+
+    const emailSent = await sendStaffWelcomeEmail({
+      to: email,
+      fullName,
+      companyName: req.company!.name,
+      role,
+      tempPassword: password,
+      pin: pin || null,
+    }).catch(() => false);
+
+    res.status(201).json({ user, email_sent: emailSent });
+  }
+);
+
+/** Tenant-scoped password recovery for a team member. */
+router.post(
+  '/cashiers/:id/password-reset',
+  requireAdminAuth,
+  requireRole(...MANAGER_ROLES),
+  requireCompany,
+  async (req, res) => {
+    const me = req.adminUser!;
+    const { rows } = await pool.query(
+      `SELECT id, full_name, email, role
+         FROM admin_users
+        WHERE id = $1 AND portal_company_id = $2
+        LIMIT 1`,
+      [req.params.id, req.company!.id]
+    );
+    const user = rows[0];
+    if (!user) {
+      res.status(404).json({ error: 'Team member not found.' });
+      return;
+    }
+    if (user.role === 'CEO' && user.id !== me.id) {
+      res.status(403).json({ error: 'Only the CEO can reset the CEO password.' });
+      return;
+    }
+
+    const token = crypto.randomBytes(32).toString('hex');
+    await pool.query(
+      `UPDATE admin_users
+          SET reset_token = $1, reset_token_expires_at = $2
+        WHERE id = $3`,
+      [token, new Date(Date.now() + 60 * 60 * 1000), user.id]
+    );
+    const sent = await sendPasswordResetEmail(
+      user.email,
+      token,
+      user.full_name,
+      'invoice'
+    ).catch(() => false);
+
+    await pool.query(
+      `INSERT INTO admin_audit_log (admin_id, admin_name, action, target_type, target_id, detail)
+       VALUES ($1,$2,'pos.staff_password_reset','admin_user',$3,$4)`,
+      [me.id, me.fullName ?? null, user.id, `Reset link for ${user.email}`]
+    ).catch(() => undefined);
+
+    res.json({ ok: true, sent, email: user.email });
+  }
+);
+
 // ── Middleware guard for all POS data endpoints ────────────────────
 
 function requireStaff(req: Request, res: Response, next: NextFunction): void {
@@ -517,7 +653,7 @@ router.get('/legacy-totals', async (req, res) => {
 
 router.get('/catalog', async (req, res) => {
   const cid = tenantId(req);
-  const [companyRes, templatesRes, themesRes] = await Promise.all([
+  const [companyRes, templatesRes, themesRes, houseRes] = await Promise.all([
     pool.query(
       // Contact + terms fields feed the A4 document sheet's bill-to block and
       // footer band, so they travel with the catalogue.
@@ -536,15 +672,21 @@ router.get('/catalog', async (req, res) => {
       )
     ),
     pool.query(
-      `SELECT id, name, description, layout, accent_color, show_logo
+      `SELECT id, name, description, layout, accent_color, show_logo, is_house_only
          FROM invoice_templates WHERE is_active ORDER BY id`
     ).catch(() => ({ rows: [] as any[] })),
     pool.query(
       `SELECT ${THEME_COLUMNS} FROM pos_themes WHERE is_active ORDER BY id`
     ).catch(() => ({ rows: [] as any[] })),
+    pool.query('SELECT id FROM companies ORDER BY created_at ASC LIMIT 1').catch(() => ({
+      rows: [] as any[],
+    })),
   ]);
   const company = withCompanyBranding(companyRes.rows[0] ?? {});
-  const templates = templatesRes.rows.length
+  const isHouseTenant = Boolean(
+    houseRes.rows[0]?.id && companyRes.rows[0]?.id === houseRes.rows[0].id
+  );
+  const allTemplates = templatesRes.rows.length
     ? templatesRes.rows.map((t: any) => ({
         id: t.id,
         name: t.name,
@@ -552,8 +694,13 @@ router.get('/catalog', async (req, res) => {
         layout: t.layout,
         accentColor: t.accent_color,
         showLogo: t.show_logo,
+        houseOnly: Boolean(t.is_house_only),
       }))
-    : (await import('../catalog/ecosystem')).INVOICE_TEMPLATES;
+    : (await import('../catalog/ecosystem')).INVOICE_TEMPLATES.map((t) => ({
+        ...t,
+        houseOnly: t.id === 1,
+      }));
+  const templates = allTemplates.filter((t: any) => isHouseTenant || !t.houseOnly);
   const themes = themesRes.rows.length ? themesRes.rows.map(mapThemeRow) : POS_THEMES;
   res.json({
     company,
@@ -604,6 +751,23 @@ router.patch('/invoice-settings', requireRole(...MANAGER_ROLES), async (req, res
   if (templateId !== null && (!Number.isInteger(templateId) || templateId < 1 || templateId > 20)) {
     res.status(422).json({ error: 'templateId must be between 1 and 20' });
     return;
+  }
+  if (templateId !== null) {
+    const [tpl, house] = await Promise.all([
+      pool.query('SELECT is_house_only FROM invoice_templates WHERE id = $1', [templateId]).catch(() => ({
+        rows: [] as any[],
+      })),
+      pool.query('SELECT id FROM companies ORDER BY created_at ASC LIMIT 1').catch(() => ({
+        rows: [] as any[],
+      })),
+    ]);
+    if (tpl.rows[0]?.is_house_only && house.rows[0]?.id !== cid) {
+      res.status(422).json({
+        error: 'Preyone Classic is the house template and cannot be used by a client company.',
+        code: 'HOUSE_TEMPLATE_ONLY',
+      });
+      return;
+    }
   }
   const currency = str(b.currency) ? str(b.currency).toUpperCase() : null;
   const taxPct = b.taxPct === undefined || b.taxPct === null ? null : round2(num(b.taxPct));

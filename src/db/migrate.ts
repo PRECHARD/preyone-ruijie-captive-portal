@@ -1977,6 +1977,11 @@ const SQL = `
       await client.query(fs.readFileSync(v33Path, 'utf8'));
       console.log('Applied db/migrations/v3_3_invoice_a4_templates.sql.');
     }
+    const v34Path = path.resolve(__dirname, '../../db/migrations/v3_4_house_template.sql');
+    if (fs.existsSync(v34Path)) {
+      await client.query(fs.readFileSync(v34Path, 'utf8'));
+      console.log('Applied db/migrations/v3_4_house_template.sql (house-only template).');
+    }
 
     // Enterprise accounting ledger + stock_applied idempotency flag.
     const v4AccountingPath = path.resolve(__dirname, '../../db/migrations/v4_accounting_ledger.sql');

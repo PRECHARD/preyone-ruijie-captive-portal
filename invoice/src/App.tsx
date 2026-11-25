@@ -26,7 +26,12 @@ import {
   type ThemeTokens,
 } from './api';
 import { applyCssVars } from './theme';
-import { OnlinePaymentModal, ReceiptPreview, ReceiptSheet } from './payments';
+import {
+  OnlinePaymentModal,
+  ReceiptPreview,
+  ReceiptSheet,
+  RECEIPT_TEMPLATES,
+} from './payments';
 import { DocumentSheet, TemplateThumb, type SheetDoc } from './DocumentSheet';
 import { ConfirmDialog, type ConfirmOptions } from './ConfirmDialog';
 import Sidebar, { type View } from './components/Sidebar';
@@ -3168,6 +3173,35 @@ function SettingsPanel({
                 {busy && <span className="spinner" aria-hidden />}
                 {busy ? 'Saving…' : 'Save receipt design'}
               </button>
+            </div>
+
+            <div className="receipt-template-grid" role="list" aria-label="Receipt templates">
+              {RECEIPT_TEMPLATES.map((t) => {
+                const active = Math.floor(Number(receipt.design) || 1) === t.id;
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    role="listitem"
+                    className={`receipt-template-chip${active ? ' is-active' : ''}`}
+                    onClick={() => setReceipt({ ...receipt, design: t.id })}
+                    title={t.blurb}
+                  >
+                    <span
+                      className="receipt-template-swatch"
+                      style={{ background: t.paper, borderColor: t.accent }}
+                      aria-hidden
+                    >
+                      <i style={{ background: t.accent }} />
+                      <i style={{ background: t.accent, opacity: 0.35 }} />
+                    </span>
+                    <span className="receipt-template-copy">
+                      <strong>{t.name}</strong>
+                      <small>{t.blurb}</small>
+                    </span>
+                  </button>
+                );
+              })}
             </div>
 
             <LogoPicker

@@ -982,3 +982,50 @@
   .settings-savebar-actions { width: 100%; }
   .settings-savebar-actions .btn { flex: 1; justify-content: center; }
 }
+
+/* Team creation (CEO/Manager) */
+.settings-team-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.settings-add-member {
+  margin: 14px 0 18px;
+  padding: 16px;
+  border: 1px solid var(--set-edge);
+  border-radius: 12px;
+  background: var(--set-violet-soft);
+}
+.settings-add-member-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.settings-add-member-head strong { display: block; color: var(--set-ink); }
+.settings-add-member-head small { display: block; margin-top: 3px; color: var(--set-muted); font-size: 11px; }
+.settings-add-member-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.settings-add-password { display: flex; gap: 8px; align-items: stretch; }
+.settings-add-password .input { flex: 1; min-width: 0; }
+.settings-add-member-actions { display: flex; justify-content: flex-end; margin-top: 14px; }
+.settings-member-action {
+  border: 1px solid var(--set-violet-line);
+  background: transparent;
+  color: var(--set-violet);
+  border-radius: 7px;
+  padding: 3px 8px;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.settings-member-action:hover { background: var(--set-violet-soft); }
+@media (max-width: 720px) {
+  .settings-add-member-grid { grid-template-columns: 1fr; }
+  .settings-add-password { flex-direction: column; }
+}
