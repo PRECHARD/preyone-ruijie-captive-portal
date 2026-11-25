@@ -602,3 +602,70 @@
   background: #fef3c7;
   border-color: #fcd34d;
 }
+
+/* Accounting cockpit daylight */
+[data-preyone-theme='light'] .fin-hero {
+  background:
+    radial-gradient(560px 260px at 100% 0%, rgba(5, 150, 105, 0.08), transparent 65%),
+    radial-gradient(520px 240px at 0% 100%, rgba(8, 145, 178, 0.06), transparent 62%),
+    linear-gradient(145deg, #ffffff, #f3faf6);
+  border-color: #cfe5da;
+  box-shadow: 0 20px 50px rgba(16, 36, 28, 0.08);
+}
+[data-preyone-theme='light'] .fin-kicker { color: #047857; }
+[data-preyone-theme='light'] .fin-hero h1,
+[data-preyone-theme='light'] .fin-chart-title,
+[data-preyone-theme='light'] .fin-donut-centre,
+[data-preyone-theme='light'] .fin-bar-value,
+[data-preyone-theme='light'] .fin-rail-value,
+[data-preyone-theme='light'] .fin-legend-amount { color: #10241c; }
+[data-preyone-theme='light'] .fin-hero p,
+[data-preyone-theme='light'] .fin-chart-sub,
+[data-preyone-theme='light'] .fin-bar-label,
+[data-preyone-theme='light'] .fin-rail-name,
+[data-preyone-theme='light'] .fin-legend,
+[data-preyone-theme='light'] .fin-legend-row,
+[data-preyone-theme='light'] .fin-area-empty { color: #536b60; }
+[data-preyone-theme='light'] .fin-donut-centre-label,
+[data-preyone-theme='light'] .fin-area .axis { fill: #536b60; color: #536b60; }
+[data-preyone-theme='light'] .fin-area .grid { stroke: rgba(16, 36, 28, 0.12); }
+[data-preyone-theme='light'] .fin-area .dot { fill: #ffffff; }
+[data-preyone-theme='light'] .fin-range button {
+  background: #ffffff;
+  border-color: #c9ded4;
+  color: #536b60;
+}
+[data-preyone-theme='light'] .fin-range button:hover,
+[data-preyone-theme='light'] .fin-range button.on {
+  background: #e8f7f0;
+  border-color: #059669;
+  color: #047857;
+  box-shadow: 0 0 14px rgba(5, 150, 105, 0.1);
+}
+[data-preyone-theme='light'] .fin-card {
+  background:
+    radial-gradient(420px 220px at 100% 0%, rgba(5, 150, 105, 0.05), transparent 66%),
+    #ffffff;
+  border-color: #d3e5dc;
+  box-shadow: 0 16px 36px rgba(16, 36, 28, 0.07);
+}
+[data-preyone-theme='light'] .fin-chart-badge {
+  background: #e8f7f0;
+  border-color: #c9ded4;
+  color: #047857;
+}
+[data-preyone-theme='light'] .fin-bar-track,
+[data-preyone-theme='light'] .fin-rail-track { background: rgba(5, 150, 105, 0.1); }
+[data-preyone-theme='light'] .fin-legend-pct { color: #536b60; }
+[data-preyone-theme='light'] .fin-tabs button,
+[data-preyone-theme='light'] .fin-tabs .acct-tab {
+  background: #ffffff;
+  border-color: #c9ded4;
+  color: #536b60;
+}
+[data-preyone-theme='light'] .fin-tabs button.on,
+[data-preyone-theme='light'] .fin-tabs .acct-tab.on {
+  background: #e8f7f0;
+  border-color: #059669;
+  color: #047857;
+}
