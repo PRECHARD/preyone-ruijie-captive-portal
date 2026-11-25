@@ -280,3 +280,11 @@
   border-color: rgba(5, 150, 105, 0.45);
   box-shadow: 0 0 16px rgba(16, 185, 129, 0.14);
 }
+
+[data-preyone-theme='light'] input:not([type='checkbox']):not([type='radio']),
+[data-preyone-theme='light'] textarea,
+[data-preyone-theme='light'] select {
+  background: #ffffff !important;
+  color: #10241c !important;
+  border-color: #c9ded4 !important;
+}

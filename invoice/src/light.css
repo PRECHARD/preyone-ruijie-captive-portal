@@ -485,3 +485,34 @@
   box-shadow: 0 14px 34px rgba(16, 36, 28, 0.07);
 }
 [data-preyone-theme='light'] .dash-quick-meta { color: #536b60; }
+
+[data-preyone-theme='light'] .dash-alert-dot {
+  color: #b91c1c;
+  background: #fee2e2;
+  border-color: #fca5a5;
+}
+[data-preyone-theme='light'] .dash-zar-chip {
+  color: #92400e;
+  background: #fef3c7;
+  border-color: #fcd34d;
+}
+[data-preyone-theme='light'] .dash-kpi-chip {
+  color: #047857;
+  background: rgba(5, 150, 105, 0.08);
+  border-color: rgba(5, 150, 105, 0.28);
+}
+
+[data-preyone-theme='light'] .settings-page .input,
+[data-preyone-theme='light'] .settings-page .select,
+[data-preyone-theme='light'] .settings-page .textarea,
+[data-preyone-theme='light'] input:not([type='checkbox']):not([type='radio']),
+[data-preyone-theme='light'] textarea,
+[data-preyone-theme='light'] select {
+  background: #ffffff !important;
+  color: #10241c !important;
+  border-color: #c9ded4 !important;
+}
+[data-preyone-theme='light'] .settings-page .input::placeholder,
+[data-preyone-theme='light'] textarea::placeholder {
+  color: #7b9187 !important;
+}
