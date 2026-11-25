@@ -7,6 +7,7 @@ import {
 } from 'react';
 import { api, getToken, type Catalog, type Company } from '../api';
 import UpgradeModal from '../components/UpgradeModal';
+import ClientTenants from '../components/ClientTenants';
 import { mergePlanTiers } from '../plans';
 import '../settings.css';
 
@@ -19,7 +20,7 @@ import '../settings.css';
  * this surface reads as the control room, not another invoice list.
  */
 
-type TabKey = 'company' | 'numbering' | 'tax' | 'payments' | 'billing' | 'team';
+type TabKey = 'company' | 'numbering' | 'tax' | 'payments' | 'billing' | 'team' | 'tenants';
 type RoleKey = 'CEO' | 'Staff' | 'Cashier';
 type SettingsIconName =
   | 'building'
@@ -78,6 +79,7 @@ const TABS: Array<{ key: TabKey; label: string; icon: SettingsIconName; caption:
   { key: 'payments', label: 'Payment Rails', icon: 'card', caption: 'Pesepay, mobile money and auto-ledger' },
   { key: 'billing', label: 'Upgrade & Billing', icon: 'spark', caption: 'POS / invoicing subscription tiers' },
   { key: 'team', label: 'Team & Roles', icon: 'team', caption: 'Permissions for CEO, Staff and Cashier' },
+  { key: 'tenants', label: 'Client Tenants', icon: 'building', caption: 'House CEO: provision clients and record cash plans' },
 ];
 
 /** Inline icons keep the tabs crisp without depending on an emoji font. */
@@ -307,6 +309,7 @@ export default function SettingsPage({
 
   const [tab, setTab] = useState<TabKey>(initialTab);
   const [role, setRole] = useState<string | null>(null);
+  const [isHouseCeo, setIsHouseCeo] = useState(false);
   const [showUpgrade, setShowUpgrade] = useState(false);
   const [billing, setBilling] = useState<{
     plan_type: string;
@@ -361,7 +364,11 @@ export default function SettingsPage({
     })
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
-        if (alive) setRole(typeof data?.role === 'string' ? data.role : null);
+        if (!alive) return;
+        setRole(typeof data?.role === 'string' ? data.role : null);
+        // Only the CEO bound to the house tenant may see the platform console.
+        // The server re-checks this on every tenants endpoint.
+        setIsHouseCeo(Boolean(data?.is_house_ceo));
       })
       .catch(() => {
         if (alive) setRole('');
@@ -583,7 +590,7 @@ export default function SettingsPage({
       {notice && <div className={`banner ${notice.kind === 'ok' ? 'ok' : 'error'}`}>{notice.text}</div>}
 
       <div className="settings-tabs" role="tablist" aria-label="Settings sections">
-        {TABS.map((item) => {
+        {TABS.filter((item) => item.key !== 'tenants' || isHouseCeo).map((item) => {
           const active = tab === item.key;
           return (
             <button
@@ -1183,7 +1190,18 @@ export default function SettingsPage({
         </section>
       )}
 
-      {tab !== 'billing' && (
+      {tab === 'tenants' && isHouseCeo && (
+        <section
+          className="settings-panel"
+          id="settings-panel-tenants"
+          role="tabpanel"
+          aria-labelledby="settings-tab-tenants"
+        >
+          <ClientTenants />
+        </section>
+      )}
+
+      {tab !== 'billing' && tab !== 'tenants' && (
         <div className="settings-savebar">
           <div className="settings-savebar-copy">
             <strong>{busy ? 'Saving configuration…' : 'Changes apply to new documents'}</strong>

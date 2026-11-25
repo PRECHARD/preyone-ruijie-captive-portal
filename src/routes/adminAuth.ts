@@ -6,6 +6,7 @@ import fs from 'fs';
 import path from 'path';
 import { pool } from '../db/pool';
 import { loadCompany } from '../middleware/company';
+import { houseCompanyId, isHouseCeo } from '../middleware/houseCeo';
 import { loadPermissions } from '../middleware/rbac';
 import {
   requireAdminAuth,
@@ -1073,6 +1074,15 @@ adminAuthRouter.get('/me', async (req: Request, res: Response) => {
     const plan_type = entitlement?.plan_type ?? null;
     const plan_name = entitlement?.plan_name ?? null;
 
+    // The client-tenants console is a platform control, not a tenant setting.
+    // Resolve it against the account's real portal binding, never the singleton
+    // fallback used just above for legacy entitlement display.
+    const houseId = await houseCompanyId();
+    const houseCeo = isHouseCeo(
+      { role: user.role, portalCompanyId: user.portal_company_id ?? null },
+      houseId
+    );
+
     // The admin console gates navigation on this array, so it must be the SAME
 // effective set requireAdminAuth builds (role_permissions + user_permissions
 // + company_permissions), keyed by company_id -- the transit company, which is
@@ -1100,6 +1110,8 @@ res.json({
   subscribed_modules,
   plan_type,
   plan_name,
+  is_house_ceo: houseCeo,
+  house_company_id: houseId,
   permissions,
   session: sessionState,
   sessionPolicy: SESSION_POLICY,

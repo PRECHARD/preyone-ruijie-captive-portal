@@ -1,5 +1,6 @@
 import type { Response } from 'express';
 import { pool } from '../db/pool';
+import { planNameFor } from '../plans/entitlements';
 
 // ── SaaS subscription guard (3-tier engine) ───────────────────────────────
 // Shared by POST /api/pos/devices/register and /auto-register (and available
@@ -7,7 +8,7 @@ import { pool } from '../db/pool';
 // tier off the companies row that requireCompany already loaded, then
 // enforces in this order (per the subscription spec):
 //   1. active device count vs the plan's max_devices, for a device that is
-//      not registered yet        -> 403 DEVICE_LIMIT_EXCEEDED
+//      not registered yet        -> 403 DEVICE_LIMIT_REACHED
 //   2. subscription expiration   -> 403 SUBSCRIPTION_EXPIRED
 //      (manual suspension        -> 403 SUBSCRIPTION_SUSPENDED)
 // A device that already has a registration row re-registers without counting
@@ -21,7 +22,7 @@ export async function enforceSubscriptionGuard(
   existingDevice: boolean
 ): Promise<boolean> {
   const { rows } = await pool.query(
-    `SELECT max_devices, subscription_status, subscription_expires_at
+    `SELECT max_devices, plan_type, subscription_status, subscription_expires_at
        FROM companies WHERE id = $1`,
     [companyId]
   );
@@ -37,11 +38,15 @@ export async function enforceSubscriptionGuard(
     const active = Number(countRows[0]?.n ?? 0);
     const max = Number(plan.max_devices);
     if (active >= max) {
+      const planLabel = planNameFor(plan.plan_type) ?? 'Your plan';
       res.status(403).json({
-        error: `Device limit reached: your subscription allows ${max} active device(s). Upgrade your plan to register more devices.`,
-        code: 'DEVICE_LIMIT_EXCEEDED',
+        error:
+          `${planLabel} allows ${max} active device${max === 1 ? '' : 's'} and all of them are registered. ` +
+          'Upgrade to PrePro (6 devices) or PreUnlimited (unlimited devices) to pair another till.',
+        code: 'DEVICE_LIMIT_REACHED',
         max_devices: max,
         active_devices: active,
+        plan_name: planNameFor(plan.plan_type),
       });
       return false;
     }

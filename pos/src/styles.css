@@ -648,6 +648,32 @@ select option,
 }
 .op-change { font-size: 0.75rem; font-weight: 400; opacity: 0.7; }
 
+/* Till ↔ company link (pre-auth roster stays tenant-scoped) */
+.pin-setup { display: flex; flex-direction: column; gap: 0.55rem; margin-bottom: 0.9rem; text-align: left; }
+.pin-setup-copy { color: #94a3b8; font-size: 0.78rem; line-height: 1.45; margin: 0; }
+.pin-setup-input {
+  width: 100%; padding: 0.7rem 0.8rem; border-radius: 10px;
+  border: 1px solid rgba(168, 85, 247, 0.28);
+  background: rgba(11, 7, 24, 0.75); color: #f1eaff;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.78rem;
+}
+.pin-setup-input:focus {
+  outline: none; border-color: rgba(34, 211, 238, 0.65);
+  box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.12);
+}
+.pin-setup-btn {
+  padding: 0.7rem 0.9rem; border-radius: 10px;
+  border: 1px solid rgba(34, 211, 238, 0.4);
+  background: linear-gradient(120deg, rgba(0, 240, 255, 0.16), rgba(124, 58, 237, 0.2));
+  color: #e0fbff; font-weight: 700; letter-spacing: 0.04em; cursor: pointer;
+}
+.pin-change-tenant {
+  margin-top: 0.9rem; background: none; border: none; color: #7dd3fc;
+  font-size: 0.74rem; letter-spacing: 0.08em; text-transform: uppercase;
+  cursor: pointer; opacity: 0.8;
+}
+.pin-change-tenant:hover { opacity: 1; text-decoration: underline; }
+
 /* Shift open screen */
 .center-card {
   max-width: 400px; margin: 10vh auto 0;

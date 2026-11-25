@@ -78,14 +78,74 @@ const operatorLimiter = rateLimit({
   message: { error: 'Too many requests, try again shortly' },
 });
 
-router.get('/auth/operators', operatorLimiter, async (_req, res) => {
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/**
+ * Resolve the tenant for an operator-roster request.
+ *
+ * The picker is pre-auth, so it cannot rely on req.company. Accepted proofs,
+ * in order of trust:
+ *   1. a valid admin Bearer token (already signed in / switching cashier);
+ *   2. a paired-device token header (x-device-token);
+ *   3. the tenant's own UUID as the till setup code (?company=);
+ *   4. a legacy single-tenant deployment, where only one company exists.
+ * With two or more companies and no proof, the caller gets TENANT_REQUIRED
+ * instead of every tenant's staff list.
+ */
+async function resolveOperatorTenant(req: Request): Promise<string | null> {
+  const auth = req.headers.authorization;
+  if (auth?.startsWith('Bearer ')) {
+    try {
+      const decoded = jwt.verify(auth.slice(7).trim(), JWT_SECRET) as { id?: string };
+      if (decoded?.id) {
+        const { rows } = await pool.query(
+          'SELECT portal_company_id FROM admin_users WHERE id = $1',
+          [decoded.id]
+        );
+        if (rows[0]?.portal_company_id) return rows[0].portal_company_id as string;
+      }
+    } catch {
+      /* invalid/expired bearer: fall through to the other proofs */
+    }
+  }
+
+  const deviceToken = str(req.headers['x-device-token']);
+  if (deviceToken) {
+    const { rows } = await pool.query(
+      `SELECT company_id FROM pos_devices WHERE device_token = $1 AND status = 'active'`,
+      [deviceToken]
+    );
+    if (rows[0]?.company_id) return rows[0].company_id as string;
+  }
+
+  const code = str(req.query.company) || str(req.query.code);
+  if (code && UUID_RE.test(code)) {
+    const { rows } = await pool.query('SELECT id FROM companies WHERE id = $1', [code]);
+    if (rows[0]?.id) return rows[0].id as string;
+  }
+
+  const { rows } = await pool.query('SELECT id FROM companies ORDER BY created_at ASC LIMIT 2');
+  return rows.length === 1 ? (rows[0].id as string) : null;
+}
+
+router.get('/auth/operators', operatorLimiter, async (req, res) => {
+  const companyId = await resolveOperatorTenant(req);
+  if (!companyId) {
+    res.status(400).json({
+      error:
+        'This till is not linked to a company. Enter the till code from Invoice → Settings → Client Tenants.',
+      code: 'TENANT_REQUIRED',
+    });
+    return;
+  }
   const { rows } = await pool.query(
-    `SELECT id, full_name, email, role, company_id
+    `SELECT id, full_name, email, role
        FROM admin_users
-      WHERE pin_hash IS NOT NULL AND approved = TRUE
-      ORDER BY full_name`
+      WHERE pin_hash IS NOT NULL AND approved = TRUE AND portal_company_id = $1
+      ORDER BY full_name`,
+    [companyId]
   );
-  res.json(rows);
+  res.json({ companyId, operators: rows });
 });
 
 router.post('/auth/pin', pinLimiter, async (req, res) => {
@@ -99,11 +159,27 @@ router.post('/auth/pin', pinLimiter, async (req, res) => {
     res.status(400).json({ error: 'Select your till operator name' });
     return;
   }
+  // A PIN is only valid inside the tenant whose roster the till loaded. This
+  // closes the pre-auth gap where a leaked operator id could be tried from any
+  // company's login screen.
+  const requestedCompany = str(req.body?.companyId);
+  const companyId =
+    requestedCompany && UUID_RE.test(requestedCompany)
+      ? requestedCompany
+      : await resolveOperatorTenant(req);
+  if (!companyId) {
+    res.status(400).json({
+      error: 'This till is not linked to a company. Enter the till code first.',
+      code: 'TENANT_REQUIRED',
+    });
+    return;
+  }
   const { rows } = await pool.query(
     `SELECT id, email, full_name, role, pin_hash, company_id
        FROM admin_users
-      WHERE id = $1 AND pin_hash IS NOT NULL AND approved = TRUE`,
-    [userId]
+      WHERE id = $1 AND portal_company_id = $2
+        AND pin_hash IS NOT NULL AND approved = TRUE`,
+    [userId, companyId]
   );
   const row = rows[0];
   if (row && (await bcrypt.compare(pin, row.pin_hash))) {
@@ -130,8 +206,9 @@ router.post('/auth/pin', pinLimiter, async (req, res) => {
   res.status(401).json({ error: 'Invalid PIN for this operator' });
 });
 
-// Set own PIN, or a cashier's PIN (Manager+)
-router.post('/auth/set-pin', requireAdminAuth, async (req, res) => {
+// Set own PIN, or a cashier's PIN (Manager+). Tenant-scoped: a manager can
+// never rewrite a PIN on another company's account.
+router.post('/auth/set-pin', requireAdminAuth, requireCompany, async (req, res) => {
   const me = req.adminUser!;
   const targetId = str(req.body?.userId) || me.id;
   const pin = str(req.body?.pin);
@@ -145,8 +222,11 @@ router.post('/auth/set-pin', requireAdminAuth, async (req, res) => {
   }
   const hash = await bcrypt.hash(pin, 10);
   const { rows } = await pool.query(
-    `UPDATE admin_users SET pin_hash = $1 WHERE id = $2 RETURNING id, full_name`,
-    [hash, targetId]
+    `UPDATE admin_users SET pin_hash = $1
+      WHERE id = $2
+        AND (portal_company_id = $3 OR portal_company_id IS NULL)
+      RETURNING id, full_name`,
+    [hash, targetId, req.company!.id]
   );
   if (rows.length === 0) {
     res.status(404).json({ error: 'User not found' });
@@ -160,15 +240,23 @@ router.post('/auth/set-pin', requireAdminAuth, async (req, res) => {
   res.json({ ok: true, user: rows[0] });
 });
 
-router.get('/cashiers', requireAdminAuth, requireRole(...MANAGER_ROLES), async (_req, res) => {
-  const { rows } = await pool.query(
-    `SELECT id, full_name, email, role, approved, pin_hash IS NOT NULL AS has_pin
-       FROM admin_users
-      WHERE role IN ('Cashier','Staff','Manager','CEO')
-      ORDER BY full_name`
-  );
-  res.json(rows);
-});
+router.get(
+  '/cashiers',
+  requireAdminAuth,
+  requireRole(...MANAGER_ROLES),
+  requireCompany,
+  async (req, res) => {
+    const { rows } = await pool.query(
+      `SELECT id, full_name, email, role, approved, pin_hash IS NOT NULL AS has_pin
+         FROM admin_users
+        WHERE portal_company_id = $1
+          AND role IN ('Cashier','Staff','Manager','CEO')
+        ORDER BY full_name`,
+      [req.company!.id]
+    );
+    res.json(rows);
+  }
+);
 
 // ── Middleware guard for all POS data endpoints ────────────────────
 
@@ -243,12 +331,20 @@ const PAYMENT_METHODS = [
 ];
 
 // ── Company profile (read-only for staff clients) ───────────────────
-// Single source of truth for receipts / invoices / support phone.
-router.get('/company', async (_req, res) => {
-  const { rows } = await pool.query('SELECT * FROM companies ORDER BY created_at LIMIT 1');
+// Single source of truth for receipts / invoices / support phone. Scoped to
+// req.company (requireCompany above), never to the first-created row: a second
+// tenant must see its own identity on every receipt.
+router.get('/company', async (req, res) => {
+  const { rows } = await pool.query('SELECT * FROM companies WHERE id = $1', [req.company!.id]);
   res.json(
     withCompanyBranding(
-      rows[0] || { name: 'Preyone', currency: 'USD', tax_pct: 0, support_phone: '' }
+      rows[0] || {
+        id: req.company!.id,
+        name: req.company!.name || 'Preyone',
+        currency: 'USD',
+        tax_pct: 0,
+        support_phone: '',
+      }
     )
   );
 });
@@ -1250,9 +1346,19 @@ router.post('/devices/register', requireAdminAuth, async (req, res) => {
   // Subscription engine: plan cap, then expiry, before any new registration.
   const companyId = tenantId(req);
   const { rows: existingRows } = await pool.query(
-    `SELECT id FROM pos_devices WHERE device_id = $1`,
+    `SELECT id, company_id FROM pos_devices WHERE device_id = $1`,
     [hardwareSerial]
   );
+  // A hardware serial is globally unique. Never hand a tenant a token for a
+  // device another tenant already paired: that would let them inherit the
+  // other till's identity and skip their own plan cap.
+  if (existingRows[0]?.company_id && existingRows[0].company_id !== companyId) {
+    res.status(409).json({
+      error: 'This device is already paired to another company. Unpair it there first.',
+      code: 'DEVICE_ALREADY_PAIRED',
+    });
+    return;
+  }
   if (!(await enforceSubscriptionGuard(res, companyId, existingRows.length > 0))) return;
 
   const deviceToken = crypto.randomBytes(32).toString('hex'); // 64-char token
@@ -1265,6 +1371,7 @@ router.post('/devices/register', requireAdminAuth, async (req, res) => {
        shop_id = EXCLUDED.shop_id,
        device_token = EXCLUDED.device_token,
        status = EXCLUDED.status,
+       company_id = COALESCE(pos_devices.company_id, EXCLUDED.company_id),
        last_seen = NOW(),
        last_seen_at = NOW(),
        updated_at = NOW()
@@ -1322,9 +1429,23 @@ router.post('/devices/auto-register', requireAdminAuth, async (req, res) => {
 
   // Check if this device_uuid already registered (idempotent re-register)
   const existingDevice = await pool.query(
-    `SELECT id, device_id, device_type, status FROM pos_devices WHERE device_uuid = $1 OR device_id = $2`,
+    `SELECT id, device_id, device_type, status, company_id
+       FROM pos_devices WHERE device_uuid = $1 OR device_id = $2`,
     [deviceUuid, deviceUuid]
   );
+
+  // A device identity is owned by exactly one tenant. Reject a re-pair attempt
+  // from a different company instead of returning the existing device token.
+  const foreignDevice = existingDevice.rows.find(
+    (row: { company_id?: string | null }) => row.company_id && row.company_id !== companyId
+  );
+  if (foreignDevice) {
+    res.status(409).json({
+      error: 'This device is already paired to another company. Unpair it there first.',
+      code: 'DEVICE_ALREADY_PAIRED',
+    });
+    return;
+  }
 
   // If device exists and is suspended, reject
   if (existingDevice.rows[0]?.status === 'suspended') {

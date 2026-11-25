@@ -233,10 +233,12 @@ export default function Login({
     let alive = true;
     api
       .tillOperators()
-      .then((rows) => {
+      .then((res) => {
         if (!alive) return;
-        setOperators(rows);
-        if (rows.length === 0) setLoadErr('No till operators with a PIN yet. Sign in with SSO to set one.');
+        setOperators(res.operators);
+        if (res.operators.length === 0) {
+          setLoadErr('No till operators with a PIN yet. Sign in with SSO to set one.');
+        }
       })
       .catch(() => alive && setLoadErr('Could not load till operators.'));
     return () => {

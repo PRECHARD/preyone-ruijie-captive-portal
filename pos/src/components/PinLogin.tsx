@@ -1,5 +1,17 @@
-import { useEffect, useState } from 'react';
-import { api, type StaffUser, type TillOperator } from '../api';
+import { useEffect, useState, type FormEvent } from 'react';
+import { api, ApiError, type StaffUser, type TillOperator } from '../api';
+
+const TENANT_KEY = 'pos_tenant';
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function storedTenant(): string {
+  try {
+    const value = localStorage.getItem(TENANT_KEY) || '';
+    return UUID_RE.test(value) ? value : '';
+  } catch {
+    return '';
+  }
+}
 
 export default function PinLogin({ onLoggedIn }: { onLoggedIn: (token: string, user: StaffUser) => void }) {
   const [operators, setOperators] = useState<TillOperator[]>([]);
@@ -9,6 +21,13 @@ export default function PinLogin({ onLoggedIn }: { onLoggedIn: (token: string, u
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [online, setOnline] = useState(typeof navigator === 'undefined' ? true : navigator.onLine);
+
+  // Tenant hint. The roster endpoint is pre-auth, so the till proves which
+  // company it belongs to with this id (or the server's single-tenant fallback).
+  const [tenant, setTenant] = useState(storedTenant);
+  const [setupOpen, setSetupOpen] = useState(false);
+  const [setupCode, setSetupCode] = useState('');
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     const up = () => setOnline(true);
@@ -23,25 +42,64 @@ export default function PinLogin({ onLoggedIn }: { onLoggedIn: (token: string, u
 
   useEffect(() => {
     let alive = true;
+    setLoadErr('');
     api
-      .tillOperators()
-      .then((rows) => {
+      .tillOperators(tenant || undefined)
+      .then((res) => {
         if (!alive) return;
-        setOperators(rows);
-        if (rows.length === 0) setLoadErr('No till operators registered. Ask an admin to add staff and set a PIN.');
+        setSetupOpen(false);
+        setOperators(res.operators);
+        if (res.companyId && res.companyId !== tenant) {
+          try {
+            localStorage.setItem(TENANT_KEY, res.companyId);
+          } catch {
+            /* private mode: the query param still scopes this session */
+          }
+          setTenant(res.companyId);
+        }
+        if (res.operators.length === 0) {
+          setLoadErr('No till operators registered. Ask an admin to add staff and set a PIN.');
+        }
       })
-      .catch(() => alive && setLoadErr('Could not load till operators. Check the connection.'));
+      .catch((e) => {
+        if (!alive) return;
+        setOperators([]);
+        if (e instanceof ApiError && e.status === 400) {
+          setSetupOpen(true);
+          setLoadErr('Link this till to your company before selecting an operator.');
+        } else {
+          setLoadErr('Could not load till operators. Check the connection.');
+        }
+      });
     return () => {
       alive = false;
     };
-  }, []);
+  }, [tenant, reloadKey]);
+
+  const connectTill = (e: FormEvent) => {
+    e.preventDefault();
+    const code = setupCode.trim();
+    if (!UUID_RE.test(code)) {
+      setLoadErr('That till code is not valid. Copy it from Invoice → Settings → Client Tenants.');
+      return;
+    }
+    try {
+      localStorage.setItem(TENANT_KEY, code);
+    } catch {
+      /* private mode: keep the in-memory value */
+    }
+    setTenant(code);
+    setSetupOpen(false);
+    setSetupCode('');
+    setReloadKey((n) => n + 1);
+  };
 
   const submit = async (code: string) => {
     if (!operator) return;
     setBusy(true);
     setError('');
     try {
-      const res = await api.loginPin(operator.id, code);
+      const res = await api.loginPin(operator.id, code, tenant || undefined);
       onLoggedIn(res.token, res.user);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Sign-in failed');
@@ -93,7 +151,30 @@ export default function PinLogin({ onLoggedIn }: { onLoggedIn: (token: string, u
         <div className="pin-brand">PREYONE</div>
         <div className="pin-sub">POINT OF SALE</div>
 
-        {loadErr && <div className="err-msg">{loadErr}</div>}
+        {setupOpen && (
+          <form className="pin-setup" onSubmit={connectTill}>
+            <div className="pin-hint">Till setup</div>
+            <p className="pin-setup-copy">
+              Enter the company till code. The house CEO can copy it from Invoice → Settings →
+              Client Tenants.
+            </p>
+            <input
+              className="pin-setup-input"
+              value={setupCode}
+              onChange={(e) => setSetupCode(e.target.value)}
+              placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+              spellCheck={false}
+              autoCapitalize="off"
+              autoCorrect="off"
+              aria-label="Company till code"
+            />
+            <button type="submit" className="pin-setup-btn">
+              Link this till
+            </button>
+          </form>
+        )}
+
+        {loadErr && !setupOpen && <div className="err-msg">{loadErr}</div>}
 
         {!operator ? (
           <>
@@ -106,6 +187,16 @@ export default function PinLogin({ onLoggedIn }: { onLoggedIn: (token: string, u
                 </button>
               ))}
             </div>
+            <button
+              type="button"
+              className="pin-change-tenant"
+              onClick={() => {
+                setSetupCode(tenant);
+                setSetupOpen(true);
+              }}
+            >
+              Company till code
+            </button>
           </>
         ) : (
           <>

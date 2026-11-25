@@ -82,7 +82,7 @@ describe('POS cross-tenant isolation', () => {
     // Simulate the row existing, but belonging to the other tenant: a correct
     // query filters it out, so the mock returns nothing for company-a.
     (pool.query as any).mockImplementation(async (sql: string, params?: any[]) => {
-      if (/FROM pos_documents WHERE id/.test(sql)) {
+      if (/FROM pos_documents d\s+LEFT JOIN pos_customers/.test(sql)) {
         const [docId, companyId] = params ?? [];
         // Model the real table: each document belongs to exactly one company.
         const owned = docId === DOC_A && companyId === COMPANY_A;
@@ -108,7 +108,7 @@ describe('POS cross-tenant isolation', () => {
     await request(createApp()).get(`/api/pos/documents/${DOC_A}`);
 
     const docCall = (pool.query as any).mock.calls.find((c: any[]) =>
-      typeof c[0] === 'string' && c[0].includes('FROM pos_documents WHERE id')
+      typeof c[0] === 'string' && /FROM pos_documents d\s+LEFT JOIN pos_customers/.test(c[0])
     );
     expect(docCall).toBeTruthy();
     // The tenant predicate must be present and bound to company-a.
@@ -206,7 +206,7 @@ describe('POS cross-tenant isolation', () => {
     await request(createApp()).get(`/api/pos/documents/${DOC_A}`);
 
     const docCall = (pool.query as any).mock.calls.find((c: any[]) =>
-      typeof c[0] === 'string' && c[0].includes('FROM pos_documents WHERE id')
+      typeof c[0] === 'string' && /FROM pos_documents d\s+LEFT JOIN pos_customers/.test(c[0])
     );
     expect(docCall![1][1]).toBe(COMPANY_B);
     expect(docCall![1]).not.toContain('some-transit-company-id');

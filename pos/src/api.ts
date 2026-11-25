@@ -310,14 +310,22 @@ export interface CompanyProfile {
 }
 
 export const api = {
-  tillOperators: () => req<TillOperator[]>('/auth/operators'),
+  /**
+   * Operator picker is pre-auth. A till that has already been linked passes its
+   * company id so the server returns only that tenant's roster; an unlinked
+   * till gets TENANT_REQUIRED until the setup code is entered.
+   */
+  tillOperators: (companyId?: string) =>
+    req<{ companyId: string; operators: TillOperator[] }>(
+      `/auth/operators${companyId ? `?company=${encodeURIComponent(companyId)}` : ''}`
+    ),
 
   company: () => req<CompanyProfile>('/company'),
 
-  loginPin: async (userId: string, pin: string) =>
+  loginPin: async (userId: string, pin: string, companyId?: string) =>
     req<{ token: string; user: StaffUser }>('/auth/pin', {
       method: 'POST',
-      body: JSON.stringify({ userId, pin }),
+      body: JSON.stringify({ userId, pin, ...(companyId ? { companyId } : {}) }),
     }),
 
   products: (includeInactive = false) =>

@@ -79,11 +79,13 @@ const posState = {
 };
 
 function routePosQuery(sql: string): { rows: any[] } {
-  if (/SELECT max_devices, subscription_status, subscription_expires_at/.test(sql)) {
+  if (/SELECT max_devices, plan_type, subscription_status, subscription_expires_at/.test(sql)) {
     return { rows: posState.companyRows };
   }
   if (/WHERE device_uuid = \$1 OR device_id = \$2/.test(sql)) return { rows: posState.existingRows };
-  if (/SELECT id FROM pos_devices WHERE device_id = \$1/.test(sql)) return { rows: posState.existingRows };
+  if (/SELECT id, company_id FROM pos_devices WHERE device_id = \$1/.test(sql)) {
+    return { rows: posState.existingRows };
+  }
   if (/COUNT\(\*\)::int AS n FROM pos_devices/.test(sql)) return { rows: [{ n: posState.activeCount }] };
   if (/AS cnt FROM pos_devices/.test(sql)) return { rows: [{ cnt: posState.quotaCount }] };
   if (/INSERT INTO pos_devices/.test(sql)) return { rows: posState.insertRows };
@@ -203,7 +205,7 @@ beforeEach(() => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('POST /api/pos/devices/register — subscription guard', () => {
-  it('rejects a new device once the plan cap is reached (DEVICE_LIMIT_EXCEEDED)', async () => {
+  it('rejects a new device once the plan cap is reached (DEVICE_LIMIT_REACHED)', async () => {
     posState.companyRows = [{ max_devices: 1, subscription_status: 'active', subscription_expires_at: null }];
     posState.activeCount = 1;
 
@@ -214,7 +216,7 @@ describe('POST /api/pos/devices/register — subscription guard', () => {
     });
 
     expect(res.status).toBe(403);
-    expect(res.body.code).toBe('DEVICE_LIMIT_EXCEEDED');
+    expect(res.body.code).toBe('DEVICE_LIMIT_REACHED');
     expect(res.body.max_devices).toBe(1);
     expect(res.body.active_devices).toBe(1);
 
@@ -295,6 +297,22 @@ describe('POST /api/pos/devices/register — subscription guard', () => {
     expect(inserts).toHaveLength(1);
   });
 
+  it('refuses to re-pair a hardware serial owned by another company', async () => {
+    posState.companyRows = [{ max_devices: 6, subscription_status: 'active', subscription_expires_at: null }];
+    posState.existingRows = [{ id: 'dev-foreign', company_id: 'company-other' }];
+
+    const res = await request(createPosApp()).post('/api/pos/devices/register').send({
+      hardware_serial: 'HW-FOREIGN',
+      device_type: 'tablet',
+      device_name: 'Foreign Till',
+    });
+
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe('DEVICE_ALREADY_PAIRED');
+    const inserts = (pool.query as any).mock.calls.filter((c: any[]) => /INSERT INTO pos_devices/.test(c[0]));
+    expect(inserts).toHaveLength(0);
+  });
+
   it('grandfathers a company with no plan columns (guard passes)', async () => {
     posState.companyRows = [{ max_devices: null, subscription_status: null, subscription_expires_at: null }];
 
@@ -334,6 +352,23 @@ describe('POST /api/pos/devices/auto-register — subscription guard', () => {
     expect(inserts).toHaveLength(0);
   });
 
+  it('refuses to auto-register a device owned by another company', async () => {
+    posState.companyRows = [{ max_devices: 6, subscription_status: 'active', subscription_expires_at: null }];
+    posState.existingRows = [{ id: 'dev-foreign', company_id: 'company-other' }];
+
+    const res = await request(createPosApp()).post('/api/pos/devices/auto-register').send({
+      device_uuid: 'auto-foreign-99999999',
+      device_type: 'phone',
+      device_name: 'Foreign Phone',
+      device_public_key: 'a'.repeat(44),
+    });
+
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe('DEVICE_ALREADY_PAIRED');
+    const inserts = (pool.query as any).mock.calls.filter((c: any[]) => /INSERT INTO pos_devices/.test(c[0]));
+    expect(inserts).toHaveLength(0);
+  });
+
   it('enforces the plan cap ahead of the per-type quota', async () => {
     posState.companyRows = [{ max_devices: 1, subscription_status: 'active', subscription_expires_at: null }];
     posState.existingRows = [];
@@ -347,7 +382,7 @@ describe('POST /api/pos/devices/auto-register — subscription guard', () => {
     });
 
     expect(res.status).toBe(403);
-    expect(res.body.code).toBe('DEVICE_LIMIT_EXCEEDED');
+    expect(res.body.code).toBe('DEVICE_LIMIT_REACHED');
     expect(res.body.max_devices).toBe(1);
   });
 });

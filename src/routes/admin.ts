@@ -1,8 +1,13 @@
 import { Router, Request, Response } from 'express';
 import crypto from 'crypto';
+import bcrypt from 'bcryptjs';
 import rateLimit from 'express-rate-limit';
 import { pool } from '../db/pool';
 import { requireAdminAuth, requireRole } from '../middleware/adminAuth';
+import { requireHouseCeo } from '../middleware/houseCeo';
+import { isPlanTier, syncPlanModules, tierById } from '../plans/entitlements';
+import { syncSaleToLedgerAndStock } from '../db/accounting';
+import { generateDocumentVerifyCode } from '../utils/documentVerifyCode';
 import { PERMISSIONS, requirePermission, scopeUserVoucherCodeCondition, scopeVoucherCondition } from '../middleware/rbac';
 import { recordAuditLog } from './adminAuth';
 import { withCompanyBranding } from '../utils/companyBranding';
@@ -3333,21 +3338,6 @@ adminRouter.get('/catalogues', requireRole('CEO'), async (_req: Request, res: Re
   });
 });
 
-/**
- * Company id for settings writes.
- *
- * A platform admin may name an explicit company; otherwise the session's
- * portal company wins and only falls back to the singleton when the account is
- * unassigned. This keeps the logo/company UPDATE from editing another tenant's
- * branding.
- */
-function targetCompanyId(req: Request): string | null {
-  const explicit = typeof (req.body as any)?.companyId === 'string' ? (req.body as any).companyId : null;
-  if (explicit) return explicit;
-  const sessionCompany = (req.adminUser as { portalCompanyId?: string | null } | undefined)?.portalCompanyId;
-  return sessionCompany ?? null;
-}
-
 // Logo upload for the Global Settings Hub and the invoice Company & Branding
 // panel.
 //
@@ -3389,7 +3379,14 @@ adminRouter.post('/company/logo', requireRole('CEO', 'Manager'), async (req: Req
   fs.writeFileSync(path.join(imagesDir, filename), bytes);
 
   const publicUrl = `/images/${filename}`;
-  const companyId = targetCompanyId(req);
+  const companyId = await portalCompanyScope(req);
+  if (!companyId) {
+    res.status(403).json({
+      error: 'No company assigned to this account.',
+      code: 'NO_COMPANY_SCOPE',
+    });
+    return;
+  }
   const slot = req.body?.slot === 'receipt' ? 'receipt' : 'company';
   const { rows } = await pool.query(
     slot === 'receipt'
@@ -3401,13 +3398,11 @@ adminRouter.post('/company/logo', requireRole('CEO', 'Manager'), async (req: Req
                          || jsonb_build_object('logoUrl', $1::text)
                      ),
                 updated_at = NOW()
-          WHERE ($2::uuid IS NULL AND id = (SELECT id FROM companies ORDER BY created_at LIMIT 1))
-             OR id = $2::uuid
+          WHERE id = $2
           RETURNING id`
       : `UPDATE companies
             SET logo_url = $1, logo_path = $2, updated_at = NOW()
-          WHERE ($3::uuid IS NULL AND id = (SELECT id FROM companies ORDER BY created_at LIMIT 1))
-             OR id = $3::uuid
+          WHERE id = $3
           RETURNING id`,
     slot === 'receipt' ? [publicUrl, companyId] : [publicUrl, filename, companyId]
   );
@@ -3426,14 +3421,48 @@ adminRouter.post('/company/logo', requireRole('CEO', 'Manager'), async (req: Req
   res.json({ logoUrl: publicUrl, filename, bytes: bytes.length, slot });
 });
 
-adminRouter.get('/company', requireRole('CEO'), async (_req: Request, res: Response) => {
-  const { rows } = await pool.query('SELECT * FROM companies ORDER BY created_at LIMIT 1');
-  res.json(
-    withCompanyBranding(rows[0] || { name: 'Preyone', currency: 'USD', tax_pct: 0 })
-  );
+/**
+ * Resolve the portal company a console session may read or write.
+ *
+ * The session's portal_company_id is authoritative. Only an account that is
+ * genuinely unbound (legacy super-admin) may fall back to the house tenant,
+ * and only while exactly one company exists — the same rule requireCompany
+ * applies. A regular tenant must never inherit the first-created row.
+ */
+async function portalCompanyScope(req: Request): Promise<string | null> {
+  const bound =
+    (req.adminUser as { portalCompanyId?: string | null } | undefined)?.portalCompanyId ?? null;
+  if (bound) return bound;
+  const { rows } = await pool.query('SELECT id FROM companies ORDER BY created_at ASC LIMIT 2');
+  return rows.length === 1 ? (rows[0].id as string) : null;
+}
+
+adminRouter.get('/company', requireRole('CEO'), async (req: Request, res: Response) => {
+  const companyId = await portalCompanyScope(req);
+  if (!companyId) {
+    res.status(403).json({
+      error: 'No company assigned to this account.',
+      code: 'NO_COMPANY_SCOPE',
+    });
+    return;
+  }
+  const { rows } = await pool.query('SELECT * FROM companies WHERE id = $1', [companyId]);
+  if (rows.length === 0) {
+    res.status(404).json({ error: 'Company not found' });
+    return;
+  }
+  res.json(withCompanyBranding(rows[0]));
 });
 
 adminRouter.put('/company', requireRole('CEO'), async (req: Request, res: Response) => {
+  const companyId = await portalCompanyScope(req);
+  if (!companyId) {
+    res.status(403).json({
+      error: 'No company assigned to this account.',
+      code: 'NO_COMPANY_SCOPE',
+    });
+    return;
+  }
   const {
     name, tagline, address, email, supportPhone, website, logoPath,
     currency, taxPct, invoicePrefix, quotePrefix, receiptFooter, termsText,
@@ -3461,6 +3490,7 @@ adminRouter.put('/company', requireRole('CEO'), async (req: Request, res: Respon
        pos_hardware        = COALESCE($18::jsonb, pos_hardware),
        invoice_settings    = COALESCE($19::jsonb, invoice_settings),
        updated_by          = $20, updated_at = NOW()
+     WHERE id = $21
      RETURNING *`,
     [name ?? null, tagline ?? null, address ?? null, email ?? null, supportPhone ?? null,
      website ?? null, logoPath ?? null, currency ?? null, taxPct ?? null, invoicePrefix ?? null,
@@ -3468,11 +3498,487 @@ adminRouter.put('/company', requireRole('CEO'), async (req: Request, res: Respon
      businessProfile ?? null, invoiceTemplateId ?? null, posThemeId ?? null,
      posHardware != null ? JSON.stringify(posHardware) : null,
      invoiceSettings != null ? JSON.stringify(invoiceSettings) : null,
-     req.adminUser!.id]
+     req.adminUser!.id, companyId]
   );
+  if (rows.length === 0) {
+    res.status(404).json({ error: 'Company not found' });
+    return;
+  }
   await recordAuditLog(req.adminUser!.id, req.adminUser!.fullName, 'company_update', 'companies', rows[0]?.id, `Company profile updated`);
   res.json(withCompanyBranding(rows[0]));
 });
+
+// ═══════════════════════════════════════════════════════
+// Client tenants & subscriptions (house CEO only)
+// ═══════════════════════════════════════════════════════
+
+const TENANT_CURRENCIES = new Set(['USD', 'ZWG']);
+
+/** Document prefixes are printed on every document; keep them filename-safe. */
+function cleanTenantPrefix(value: unknown, fallback: string): string {
+  const cleaned = String(value ?? '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9._/-]+/g, '')
+    .replace(/[-/._]+$/, '')
+    .slice(0, 12);
+  return cleaned || fallback;
+}
+
+function tenantDurationDays(value: unknown): number {
+  const n = Math.floor(Number(value));
+  if (!Number.isFinite(n)) return 30;
+  return Math.min(3650, Math.max(1, n));
+}
+
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+/** All portal companies, their house plan and live device usage. */
+adminRouter.get(
+  '/tenants/portal-list',
+  requireRole('CEO'),
+  requireHouseCeo,
+  async (req: Request, res: Response) => {
+    const houseId = req.houseCompanyId!;
+    const { rows } = await pool.query(
+      `SELECT c.id, c.name, c.currency, c.plan_type, c.max_devices,
+              c.subscription_status, c.subscription_expires_at, c.created_at,
+              owner.full_name AS owner_name,
+              owner.email     AS owner_email,
+              owner.phone     AS owner_phone,
+              COALESCE(dev.active, 0)::int AS active_devices,
+              (c.id = $1) AS is_house
+         FROM companies c
+         LEFT JOIN LATERAL (
+           SELECT a.full_name, a.email, a.phone
+             FROM admin_users a
+            WHERE a.portal_company_id = c.id AND a.role = 'CEO'
+            ORDER BY a.created_at ASC
+            LIMIT 1
+         ) owner ON TRUE
+         LEFT JOIN LATERAL (
+           SELECT COUNT(*)::int AS active
+             FROM pos_devices d
+            WHERE d.company_id = c.id AND d.status = 'active'
+         ) dev ON TRUE
+        ORDER BY c.created_at ASC`,
+      [houseId]
+    );
+
+    const now = Date.now();
+    const tenants = rows.map((row) => {
+      const tier = tierById(row.plan_type);
+      const expires = row.subscription_expires_at
+        ? new Date(row.subscription_expires_at).getTime()
+        : null;
+      let status = 'Active';
+      if (row.subscription_status === 'suspended') status = 'Suspended';
+      else if (row.subscription_status === 'expired' || (expires !== null && expires <= now)) {
+        status = 'Expired';
+      } else if (expires !== null && expires <= now + 7 * 86_400_000) {
+        status = 'Expiring Soon';
+      }
+      return {
+        id: row.id,
+        name: row.name,
+        currency: row.currency,
+        plan_type: row.plan_type,
+        plan_name: tier?.name ?? null,
+        plan_price: tier?.price ?? null,
+        max_devices: Number(row.max_devices ?? tier?.devices ?? 0),
+        active_devices: Number(row.active_devices ?? 0),
+        subscription_status: row.subscription_status,
+        subscription_expires_at: row.subscription_expires_at,
+        owner_name: row.owner_name ?? null,
+        owner_email: row.owner_email ?? null,
+        owner_phone: row.owner_phone ?? null,
+        is_house: Boolean(row.is_house),
+        status,
+        till_code: row.id,
+      };
+    });
+
+    res.json({ houseCompanyId: houseId, tenants });
+  }
+);
+
+/**
+ * Atomic client onboarding: tenant + CEO login + module mirror rows.
+ *
+ * Nothing here trusts a company id from the browser; the new tenant is created
+ * inside the transaction and every child row points at it. The house CEO is
+ * the only caller (requireHouseCeo above).
+ */
+adminRouter.post(
+  '/tenants/provision',
+  requireRole('CEO'),
+  requireHouseCeo,
+  async (req: Request, res: Response) => {
+    const body = req.body ?? {};
+    const businessName = typeof body.businessName === 'string' ? body.businessName.trim() : '';
+    const tagline = typeof body.tagline === 'string' ? body.tagline.trim() : '';
+    const businessProfile = typeof body.businessProfile === 'string' ? body.businessProfile.trim() : '';
+    const currency = typeof body.currency === 'string' ? body.currency.trim().toUpperCase() : '';
+    const planType = typeof body.planType === 'string' ? body.planType.trim() : '';
+    const ownerName = typeof body.ownerName === 'string' ? body.ownerName.trim() : '';
+    const ownerEmail = typeof body.ownerEmail === 'string' ? body.ownerEmail.trim().toLowerCase() : '';
+    const ownerPhone = typeof body.ownerPhone === 'string' ? body.ownerPhone.trim() : '';
+    const tempPassword = typeof body.tempPassword === 'string' ? body.tempPassword : '';
+    const taxPct = Number(body.taxPct);
+    const durationDays = tenantDurationDays(body.durationDays);
+
+    if (!businessName) {
+      res.status(422).json({ error: 'Business name is required' });
+      return;
+    }
+    if (!BUSINESS_PROFILES.some((p) => p.id === businessProfile)) {
+      res.status(422).json({
+        error: `businessProfile must be one of: ${BUSINESS_PROFILES.map((p) => p.id).join(', ')}`,
+      });
+      return;
+    }
+    if (!TENANT_CURRENCIES.has(currency)) {
+      res.status(422).json({ error: 'currency must be USD or ZWG' });
+      return;
+    }
+    if (!isPlanTier(planType)) {
+      res.status(422).json({ error: 'planType is not a valid Preyone plan' });
+      return;
+    }
+    if (!ownerName || !ownerEmail || !ownerPhone) {
+      res.status(422).json({ error: 'Owner name, email and phone are required' });
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(ownerEmail)) {
+      res.status(422).json({ error: 'Owner email is not valid' });
+      return;
+    }
+    if (tempPassword.length < 8) {
+      res.status(422).json({ error: 'Temporary password must be at least 8 characters' });
+      return;
+    }
+    if (!Number.isFinite(taxPct) || taxPct < 0 || taxPct > 100) {
+      res.status(422).json({ error: 'taxPct must be between 0 and 100' });
+      return;
+    }
+
+    const tier = tierById(planType)!;
+    const invoicePrefix = cleanTenantPrefix(body.invoicePrefix, 'INV');
+    const quotePrefix = cleanTenantPrefix(body.quotePrefix, 'QUO');
+    const invoiceTemplateId = Math.min(
+      20,
+      Math.max(1, Math.floor(Number(body.invoiceTemplateId) || 1))
+    );
+    const posThemeId = Math.min(20, Math.max(1, Math.floor(Number(body.posThemeId) || 1)));
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      const duplicate = await client.query(
+        'SELECT 1 FROM admin_users WHERE lower(email) = lower($1) LIMIT 1',
+        [ownerEmail]
+      );
+      if (duplicate.rows.length > 0) {
+        await client.query('ROLLBACK');
+        res.status(409).json({
+          error: 'An account with that owner email already exists.',
+          code: 'EMAIL_IN_USE',
+        });
+        return;
+      }
+
+      const companyRes = await client.query(
+        `INSERT INTO companies
+           (name, tagline, email, support_phone, currency, tax_pct,
+            invoice_prefix, quote_prefix, business_profile,
+            invoice_template_id, pos_theme_id,
+            plan_type, subscription_status, subscription_expires_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'active',
+                 NOW() + ($13 || ' days')::interval)
+         RETURNING id, name, tagline, email, support_phone, currency, tax_pct,
+                   invoice_prefix, quote_prefix, business_profile,
+                   invoice_template_id, pos_theme_id, plan_type, max_devices,
+                   subscription_status, subscription_expires_at, created_at`,
+        [
+          businessName,
+          tagline || null,
+          ownerEmail,
+          ownerPhone,
+          currency,
+          taxPct,
+          invoicePrefix,
+          quotePrefix,
+          businessProfile,
+          invoiceTemplateId,
+          posThemeId,
+          planType,
+          String(durationDays),
+        ]
+      );
+      const company = companyRes.rows[0];
+
+      const passwordHash = await bcrypt.hash(tempPassword, 12);
+      const ownerRes = await client.query(
+        `INSERT INTO admin_users
+           (full_name, email, phone, role, password_hash,
+            approved, email_verified, status, portal_company_id)
+         VALUES ($1,$2,$3,'CEO',$4,TRUE,TRUE,'active',$5)
+         RETURNING id, full_name, email, phone, role, approved, email_verified, status`,
+        [ownerName, ownerEmail, ownerPhone, passwordHash, company.id]
+      );
+
+      await syncPlanModules(client, company.id, planType);
+      await client.query('COMMIT');
+
+      // The tenant is already committed. An audit-log failure must not turn a
+      // successful onboarding into a 500 the caller would retry.
+      await recordAuditLog(
+        req.adminUser!.id,
+        req.adminUser!.fullName,
+        'tenant_provision',
+        'companies',
+        company.id,
+        `Provisioned ${businessName} on ${tier.name} for ${durationDays} days`
+      ).catch(() => undefined);
+
+      res.status(201).json({
+        company,
+        owner: ownerRes.rows[0],
+        plan_name: tier.name,
+        duration_days: durationDays,
+        till_code: company.id,
+        login_urls: {
+          invoice: 'https://invoice.preyone.com',
+          pos: 'https://pos.preyone.com',
+        },
+      });
+    } catch (err) {
+      await client.query('ROLLBACK');
+      // A concurrent provision can win the email race after our pre-check.
+      if ((err as { code?: string }).code === '23505') {
+        res.status(409).json({
+          error: 'An account with that owner email already exists.',
+          code: 'EMAIL_IN_USE',
+        });
+        return;
+      }
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+);
+
+/**
+ * Record a cash subscription payment in the HOUSE tenant, then extend the
+ * client tenant in the same transaction.
+ *
+ * The revenue document deliberately belongs to Preyone, not to the client:
+ * booking it in the client's ledger would inflate their sales and corrupt
+ * their VAT/AR reports. The client row only ever receives the entitlement.
+ */
+adminRouter.post(
+  '/tenants/:id/cash-subscription',
+  requireRole('CEO'),
+  requireHouseCeo,
+  async (req: Request, res: Response) => {
+    const targetId = String(req.params.id ?? '');
+    if (!isUuid(targetId)) {
+      res.status(422).json({ error: 'Client id is not a valid UUID' });
+      return;
+    }
+
+    const planType = typeof req.body?.planType === 'string' ? req.body.planType.trim() : '';
+    if (!isPlanTier(planType)) {
+      res.status(422).json({ error: 'planType is not a valid Preyone plan' });
+      return;
+    }
+    const tier = tierById(planType)!;
+    const amountUsd = Math.round(Number(req.body?.amountUsd ?? tier.price) * 100) / 100;
+    if (!Number.isFinite(amountUsd) || amountUsd <= 0) {
+      res.status(422).json({ error: 'amountUsd must be a positive amount' });
+      return;
+    }
+    const durationDays = tenantDurationDays(req.body?.durationDays);
+    const notes = typeof req.body?.notes === 'string' ? req.body.notes.trim().slice(0, 500) : '';
+    const houseId = req.houseCompanyId!;
+    const me = req.adminUser!;
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      const targetRes = await client.query(
+        `SELECT id, name, plan_type, subscription_status, subscription_expires_at
+           FROM companies WHERE id = $1 FOR UPDATE`,
+        [targetId]
+      );
+      if (targetRes.rows.length === 0) {
+        await client.query('ROLLBACK');
+        res.status(404).json({ error: 'Client company not found' });
+        return;
+      }
+      const target = targetRes.rows[0];
+      if (target.id === houseId) {
+        await client.query('ROLLBACK');
+        res.status(400).json({
+          error: 'The house tenant cannot bill itself a client subscription.',
+          code: 'HOUSE_TENANT_NOT_BILLABLE',
+        });
+        return;
+      }
+
+      const houseRes = await client.query(
+        `SELECT id, name, currency, tax_pct FROM companies WHERE id = $1 FOR UPDATE`,
+        [houseId]
+      );
+      const house = houseRes.rows[0];
+      if (!house) {
+        await client.query('ROLLBACK');
+        res.status(500).json({ error: 'House company is not configured' });
+        return;
+      }
+
+      // Cash belongs in a shift drawer. Reuse the operator's open house shift,
+      // or open a zero-float one exactly like the till checkout does.
+      let shiftId: string;
+      const openShift = await client.query(
+        `SELECT id FROM pos_shifts
+          WHERE company_id = $1 AND cashier_id = $2 AND status = 'open'
+          LIMIT 1`,
+        [houseId, me.id]
+      );
+      if (openShift.rows.length > 0) {
+        shiftId = openShift.rows[0].id;
+      } else {
+        const created = await client.query(
+          `INSERT INTO pos_shifts (cashier_id, opening_float, company_id)
+           VALUES ($1, 0, $2) RETURNING id`,
+          [me.id, houseId]
+        );
+        shiftId = created.rows[0].id;
+      }
+
+      const seq = await client.query(`SELECT nextval('pos_doc_number_seq') AS v`);
+      const docNumber = `RCP-${String(seq.rows[0].v).padStart(4, '0')}`;
+      const taxPct = Number(house.tax_pct) || 0;
+      const lineDescription = `${tier.name} Subscription — ${durationDays} Days (${target.name})`;
+      const docNotes = [lineDescription, notes].filter(Boolean).join(' · ');
+      const reference = `SUB-${String(target.id).slice(0, 8).toUpperCase()}`;
+
+      const docRes = await client.query(
+        `INSERT INTO pos_documents
+           (doc_number, doc_type, channel, status, cashier_id, shift_id,
+            issue_date, subtotal, discount_pct, tax_pct, total, amount_paid,
+            notes, company_id, currency)
+         VALUES ($1,'sale','till','paid',$2,$3,CURRENT_DATE,$4,0,$5,$4,$4,$6,$7,$8)
+         RETURNING *`,
+        [
+          docNumber,
+          me.id,
+          shiftId,
+          amountUsd,
+          taxPct,
+          docNotes,
+          houseId,
+          house.currency || 'USD',
+        ]
+      );
+      const doc = docRes.rows[0];
+
+      const verified = await client.query(
+        `UPDATE pos_documents SET verify_code = $1 WHERE id = $2 RETURNING *`,
+        [generateDocumentVerifyCode(), doc.id]
+      );
+      const savedDoc = verified.rows[0];
+
+      await client.query(
+        `INSERT INTO pos_document_items
+           (document_id, description, details, price, qty, line_total, position)
+         VALUES ($1,$2,'{}'::text[],$3,1,$3,0)`,
+        [doc.id, lineDescription, amountUsd]
+      );
+
+      const payRes = await client.query(
+        `INSERT INTO pos_document_payments
+           (document_id, amount, method, reference, recorded_by, shift_id)
+         VALUES ($1,$2,'cash',$3,$4,$5)
+         RETURNING id`,
+        [doc.id, amountUsd, reference, me.id, shiftId]
+      );
+
+      const ledger = await syncSaleToLedgerAndStock(client, {
+        companyId: houseId,
+        documentId: doc.id,
+        paymentId: Number(payRes.rows[0].id),
+        amount: amountUsd,
+        method: 'cash',
+        docType: 'sale',
+        docNumber,
+        reference,
+        taxPct,
+        currency: house.currency || 'USD',
+        alreadyDecrementedStock: true,
+      });
+
+      const updatedRes = await client.query(
+        `UPDATE companies SET
+           plan_type              = $2,
+           subscription_status    = 'active',
+           subscription_expires_at =
+             GREATEST(COALESCE(subscription_expires_at, NOW()), NOW())
+             + ($3 || ' days')::interval,
+           reminder_3day_sent     = FALSE,
+           reminder_1day_sent     = FALSE,
+           updated_at             = NOW()
+         WHERE id = $1
+         RETURNING id, name, plan_type, max_devices, subscription_status,
+                   subscription_expires_at`,
+        [target.id, planType, String(durationDays)]
+      );
+
+      await syncPlanModules(client, target.id, planType);
+      await client.query('COMMIT');
+
+      await recordAuditLog(
+        me.id,
+        me.fullName,
+        'tenant_cash_subscription',
+        'companies',
+        target.id,
+        `${tier.name} cash sale ${docNumber} (${house.currency || 'USD'} ${amountUsd.toFixed(
+          2
+        )}) extended ${target.name} by ${durationDays} days`
+      ).catch(() => undefined);
+
+      res.json({
+        subscription: updatedRes.rows[0],
+        plan_name: tier.name,
+        duration_days: durationDays,
+        receipt: {
+          document_id: savedDoc.id,
+          doc_number: savedDoc.doc_number,
+          doc_type: savedDoc.doc_type,
+          status: savedDoc.status,
+          amount: amountUsd,
+          currency: house.currency || 'USD',
+          shift_id: shiftId,
+          reference,
+          ledger_id: ledger.ledgerId,
+          company_id: houseId,
+          company_name: house.name,
+        },
+      });
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+);
 
 // ═══════════════════════════════════════════════════════
 // POS: Devices & Endpoints (desktop / web / android)
