@@ -230,3 +230,136 @@
   background: #eef7f2;
   color: #536b60;
 }
+
+/* Settings tabs and cards */
+[data-preyone-theme='light'] .settings-tabs {
+  background: #ffffff;
+  border-color: #cfe5da;
+}
+[data-preyone-theme='light'] .settings-tab {
+  color: #536b60;
+  border-color: transparent;
+}
+[data-preyone-theme='light'] .settings-tab:hover {
+  background: #f3faf6;
+  color: #0f5c43;
+}
+[data-preyone-theme='light'] .settings-tab.is-active {
+  background: #e8f7f0;
+  border-color: rgba(5, 150, 105, 0.35);
+  color: #047857;
+}
+[data-preyone-theme='light'] .settings-number-row,
+[data-preyone-theme='light'] .settings-rail,
+[data-preyone-theme='light'] .settings-member,
+[data-preyone-theme='light'] .settings-lock,
+[data-preyone-theme='light'] .settings-note,
+[data-preyone-theme='light'] .settings-empty,
+[data-preyone-theme='light'] .settings-savebar,
+[data-preyone-theme='light'] .settings-billing-card {
+  background: #f7fcf9;
+  border-color: #d3e5dc;
+  color: #10241c;
+}
+[data-preyone-theme='light'] .settings-section-head h3,
+[data-preyone-theme='light'] .settings-section-head p,
+[data-preyone-theme='light'] .settings-billing-name {
+  color: #10241c;
+}
+[data-preyone-theme='light'] .settings-section-head p,
+[data-preyone-theme='light'] .settings-hint,
+[data-preyone-theme='light'] .settings-billing-meta,
+[data-preyone-theme='light'] .settings-note {
+  color: #536b60;
+}
+
+/* Sidebar brand + identity */
+[data-preyone-theme='light'] .brand {
+  background: linear-gradient(150deg, #ffffff, #eef8f2);
+  border-color: #cfe5da;
+  box-shadow: 0 12px 28px rgba(16, 36, 28, 0.08);
+}
+[data-preyone-theme='light'] .brand-name { color: #10241c; }
+[data-preyone-theme='light'] .brand-sub,
+[data-preyone-theme='light'] .brand-client-name { color: #536b60; }
+[data-preyone-theme='light'] .profile-card {
+  background: #ffffff;
+  border-color: #d3e5dc;
+  box-shadow: 0 10px 24px rgba(16, 36, 28, 0.07);
+}
+[data-preyone-theme='light'] .profile-name { color: #10241c; }
+[data-preyone-theme='light'] .profile-meta,
+[data-preyone-theme='light'] .profile-email { color: #536b60; }
+
+/* Client Tenants panel */
+[data-preyone-theme='light'] .ct-root {
+  --ct-ink: #10241c;
+  --ct-muted: #536b60;
+  --ct-line: rgba(5, 150, 105, 0.18);
+  --ct-panel: #ffffff;
+  --ct-cyan: #047857;
+  --ct-cyan-soft: rgba(5, 150, 105, 0.1);
+}
+[data-preyone-theme='light'] .ct-hero {
+  background:
+    radial-gradient(520px 180px at 0% 0%, rgba(5, 150, 105, 0.1), transparent 70%),
+    linear-gradient(145deg, #ffffff, #f2faf6);
+  border-color: #cfe5da;
+  box-shadow: 0 18px 45px rgba(16, 36, 28, 0.08);
+}
+[data-preyone-theme='light'] .ct-stat {
+  background: #ffffff;
+  border-color: #d3e5dc;
+  box-shadow: 0 10px 24px rgba(16, 36, 28, 0.06);
+}
+[data-preyone-theme='light'] .ct-table-wrap {
+  background: #ffffff;
+  border-color: #cfe5da;
+  box-shadow: 0 18px 45px rgba(16, 36, 28, 0.08);
+}
+[data-preyone-theme='light'] .ct-table th {
+  background: #f3faf6;
+  color: #536b60;
+  border-bottom-color: #d3e5dc;
+}
+[data-preyone-theme='light'] .ct-table td {
+  border-bottom-color: #e3efe9;
+  color: #243d33;
+}
+[data-preyone-theme='light'] .ct-table tbody tr:hover { background: #f7fcf9; }
+[data-preyone-theme='light'] .ct-table tr.is-house { background: #f2fbf6; }
+[data-preyone-theme='light'] .ct-plan {
+  background: rgba(5, 150, 105, 0.08);
+  border-color: rgba(5, 150, 105, 0.28);
+  color: #047857;
+}
+[data-preyone-theme='light'] .ct-action {
+  background: rgba(5, 150, 105, 0.08);
+  border-color: rgba(5, 150, 105, 0.32);
+  color: #047857;
+}
+[data-preyone-theme='light'] .ct-action--copy {
+  background: #f3faf6;
+  border-color: #c9ded4;
+  color: #536b60;
+}
+[data-preyone-theme='light'] .ct-modal {
+  background:
+    radial-gradient(600px 220px at 0% 0%, rgba(5, 150, 105, 0.08), transparent 70%),
+    #ffffff;
+  border-color: #cfe5da;
+}
+[data-preyone-theme='light'] .ct-field .input,
+[data-preyone-theme='light'] .ct-field .select,
+[data-preyone-theme='light'] .ct-field .textarea {
+  background: #ffffff;
+  border-color: #c9ded4;
+  color: #10241c;
+}
+[data-preyone-theme='light'] .ct-success-grid {
+  background: #f7fcf9;
+  border-color: #d3e5dc;
+}
+[data-preyone-theme='light'] .ct-success > strong { color: #047857; }
+[data-preyone-theme='light'] .ct-footnote,
+[data-preyone-theme='light'] .ct-hint { color: #536b60; }

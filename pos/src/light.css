@@ -253,3 +253,30 @@
 [data-preyone-theme='light'] .auth-card .btn.primary {
   color: #ffffff;
 }
+
+[data-preyone-theme='light'] .center-card,
+[data-preyone-theme='light'] .shift-card,
+[data-preyone-theme='light'] .shift-gate-card {
+  background: #ffffff;
+  color: #10241c;
+  border-color: #d3e5dc;
+  box-shadow: 0 22px 55px rgba(16, 36, 28, 0.1);
+}
+[data-preyone-theme='light'] .center-card h3,
+[data-preyone-theme='light'] .center-card h2,
+[data-preyone-theme='light'] .center-card p {
+  color: #10241c;
+}
+[data-preyone-theme='light'] .center-card .hint,
+[data-preyone-theme='light'] .field-label {
+  color: #536b60;
+}
+[data-preyone-theme='light'] .primary-btn {
+  background: linear-gradient(120deg, #047857, #10b981 58%, #34d399);
+  color: #04120d;
+  box-shadow: 0 12px 26px rgba(16, 185, 129, 0.22);
+}
+[data-preyone-theme='light'] button:hover:not(:disabled) {
+  border-color: rgba(5, 150, 105, 0.45);
+  box-shadow: 0 0 16px rgba(16, 185, 129, 0.14);
+}
