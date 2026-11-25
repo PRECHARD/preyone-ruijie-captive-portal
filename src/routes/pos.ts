@@ -15,6 +15,7 @@ import { POS_THEMES, CURRENCIES, type PosTheme } from '../catalog/ecosystem';
 import { themeCssVariables, themeCssBlock } from '../utils/themeVars';
 import {
   sendPasswordResetEmail,
+  sendShiftCloseEmail,
   sendStaffWelcomeEmail,
   sendTransactionalEmail,
 } from '../services/notificationService';
@@ -894,7 +895,18 @@ router.post('/documents', async (req, res) => {
 
     let customerId = str(b.customerId) || null;
     if (!customerId && b.customer && typeof b.customer === 'object') {
-      customerId = await upsertCustomer(client, b.customer);
+      customerId = await upsertCustomer(client, cid, b.customer);
+    }
+    if (customerId) {
+      const owned = await client.query(
+        'SELECT 1 FROM pos_customers WHERE id = $1 AND company_id = $2',
+        [customerId, cid]
+      );
+      if (owned.rows.length === 0) {
+        await client.query('ROLLBACK');
+        res.status(422).json({ error: 'Customer not found for this company.' });
+        return;
+      }
     }
 
     if (requestedNumber.number) {
@@ -962,6 +974,17 @@ router.post('/documents', async (req, res) => {
 
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
+      if (line.productId) {
+        const owned = await client.query(
+          'SELECT 1 FROM pos_products WHERE id = $1 AND company_id = $2',
+          [line.productId, cid]
+        );
+        if (owned.rows.length === 0) {
+          await client.query('ROLLBACK');
+          res.status(422).json({ error: 'One of the selected products does not belong to this company.' });
+          return;
+        }
+      }
       await client.query(
         `INSERT INTO pos_document_items (document_id, product_id, description, details, price, qty, line_total, position)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
@@ -1098,7 +1121,10 @@ router.put('/documents/:id', requireRole(...MANAGER_ROLES), async (req, res) => 
     if ('customerId' in b) {
       const customerId = str(b.customerId) || null;
       if (customerId) {
-        const customer = await client.query('SELECT 1 FROM pos_customers WHERE id = $1', [customerId]);
+        const customer = await client.query(
+          'SELECT 1 FROM pos_customers WHERE id = $1 AND company_id = $2',
+          [customerId, tenantId(req)]
+        );
         if (customer.rows.length === 0) {
           await client.query('ROLLBACK');
           res.status(422).json({ error: 'Customer not found.' });
@@ -1112,9 +1138,12 @@ router.put('/documents/:id', requireRole(...MANAGER_ROLES), async (req, res) => 
       // save. Existing customer data is only replaced when a name is supplied.
       const customerName = str((b.customer as Record<string, unknown>).name);
       if (customerName) {
-        const customerId = await upsertCustomer(client, b.customer as Record<string, unknown>, {
-          replace: true,
-        });
+        const customerId = await upsertCustomer(
+          client,
+          tenantId(req),
+          b.customer as Record<string, unknown>,
+          { replace: true }
+        );
         if (!customerId) {
           await client.query('ROLLBACK');
           res.status(422).json({ error: 'Could not save the client details.' });
@@ -1161,15 +1190,18 @@ router.put('/documents/:id', requireRole(...MANAGER_ROLES), async (req, res) => 
           await client.query(
             `UPDATE pos_products
                 SET stock_qty = stock_qty + $1, updated_at = NOW()
-              WHERE id = $2 AND track_stock = TRUE`,
-            [num(old.qty), old.product_id]
+              WHERE id = $2 AND company_id = $3 AND track_stock = TRUE`,
+            [num(old.qty), old.product_id, tenantId(req)]
           );
         }
         for (const item of items) {
           if (!item.productId) continue;
           const product = await client.query(
-            `SELECT name, track_stock, stock_qty FROM pos_products WHERE id = $1 FOR UPDATE`,
-            [item.productId]
+            `SELECT name, track_stock, stock_qty
+               FROM pos_products
+              WHERE id = $1 AND company_id = $2
+              FOR UPDATE`,
+            [item.productId, tenantId(req)]
           );
           if (product.rows.length === 0) {
             await client.query('ROLLBACK');
@@ -1187,8 +1219,8 @@ router.put('/documents/:id', requireRole(...MANAGER_ROLES), async (req, res) => 
           await client.query(
             `UPDATE pos_products
                 SET stock_qty = stock_qty - $1, updated_at = NOW()
-              WHERE id = $2 AND track_stock = TRUE`,
-            [item.qty, item.productId]
+              WHERE id = $2 AND company_id = $3 AND track_stock = TRUE`,
+            [item.qty, item.productId, tenantId(req)]
           );
         }
       }
@@ -1213,6 +1245,17 @@ router.put('/documents/:id', requireRole(...MANAGER_ROLES), async (req, res) => 
       await client.query('DELETE FROM pos_document_items WHERE document_id = $1', [current.id]);
       for (let index = 0; index < totals.lines.length; index += 1) {
         const line = totals.lines[index] as any;
+        if (line.productId) {
+          const owned = await client.query(
+            'SELECT 1 FROM pos_products WHERE id = $1 AND company_id = $2',
+            [line.productId, tenantId(req)]
+          );
+          if (owned.rows.length === 0) {
+            await client.query('ROLLBACK');
+            res.status(422).json({ error: 'One of the selected products does not belong to this company.' });
+            return;
+          }
+        }
         await client.query(
           `INSERT INTO pos_document_items
              (document_id, product_id, description, details, price, qty, line_total, position)
@@ -1722,14 +1765,14 @@ router.get('/devices/mine', requireDeviceAuth, async (req, res) => {
 router.get('/products', async (req, res) => {
   const q = str(req.query.q);
   const includeInactive = str(req.query.includeInactive) === '1';
-  const params: unknown[] = [];
-  let where = includeInactive ? '' : 'AND active = TRUE';
+  const params: unknown[] = [tenantId(req)];
+  let where = `company_id = $1 ${includeInactive ? '' : 'AND active = TRUE'}`;
   if (q) {
     params.push(`%${q.toLowerCase()}%`);
     where += ` AND (lower(name) LIKE $${params.length} OR lower(coalesce(description,'')) LIKE $${params.length} OR lower(coalesce(sku,'')) LIKE $${params.length} OR lower(coalesce(barcode,'')) LIKE $${params.length})`;
   }
   const { rows } = await pool.query(
-    `SELECT * FROM pos_products WHERE TRUE ${where} ORDER BY name LIMIT 500`,
+    `SELECT * FROM pos_products WHERE ${where} ORDER BY name LIMIT 500`,
     params
   );
   res.json(rows);
@@ -1743,10 +1786,11 @@ router.post('/products', async (req, res) => {
     return;
   }
   const { rows } = await pool.query(
-    `INSERT INTO pos_products (name, description, sku, barcode, category, price, cost_price, stock_qty, track_stock, low_stock_threshold)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+    `INSERT INTO pos_products (company_id, name, description, sku, barcode, category, price, cost_price, stock_qty, track_stock, low_stock_threshold)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
      RETURNING *`,
     [
+      tenantId(req),
       name,
       str(b.description) || null,
       str(b.sku) || null,
@@ -1796,9 +1840,12 @@ router.put('/products/:id', async (req, res) => {
     res.status(400).json({ error: 'Nothing to update' });
     return;
   }
-  values.push(req.params.id);
+  values.push(req.params.id, tenantId(req));
+  const idIndex = values.length - 1;
   const { rows } = await pool.query(
-    `UPDATE pos_products SET ${fields.join(', ')}, updated_at = NOW() WHERE id = $${values.length} RETURNING *`,
+    `UPDATE pos_products SET ${fields.join(', ')}, updated_at = NOW()
+      WHERE id = $${idIndex} AND company_id = $${values.length}
+      RETURNING *`,
     values
   );
   if (rows.length === 0) {
@@ -1817,8 +1864,9 @@ router.put('/products/:id', async (req, res) => {
 
 router.delete('/products/:id', requireRole(...MANAGER_ROLES), async (req, res) => {
   const { rows } = await pool.query(
-    `UPDATE pos_products SET active = FALSE, updated_at = NOW() WHERE id = $1 RETURNING id, name`,
-    [req.params.id]
+    `UPDATE pos_products SET active = FALSE, updated_at = NOW()
+      WHERE id = $1 AND company_id = $2 RETURNING id, name`,
+    [req.params.id, tenantId(req)]
   );
   if (rows.length === 0) {
     res.status(404).json({ error: 'Product not found' });
@@ -1845,9 +1893,9 @@ router.post('/products/:id/stock', async (req, res) => {
   const { rows } = await pool.query(
     `UPDATE pos_products
         SET stock_qty = stock_qty + $1, updated_at = NOW()
-      WHERE id = $2
+      WHERE id = $2 AND company_id = $3
       RETURNING id, name, stock_qty`,
-    [delta, req.params.id]
+    [delta, req.params.id, tenantId(req)]
   );
   if (rows.length === 0) {
     res.status(404).json({ error: 'Product not found' });
@@ -1865,14 +1913,14 @@ router.post('/products/:id/stock', async (req, res) => {
 
 router.get('/customers', async (req, res) => {
   const q = str(req.query.q);
-  const params: unknown[] = [];
-  let where = '';
+  const params: unknown[] = [tenantId(req)];
+  let where = `company_id = $1`;
   if (q) {
     params.push(`%${q.toLowerCase()}%`);
-    where = `WHERE lower(name) LIKE $${params.length} OR lower(coalesce(phone,'')) LIKE $${params.length} OR lower(coalesce(email,'')) LIKE $${params.length}`;
+    where += ` AND (lower(name) LIKE $${params.length} OR lower(coalesce(phone,'')) LIKE $${params.length} OR lower(coalesce(email,'')) LIKE $${params.length})`;
   }
   const { rows } = await pool.query(
-    `SELECT * FROM pos_customers ${where} ORDER BY name LIMIT 500`,
+    `SELECT * FROM pos_customers WHERE ${where} ORDER BY name LIMIT 500`,
     params
   );
   res.json(rows);
@@ -1880,14 +1928,17 @@ router.get('/customers', async (req, res) => {
 
 async function upsertCustomer(
   client: import('pg').PoolClient,
+  companyId: string,
   c: Record<string, unknown>,
   options: { replace?: boolean } = {}
 ): Promise<string | null> {
   const name = str(c?.name);
   if (!name) return null;
   const existing = await client.query(
-    `SELECT id FROM pos_customers WHERE lower(name) = lower($1) LIMIT 1`,
-    [name]
+    `SELECT id FROM pos_customers
+      WHERE company_id = $1 AND lower(name) = lower($2)
+      LIMIT 1`,
+    [companyId, name]
   );
   if (existing.rows.length > 0) {
     const replace = options.replace === true;
@@ -1904,14 +1955,15 @@ async function upsertCustomer(
               email = ${emailValue},
               address = ${addressValue},
               updated_at = NOW()
-        WHERE id = $1`,
-      [existing.rows[0].id, str(c.phone), str(c.email), str(c.address), name]
+        WHERE id = $1 AND company_id = $6`,
+      [existing.rows[0].id, str(c.phone), str(c.email), str(c.address), name, companyId]
     );
     return existing.rows[0].id as string;
   }
   const inserted = await client.query(
-    `INSERT INTO pos_customers (name, phone, email, address) VALUES ($1,$2,$3,$4) RETURNING id`,
-    [name, str(c.phone) || null, str(c.email) || null, str(c.address) || null]
+    `INSERT INTO pos_customers (company_id, name, phone, email, address)
+     VALUES ($1,$2,$3,$4,$5) RETURNING id`,
+    [companyId, name, str(c.phone) || null, str(c.email) || null, str(c.address) || null]
   );
   return inserted.rows[0].id as string;
 }
@@ -1920,13 +1972,17 @@ router.post('/customers', async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const id = await upsertCustomer(client, req.body || {});
+    const companyId = tenantId(req);
+    const id = await upsertCustomer(client, companyId, req.body || {});
     await client.query('COMMIT');
     if (!id) {
       res.status(400).json({ error: 'Customer name is required' });
       return;
     }
-    const { rows } = await client.query(`SELECT * FROM pos_customers WHERE id = $1`, [id]);
+    const { rows } = await client.query(
+      `SELECT * FROM pos_customers WHERE id = $1 AND company_id = $2`,
+      [id, companyId]
+    );
     await pool
       .query(
         `INSERT INTO admin_audit_log (admin_id, admin_name, action, target_type, target_id, detail)
@@ -1964,9 +2020,12 @@ router.put('/customers/:id', async (req, res) => {
     res.status(400).json({ error: 'Nothing to update' });
     return;
   }
-  values.push(req.params.id);
+  values.push(req.params.id, tenantId(req));
+  const idIndex = values.length - 1;
   const { rows } = await pool.query(
-    `UPDATE pos_customers SET ${fields.join(', ')}, updated_at = NOW() WHERE id = $${values.length} RETURNING *`,
+    `UPDATE pos_customers SET ${fields.join(', ')}, updated_at = NOW()
+      WHERE id = $${idIndex} AND company_id = $${values.length}
+      RETURNING *`,
     values
   );
   if (rows.length === 0) {
@@ -1984,7 +2043,11 @@ router.put('/customers/:id', async (req, res) => {
 });
 
 router.delete('/customers/:id', requireRole(...MANAGER_ROLES), async (req, res) => {
-  const customer = await pool.query('SELECT id, name FROM pos_customers WHERE id = $1', [req.params.id]);
+  const cid = tenantId(req);
+  const customer = await pool.query(
+    'SELECT id, name FROM pos_customers WHERE id = $1 AND company_id = $2',
+    [req.params.id, cid]
+  );
   if (customer.rows.length === 0) {
     res.status(404).json({ error: 'Customer not found' });
     return;
@@ -1992,8 +2055,8 @@ router.delete('/customers/:id', requireRole(...MANAGER_ROLES), async (req, res) 
   // Deleting a referenced customer would null the link on issued documents and
   // erase who they were billed to. Refuse and let the user correct the record.
   const used = await pool.query(
-    'SELECT COUNT(*)::int AS n FROM pos_documents WHERE customer_id = $1',
-    [req.params.id]
+    'SELECT COUNT(*)::int AS n FROM pos_documents WHERE customer_id = $1 AND company_id = $2',
+    [req.params.id, cid]
   );
   if (Number(used.rows[0]?.n) > 0) {
     res.status(409).json({
@@ -2002,7 +2065,10 @@ router.delete('/customers/:id', requireRole(...MANAGER_ROLES), async (req, res) 
     });
     return;
   }
-  await pool.query('DELETE FROM pos_customers WHERE id = $1', [req.params.id]);
+  await pool.query('DELETE FROM pos_customers WHERE id = $1 AND company_id = $2', [
+    req.params.id,
+    cid,
+  ]);
   await pool
     .query(
       `INSERT INTO admin_audit_log (admin_id, admin_name, action, target_type, target_id, detail)
@@ -2016,8 +2082,9 @@ router.delete('/customers/:id', requireRole(...MANAGER_ROLES), async (req, res) 
 // Credit statement: documents + payments for one customer (admin console)
 router.get('/customers/:id/statement', async (req, res) => {
   const cust = await pool.query(
-    `SELECT id, name, phone, email, address, created_at FROM pos_customers WHERE id = $1`,
-    [req.params.id]
+    `SELECT id, name, phone, email, address, created_at
+       FROM pos_customers WHERE id = $1 AND company_id = $2`,
+    [req.params.id, tenantId(req)]
   );
   if (cust.rows.length === 0) {
     res.status(404).json({ error: 'Customer not found' });
@@ -2090,7 +2157,9 @@ router.post('/shifts/open', async (req, res) => {
 });
 
 router.post('/shifts/close', async (req, res) => {
-  const shift = await getOpenShift(req.adminUser!.id, tenantId(req));
+  const cid = tenantId(req);
+  const me = req.adminUser!;
+  const shift = await getOpenShift(me.id, cid);
   if (!shift) {
     res.status(400).json({ error: 'No open shift to close' });
     return;
@@ -2101,21 +2170,136 @@ router.post('/shifts/close', async (req, res) => {
     `SELECT method, SUM(amount) AS total, COUNT(*) AS count
        FROM pos_document_payments
       WHERE shift_id = $1
-      GROUP BY method`,
+      GROUP BY method ORDER BY method`,
     [shift.id]
   );
   const cashRow = sums.rows.find((r: Record<string, unknown>) => r.method === 'cash');
   const expectedCash = round2(num(shift.opening_float) + num(cashRow ? cashRow.total : 0));
   const variance = round2(counted - expectedCash);
+  const closedAt = new Date();
+  const companyRow = await pool.query('SELECT name, currency FROM companies WHERE id = $1', [cid]);
+  const currency = String(companyRow.rows[0]?.currency || 'USD').toUpperCase();
+
+  const snapshot = {
+    shift_id: shift.id,
+    cashier_id: me.id,
+    cashier_name: me.fullName || me.email,
+    opened_at: shift.opened_at,
+    closed_at: closedAt.toISOString(),
+    opening_float: round2(num(shift.opening_float)),
+    expected_cash: expectedCash,
+    counted_cash: counted,
+    variance,
+    notes: notes || null,
+    currency,
+    totals_by_method: sums.rows.map((row: Record<string, unknown>) => ({
+      method: String(row.method ?? 'other'),
+      total: round2(num(row.total)),
+      count: Number(row.count) || 0,
+    })),
+  };
+
   const { rows } = await pool.query(
     `UPDATE pos_shifts
-        SET closed_at = NOW(), status = 'closed',
-            expected_cash = $3, counted_cash = $4, variance = $5, notes = $6
+        SET closed_at = $7, status = 'closed',
+            expected_cash = $3, counted_cash = $4, variance = $5, notes = $6,
+            close_snapshot = $8::jsonb
       WHERE id = $1 AND company_id = $2
       RETURNING *`,
-    [shift.id, tenantId(req), expectedCash, counted, variance, notes]
+    [shift.id, cid, expectedCash, counted, variance, notes, closedAt, JSON.stringify(snapshot)]
   );
-  res.json({ shift: rows[0], totalsByMethod: sums.rows });
+
+  // Proof of tender goes to the cashier who closed and to every tenant
+  // CEO/Manager. These are the only people allowed to reconcile the drawer;
+  // the house tenant is never copied into a client's cash-up.
+  const recipients = await pool.query(
+    `SELECT DISTINCT email, full_name, role
+       FROM admin_users
+      WHERE portal_company_id = $1
+        AND approved = TRUE
+        AND email IS NOT NULL AND email <> ''
+        AND (id = $2 OR role IN ('CEO', 'Manager'))
+      ORDER BY role, full_name`,
+    [cid, me.id]
+  );
+  const seen = new Set<string>();
+  const emails: string[] = [];
+  for (const row of recipients.rows) {
+    const email = String(row.email).toLowerCase();
+    if (seen.has(email)) continue;
+    seen.add(email);
+    emails.push(String(row.email));
+  }
+
+  let sentCount = 0;
+  for (const email of emails) {
+    const sent = await sendShiftCloseEmail({
+      to: email,
+      storeName: String(companyRow.rows[0]?.name || req.company!.name || 'Preyone'),
+      cashierName: me.fullName || me.email,
+      openedAt: shift.opened_at,
+      closedAt,
+      openingFloat: round2(num(shift.opening_float)),
+      expectedCash,
+      countedCash: counted,
+      variance,
+      currency,
+      totalsByMethod: snapshot.totals_by_method,
+      notes: notes || null,
+      shiftId: shift.id,
+    }).catch(() => false);
+    if (sent) sentCount += 1;
+  }
+
+  if (sentCount > 0) {
+    await pool.query(
+      `UPDATE pos_shifts
+          SET close_receipt_recipients = $3::text[], close_receipt_sent_at = NOW()
+        WHERE id = $1 AND company_id = $2`,
+      [shift.id, cid, emails]
+    );
+  }
+
+  await pool.query(
+    `INSERT INTO admin_audit_log (admin_id, admin_name, action, target_type, target_id, detail)
+     VALUES ($1,$2,'pos.shift_close','shift',$3,$4)`,
+    [
+      me.id,
+      me.fullName ?? null,
+      shift.id,
+      `Counted ${currency} ${counted.toFixed(2)} · expected ${currency} ${expectedCash.toFixed(
+        2
+      )} · variance ${currency} ${variance.toFixed(2)} · proof emails ${sentCount}/${emails.length}`,
+    ]
+  ).catch(() => undefined);
+
+  res.json({
+    shift: {
+      ...rows[0],
+      close_snapshot: snapshot,
+      close_receipt_recipients: sentCount > 0 ? emails : rows[0].close_receipt_recipients,
+      close_receipt_sent_at: sentCount > 0 ? new Date().toISOString() : rows[0].close_receipt_sent_at,
+    },
+    totalsByMethod: sums.rows,
+    receipt_email_sent: sentCount > 0,
+    receipt_recipients: emails,
+  });
+});
+
+/** A single closed-shift record with its immutable cash-up snapshot. */
+router.get('/shifts/:id/report', async (req, res) => {
+  const { rows } = await pool.query(
+    `SELECT s.*, u.full_name AS cashier_name, u.email AS cashier_email
+       FROM pos_shifts s
+       LEFT JOIN admin_users u ON u.id = s.cashier_id
+      WHERE s.id = $1 AND s.company_id = $2`,
+    [req.params.id, tenantId(req)]
+  );
+  if (rows.length === 0) {
+    res.status(404).json({ error: 'Shift not found' });
+    return;
+  }
+  res.json(rows[0]);
 });
 
 // Cash drawer audit: every drawer-kick event is recorded against the shift
@@ -2307,7 +2491,7 @@ router.get('/documents/:id', async (req, res) => {
   const doc = await pool.query(
     `SELECT d.*, c.name AS customer_name
        FROM pos_documents d
-       LEFT JOIN pos_customers c ON c.id = d.customer_id
+       LEFT JOIN pos_customers c ON c.id = d.customer_id AND c.company_id = d.company_id
       WHERE d.id = $1 AND d.company_id = $2`,
     [req.params.id, tenantId(req)]
   );
@@ -2326,7 +2510,10 @@ router.get('/documents/:id', async (req, res) => {
     [req.params.id]
   );
   const customer = doc.rows[0].customer_id
-    ? await pool.query(`SELECT * FROM pos_customers WHERE id = $1`, [doc.rows[0].customer_id])
+    ? await pool.query(
+        `SELECT * FROM pos_customers WHERE id = $1 AND company_id = $2`,
+        [doc.rows[0].customer_id, tenantId(req)]
+      )
     : { rows: [] };
   res.json({ ...doc.rows[0], items: items.rows, payments: pays.rows, customer: customer.rows[0] || null });
 });
@@ -2646,8 +2833,11 @@ router.post('/checkout', async (req, res) => {
       const pid = str(line.productId);
       if (!pid) continue;
       const prod = await client.query(
-        `SELECT name, track_stock, stock_qty FROM pos_products WHERE id = $1 FOR UPDATE`,
-        [pid]
+        `SELECT name, track_stock, stock_qty
+           FROM pos_products
+          WHERE id = $1 AND company_id = $2
+          FOR UPDATE`,
+        [pid, tenantId(req)]
       );
       if (
         prod.rows.length > 0 &&
@@ -2665,7 +2855,18 @@ router.post('/checkout', async (req, res) => {
     // Resolve customer (create/update by name if inline object given)
     let customerId: string | null = str(b.customerId) || null;
     if (!customerId && b.customer && typeof b.customer === 'object') {
-      customerId = await upsertCustomer(client, b.customer);
+      customerId = await upsertCustomer(client, tenantId(req), b.customer);
+    }
+    if (customerId) {
+      const owned = await client.query(
+        'SELECT 1 FROM pos_customers WHERE id = $1 AND company_id = $2',
+        [customerId, tenantId(req)]
+      );
+      if (owned.rows.length === 0) {
+        await client.query('ROLLBACK');
+        res.status(422).json({ error: 'Customer not found for this company.' });
+        return;
+      }
     }
 
     // Till sales must belong to a shift (auto-open a zero-float shift if needed)
@@ -2742,8 +2943,8 @@ router.post('/checkout', async (req, res) => {
         await client.query(
           `UPDATE pos_products
               SET stock_qty = stock_qty - $1, updated_at = NOW()
-            WHERE id = $2 AND track_stock = TRUE`,
-          [line.qty, line.productId]
+            WHERE id = $2 AND company_id = $3 AND track_stock = TRUE`,
+          [line.qty, line.productId, tenantId(req)]
         );
       }
     }
@@ -2920,8 +3121,10 @@ router.post('/documents/:id/void', requireRole(...MANAGER_ROLES), async (req, re
       );
       for (const it of items.rows) {
         await client.query(
-          `UPDATE pos_products SET stock_qty = stock_qty + $1, updated_at = NOW() WHERE id = $2 AND track_stock = TRUE`,
-          [num(it.qty), it.product_id]
+          `UPDATE pos_products
+              SET stock_qty = stock_qty + $1, updated_at = NOW()
+            WHERE id = $2 AND company_id = $3 AND track_stock = TRUE`,
+          [num(it.qty), it.product_id, tenantId(req)]
         );
       }
     }
@@ -2952,7 +3155,7 @@ router.get('/documents/:id/ubl', async (req, res) => {
   const { rows } = await pool.query(
     `SELECT d.*, c.name AS customer_name, c.email AS customer_email, c.address AS customer_address
        FROM pos_documents d
-       LEFT JOIN pos_customers c ON c.id = d.customer_id
+       LEFT JOIN pos_customers c ON c.id = d.customer_id AND c.company_id = d.company_id
       WHERE d.id = $1 AND d.company_id = $2`,
     [req.params.id, cid]
   );
@@ -3091,8 +3294,10 @@ router.get('/dashboard', async (req, res) => {
         pool.query(
           `SELECT id, name, stock_qty, low_stock_threshold
              FROM pos_products
-            WHERE active = TRUE AND track_stock = TRUE AND stock_qty <= low_stock_threshold
-            ORDER BY stock_qty ASC LIMIT 30`
+            WHERE company_id = $1
+              AND active = TRUE AND track_stock = TRUE AND stock_qty <= low_stock_threshold
+            ORDER BY stock_qty ASC LIMIT 30`,
+          [cid]
         ),
         pool.query(
           `SELECT u.full_name AS cashier, COUNT(*)::int AS count, COALESCE(SUM(d.total),0)::numeric AS gross
@@ -3217,8 +3422,10 @@ router.get('/reports/summary', async (req, res) => {
   const lowStock = await pool.query(
     `SELECT id, name, stock_qty, low_stock_threshold
        FROM pos_products
-      WHERE active = TRUE AND track_stock = TRUE AND stock_qty <= low_stock_threshold
-      ORDER BY stock_qty ASC LIMIT 50`
+      WHERE company_id = $1
+        AND active = TRUE AND track_stock = TRUE AND stock_qty <= low_stock_threshold
+      ORDER BY stock_qty ASC LIMIT 50`,
+    [me2]
   );
   res.json({ byMethod: byMethod.rows, daily: daily.rows, bestSellers: bestSellers.rows, lowStock: lowStock.rows });
 });
@@ -3264,8 +3471,11 @@ async function salesReport(from: string, to: string, companyId: string) {
   ]);
   const lowStock = await pool.query(
     `SELECT id, name, stock_qty, low_stock_threshold
-       FROM pos_products WHERE active = TRUE AND track_stock = TRUE AND stock_qty <= low_stock_threshold
-       ORDER BY stock_qty ASC LIMIT 50`
+       FROM pos_products
+      WHERE company_id = $1
+        AND active = TRUE AND track_stock = TRUE AND stock_qty <= low_stock_threshold
+      ORDER BY stock_qty ASC LIMIT 50`,
+    [companyId]
   );
   return {
     from, to,

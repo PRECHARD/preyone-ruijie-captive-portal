@@ -97,15 +97,18 @@ export async function ensureStockDecremented(
     const qty = Number(it.qty) || 0;
     if (qty <= 0) continue;
     const prod = await client.query(
-      `SELECT track_stock, stock_qty, name FROM pos_products WHERE id = $1 FOR UPDATE`,
-      [it.product_id]
+      `SELECT track_stock, stock_qty, name
+         FROM pos_products
+        WHERE id = $1 AND company_id = $2
+        FOR UPDATE`,
+      [it.product_id, companyId]
     );
     if (prod.rows.length === 0 || !prod.rows[0].track_stock) continue;
     await client.query(
       `UPDATE pos_products
           SET stock_qty = stock_qty - $1, updated_at = NOW()
-        WHERE id = $2 AND track_stock = TRUE`,
-      [qty, it.product_id]
+        WHERE id = $2 AND company_id = $3 AND track_stock = TRUE`,
+      [qty, it.product_id, companyId]
     );
     lines += 1;
   }
@@ -359,7 +362,8 @@ export async function getAccountingOverview(
         CASE WHEN track_stock THEN GREATEST(stock_qty, 0) * COALESCE(cost_price, 0) ELSE 0 END
       ), 0)::numeric AS valuation
        FROM pos_products
-      WHERE active = TRUE`
+      WHERE company_id = $1 AND active = TRUE`,
+    [companyId]
   );
 
   const { rows: rails } = await pool.query(

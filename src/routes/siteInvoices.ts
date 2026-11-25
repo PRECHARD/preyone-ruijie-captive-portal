@@ -147,11 +147,14 @@ async function loadPortalCompany(): Promise<{
  */
 async function upsertWebsiteCustomer(
   client: PoolClient,
+  companyId: string,
   input: { name: string; email: string; phone: string }
 ): Promise<string> {
   const existing = await client.query(
-    `SELECT id FROM pos_customers WHERE lower(email) = lower($1) LIMIT 1`,
-    [input.email]
+    `SELECT id FROM pos_customers
+      WHERE company_id = $2 AND lower(email) = lower($1)
+      LIMIT 1`,
+    [input.email, companyId]
   );
   if (existing.rows.length > 0) {
     await client.query(
@@ -159,26 +162,29 @@ async function upsertWebsiteCustomer(
           SET phone  = COALESCE(NULLIF($2,''), phone),
               name   = COALESCE(NULLIF($3,''), name),
               updated_at = NOW()
-        WHERE id = $1`,
-      [existing.rows[0].id, input.phone, input.name]
+        WHERE id = $1 AND company_id = $4`,
+      [existing.rows[0].id, input.phone, input.name, companyId]
     );
     return existing.rows[0].id as string;
   }
 
-  // lower(name) is globally unique, so try the plain name first and fall back
-  // to an email-qualified name rather than aborting on a conflict.
+  // Customer names are unique per company. Try the plain name first and fall
+  // back to an email-qualified name rather than aborting on a conflict.
   let candidateName = input.name;
   const clash = await client.query(
-    `SELECT 1 FROM pos_customers WHERE lower(name) = lower($1) LIMIT 1`,
-    [candidateName]
+    `SELECT 1 FROM pos_customers
+      WHERE company_id = $2 AND lower(name) = lower($1)
+      LIMIT 1`,
+    [candidateName, companyId]
   );
   if (clash.rows.length > 0) {
     candidateName = `${input.name} (${input.email})`;
   }
 
   const inserted = await client.query(
-    `INSERT INTO pos_customers (name, phone, email) VALUES ($1,$2,$3) RETURNING id`,
-    [candidateName, input.phone || null, input.email]
+    `INSERT INTO pos_customers (company_id, name, phone, email)
+     VALUES ($1,$2,$3,$4) RETURNING id`,
+    [companyId, candidateName, input.phone || null, input.email]
   );
   return inserted.rows[0].id as string;
 }
@@ -339,7 +345,11 @@ siteInvoicesRouter.post('/invoices', createLimiter, async (req: Request, res: Re
   try {
     await client.query('BEGIN');
 
-    const customerId = await upsertWebsiteCustomer(client, { name: fullName, email, phone });
+    const customerId = await upsertWebsiteCustomer(client, company.id, {
+      name: fullName,
+      email,
+      phone,
+    });
 
     const seq = await client.query(`SELECT nextval('pos_doc_number_seq') AS v`);
     docNumber = `${company.invoicePrefix}-${String(seq.rows[0].v).padStart(4, '0')}`;

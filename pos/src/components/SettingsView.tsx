@@ -474,6 +474,13 @@ export default function SettingsView({
                   {fmtDateTime(s.opened_at)}
                   <span className="receipt-muted">
                     {' '}· {s.cashier_name || '—'} · float ${(Number(s.opening_float) || 0).toFixed(2)}
+                    {s.status === 'closed' && (
+                      <>
+                        {' '}· counted ${(Number(s.counted_cash) || 0).toFixed(2)}
+                        {' '}· variance ${(Number(s.variance) || 0).toFixed(2)}
+                        {s.close_receipt_sent_at ? ' · proof emailed' : ''}
+                      </>
+                    )}
                   </span>
                 </span>
                 <span className={`pill ${s.status === 'open' ? 'warn' : 'ok'}`}>{s.status}</span>

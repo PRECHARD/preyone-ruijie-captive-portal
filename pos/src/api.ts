@@ -271,7 +271,10 @@ export interface ShiftHistoryRow {
   closed_at: string | null;
   status: string;
   opening_float: number;
+  expected_cash?: number | null;
   counted_cash: number | null;
+  variance?: number | null;
+  close_receipt_sent_at?: string | null;
   cashier_name: string | null;
 }
 

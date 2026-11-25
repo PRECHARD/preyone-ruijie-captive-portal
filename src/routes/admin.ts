@@ -3643,6 +3643,7 @@ adminRouter.post(
     const ownerEmail = typeof body.ownerEmail === 'string' ? body.ownerEmail.trim().toLowerCase() : '';
     const ownerPhone = typeof body.ownerPhone === 'string' ? body.ownerPhone.trim() : '';
     const tempPassword = typeof body.tempPassword === 'string' ? body.tempPassword : '';
+    const requestedPin = typeof body.posPin === 'string' ? body.posPin.trim() : '';
     const taxPct = Number(body.taxPct);
     const durationDays = tenantDurationDays(body.durationDays);
 
@@ -3674,6 +3675,10 @@ adminRouter.post(
     }
     if (tempPassword.length < 8) {
       res.status(422).json({ error: 'Temporary password must be at least 8 characters' });
+      return;
+    }
+    if (requestedPin && !/^\d{4,8}$/.test(requestedPin)) {
+      res.status(422).json({ error: 'POS PIN must be 4–8 digits' });
       return;
     }
     if (!Number.isFinite(taxPct) || taxPct < 0 || taxPct > 100) {
@@ -3772,13 +3777,19 @@ adminRouter.post(
       const company = companyRes.rows[0];
 
       const passwordHash = await bcrypt.hash(tempPassword, 12);
+      // Every plan includes POS, so a freshly provisioned CEO can sign into
+      // the till immediately. A PIN is generated when the form leaves it blank
+      // and is sent once in the welcome email; only the bcrypt hash is stored.
+      const posPin = requestedPin || String(crypto.randomInt(100000, 1000000));
+      const pinHash = await bcrypt.hash(posPin, 10);
       const ownerRes = await client.query(
         `INSERT INTO admin_users
-           (full_name, email, phone, role, password_hash,
+           (full_name, email, phone, role, password_hash, pin_hash,
             approved, email_verified, status, portal_company_id)
-         VALUES ($1,$2,$3,'CEO',$4,TRUE,TRUE,'active',$5)
-         RETURNING id, full_name, email, phone, role, approved, email_verified, status`,
-        [ownerName, ownerEmail, ownerPhone, passwordHash, company.id]
+         VALUES ($1,$2,$3,'CEO',$4,$5,TRUE,TRUE,'active',$6)
+         RETURNING id, full_name, email, phone, role, approved, email_verified, status,
+                   (pin_hash IS NOT NULL) AS has_pin`,
+        [ownerName, ownerEmail, ownerPhone, passwordHash, pinHash, company.id]
       );
 
       await syncPlanModules(client, company.id, planType);
@@ -3803,6 +3814,7 @@ adminRouter.post(
         durationDays,
         expiresAt: company.subscription_expires_at,
         tempPassword,
+        pin: posPin,
         tillCode: company.id,
       }).catch(() => false);
 
@@ -3812,6 +3824,7 @@ adminRouter.post(
         plan_name: tier.name,
         duration_days: durationDays,
         till_code: company.id,
+        pos_pin_set: true,
         welcome_email_sent: welcomeSent,
         login_urls: {
           invoice: 'https://invoice.preyone.com',
@@ -4129,6 +4142,48 @@ adminRouter.post(
         ? `A password reset link was emailed to ${owner.email}.`
         : `The reset link was generated, but the email could not be sent. Check SMTP configuration.`,
     });
+  }
+);
+
+/** House CEO: set/replace the client CEO's POS PIN. */
+adminRouter.post(
+  '/tenants/:id/ceo-pin',
+  requireRole('CEO'),
+  requireHouseCeo,
+  async (req: Request, res: Response) => {
+    const targetId = String(req.params.id ?? '');
+    if (!isUuid(targetId)) {
+      res.status(422).json({ error: 'Client id is not a valid UUID' });
+      return;
+    }
+    const pin = typeof req.body?.pin === 'string' ? req.body.pin.trim() : '';
+    if (!/^\d{4,8}$/.test(pin)) {
+      res.status(422).json({ error: 'POS PIN must be 4–8 digits' });
+      return;
+    }
+    const { rows } = await pool.query(
+      `SELECT u.id, u.full_name, u.email
+         FROM admin_users u
+        WHERE u.portal_company_id = $1 AND u.role = 'CEO'
+        ORDER BY u.created_at ASC LIMIT 1`,
+      [targetId]
+    );
+    const owner = rows[0];
+    if (!owner) {
+      res.status(404).json({ error: 'That client has no CEO account on file.' });
+      return;
+    }
+    const hash = await bcrypt.hash(pin, 10);
+    await pool.query('UPDATE admin_users SET pin_hash = $1 WHERE id = $2', [hash, owner.id]);
+    await recordAuditLog(
+      req.adminUser!.id,
+      req.adminUser!.fullName,
+      'tenant_ceo_pin',
+      'admin_user',
+      owner.id,
+      `POS PIN set for ${owner.email}`
+    ).catch(() => undefined);
+    res.json({ ok: true, user: { id: owner.id, full_name: owner.full_name, email: owner.email } });
   }
 );
 

@@ -299,6 +299,7 @@ export async function sendClientProvisionedEmail(opts: {
   durationDays: number;
   expiresAt: Date | string;
   tempPassword: string;
+  pin?: string | null;
   tillCode: string;
 }): Promise<boolean> {
   const invoiceUrl = `${appBaseUrl('invoice')}/`;
@@ -333,11 +334,21 @@ export async function sendClientProvisionedEmail(opts: {
           opts.tillCode
         )}</span>`,
       ],
+      ...(opts.pin
+        ? ([
+            [
+              'POS PIN',
+              `<span style="font-family:Consolas,monospace;font-size:15px;letter-spacing:2px">${escapeEmailHtml(
+                opts.pin
+              )}</span>`,
+            ],
+          ] as Array<[string, string]>)
+        : []),
     ],
     cta: { label: 'Sign in to Invoice', url: invoiceUrl },
     secondaryCta: { label: 'Open POS', url: posUrl },
     noteHtml:
-      'Change the temporary password after your first sign-in. On a new till, enter the till code once under <strong>Company till code</strong>.',
+      'Change the temporary password and POS PIN after your first sign-in. On a new till, enter the till code once under <strong>Company till code</strong>.',
     footerNote: 'Preyone Invoice & POS · secure business workspace',
   });
   const text = [
@@ -348,9 +359,10 @@ export async function sendClientProvisionedEmail(opts: {
     `POS: ${posUrl}`,
     `Sign-in email: ${opts.to}`,
     `Temporary password: ${opts.tempPassword}`,
+    opts.pin ? `POS PIN: ${opts.pin}` : '',
     `Till code: ${opts.tillCode}`,
     '',
-    'Change the temporary password after your first sign-in.',
+    'Change the temporary password and POS PIN after your first sign-in.',
     'Preyone Enterprises · support@preyone.com',
   ].join('\n');
   return sendMail(
@@ -427,6 +439,98 @@ export async function sendStaffWelcomeEmail(opts: {
     `Your ${opts.companyName} Preyone workspace access`,
     html,
     'Preyone Invoice',
+    'support@preyone.com',
+    undefined,
+    undefined,
+    text
+  );
+}
+
+/** Proof of tender sent to the cashier and the tenant's managers on shift close. */
+export async function sendShiftCloseEmail(opts: {
+  to: string;
+  storeName: string;
+  cashierName: string;
+  openedAt: Date | string;
+  closedAt: Date | string;
+  openingFloat: number;
+  expectedCash: number;
+  countedCash: number;
+  variance: number;
+  currency: string;
+  totalsByMethod: Array<{ method: string; total: number | string; count: number | string }>;
+  notes?: string | null;
+  shiftId: string;
+}): Promise<boolean> {
+  const when = (value: Date | string) =>
+    new Date(value).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
+  const money = (value: number) =>
+    `${opts.currency} ${Number(value || 0).toLocaleString('en-US', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })}`;
+  const methodRows = opts.totalsByMethod
+    .map(
+      (row) =>
+        `<tr><td style="padding:6px 0;color:${EMERALD.muted};font-size:12px;text-transform:capitalize">${escapeEmailHtml(
+          row.method
+        )}</td><td style="padding:6px 0;text-align:right;color:${EMERALD.text};font-size:12px;font-weight:700">${escapeEmailHtml(
+          money(Number(row.total))
+        )}</td><td style="padding:6px 0;text-align:right;color:${EMERALD.dim};font-size:11px">${escapeEmailHtml(
+          row.count
+        )}</td></tr>`
+    )
+    .join('');
+  const varianceColor = Number(opts.variance) === 0 ? EMERALD.accent : Number(opts.variance) < 0 ? '#fca5a5' : '#fbbf24';
+  const html = buildEmeraldEmail({
+    title: 'Shift closed — proof of tender',
+    eyebrow: 'Cash-up receipt',
+    preheader: `${opts.cashierName} closed a shift at ${opts.storeName}.`,
+    bodyHtml: `<p style="margin:0 0 12px">Hi <strong style="color:${EMERALD.text}">${escapeEmailHtml(
+      opts.cashierName
+    )}</strong>,</p>
+      <p style="margin:0 0 14px">Your shift at ${escapeEmailHtml(
+        opts.storeName
+      )} has been closed. This is your proof of tender and cash-up record.</p>
+      <p style="margin:0 0 6px;font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:${EMERALD.accent}">Collections by method</p>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse">
+        <tr><td style="padding:4px 0;color:${EMERALD.dim};font-size:10px;text-transform:uppercase">Method</td><td style="padding:4px 0;text-align:right;color:${EMERALD.dim};font-size:10px;text-transform:uppercase">Amount</td><td style="padding:4px 0;text-align:right;color:${EMERALD.dim};font-size:10px;text-transform:uppercase">Count</td></tr>
+        ${methodRows || `<tr><td colspan="3" style="padding:8px 0;color:${EMERALD.dim};font-size:12px">No payments recorded.</td></tr>`}
+      </table>`,
+    details: [
+      ['Opened', escapeEmailHtml(when(opts.openedAt))],
+      ['Closed', escapeEmailHtml(when(opts.closedAt))],
+      ['Opening float', escapeEmailHtml(money(opts.openingFloat))],
+      ['Cash tendered / counted', escapeEmailHtml(money(opts.countedCash))],
+      ['Expected cash', escapeEmailHtml(money(opts.expectedCash))],
+      [
+        'Variance',
+        `<strong style="color:${varianceColor}">${escapeEmailHtml(money(opts.variance))}</strong>`,
+      ],
+      ...(opts.notes ? ([['Notes', escapeEmailHtml(opts.notes)]] as Array<[string, string]>) : []),
+    ],
+    cta: { label: 'Open shift history', url: `${appBaseUrl('pos')}/` },
+    noteHtml:
+      'Keep this email. The same snapshot is stored against the shift and appears in the tenant reports and staff history.',
+    footerNote: 'Preyone POS · shift close proof of tender',
+  });
+  const text = [
+    `Shift closed at ${opts.storeName}`,
+    `Cashier: ${opts.cashierName}`,
+    `Opened: ${when(opts.openedAt)}`,
+    `Closed: ${when(opts.closedAt)}`,
+    `Opening float: ${money(opts.openingFloat)}`,
+    `Cash tendered / counted: ${money(opts.countedCash)}`,
+    `Expected cash: ${money(opts.expectedCash)}`,
+    `Variance: ${money(opts.variance)}`,
+    `Shift: ${opts.shiftId}`,
+    'Preyone POS · shift close proof of tender',
+  ].join('\n');
+  return sendMail(
+    opts.to,
+    `Shift closed — ${opts.cashierName} — ${money(opts.countedCash)}`,
+    html,
+    'Preyone POS',
     'support@preyone.com',
     undefined,
     undefined,

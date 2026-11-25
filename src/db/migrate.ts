@@ -1982,6 +1982,16 @@ const SQL = `
       await client.query(fs.readFileSync(v34Path, 'utf8'));
       console.log('Applied db/migrations/v3_4_house_template.sql (house-only template).');
     }
+    const v35Path = path.resolve(__dirname, '../../db/migrations/v3_5_tenant_catalog.sql');
+    if (fs.existsSync(v35Path)) {
+      await client.query(fs.readFileSync(v35Path, 'utf8'));
+      console.log('Applied db/migrations/v3_5_tenant_catalog.sql (tenant catalogue).');
+    }
+    const v36Path = path.resolve(__dirname, '../../db/migrations/v3_6_shift_close_receipts.sql');
+    if (fs.existsSync(v36Path)) {
+      await client.query(fs.readFileSync(v36Path, 'utf8'));
+      console.log('Applied db/migrations/v3_6_shift_close_receipts.sql (shift close proof).');
+    }
 
     // Enterprise accounting ledger + stock_applied idempotency flag.
     const v4AccountingPath = path.resolve(__dirname, '../../db/migrations/v4_accounting_ledger.sql');

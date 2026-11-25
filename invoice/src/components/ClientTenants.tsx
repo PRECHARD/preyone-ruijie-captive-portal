@@ -110,6 +110,7 @@ function ProvisionModal({
     ownerEmail: '',
     ownerPhone: '',
     tempPassword: '',
+    posPin: '',
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -165,6 +166,7 @@ function ProvisionModal({
         ownerEmail: form.ownerEmail.trim(),
         ownerPhone: form.ownerPhone.trim(),
         tempPassword: form.tempPassword,
+        posPin: form.posPin.trim() || undefined,
       });
       setCreated(res);
       onDone(`Provisioned ${res.company.name} on ${res.plan_name}.`);
@@ -406,6 +408,17 @@ function ProvisionModal({
                   Only the bcrypt hash is stored. Send this to the client over a secure channel.
                 </small>
               </label>
+
+              <label className="ct-field">
+                <span>POS PIN (optional)</span>
+                <input
+                  className="input"
+                  value={form.posPin}
+                  onChange={(e) => set('posPin', e.target.value.replace(/\D/g, '').slice(0, 8))}
+                  inputMode="numeric"
+                  placeholder="Generated and emailed if blank"
+                />
+              </label>
             </div>
 
             <div className="ct-modal-actions">
@@ -627,6 +640,9 @@ export default function ClientTenants() {
   const [provisionOpen, setProvisionOpen] = useState(false);
   const [cashTarget, setCashTarget] = useState<TenantRow | null>(null);
   const [resetId, setResetId] = useState<string | null>(null);
+  const [pinTarget, setPinTarget] = useState<TenantRow | null>(null);
+  const [pinValue, setPinValue] = useState('');
+  const [pinBusy, setPinBusy] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -657,6 +673,29 @@ export default function ClientTenants() {
       setNotice({ kind: 'error', text: errorText(err) });
     } finally {
       setResetId(null);
+    }
+  };
+
+  const savePin = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!pinTarget) return;
+    if (!/^\d{4,8}$/.test(pinValue)) {
+      setNotice({ kind: 'error', text: 'POS PIN must be 4–8 digits.' });
+      return;
+    }
+    setPinBusy(true);
+    try {
+      await api.post(`/api/admin/tenants/${pinTarget.id}/ceo-pin`, { pin: pinValue });
+      setNotice({
+        kind: 'ok',
+        text: `POS PIN updated for ${pinTarget.owner_name || pinTarget.name}'s CEO.`,
+      });
+      setPinTarget(null);
+      setPinValue('');
+    } catch (err) {
+      setNotice({ kind: 'error', text: errorText(err) });
+    } finally {
+      setPinBusy(false);
     }
   };
 
@@ -804,6 +843,18 @@ export default function ClientTenants() {
                       <button
                         type="button"
                         className="ct-action ct-action--copy"
+                        disabled={tenant.is_house || !tenant.owner_email}
+                        title="Set the client CEO's POS PIN"
+                        onClick={() => {
+                          setPinTarget(tenant);
+                          setPinValue('');
+                        }}
+                      >
+                        Set PIN
+                      </button>
+                      <button
+                        type="button"
+                        className="ct-action ct-action--copy"
                         onClick={() => copyText(tenant.till_code)}
                         title="Copy full till code"
                       >
@@ -848,6 +899,53 @@ export default function ClientTenants() {
             void load();
           }}
         />
+      )}
+
+      {pinTarget && (
+        <div className="ct-modal-backdrop" role="presentation" onClick={() => setPinTarget(null)}>
+          <form
+            className="ct-modal ct-modal--narrow"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="ct-pin-title"
+            onClick={(event) => event.stopPropagation()}
+            onSubmit={savePin}
+          >
+            <header className="ct-modal-head">
+              <div>
+                <span className="ct-eyebrow">POS access</span>
+                <h3 id="ct-pin-title">Set CEO POS PIN</h3>
+                <p>
+                  {pinTarget.owner_name || pinTarget.name} can sign into the till with this
+                  4–8 digit PIN immediately.
+                </p>
+              </div>
+              <button type="button" className="ct-close" onClick={() => setPinTarget(null)} aria-label="Close">
+                ×
+              </button>
+            </header>
+            <label className="ct-field">
+              <span>New POS PIN</span>
+              <input
+                className="input"
+                value={pinValue}
+                onChange={(e) => setPinValue(e.target.value.replace(/\D/g, '').slice(0, 8))}
+                inputMode="numeric"
+                autoFocus
+                placeholder="4–8 digits"
+                required
+              />
+            </label>
+            <div className="ct-modal-actions">
+              <button type="button" className="btn ghost" onClick={() => setPinTarget(null)} disabled={pinBusy}>
+                Cancel
+              </button>
+              <button type="submit" className="btn primary" disabled={pinBusy}>
+                {pinBusy ? 'Saving…' : 'Save PIN'}
+              </button>
+            </div>
+          </form>
+        </div>
       )}
     </div>
   );
