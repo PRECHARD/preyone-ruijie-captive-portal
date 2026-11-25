@@ -53,7 +53,7 @@ import Accounting from './pages/Accounting';
 import type { AuthUser } from './context/AuthContext';
 import { FiAlertOctagon } from 'react-icons/fi';
 import { WORKSPACE_KEY, type Workspace, loadWorkspace, persistWorkspace, workspaceForSection } from './workspace';
-import { currentRoute, writeHash } from './routes';
+import { currentRoute, isStarlinkCustomerPath, writeHash } from './routes';
 
 const sectionRoles: Record<string, string[]> = {
   overview: ['Staff', 'Manager', 'CEO'],
@@ -147,7 +147,10 @@ export default function App() {
   // #/transit/tenants must land on Transit regardless of what this browser
   // last used, otherwise the page stays unreachable by URL.
   const initial = useMemo(currentRoute, []);
-  const [section, setSection] = useState(initial.section || 'overview');
+  // /starlink/portal on this host is the old customer-portal link. Open the
+  // management dashboard instead of leaving the URL on that path.
+  const fromStarlinkPath = typeof window !== 'undefined' && isStarlinkCustomerPath(window.location.pathname);
+  const [section, setSection] = useState(initial.section || (fromStarlinkPath ? 'starlink' : 'overview'));
   const [workspace, setWorkspace] = useState<Workspace>(initial.workspace || loadWorkspace);
 
   // Brand each workspace's document title accordingly.
@@ -158,10 +161,19 @@ export default function App() {
       : 'Preyone UltraNet WiFi | Admin Console';
   }, [workspace]);
 
+  // Drop /starlink/portal (and /starlink/auth) off the admin host so a refresh
+  // cannot boot the customer shell. Hash-only replaceState would keep the path.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (!isStarlinkCustomerPath(window.location.pathname)) return;
+    window.history.replaceState(null, '', `/#/ultranet/starlink`);
+  }, []);
+
   // Normalise the URL once the route is known so a bare deep link
   // (#/tenants) is rewritten to its canonical, shareable form (#/transit/tenants).
   useEffect(() => {
     if (!user) return;
+    if (isStarlinkCustomerPath(window.location.pathname)) return;
     writeHash(workspace, section, true);
   }, [user, workspace, section]);
 

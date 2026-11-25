@@ -10,13 +10,19 @@ import { registerServiceWorker } from './pwa'
 
 /**
  * The Starlink customer portal ships inside this bundle but has its own shell
- * (own auth, own navbar, plain-CSS neon skin). It owns any /starlink/* deep
- * link and is also served on the starlink.preyone.com subdomain, where the
- * Express fallback delivers index.html for every path.
+ * (own auth, own navbar, plain-CSS neon skin). It owns /starlink/* deep links
+ * on the public site and is served on starlink.preyone.com.
+ *
+ * admin.preyone.com is never the customer portal — even at /starlink/portal.
+ * That path is the old navbar link; it must open the management dashboard
+ * (StarlinkAdmin tabs), not rewrite itself into the customer shell.
  */
+const onAdminConsole = window.location.hostname === 'admin.preyone.com'
 const isStarlinkPortal =
-  window.location.pathname.startsWith('/starlink') ||
-  window.location.hostname.startsWith('starlink.')
+  !onAdminConsole && (
+    window.location.pathname.startsWith('/starlink') ||
+    window.location.hostname.startsWith('starlink.')
+  )
 
 createRoot(document.getElementById('root')!).render(
   isStarlinkPortal ? (

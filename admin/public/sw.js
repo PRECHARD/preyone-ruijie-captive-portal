@@ -13,7 +13,7 @@
  *   - /api/* is never intercepted. Auth, sessions and live telemetry must always
  *     hit the network; caching them would leak data between accounts.
  */
-const VERSION = 'preyone-admin-v1';
+const VERSION = 'preyone-admin-v2';
 const SHELL_CACHE = `${VERSION}-shell`;
 const ASSET_CACHE = `${VERSION}-assets`;
 const OFFLINE_URL = '/offline.html';

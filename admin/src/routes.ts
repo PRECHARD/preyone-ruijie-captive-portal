@@ -41,6 +41,14 @@ export function currentRoute(): ParsedRoute {
 }
 
 /**
+ * Customer-portal paths that must not boot the customer shell on the admin
+ * console. `/starlink-privacy.html` is a real file and does not match.
+ */
+export function isStarlinkCustomerPath(pathname: string): boolean {
+  return pathname === '/starlink' || pathname.startsWith('/starlink/');
+}
+
+/**
  * Build the fragment for a section, resolving which workspace it belongs to.
  *
  * `workspace` is only a tiebreaker for sections scoped to 'both' (Overview);

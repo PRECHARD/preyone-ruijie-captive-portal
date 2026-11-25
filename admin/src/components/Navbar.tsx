@@ -26,6 +26,8 @@ export default function Navbar({ className }: { className?: string }) {
 
   return (
     <div className={'navbar-right' + (className ? ' ' + className : '')} ref={userRef}>
+      {/* Stay inside the console. An <a href="/starlink/portal"> boots the
+          customer portal and hides this management dashboard. */}
       <button
         type="button"
         className="navbar-portal"

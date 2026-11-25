@@ -47,8 +47,9 @@
         var loader = document.getElementById('boot-loader');
         if (!loader) return;
         var isStarlink =
-          window.location.pathname.indexOf('/starlink') === 0 ||
-          window.location.hostname.indexOf('starlink.') === 0;
+          window.location.hostname.indexOf('starlink.') === 0 ||
+          (window.location.hostname !== 'admin.preyone.com' &&
+            window.location.pathname.indexOf('/starlink') === 0);
         if (isStarlink) {
           loader.setAttribute('data-portal', 'starlink');
           var text = document.getElementById('boot-text');

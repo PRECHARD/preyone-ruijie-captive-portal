@@ -40,6 +40,7 @@ import { startRuijieVoucherStatusWorker } from './services/ruijieVoucherStatusSy
 import { startReportScheduler } from './services/scheduler';
 import { ensureStarlinkSchema } from './db/starlink';
 import { serveSpaBundle, spaDistDir } from './utils/spaHost';
+import { starlinkAdminRedirect } from './utils/starlinkAdminEntry';
 import { errorHandler } from './middleware/errorHandler';
 import { maintenanceCheck } from './middleware/maintenanceMode';
 import { scheduleSessionCleanup } from './services/sessionCleanup';
@@ -435,6 +436,16 @@ app.use((req, res, next) => {
       }
     }
     res.status(404).type('text/plain').send('Download not available.');
+    return;
+  }
+
+  // Admin Starlink management must not fall through into the customer portal.
+  // /starlink/portal on the admin host (and a signed-in manager on
+  // starlink.preyone.com) used to boot the customer shell, which rewrote the
+  // URL to /starlink/portal and hid the designed dashboard tabs.
+  const starlinkAdminTarget = starlinkAdminRedirect(req);
+  if (starlinkAdminTarget) {
+    res.redirect(302, starlinkAdminTarget);
     return;
   }
 

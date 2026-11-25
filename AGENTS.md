@@ -53,7 +53,7 @@ Ruijie captive portal system for Preyone UltraNet Wi-Fi. Voucher-based internet 
 
 ### Host routing (`src/index.ts`)
 - `admin.preyone.com` → `admin/dist` (LOCKED)
-- `starlink.preyone.com` → `admin/dist` Starlink portal (UNLOCKED, see Starlink section)
+- `starlink.preyone.com` → `admin/dist` Starlink customer portal (UNLOCKED). A signed-in Manager/CEO is redirected to the admin dashboard at `admin.preyone.com/#/ultranet/starlink` (tabs: overview, customers, applications, transactions, kits, plans). `?view=customer` keeps the customer portal. `admin.preyone.com/starlink/*` is the same dashboard, never `/starlink/portal`.
 - `app.preyone.com` → `app/dist` gateway (LOCKED)
 - `pos.preyone.com` → `pos/dist` (POS till SPA — ACTIVE)
 - `invoice.preyone.com` → invoice app (ACTIVE)
