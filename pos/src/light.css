@@ -288,3 +288,10 @@
   color: #10241c !important;
   border-color: #c9ded4 !important;
 }
+
+[data-preyone-theme='light'] .doc-type-row button.on {
+  background: linear-gradient(120deg, #047857, #10b981 58%, #34d399);
+  border-color: #047857;
+  color: #ffffff;
+  box-shadow: 0 8px 18px rgba(5, 150, 105, 0.18);
+}

@@ -542,3 +542,63 @@
 .receipt-table th { color: #475569; }
 .receipt-totals > div { color: #334155; }
 .receipt-foot { color: #64748b; }
+
+[data-preyone-theme='light'] .glass-shell .panel-head {
+  background: #f7fcf9;
+  border-color: #d3e5dc;
+}
+[data-preyone-theme='light'] .glass-shell .panel-title { color: #10241c; }
+
+[data-preyone-theme='light'] .settings-matrix {
+  background: #ffffff;
+  border-color: #d3e5dc;
+}
+[data-preyone-theme='light'] .settings-matrix-head {
+  background: #f3faf6;
+  color: #536b60;
+  border-bottom-color: #d3e5dc;
+}
+[data-preyone-theme='light'] .settings-matrix-row + .settings-matrix-row { border-top-color: #e3efe9; }
+[data-preyone-theme='light'] .settings-matrix-row:hover { background: #f7fcf9; }
+[data-preyone-theme='light'] .settings-perm strong { color: #10241c; }
+[data-preyone-theme='light'] .settings-perm small { color: #536b60; }
+[data-preyone-theme='light'] .settings-team-head h4 { color: #10241c; }
+[data-preyone-theme='light'] .settings-team-head p { color: #536b60; }
+[data-preyone-theme='light'] .settings-check input:checked + span {
+  background: #059669;
+  border-color: #047857;
+  box-shadow: 0 0 12px rgba(5, 150, 105, 0.22);
+}
+
+[data-preyone-theme='light'] .stat-value { color: #10241c; }
+[data-preyone-theme='light'] .stat-value.warn { color: #b45309; text-shadow: none; }
+[data-preyone-theme='light'] .stat-value.danger { color: #be123c; text-shadow: none; }
+[data-preyone-theme='light'] .table-wrap table,
+[data-preyone-theme='light'] .table-wrap tbody td { color: #243d33; }
+[data-preyone-theme='light'] .table-wrap thead th {
+  color: #536b60;
+  background: #f3faf6;
+  border-bottom-color: #d3e5dc;
+}
+[data-preyone-theme='light'] .table-wrap tbody tr:hover { background: #f7fcf9; }
+
+[data-preyone-theme='light'] .glass-shell table:not(.receipt-table),
+[data-preyone-theme='light'] .glass-shell table:not(.receipt-table) tbody td {
+  color: #243d33;
+}
+[data-preyone-theme='light'] .glass-shell table:not(.receipt-table) thead th {
+  color: #536b60;
+  background: #f3faf6;
+  border-bottom-color: #d3e5dc;
+}
+
+[data-preyone-theme='light'] .status-chip {
+  color: #047857;
+  background: #e8f7f0;
+  border-color: #c9ded4;
+}
+[data-preyone-theme='light'] .status-chip--zar {
+  color: #92400e;
+  background: #fef3c7;
+  border-color: #fcd34d;
+}

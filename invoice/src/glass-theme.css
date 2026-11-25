@@ -239,8 +239,8 @@
   border-radius: 0;
   background: transparent;
 }
-.glass-shell table { color: #dbe7f5; }
-.glass-shell thead th {
+.glass-shell table:not(.receipt-table) { color: #dbe7f5; }
+.glass-shell table:not(.receipt-table) thead th {
   padding: 11px 14px;
   border-bottom: 1px solid var(--glass-border-soft);
   background: rgba(255, 255, 255, 0.03);
@@ -250,12 +250,12 @@
   font-weight: 700;
   backdrop-filter: blur(8px);
 }
-.glass-shell tbody td {
+.glass-shell table:not(.receipt-table) tbody td {
   padding: 11px 14px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
   color: #dbe7f5;
 }
-.glass-shell tbody tr:hover {
+.glass-shell table:not(.receipt-table) tbody tr:hover {
   background: rgba(0, 240, 255, 0.04);
 }
 .glass-shell tbody tr:hover td:first-child {
