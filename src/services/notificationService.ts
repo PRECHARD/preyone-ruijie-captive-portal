@@ -193,10 +193,10 @@ export function buildEmeraldEmail(opts: {
 }): string {
   const invoiceUrl = appBaseUrl('invoice');
   const posUrl = appBaseUrl('pos');
-  // Same header wordmark and footer mark as the admin.console templates:
-  // the horizontal inverse wordmark belongs in the header, the square house
-  // mark belongs in the footer. Using the footer mark twice looked wrong.
-  const headerLogo = `${appBaseUrl('invoice')}/images/preyone-logo-mainInverse-optimized.png`;
+  // Same logo pair the admin.console templates use: the horizontal Preyone
+  // wordmark in the header and the square house mark in the footer. Using the
+  // square footer mark in the header was the bug.
+  const headerLogo = `${appBaseUrl('invoice')}/images/preyonenoneglow-logo-zoom-800.png`;
   const footerLogo = `${appBaseUrl('invoice')}/images/preyonelogomainzw-email.png`;
   const sans = "'Segoe UI',-apple-system,BlinkMacSystemFont,Roboto,Arial,sans-serif";
   const eyebrow = opts.eyebrow || 'Preyone Invoice & POS';
@@ -217,7 +217,7 @@ export function buildEmeraldEmail(opts: {
         <tr><td style="background:${EMERALD.panel};border:1px solid ${EMERALD.line};border-radius:18px;overflow:hidden">
           <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
             <tr><td align="center" style="padding:30px 28px 2px">
-              <img src="${headerLogo}" width="170" height="96" alt="Preyone" style="display:block;width:170px;max-width:100%;height:auto;border:0;outline:none;text-decoration:none">
+              <img src="${headerLogo}" width="190" alt="Preyone" style="display:block;width:190px;max-width:100%;height:auto;border:0;outline:none;text-decoration:none">
             </td></tr>
             <tr><td align="center" style="padding:14px 28px 0">
               <div style="font-family:${sans};font-size:10px;font-weight:700;letter-spacing:2.4px;text-transform:uppercase;color:${EMERALD.accent}">${escapeEmailHtml(

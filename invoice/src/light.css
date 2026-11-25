@@ -472,3 +472,16 @@
   border-color: #c9ded4;
   color: #047857;
 }
+
+[data-preyone-theme='light'] .dash-page::before {
+  background:
+    radial-gradient(720px 340px at 8% -8%, rgba(5, 150, 105, 0.06), transparent 68%),
+    radial-gradient(640px 320px at 92% 0%, rgba(8, 145, 178, 0.05), transparent 64%),
+    linear-gradient(180deg, #f4faf6 0%, #ffffff 62%, #f7fcf9 100%);
+}
+[data-preyone-theme='light'] .dash-quick {
+  background: linear-gradient(160deg, #ffffff, #f3faf6);
+  border-color: #d3e5dc;
+  box-shadow: 0 14px 34px rgba(16, 36, 28, 0.07);
+}
+[data-preyone-theme='light'] .dash-quick-meta { color: #536b60; }
