@@ -27,7 +27,8 @@ import { requireStarlinkAuth } from '../middleware/starlinkAuth';
 import { createStarlinkInvoice, applyStarlinkPayment, getStarlinkKit } from '../db/starlink';
 import { getStarlinkPlan } from '../plans/starlinkPlans';
 import { syncSaleToLedgerAndStock } from '../db/accounting';
-import { canonicalPlanId, syncPlanModules } from '../plans/entitlements';
+import { canonicalPlanId, planNameFor, syncPlanModules } from '../plans/entitlements';
+import { sendSubscriptionPaymentReceiptEmail } from '../services/notificationService';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'preyone-jwt-secret-change-in-production';
 let _jwtSecretWarned = false;
@@ -1854,7 +1855,7 @@ paymentsRouter.post('/pesepay/webhook', async (req: Request, res: Response) => {
       await client.query('BEGIN');
 
       const { rows: intentRows } = await client.query(
-        `SELECT id, reference, tenant_id, target_type, status, plan_tier
+        `SELECT id, reference, tenant_id, target_type, status, plan_tier, amount, currency
            FROM pesepay_intents
           WHERE reference = ANY($1::text[]) OR provider_reference = ANY($1::text[])
           FOR UPDATE`,
@@ -1911,7 +1912,7 @@ paymentsRouter.post('/pesepay/webhook', async (req: Request, res: Response) => {
                 ${purchasedTier ? `plan_type = '${purchasedTier}',` : ''}
                 updated_at = NOW()
           WHERE id = $1
-          RETURNING id, plan_type, subscription_expires_at, subscription_status`,
+          RETURNING id, name, email, currency, plan_type, subscription_expires_at, subscription_status`,
         [companyId]
       );
 
@@ -1939,6 +1940,21 @@ paymentsRouter.post('/pesepay/webhook', async (req: Request, res: Response) => {
       }
 
       await client.query('COMMIT');
+
+      const receiptAmount = Number(intent?.amount ?? payload.amount ?? 0);
+      if (company.email && Number.isFinite(receiptAmount) && receiptAmount > 0) {
+        await sendSubscriptionPaymentReceiptEmail({
+          to: company.email,
+          companyName: company.name || 'Preyone client',
+          planName: planNameFor(company.plan_type) || 'Preyone plan',
+          amount: receiptAmount,
+          currency: String(intent?.currency || company.currency || 'USD'),
+          method: 'Pesepay',
+          reference,
+          paidAt: new Date(),
+          expiresAt: company.subscription_expires_at,
+        }).catch(() => false);
+      }
 
       res.json({
         success: true,

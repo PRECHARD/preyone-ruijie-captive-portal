@@ -16,6 +16,9 @@ import {
   sendAdminRejectedNotification,
   sendCashHandoverDecisionEmail,
   sendCashHandoverSubmittedEmail,
+  sendClientProvisionedEmail,
+  sendPasswordResetEmail,
+  sendSubscriptionPaymentReceiptEmail,
 } from '../services/notificationService';
 import { isRuijieCloudConfigured, mintRuijieVoucherForTier } from '../services/ruijieMint';
 import { TIER_CATALOG } from './subscription';
@@ -3743,12 +3746,24 @@ adminRouter.post(
         `Provisioned ${businessName} on ${tier.name} for ${durationDays} days`
       ).catch(() => undefined);
 
+      const welcomeSent = await sendClientProvisionedEmail({
+        to: ownerEmail,
+        ownerName,
+        companyName: businessName,
+        planName: tier.name,
+        durationDays,
+        expiresAt: company.subscription_expires_at,
+        tempPassword,
+        tillCode: company.id,
+      }).catch(() => false);
+
       res.status(201).json({
         company,
         owner: ownerRes.rows[0],
         plan_name: tier.name,
         duration_days: durationDays,
         till_code: company.id,
+        welcome_email_sent: welcomeSent,
         login_urls: {
           invoice: 'https://invoice.preyone.com',
           pos: 'https://pos.preyone.com',
@@ -3811,7 +3826,7 @@ adminRouter.post(
       await client.query('BEGIN');
 
       const targetRes = await client.query(
-        `SELECT id, name, plan_type, subscription_status, subscription_expires_at
+        `SELECT id, name, email, plan_type, subscription_status, subscription_expires_at
            FROM companies WHERE id = $1 FOR UPDATE`,
         [targetId]
       );
@@ -3953,10 +3968,25 @@ adminRouter.post(
         )}) extended ${target.name} by ${durationDays} days`
       ).catch(() => undefined);
 
+      const receiptSent = target.email
+        ? await sendSubscriptionPaymentReceiptEmail({
+            to: target.email,
+            companyName: target.name,
+            planName: tier.name,
+            amount: amountUsd,
+            currency: house.currency || 'USD',
+            method: 'Cash',
+            reference,
+            paidAt: new Date(),
+            expiresAt: updatedRes.rows[0].subscription_expires_at,
+          }).catch(() => false)
+        : false;
+
       res.json({
         subscription: updatedRes.rows[0],
         plan_name: tier.name,
         duration_days: durationDays,
+        receipt_email_sent: receiptSent,
         receipt: {
           document_id: savedDoc.id,
           doc_number: savedDoc.doc_number,
@@ -3977,6 +4007,79 @@ adminRouter.post(
     } finally {
       client.release();
     }
+  }
+);
+
+/**
+ * House CEO: send a client owner a fresh password-reset link.
+ *
+ * Passwords are never stored or recoverable — only a bcrypt hash exists — so
+ * recovery is a one-hour reset token emailed to the owner. The token is never
+ * returned to the caller.
+ */
+adminRouter.post(
+  '/tenants/:id/password-reset',
+  requireRole('CEO'),
+  requireHouseCeo,
+  async (req: Request, res: Response) => {
+    const targetId = String(req.params.id ?? '');
+    if (!isUuid(targetId)) {
+      res.status(422).json({ error: 'Client id is not a valid UUID' });
+      return;
+    }
+
+    const { rows } = await pool.query(
+      `SELECT u.id, u.full_name, u.email, c.name AS company_name
+         FROM companies c
+         JOIN admin_users u
+           ON u.portal_company_id = c.id AND u.role = 'CEO'
+        WHERE c.id = $1
+        ORDER BY u.created_at ASC
+        LIMIT 1`,
+      [targetId]
+    );
+    const owner = rows[0];
+    if (!owner) {
+      res.status(404).json({
+        error: 'That client has no CEO account on file.',
+        code: 'NO_CLIENT_CEO',
+      });
+      return;
+    }
+
+    const token = crypto.randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
+    await pool.query(
+      `UPDATE admin_users
+          SET reset_token = $1, reset_token_expires_at = $2
+        WHERE id = $3`,
+      [token, expiresAt, owner.id]
+    );
+
+    const sent = await sendPasswordResetEmail(
+      owner.email,
+      token,
+      owner.full_name,
+      'invoice'
+    ).catch(() => false);
+
+    await recordAuditLog(
+      req.adminUser!.id,
+      req.adminUser!.fullName,
+      'tenant_password_reset',
+      'admin_user',
+      owner.id,
+      `Password reset link for ${owner.company_name} (${owner.email})`
+    ).catch(() => undefined);
+
+    res.json({
+      ok: true,
+      sent,
+      email: owner.email,
+      message: sent
+        ? `A password reset link was emailed to ${owner.email}.`
+        : `The reset link was generated, but the email could not be sent. Check SMTP configuration.`,
+    });
   }
 );
 

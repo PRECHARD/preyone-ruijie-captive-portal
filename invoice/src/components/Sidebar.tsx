@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { getToken, type Company, type DocType } from '../api';
+import ThemeToggle from './ThemeToggle';
 
 /**
  * The invoicing workspace rail.
@@ -600,6 +601,11 @@ export default function Sidebar({
           </button>
         </div>
       ) : null}
+
+      <div className="sidebar-appearance">
+        <span>Appearance</span>
+        <ThemeToggle />
+      </div>
 
       <div className="sidebar-footer">
         <strong>Preyone Invoicing v3.2</strong>

@@ -1,0 +1,232 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   Light mode — daylight skin for the invoicing workspace
+   Applied by [data-preyone-theme="light"]; dark mode is untouched.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+[data-preyone-theme='light'] {
+  color-scheme: light;
+  --pos-primary: #059669 !important;
+  --pos-primary-strong: #047857 !important;
+  --pos-primary-soft: rgba(5, 150, 105, 0.12) !important;
+  --pos-secondary: #d9efe5 !important;
+  --pos-accent: #0891b2 !important;
+  --pos-accent-soft: rgba(8, 145, 178, 0.1) !important;
+  --pos-bg: #eef6f1 !important;
+  --pos-bg-elevated: #ffffff !important;
+  --pos-surface: #ffffff !important;
+  --pos-surface-2: #f5faf7 !important;
+  --pos-border: #d3e5dc !important;
+  --pos-text: #10241c !important;
+  --pos-text-muted: #536b60 !important;
+  --pos-on-primary: #ffffff !important;
+  --pos-on-accent: #ffffff !important;
+  --pos-glow: rgba(5, 150, 105, 0.2) !important;
+  --pos-glow-accent: rgba(8, 145, 178, 0.16) !important;
+  --pos-shadow: 0 18px 40px rgba(16, 36, 28, 0.1) !important;
+  --pos-glass: rgba(255, 255, 255, 0.82) !important;
+  --pos-glass-strong: rgba(255, 255, 255, 0.96) !important;
+  --pos-glass-edge: rgba(16, 36, 28, 0.1) !important;
+  --pos-glass-edge-strong: rgba(16, 36, 28, 0.16) !important;
+  --pos-glass-highlight: rgba(255, 255, 255, 0.9) !important;
+  --pos-hairline: linear-gradient(90deg, transparent, rgba(16, 36, 28, 0.12), transparent) !important;
+  --pos-ring: 0 0 0 1px rgba(5, 150, 105, 0.4), 0 0 0 4px rgba(5, 150, 105, 0.12) !important;
+}
+
+[data-preyone-theme='light'] body {
+  background:
+    radial-gradient(1100px 620px at 6% -12%, rgba(5, 150, 105, 0.1), transparent 62%),
+    radial-gradient(900px 520px at 104% -8%, rgba(8, 145, 178, 0.08), transparent 58%),
+    radial-gradient(900px 700px at 50% 120%, rgba(16, 185, 129, 0.06), transparent 62%),
+    #eef6f1;
+  color: #10241c;
+}
+[data-preyone-theme='light'] body::before {
+  opacity: 0.35;
+  background-image:
+    linear-gradient(rgba(16, 36, 28, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(16, 36, 28, 0.05) 1px, transparent 1px);
+}
+
+[data-preyone-theme='light'] .sidebar,
+[data-preyone-theme='light'] .topbar,
+[data-preyone-theme='light'] .main,
+[data-preyone-theme='light'] .page-head {
+  background: rgba(255, 255, 255, 0.9);
+  color: #10241c;
+  border-color: #d3e5dc;
+}
+[data-preyone-theme='light'] .sidebar {
+  border-right: 1px solid #d3e5dc;
+  box-shadow: 12px 0 40px rgba(16, 36, 28, 0.05);
+}
+[data-preyone-theme='light'] .nav-link,
+[data-preyone-theme='light'] .nav-link span,
+[data-preyone-theme='light'] .nav-section,
+[data-preyone-theme='light'] .brand-sub,
+[data-preyone-theme='light'] .brand-client-name,
+[data-preyone-theme='light'] .footer-meta,
+[data-preyone-theme='light'] .profile-meta,
+[data-preyone-theme='light'] .profile-email {
+  color: #536b60;
+}
+[data-preyone-theme='light'] .nav-link:hover,
+[data-preyone-theme='light'] .nav-link.on {
+  color: #047857;
+  background: rgba(5, 150, 105, 0.1);
+  border-color: rgba(5, 150, 105, 0.22);
+}
+[data-preyone-theme='light'] .brand-name,
+[data-preyone-theme='light'] .profile-name,
+[data-preyone-theme='light'] .main h1,
+[data-preyone-theme='light'] .main h2,
+[data-preyone-theme='light'] .main h3,
+[data-preyone-theme='light'] .card h1,
+[data-preyone-theme='light'] .card h2,
+[data-preyone-theme='light'] .card h3,
+[data-preyone-theme='light'] .panel h3 {
+  color: #10241c;
+}
+[data-preyone-theme='light'] .theme-toggle {
+  background: #ffffff;
+  border-color: #c9ded4;
+  color: #047857;
+}
+[data-preyone-theme='light'] .theme-toggle:hover {
+  background: #e8f7f0;
+  border-color: #059669;
+}
+
+[data-preyone-theme='light'] .card,
+[data-preyone-theme='light'] .panel,
+[data-preyone-theme='light'] .stat,
+[data-preyone-theme='light'] .table-wrap,
+[data-preyone-theme='light'] .doc-row,
+[data-preyone-theme='light'] .empty,
+[data-preyone-theme='light'] .drawer,
+[data-preyone-theme='light'] .modal,
+[data-preyone-theme='light'] .modal-card,
+[data-preyone-theme='light'] .confirm-card,
+[data-preyone-theme='light'] .settings-panel,
+[data-preyone-theme='light'] .settings-hero,
+[data-preyone-theme='light'] .settings-card,
+[data-preyone-theme='light'] .settings-billing-card,
+[data-preyone-theme='light'] .tier-card,
+[data-preyone-theme='light'] .acct-kpi-card,
+[data-preyone-theme='light'] .fin-panel,
+[data-preyone-theme='light'] .pay-modal,
+[data-preyone-theme='light'] .send-modal {
+  background: #ffffff;
+  color: #10241c;
+  border-color: #d3e5dc;
+  box-shadow: 0 18px 45px rgba(16, 36, 28, 0.08);
+}
+[data-preyone-theme='light'] .doc-row:hover,
+[data-preyone-theme='light'] .card:hover {
+  background: #f7fcf9;
+}
+[data-preyone-theme='light'] .table th {
+  color: #536b60;
+  border-bottom-color: #d3e5dc;
+  background: #f3faf6;
+}
+[data-preyone-theme='light'] .table td {
+  border-bottom-color: #e3efe9;
+}
+[data-preyone-theme='light'] .banner {
+  border-color: #c9ded4;
+}
+[data-preyone-theme='light'] .banner.ok {
+  background: #ecfdf5;
+  color: #065f46;
+}
+[data-preyone-theme='light'] .banner.error {
+  background: #fef2f2;
+  color: #991b1b;
+}
+
+[data-preyone-theme='light'] .input,
+[data-preyone-theme='light'] .select,
+[data-preyone-theme='light'] .textarea,
+[data-preyone-theme='light'] .settings-field input,
+[data-preyone-theme='light'] .settings-field select,
+[data-preyone-theme='light'] .settings-field textarea {
+  background: #ffffff;
+  border-color: #c9ded4;
+  color: #10241c;
+}
+[data-preyone-theme='light'] .input::placeholder,
+[data-preyone-theme='light'] .textarea::placeholder {
+  color: #7b9187;
+}
+[data-preyone-theme='light'] .btn.ghost {
+  background: #f5faf7;
+  border-color: #c9ded4;
+  color: #0f5c43;
+}
+[data-preyone-theme='light'] .chip {
+  background: #f3faf6;
+  border-color: #c9ded4;
+  color: #334c41;
+}
+
+/* Auth: white daylight card with the emerald house accent. */
+[data-preyone-theme='light'] .auth-shell {
+  --pos-text: #10241c;
+  --pos-text-muted: #536b60;
+  --pos-glass-edge: rgba(16, 36, 28, 0.1);
+  --pos-glass-edge-strong: rgba(16, 36, 28, 0.16);
+  background:
+    radial-gradient(900px 560px at 8% -10%, rgba(5, 150, 105, 0.12), transparent 58%),
+    radial-gradient(760px 480px at 100% 0%, rgba(8, 145, 178, 0.08), transparent 55%),
+    #eef7f2;
+  color: #10241c;
+}
+[data-preyone-theme='light'] .auth-hero {
+  background:
+    radial-gradient(720px 420px at 8% 0%, rgba(5, 150, 105, 0.1), transparent 64%),
+    radial-gradient(560px 420px at 100% 100%, rgba(8, 145, 178, 0.08), transparent 62%),
+    linear-gradient(155deg, #ffffff, #f2faf6);
+  border-color: #cfe5da;
+  box-shadow: 0 32px 80px rgba(16, 36, 28, 0.1);
+}
+[data-preyone-theme='light'] .auth-hero h2,
+[data-preyone-theme='light'] .auth-points strong,
+[data-preyone-theme='light'] .auth-card h1 {
+  color: #10241c;
+}
+[data-preyone-theme='light'] .auth-hero-division,
+[data-preyone-theme='light'] .auth-points span:not(.auth-point-dot),
+[data-preyone-theme='light'] .auth-card p,
+[data-preyone-theme='light'] .auth-legal,
+[data-preyone-theme='light'] .auth-foot-hint {
+  color: #536b60;
+}
+[data-preyone-theme='light'] .auth-card {
+  background: #ffffff;
+  border-color: #cfe5da;
+  box-shadow: 0 32px 80px rgba(16, 36, 28, 0.12);
+}
+[data-preyone-theme='light'] .auth-card .input {
+  background: #ffffff;
+  border-color: #c9ded4;
+  color: #10241c;
+}
+[data-preyone-theme='light'] .auth-card .input:focus {
+  border-color: #059669;
+  box-shadow: 0 0 0 3px rgba(5, 150, 105, 0.12);
+}
+[data-preyone-theme='light'] .auth-card .btn.primary {
+  color: #ffffff;
+}
+[data-preyone-theme='light'] .auth-card .btn.ghost {
+  background: #f3faf6;
+  border-color: #c9ded4;
+  color: #0f5c43;
+}
+[data-preyone-theme='light'] .auth-legal a {
+  color: #047857;
+}
+[data-preyone-theme='light'] .input-affix-btn {
+  background: #eef7f2;
+  color: #536b60;
+}

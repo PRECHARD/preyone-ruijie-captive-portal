@@ -120,6 +120,7 @@ function ProvisionModal({
     duration_days: number;
     till_code: string;
     login_urls: { invoice: string; pos: string };
+    welcome_email_sent?: boolean;
   } | null>(null);
 
   const set = (key: keyof typeof form, value: string) =>
@@ -149,6 +150,7 @@ function ProvisionModal({
         duration_days: number;
         till_code: string;
         login_urls: { invoice: string; pos: string };
+        welcome_email_sent?: boolean;
       }>('/api/admin/tenants/provision', {
         businessName: form.businessName.trim(),
         tagline: form.tagline.trim(),
@@ -222,8 +224,12 @@ function ProvisionModal({
               </div>
             </div>
             <p className="ct-hint">
-              Plan valid for {created.duration_days} days. Record the cash payment next from the
-              client row to book the revenue in Preyone's ledger.
+              Plan valid for {created.duration_days} days.{' '}
+              {created.welcome_email_sent
+                ? `A welcome email with the sign-in details was sent to ${created.owner.email}.`
+                : 'The welcome email could not be sent — hand the credentials over securely.'}{' '}
+              Record the cash payment next from the client row to book the revenue in Preyone's
+              ledger.
             </p>
             <div className="ct-modal-actions">
               <button type="button" className="btn primary" onClick={onClose}>
@@ -620,6 +626,7 @@ export default function ClientTenants() {
   const [notice, setNotice] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
   const [provisionOpen, setProvisionOpen] = useState(false);
   const [cashTarget, setCashTarget] = useState<TenantRow | null>(null);
+  const [resetId, setResetId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -637,6 +644,21 @@ export default function ClientTenants() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const sendResetLink = async (tenant: TenantRow) => {
+    setResetId(tenant.id);
+    setNotice(null);
+    try {
+      const res = await api.post<{ message: string; sent: boolean }>(
+        `/api/admin/tenants/${tenant.id}/password-reset`
+      );
+      setNotice({ kind: res.sent ? 'ok' : 'error', text: res.message });
+    } catch (err) {
+      setNotice({ kind: 'error', text: errorText(err) });
+    } finally {
+      setResetId(null);
+    }
+  };
 
   const clients = tenants.filter((tenant) => !tenant.is_house);
   const expiring = clients.filter((tenant) => tenant.status === 'Expiring Soon').length;
@@ -765,6 +787,23 @@ export default function ClientTenants() {
                       <button
                         type="button"
                         className="ct-action ct-action--copy"
+                        disabled={
+                          tenant.is_house ||
+                          !tenant.owner_email ||
+                          resetId === tenant.id
+                        }
+                        title={
+                          tenant.is_house
+                            ? 'The house tenant uses its own CEO sign-in'
+                            : 'Email the owner a one-hour password reset link'
+                        }
+                        onClick={() => void sendResetLink(tenant)}
+                      >
+                        {resetId === tenant.id ? 'Sending…' : 'Reset link'}
+                      </button>
+                      <button
+                        type="button"
+                        className="ct-action ct-action--copy"
                         onClick={() => copyText(tenant.till_code)}
                         title="Copy full till code"
                       >
@@ -782,6 +821,12 @@ export default function ClientTenants() {
         Cash payments are recorded as paid sales in the first-created Preyone company, then the
         client's <code>plan_type</code> and expiry are extended in the same transaction. Pesepay
         renewals are untouched and continue through the existing webhook.
+      </p>
+      <p className="ct-footnote">
+        <strong>Credentials:</strong> passwords are stored only as bcrypt hashes. The temporary
+        password is sent once in the welcome email; if it is lost, use <em>Reset link</em> to email
+        the owner a one-hour recovery link. Provisioning, plan changes, cash receipts and password
+        resets are written to the admin audit log.
       </p>
 
       {provisionOpen && (

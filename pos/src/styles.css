@@ -1436,3 +1436,142 @@ select option,
   background: linear-gradient(135deg, #be123c, #7f1d3a) !important;
   border-color: rgba(244, 63, 94, 0.5) !important;
 }
+
+/* ══ Day/night switch + emerald sign-in ═══════════════════════════════════ */
+
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: rgba(15, 23, 42, 0.62);
+  color: #a7f3d0;
+  cursor: pointer;
+  transition: color 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+}
+.theme-toggle:hover {
+  color: #6ee7b7;
+  border-color: rgba(52, 211, 153, 0.5);
+  background: rgba(16, 185, 129, 0.12);
+}
+.theme-toggle svg { width: 17px; height: 17px; }
+.pin-theme-toggle { position: absolute; top: 18px; right: 18px; z-index: 4; }
+.topbar-theme-toggle { margin-right: 4px; }
+
+/* Emerald PIN landing */
+.pin-login-screen {
+  position: relative;
+  background:
+    radial-gradient(900px 520px at 12% -10%, rgba(16, 185, 129, 0.24), transparent 60%),
+    radial-gradient(800px 480px at 92% 0%, rgba(0, 240, 255, 0.12), transparent 55%),
+    radial-gradient(700px 500px at 50% 120%, rgba(4, 120, 87, 0.16), transparent 62%),
+    linear-gradient(160deg, #04100c 0%, #06160f 48%, #0a1f16 100%);
+}
+.pin-login-glass {
+  background:
+    radial-gradient(360px 180px at 100% 0%, rgba(0, 240, 255, 0.1), transparent 68%),
+    linear-gradient(160deg, rgba(7, 30, 23, 0.92), rgba(4, 13, 20, 0.88));
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  box-shadow:
+    0 24px 60px rgba(0, 0, 0, 0.48),
+    0 0 44px rgba(16, 185, 129, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+.pin-logo { filter: drop-shadow(0 8px 18px rgba(16, 185, 129, 0.32)); }
+.pin-dot.filled {
+  background: #34d399;
+  border-color: #6ee7b7;
+  box-shadow: 0 0 12px rgba(52, 211, 153, 0.55);
+}
+.pin-pad button:hover:not(:disabled) {
+  border-color: rgba(52, 211, 153, 0.55);
+  box-shadow: 0 0 16px rgba(16, 185, 129, 0.2);
+}
+.pin-pad button.pin-ok {
+  background: linear-gradient(120deg, #047857, #10b981 58%, #34d399);
+  color: #04120d;
+}
+.op-btn {
+  background: linear-gradient(160deg, rgba(7, 30, 23, 0.78), rgba(4, 13, 20, 0.86));
+  border-color: rgba(16, 185, 129, 0.26);
+  color: #eafff7;
+}
+.op-btn:hover {
+  border-color: rgba(52, 211, 153, 0.52);
+  box-shadow: 0 0 18px rgba(16, 185, 129, 0.18);
+}
+.op-selected { background: linear-gradient(120deg, #047857, #10b981 58%, #34d399); color: #04120d; }
+.op-change { color: rgba(4, 18, 13, 0.7); }
+.pin-status.ok { color: #6ee7b7; border-color: rgba(52, 211, 153, 0.35); }
+
+/* Emerald SSO auth (Login.tsx is the fallback shell) */
+.auth-shell {
+  --pos-primary: #10b981;
+  --pos-primary-strong: #047857;
+  --pos-primary-soft: rgba(16, 185, 129, 0.2);
+  --pos-accent: #00f0ff;
+  --pos-accent-soft: rgba(0, 240, 255, 0.14);
+  --pos-text: #eafff7;
+  --pos-text-muted: #9bbdaf;
+  --pos-glow: rgba(16, 185, 129, 0.4);
+  background:
+    radial-gradient(900px 520px at 8% -10%, rgba(16, 185, 129, 0.22), transparent 58%),
+    radial-gradient(800px 480px at 100% 0%, rgba(0, 240, 255, 0.1), transparent 55%),
+    #06120d;
+  color: var(--pos-text);
+}
+.auth-hero {
+  border-color: rgba(16, 185, 129, 0.22);
+  background:
+    radial-gradient(720px 420px at 8% 0%, rgba(16, 185, 129, 0.18), transparent 64%),
+    radial-gradient(560px 420px at 100% 100%, rgba(0, 240, 255, 0.1), transparent 62%),
+    linear-gradient(155deg, rgba(8, 32, 25, 0.92), rgba(4, 13, 20, 0.95));
+}
+.auth-card {
+  background: linear-gradient(160deg, rgba(8, 30, 24, 0.95), rgba(4, 13, 20, 0.95));
+  border-color: rgba(16, 185, 129, 0.24);
+  box-shadow:
+    0 40px 100px rgba(0, 0, 0, 0.55),
+    0 0 0 1px rgba(16, 185, 129, 0.08),
+    0 0 40px rgba(16, 185, 129, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07);
+}
+.auth-card h1, .auth-hero h2 { color: #f2fff9; }
+.auth-kicker, .auth-eyebrow { color: #6ee7b7; }
+.auth-card .input {
+  background: rgba(4, 16, 12, 0.88);
+  border-color: rgba(16, 185, 129, 0.3);
+  color: #eafff7;
+}
+.auth-card .input:focus {
+  border-color: #34d399;
+  box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.18);
+}
+.auth-shell .btn.primary,
+.auth-card .btn.primary {
+  background: linear-gradient(120deg, #047857, #10b981 58%, #34d399);
+  color: #04120d;
+  box-shadow: 0 12px 28px rgba(16, 185, 129, 0.24);
+}
+.auth-mode-tabs button.on {
+  color: #ecfdf5;
+  border-color: rgba(52, 211, 153, 0.45);
+  box-shadow: 0 0 0 2px rgba(52, 211, 153, 0.12), 0 0 18px rgba(16, 185, 129, 0.18);
+  background: rgba(16, 185, 129, 0.16);
+}
+
+.pin-recover {
+  display: inline-block;
+  margin-top: 0.55rem;
+  color: #7dd3fc;
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-decoration: none;
+}
+.pin-recover:hover { text-decoration: underline; }
+[data-preyone-theme='light'] .pin-recover { color: #047857; }

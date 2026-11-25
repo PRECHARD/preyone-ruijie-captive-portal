@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { api, ApiError, type StaffUser, type TillOperator } from '../api';
+import ThemeToggle from './ThemeToggle';
 
 const TENANT_KEY = 'pos_tenant';
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -130,6 +131,7 @@ export default function PinLogin({ onLoggedIn }: { onLoggedIn: (token: string, u
 
   return (
     <div className="pin-login-screen">
+      <ThemeToggle className="pin-theme-toggle" />
       <div className="pin-login-glass">
         <div className="pin-status-row" aria-live="polite">
           <span className={`pin-status${online ? ' ok' : ' warn'}`}>
@@ -197,6 +199,14 @@ export default function PinLogin({ onLoggedIn }: { onLoggedIn: (token: string, u
             >
               Company till code
             </button>
+            <a
+              className="pin-recover"
+              href="https://invoice.preyone.com/?recover=1"
+              target="_blank"
+              rel="noreferrer"
+            >
+              Forgot password?
+            </a>
           </>
         ) : (
           <>

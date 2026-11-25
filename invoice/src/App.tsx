@@ -30,6 +30,7 @@ import { OnlinePaymentModal, ReceiptPreview, ReceiptSheet } from './payments';
 import { DocumentSheet, TemplateThumb, type SheetDoc } from './DocumentSheet';
 import { ConfirmDialog, type ConfirmOptions } from './ConfirmDialog';
 import Sidebar, { type View } from './components/Sidebar';
+import ThemeToggle from './components/ThemeToggle';
 import SettingsPage from './pages/Settings';
 import AccountingPage from './pages/Accounting';
 import DashboardPage, { type DocumentAction } from './pages/Dashboard';
@@ -175,6 +176,7 @@ function AuthFrame({
 }) {
   return (
     <div className="auth-shell">
+      <ThemeToggle className="auth-theme-toggle" />
       <aside className="auth-hero">
         <div className="auth-hero-brand">
           <span className="auth-logo">
@@ -367,6 +369,15 @@ function LoginPanel({ onSignedIn, initialNotice }: { onSignedIn: () => void; ini
   const [expired, setExpired] = useState(false);
   const [notVerified, setNotVerified] = useState(false);
   const [verifying, setVerifying] = useState(false);
+  const [recovery, setRecovery] = useState<'none' | 'form' | 'sent'>(() => {
+    try {
+      return new URLSearchParams(window.location.search).get('recover') === '1' ? 'form' : 'none';
+    } catch {
+      return 'none';
+    }
+  });
+  const [recoveryEmail, setRecoveryEmail] = useState('');
+  const [recoveryBusy, setRecoveryBusy] = useState(false);
 
   const resetToSignIn = (message?: string) => {
     setChallenge(null);
@@ -488,17 +499,55 @@ function LoginPanel({ onSignedIn, initialNotice }: { onSignedIn: () => void; ini
     ? new Date(expiresAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     : null;
 
+  const sendRecovery = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setRecoveryBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const res = await fetch('/api/admin/auth/forgot-password', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: (recoveryEmail || email).trim(), client: 'invoice' }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Could not send the reset link');
+      setRecovery('sent');
+      setNotice(data.message || 'If that email is registered, a reset link has been sent.');
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setRecoveryBusy(false);
+    }
+  };
+
+  const recoveryMode = !challenge && recovery !== 'none';
+  const backToSignIn = () => {
+    setRecovery('none');
+    setNotice(null);
+    setError(null);
+  };
+
   return (
     <AuthFrame
-      kicker={challenge ? 'Identity check' : 'Finance workspace'}
-      title={challenge ? 'Two-factor code' : 'Sign in to Invoicing'}
+      kicker={challenge ? 'Identity check' : recoveryMode ? 'Account recovery' : 'Finance workspace'}
+      title={
+        challenge
+          ? 'Two-factor code'
+          : recoveryMode
+            ? 'Reset your password'
+            : 'Sign in to Invoicing'
+      }
       subtitle={
         challenge
           ? `Enter the 6-digit code sent to ${masked || 'your email'}.`
-          : 'One Preyone account unlocks invoicing, POS, admin and every business app.'
+          : recoveryMode
+            ? 'Enter the email on your Preyone account and we will send a one-hour reset link.'
+            : 'One Preyone account unlocks invoicing, POS, admin and every business app.'
       }
     >
-      <form className="auth-form" onSubmit={submit} noValidate>
+      <form className="auth-form" onSubmit={recoveryMode ? sendRecovery : submit} noValidate>
         {notice && <div className="banner ok">{notice}</div>}
         {error && <div className="banner error">{error}</div>}
         {challenge && expired && !error && (
@@ -552,6 +601,37 @@ function LoginPanel({ onSignedIn, initialNotice }: { onSignedIn: () => void; ini
               </button>
             </div>
           </>
+        ) : recoveryMode ? (
+          <>
+            {recovery === 'sent' ? (
+              <button className="btn primary" type="button" onClick={backToSignIn}>
+                Back to sign in
+              </button>
+            ) : (
+              <>
+                <label className="field">
+                  <span>Work email</span>
+                  <input
+                    className="input"
+                    type="email"
+                    value={recoveryEmail}
+                    onChange={(e) => setRecoveryEmail(e.target.value)}
+                    autoComplete="username"
+                    placeholder="you@company.com"
+                    autoFocus
+                    required
+                  />
+                </label>
+                <button className="btn primary" disabled={recoveryBusy} type="submit">
+                  {recoveryBusy && <span className="spinner" aria-hidden />}
+                  {recoveryBusy ? 'Sending…' : 'Send reset link'}
+                </button>
+                <button className="btn ghost auth-inline-action" type="button" onClick={backToSignIn}>
+                  Back to sign in
+                </button>
+              </>
+            )}
+          </>
         ) : (
           <>
             <label className="field">
@@ -572,12 +652,102 @@ function LoginPanel({ onSignedIn, initialNotice }: { onSignedIn: () => void; ini
               {busy && <span className="spinner" aria-hidden />}
               {busy ? 'Signing in…' : 'Continue'}
             </button>
+            <button
+              type="button"
+              className="auth-link"
+              onClick={() => {
+                setRecovery('form');
+                setRecoveryEmail(email);
+                setError(null);
+                setNotice(null);
+              }}
+            >
+              Forgot password?
+            </button>
             <p className="auth-foot-hint">
               We&apos;ll email a one-time code to confirm it&apos;s you. No password is ever stored in the browser.
             </p>
           </>
         )}
       </form>
+    </AuthFrame>
+  );
+}
+
+/** Public reset screen reached from the emerald reset email. */
+function ResetPasswordPanel({ token, onDone }: { token: string; onDone: () => void }) {
+  const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    if (password.length < 8) {
+      setError('Use at least 8 characters.');
+      return;
+    }
+    if (password !== confirm) {
+      setError('The two passwords do not match.');
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await fetch('/api/admin/auth/reset-password', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token, password }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Could not reset the password');
+      setDone(true);
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <AuthFrame
+      kicker="Account recovery"
+      title={done ? 'Password updated' : 'Set a new password'}
+      subtitle={
+        done
+          ? 'Your password has been changed and every old session was signed out. Sign in with the new password.'
+          : 'Choose a new password for your Preyone Invoice / POS account.'
+      }
+    >
+      {done ? (
+        <button className="btn primary" type="button" onClick={onDone}>
+          Back to sign in
+        </button>
+      ) : (
+        <form className="auth-form" onSubmit={submit} noValidate>
+          {error && <div className="banner error">{error}</div>}
+          <PasswordField
+            label="New password"
+            value={password}
+            onChange={setPassword}
+            autoComplete="new-password"
+            autoFocus
+          />
+          <PasswordField
+            label="Confirm new password"
+            value={confirm}
+            onChange={setConfirm}
+            autoComplete="new-password"
+          />
+          <p className="auth-hint">At least 8 characters. Use a password you do not reuse elsewhere.</p>
+          <button className="btn primary" disabled={busy} type="submit">
+            {busy && <span className="spinner" aria-hidden />}
+            {busy ? 'Updating…' : 'Update password'}
+          </button>
+        </form>
+      )}
     </AuthFrame>
   );
 }
@@ -3298,6 +3468,12 @@ export default function App() {
   const [authNotice, setAuthNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [view, setView] = useState<View>(() => viewFromPath(window.location.pathname));
+  // Deliberately not `/reset-password`: the WiFi portal owns that global route.
+  const resetPath = typeof window !== 'undefined' && window.location.pathname === '/recover-password';
+  const resetToken = useMemo(
+    () => (resetPath ? new URLSearchParams(window.location.search).get('token') : null),
+    [resetPath]
+  );
   const [docs, setDocs] = useState<PosDocument[]>([]);
   const [docsLoading, setDocsLoading] = useState(false);
   const [aging, setAging] = useState<ArAging | null>(null);
@@ -3409,8 +3585,10 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    void boot();
-  }, [boot]);
+    // A reset link is public and must not attempt /me first: it would bounce
+    // the user into the login flow before they can set the new password.
+    if (!resetPath) void boot();
+  }, [boot, resetPath]);
 
   // Any 401/423 raised by a nested call (documents, payments, theme edits) is
   // promoted to a first-class auth state instead of a red banner over stale
@@ -3471,6 +3649,24 @@ export default function App() {
       : statusFilter === 'paid'
         ? 'Settled documents and the payments behind them.'
         : 'Every quote, invoice, credit note and receipt for this company.';
+
+  if (resetPath) {
+    return resetToken ? (
+      <ResetPasswordPanel
+        token={resetToken}
+        onDone={() => {
+          window.location.assign('/');
+        }}
+      />
+    ) : (
+      <LoginPanel
+        initialNotice="That reset link is missing or has expired. Request a new one below."
+        onSignedIn={() => {
+          window.location.assign('/');
+        }}
+      />
+    );
+  }
 
   if (locked) {
     return (

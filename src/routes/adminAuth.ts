@@ -1196,12 +1196,15 @@ adminAuthRouter.post('/avatar', requireAdminAuth, async (req: Request, res: Resp
 });
 
 // ── Forgot password: generate token, send email ──────────────────────
-adminAuthRouter.post('/forgot-password', async (req: Request, res: Response) => {
-  const { email } = req.body as { email: string };
+adminAuthRouter.post('/forgot-password', authLimiter, async (req: Request, res: Response) => {
+  const { email, client } = req.body as { email: string; client?: string };
   if (!email) {
     res.status(422).json({ error: 'Email is required' });
     return;
   }
+  // The same account can recover from invoice, POS or the admin console. The
+  // app chooses the brand and the reset page the link points at.
+  const mailClient: MailClient = resolveMailClient(client);
 
   // Always return 200 to avoid email enumeration
   try {
@@ -1213,7 +1216,7 @@ adminAuthRouter.post('/forgot-password', async (req: Request, res: Response) => 
         'UPDATE admin_users SET reset_token = $1, reset_token_expires_at = $2 WHERE email = $3',
         [resetToken, expiresAt, email.toLowerCase().trim()]
       );
-      sendPasswordResetEmail(rows[0].email, resetToken, rows[0].full_name);
+      sendPasswordResetEmail(rows[0].email, resetToken, rows[0].full_name, mailClient);
     }
     res.json({ message: 'If that email is registered, a reset link has been sent.' });
   } catch (err) {

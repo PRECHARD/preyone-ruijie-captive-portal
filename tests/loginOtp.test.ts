@@ -22,6 +22,10 @@ vi.mock('../src/services/notificationService', () => ({
   sendPasswordResetEmail: vi.fn(),
   sendAdminLoginCode: vi.fn(async () => true),
   sendAdminPasswordChangedEmail: vi.fn(),
+  resolveMailClient: (value: unknown) =>
+    value === 'invoice' || value === 'pos' || value === 'wifi' || value === 'starlink'
+      ? value
+      : 'admin',
 }));
 
 function loadRouter() {

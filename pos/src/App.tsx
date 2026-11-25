@@ -9,6 +9,7 @@ import HistoryView from './components/HistoryView';
 import SettingsView from './components/SettingsView';
 import AccountingView from './components/AccountingView';
 import CloudSyncIndicator from './components/CloudSyncIndicator';
+import ThemeToggle from './components/ThemeToggle';
 import { applyCssVars } from './theme';
 
 export interface Toast {
@@ -128,6 +129,7 @@ export default function App() {
               </button>
             )}
             <CloudSyncIndicator />
+            <ThemeToggle className="topbar-theme-toggle" />
             <span className="chip">{user.fullName}</span>
             <button className="ghost-btn" onClick={() => setSwitching(true)} title="Hand the till to another cashier">
               Switch

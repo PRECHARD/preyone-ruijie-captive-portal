@@ -1277,25 +1277,25 @@ router.post('/documents/:id/email', documentEmailLimiter, async (req, res) => {
     .join(' &middot; ');
 
   const html = `<!DOCTYPE html>
-<html><body style="margin:0;padding:24px;background:#f4f1f8;font-family:'Segoe UI',Arial,sans-serif;color:#241b3a">
-  <div style="max-width:560px;margin:0 auto;background:#fff;border-radius:14px;overflow:hidden;border:1px solid #e6e0ef">
-    <div style="background:linear-gradient(100deg,#14002e,#7a0e57);padding:24px 26px;color:#fff">
-      <div style="font-size:11px;letter-spacing:.18em;text-transform:uppercase;opacity:.8">${escapeHtml(companyName)}</div>
+<html><body style="margin:0;padding:24px;background:#eef7f2;font-family:'Segoe UI',Arial,sans-serif;color:#10241c">
+  <div style="max-width:560px;margin:0 auto;background:#fff;border-radius:14px;overflow:hidden;border:1px solid #d3e5dc">
+    <div style="background:linear-gradient(100deg,#04231a,#047857 55%,#10b981);padding:24px 26px;color:#fff">
+      <div style="font-size:11px;letter-spacing:.18em;text-transform:uppercase;opacity:.85">${escapeHtml(companyName)}</div>
       <div style="font-size:22px;font-weight:700;margin-top:6px">${escapeHtml(label)} ${escapeHtml(doc.doc_number)}</div>
     </div>
     <div style="padding:24px 26px">
       <div style="font-size:14px;line-height:1.65">${bodyHtml}</div>
       <table style="width:100%;border-collapse:collapse;font-size:14px;margin:18px 0">
-        <tr><td style="padding:6px 0;color:#6d6786">Total</td><td align="right" style="padding:6px 0;font-weight:700">${escapeHtml(total)}</td></tr>
+        <tr><td style="padding:6px 0;color:#536b60">Total</td><td align="right" style="padding:6px 0;font-weight:700">${escapeHtml(total)}</td></tr>
         ${
           balance > 0
-            ? `<tr><td style="padding:6px 0;color:#6d6786">Balance due</td><td align="right" style="padding:6px 0;font-weight:700;color:#7a0e57">${escapeHtml(fmt(balance))}</td></tr>`
+            ? `<tr><td style="padding:6px 0;color:#536b60">Balance due</td><td align="right" style="padding:6px 0;font-weight:700;color:#047857">${escapeHtml(fmt(balance))}</td></tr>`
             : ''
         }
       </table>
-      <p style="margin:0;color:#6d6786;font-size:13px">The ${escapeHtml(label.toLowerCase())} PDF is attached.</p>
+      <p style="margin:0;color:#536b60;font-size:13px">The ${escapeHtml(label.toLowerCase())} PDF is attached.</p>
     </div>
-    <div style="padding:16px 26px;background:#f7f4fb;font-size:12px;color:#6d6786">
+    <div style="padding:16px 26px;background:#f3faf6;font-size:12px;color:#536b60">
       ${escapeHtml(companyName)}${contact ? ` &middot; ${contact}` : ''}
     </div>
   </div>
