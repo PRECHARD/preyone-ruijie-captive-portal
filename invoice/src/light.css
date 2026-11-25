@@ -516,3 +516,29 @@
 [data-preyone-theme='light'] textarea::placeholder {
   color: #7b9187 !important;
 }
+
+[data-preyone-theme='light'] .settings-two-col .card,
+[data-preyone-theme='light'] .settings-panel .card,
+[data-preyone-theme='light'] .receipt-settings-preview .card {
+  background: #ffffff !important;
+  color: #10241c !important;
+  border-color: #d3e5dc !important;
+  box-shadow: 0 16px 38px rgba(16, 36, 28, 0.07) !important;
+}
+[data-preyone-theme='light'] .receipt-settings-preview {
+  background: #f7fcf9;
+  border: 1px solid #d3e5dc;
+  border-radius: 14px;
+  padding: 12px;
+}
+[data-preyone-theme='light'] .receipt-settings-preview .panel-title,
+[data-preyone-theme='light'] .receipt-settings-preview .muted { color: #10241c; }
+[data-preyone-theme='light'] .receipt-template-chip { color: #10241c; background: #ffffff; }
+[data-preyone-theme='light'] .receipt-template-copy small { color: #536b60; }
+[data-preyone-theme='light'] .settings-two-col .panel-title,
+[data-preyone-theme='light'] .settings-two-col .muted { color: #536b60; }
+
+.receipt-meta span { color: #475569; }
+.receipt-table th { color: #475569; }
+.receipt-totals > div { color: #334155; }
+.receipt-foot { color: #64748b; }

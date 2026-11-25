@@ -17,7 +17,7 @@ ALTER TABLE invoice_templates
 -- The first-created company is the platform house tenant. Its template 1 is
 -- the original Preyone Classic sheet and must never appear in a client list.
 UPDATE invoice_templates
-   SET is_house_only = (id = 1)
+   SET is_house_only = (id IN (1, 20))
  WHERE id BETWEEN 1 AND 20;
 
 -- Reassign any client still pointing at the house template. Template 2 is the

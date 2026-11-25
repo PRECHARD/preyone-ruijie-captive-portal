@@ -698,7 +698,7 @@ router.get('/catalog', async (req, res) => {
       }))
     : (await import('../catalog/ecosystem')).INVOICE_TEMPLATES.map((t) => ({
         ...t,
-        houseOnly: t.id === 1,
+        houseOnly: t.id === 1 || t.id === 20,
       }));
   const templates = allTemplates.filter((t: any) => isHouseTenant || !t.houseOnly);
   const themes = themesRes.rows.length ? themesRes.rows.map(mapThemeRow) : POS_THEMES;

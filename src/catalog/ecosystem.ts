@@ -68,7 +68,7 @@ export const INVOICE_TEMPLATES: InvoiceTemplate[] = [
   { id: 17, name: 'Eco Green', description: 'Natural greens with a leaf mark placeholder.', layout: 'standard', accentColor: '#15803d', showLogo: true },
   { id: 18, name: 'Luxury Black', description: 'Matte black header with foil-gold totals.', layout: 'standard', accentColor: '#111827', showLogo: true },
   { id: 19, name: 'Friendly Rounded', description: 'Soft corners and pastel section fills.', layout: 'minimal', accentColor: '#8b5cf6', showLogo: true },
-  { id: 20, name: 'Preyone Signature', description: 'House style — brand teal with the Preyone wordmark.', layout: 'standard', accentColor: '#0d9488', showLogo: true },
+  { id: 20, name: 'Preyone Signature', description: 'House style — brand teal with the Preyone wordmark.', layout: 'standard', accentColor: '#0d9488', showLogo: true, houseOnly: true },
 ];
 
 export const POS_THEMES: PosTheme[] = [
