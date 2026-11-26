@@ -72,16 +72,14 @@ export function Hero() {
           <div className="glass glow-brand mesh-card relative overflow-hidden rounded-[2rem] p-6 sm:p-8">
             <div className="relative flex items-center justify-center overflow-hidden rounded-2xl border border-white/10 bg-ink/70 p-6">
               <div className="noise absolute inset-0" />
-              <div className="animate-float relative rounded-xl bg-white/95 px-4 py-3 shadow-[0_18px_40px_rgba(0,0,0,0.38)] ring-1 ring-white/50">
-                <img
-                  src="/images/landingpage-1000.png"
-                  alt="Preyone"
-                  width={1000}
-                  height={423}
-                  loading="eager"
-                  className="relative w-full max-w-[17rem]"
-                />
-              </div>
+              <img
+                src="/images/preyonelogomainzw.png"
+                alt="Preyone Insider Program"
+                width={800}
+                height={800}
+                loading="eager"
+                className="animate-float relative w-full max-w-[17rem] drop-shadow-[0_18px_40px_rgba(0,212,255,0.28)]"
+              />
 
               <span className="animate-float-slow absolute top-4 right-4 flex items-center gap-1.5 rounded-full border border-cyan-400/30 bg-cyan-400/10 px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-cyan-200">
                 <Zap size={11} />
