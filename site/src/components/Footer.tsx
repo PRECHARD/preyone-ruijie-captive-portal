@@ -16,7 +16,7 @@ export function Footer() {
         <div className="footer-col brand-col">
           <Link to="/" aria-label="Preyone — home">
             <img
-              src="/images/preyonenoneglow-logo-zoom-800.png"
+              src="/images/landingpage-1000.png"
               alt="Preyone"
               className="footer-brand-mark"
               width={800}

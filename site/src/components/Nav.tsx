@@ -395,7 +395,7 @@ export function Nav() {
     >
       <div className="container-site flex items-center justify-between gap-5">
         <Link to="/" aria-label="Preyone — home" className="shrink-0">
-          <Logo size={60} />
+          <Logo size={44} />
         </Link>
 
         <nav className="hidden items-center gap-3 xl:flex" aria-label="Primary">
