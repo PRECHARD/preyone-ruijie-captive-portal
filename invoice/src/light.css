@@ -143,6 +143,14 @@
   background: #fef2f2;
   color: #991b1b;
 }
+[data-preyone-theme='light'] .plan-alert {
+  border-color: #fecdd3;
+  background: linear-gradient(100deg, #fff1f2, #fff7f7);
+  box-shadow: 0 10px 28px rgba(136, 19, 55, 0.1);
+  color: #881337;
+}
+[data-preyone-theme='light'] .plan-alert-copy span { color: #be123c; }
+[data-preyone-theme='light'] .plan-alert-icon { box-shadow: 0 6px 16px rgba(190, 18, 60, 0.3); }
 
 [data-preyone-theme='light'] .input,
 [data-preyone-theme='light'] .select,

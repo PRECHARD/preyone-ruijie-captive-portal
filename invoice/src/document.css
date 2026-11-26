@@ -509,6 +509,41 @@
   pointer-events: none;
 }
 
+/* Expired/suspended tenants: a diagonal notice across every finished sheet.
+   Kept as plain CSS text (no images, no color-mix) so html-to-image reproduces
+   it in downloaded PDFs and browser print exactly as it appears on screen. */
+.a4-plan-watermark {
+  display: none;
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  place-items: center;
+  align-content: center;
+  transform: rotate(-32deg);
+  text-align: center;
+  pointer-events: none;
+  user-select: none;
+}
+html[data-preyone-plan='blocked'] .a4-plan-watermark { display: grid; }
+.a4-plan-watermark span {
+  font-family: Montserrat, Arial, sans-serif;
+  font-size: 38pt;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: rgba(190, 18, 60, 0.2);
+}
+.a4-plan-watermark small {
+  margin-top: 8px;
+  font-family: Montserrat, Arial, sans-serif;
+  font-size: 10pt;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(190, 18, 60, 0.16);
+}
+
 /* ── density variants: same genre, different breathing room ───────────── */
 .a4-doc.layout-minimal .a4-items-table thead th { background-image: none; background-color: var(--doc-accent); }
 .a4-doc.layout-minimal .a4-totals .a4-row.a4-grand { background-image: none; background-color: var(--doc-accent); }

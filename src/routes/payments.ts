@@ -29,6 +29,8 @@ import { getStarlinkPlan } from '../plans/starlinkPlans';
 import { syncSaleToLedgerAndStock } from '../db/accounting';
 import { canonicalPlanId, planNameFor, syncPlanModules } from '../plans/entitlements';
 import { sendSubscriptionPaymentReceiptEmail } from '../services/notificationService';
+import { buildSubscriptionInvoicePdf } from '../services/subscriptionInvoicePdf';
+import { TIER_CATALOG } from '../plans/entitlements';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'preyone-jwt-secret-change-in-production';
 let _jwtSecretWarned = false;
@@ -1855,7 +1857,8 @@ paymentsRouter.post('/pesepay/webhook', async (req: Request, res: Response) => {
       await client.query('BEGIN');
 
       const { rows: intentRows } = await client.query(
-        `SELECT id, reference, tenant_id, target_type, status, plan_tier, amount, currency
+        `SELECT id, reference, tenant_id, target_type, status, plan_tier, amount, currency,
+                payment_method, client_name, client_email, client_phone, invoice_number
            FROM pesepay_intents
           WHERE reference = ANY($1::text[]) OR provider_reference = ANY($1::text[])
           FOR UPDATE`,
@@ -1912,7 +1915,7 @@ paymentsRouter.post('/pesepay/webhook', async (req: Request, res: Response) => {
                 ${purchasedTier ? `plan_type = '${purchasedTier}',` : ''}
                 updated_at = NOW()
           WHERE id = $1
-          RETURNING id, name, email, currency, plan_type, subscription_expires_at, subscription_status`,
+          RETURNING id, name, email, currency, plan_type, subscription_expires_at, subscription_status, account_number`,
         [companyId]
       );
 
@@ -1942,17 +1945,53 @@ paymentsRouter.post('/pesepay/webhook', async (req: Request, res: Response) => {
       await client.query('COMMIT');
 
       const receiptAmount = Number(intent?.amount ?? payload.amount ?? 0);
-      if (company.email && Number.isFinite(receiptAmount) && receiptAmount > 0) {
-        await sendSubscriptionPaymentReceiptEmail({
-          to: company.email,
+      const recipient = String(intent?.client_email || company.email || '').trim();
+      if (recipient && Number.isFinite(receiptAmount) && receiptAmount > 0) {
+        const methodLabels: Record<string, string> = {
+          ecocash: 'EcoCash (Pesepay)',
+          innbucks: 'InnBucks (Pesepay)',
+          omari: "O'mari USD (Pesepay)",
+          paygo: 'PayGo (Pesepay)',
+        };
+        const currency = String(intent?.currency || company.currency || 'USD');
+        const planName = planNameFor(company.plan_type) || 'Preyone plan';
+        const invoiceNumber =
+          intent?.invoice_number || `PINV-${Date.now().toString(36).toUpperCase()}`;
+        const devices =
+          TIER_CATALOG.find((t) => t.id === canonicalPlanId(company.plan_type))?.devices ?? 1;
+        const invoicePdf = buildSubscriptionInvoicePdf({
+          invoiceNumber,
+          issuedAt: new Date(),
           companyName: company.name || 'Preyone client',
-          planName: planNameFor(company.plan_type) || 'Preyone plan',
+          accountNumber: company.account_number || '-',
+          billingName: intent?.client_name || null,
+          billingEmail: intent?.client_email || null,
+          billingPhone: intent?.client_phone || null,
+          planName,
           amount: receiptAmount,
-          currency: String(intent?.currency || company.currency || 'USD'),
-          method: 'Pesepay',
+          currency,
+          paymentMethod: methodLabels[intent?.payment_method] || 'Pesepay',
+          reference: String(reference || intent?.reference || '-'),
+          expiresAt: new Date(company.subscription_expires_at || Date.now()),
+          devices,
+        });
+        await sendSubscriptionPaymentReceiptEmail({
+          to: recipient,
+          companyName: company.name || 'Preyone client',
+          planName,
+          amount: receiptAmount,
+          currency,
+          method: methodLabels[intent?.payment_method] || 'Pesepay',
           reference,
           paidAt: new Date(),
           expiresAt: company.subscription_expires_at,
+          accountNumber: company.account_number,
+          invoiceNumber,
+          invoicePdf,
+          billingName: intent?.client_name,
+          billingEmail: intent?.client_email,
+          billingPhone: intent?.client_phone,
+          devices,
         }).catch(() => false);
       }
 

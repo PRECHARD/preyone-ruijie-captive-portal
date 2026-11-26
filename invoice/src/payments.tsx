@@ -165,6 +165,7 @@ export function OnlinePaymentModal({
   const [rail, setRail] = useState<PesepayRail>(options[0].rail);
   const [amount, setAmount] = useState(balance.toFixed(2));
   const [phone, setPhone] = useState('');
+  const [clientEmail, setClientEmail] = useState('');
   const [otp, setOtp] = useState('');
   const [intent, setIntent] = useState<InitiateResult | null>(null);
   const [phase, setPhase] = useState<'form' | 'authorize' | 'waiting' | 'success' | 'failed'>('form');
@@ -268,6 +269,7 @@ export function OnlinePaymentModal({
         targetId: doc.id,
         reasonForPayment: `Invoice ${doc.doc_number}`,
         phone: option.requiresPhone ? phone.trim() : undefined,
+        email: clientEmail.trim() || undefined,
       });
       setIntent(result);
       if (rail === 'omari') {
@@ -390,6 +392,16 @@ export function OnlinePaymentModal({
                   value={option.requiresPhone ? phone : ''}
                   onChange={(e) => setPhone(e.target.value)}
                   disabled={!option.requiresPhone}
+                />
+              </label>
+              <label className="field">
+                <span>Client email for the receipt</span>
+                <input
+                  className="input"
+                  type="email"
+                  placeholder="client@company.com"
+                  value={clientEmail}
+                  onChange={(e) => setClientEmail(e.target.value)}
                 />
               </label>
             </div>

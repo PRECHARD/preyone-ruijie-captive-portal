@@ -18,6 +18,7 @@ interface TenantRow {
   plan_type: string | null;
   plan_name: string | null;
   plan_price: number | null;
+  account_number: string | null;
   max_devices: number;
   active_devices: number;
   subscription_status: string;
@@ -120,6 +121,7 @@ function ProvisionModal({
     plan_name: string;
     duration_days: number;
     till_code: string;
+    account_number?: string;
     login_urls: { invoice: string; pos: string };
     welcome_email_sent?: boolean;
   } | null>(null);
@@ -216,6 +218,10 @@ function ProvisionModal({
                 <a href={created.login_urls.pos} target="_blank" rel="noreferrer">
                   {created.login_urls.pos}
                 </a>
+              </div>
+              <div>
+                <span>Account number (accounting reference)</span>
+                <code>{created.account_number}</code>
               </div>
               <div className="ct-span-2">
                 <span>Till code (enter once on each new till)</span>
@@ -785,7 +791,7 @@ export default function ClientTenants() {
                     <div className="ct-business">
                       <strong>{tenant.name}</strong>
                       <small>
-                        {tenant.currency} · till code {tenant.till_code.slice(0, 8)}…
+                        {tenant.account_number || '—'} · till code {tenant.till_code.slice(0, 8)}…
                       </small>
                       {tenant.is_house && <span className="ct-house-badge">House</span>}
                     </div>

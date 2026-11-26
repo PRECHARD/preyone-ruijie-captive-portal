@@ -22,6 +22,7 @@ import {
 } from '../services/notificationService';
 import { isRuijieCloudConfigured, mintRuijieVoucherForTier } from '../services/ruijieMint';
 import { TIER_CATALOG } from './subscription';
+import { buildSubscriptionInvoicePdf } from '../services/subscriptionInvoicePdf';
 import {
   BUSINESS_PROFILES,
   CURRENCIES,
@@ -3560,7 +3561,7 @@ adminRouter.get(
   async (req: Request, res: Response) => {
     const houseId = req.houseCompanyId!;
     const { rows } = await pool.query(
-      `SELECT c.id, c.name, c.currency, c.plan_type, c.max_devices,
+      `SELECT c.id, c.name, c.currency, c.plan_type, c.max_devices, c.account_number,
               c.subscription_status, c.subscription_expires_at, c.created_at,
               owner.full_name AS owner_name,
               owner.email     AS owner_email,
@@ -3604,6 +3605,7 @@ adminRouter.get(
         plan_type: row.plan_type,
         plan_name: tier?.name ?? null,
         plan_price: tier?.price ?? null,
+        account_number: row.account_number ?? null,
         max_devices: Number(row.max_devices ?? tier?.devices ?? 0),
         active_devices: Number(row.active_devices ?? 0),
         subscription_status: row.subscription_status,
@@ -3757,7 +3759,7 @@ adminRouter.post(
          RETURNING id, name, tagline, email, support_phone, currency, tax_pct,
                    invoice_prefix, quote_prefix, business_profile,
                    invoice_template_id, pos_theme_id, plan_type, max_devices,
-                   subscription_status, subscription_expires_at, created_at`,
+                   subscription_status, subscription_expires_at, account_number, created_at`,
         [
           businessName,
           tagline || null,
@@ -3816,6 +3818,7 @@ adminRouter.post(
         tempPassword,
         pin: posPin,
         tillCode: company.id,
+        accountNumber: company.account_number,
       }).catch(() => false);
 
       res.status(201).json({
@@ -3824,6 +3827,7 @@ adminRouter.post(
         plan_name: tier.name,
         duration_days: durationDays,
         till_code: company.id,
+        account_number: company.account_number,
         pos_pin_set: true,
         welcome_email_sent: welcomeSent,
         login_urls: {
@@ -4012,7 +4016,7 @@ adminRouter.post(
            updated_at             = NOW()
          WHERE id = $1
          RETURNING id, name, plan_type, max_devices, subscription_status,
-                   subscription_expires_at`,
+                   subscription_expires_at, account_number`,
         [target.id, planType, String(durationDays)]
       );
 
@@ -4030,6 +4034,24 @@ adminRouter.post(
         )}) extended ${target.name} by ${durationDays} days`
       ).catch(() => undefined);
 
+      const invoiceNumber = `PINV-${Date.now().toString(36).toUpperCase()}-${crypto
+        .randomBytes(2)
+        .toString('hex')
+        .toUpperCase()}`;
+      const invoicePdf = buildSubscriptionInvoicePdf({
+        invoiceNumber,
+        issuedAt: new Date(),
+        companyName: target.name,
+        accountNumber: updatedRes.rows[0].account_number || '-',
+        billingEmail: target.email || null,
+        planName: tier.name,
+        amount: amountUsd,
+        currency: house.currency || 'USD',
+        paymentMethod: 'Cash (house CEO)',
+        reference,
+        expiresAt: new Date(updatedRes.rows[0].subscription_expires_at || Date.now()),
+        devices: tier.devices,
+      });
       const receiptSent = target.email
         ? await sendSubscriptionPaymentReceiptEmail({
             to: target.email,
@@ -4037,10 +4059,14 @@ adminRouter.post(
             planName: tier.name,
             amount: amountUsd,
             currency: house.currency || 'USD',
-            method: 'Cash',
+            method: 'Cash (house CEO)',
             reference,
             paidAt: new Date(),
             expiresAt: updatedRes.rows[0].subscription_expires_at,
+            accountNumber: updatedRes.rows[0].account_number,
+            invoiceNumber,
+            invoicePdf,
+            devices: tier.devices,
           }).catch(() => false)
         : false;
 

@@ -1073,6 +1073,9 @@ adminAuthRouter.get('/me', async (req: Request, res: Response) => {
     const subscribed_modules = entitlement?.modules ?? [];
     const plan_type = entitlement?.plan_type ?? null;
     const plan_name = entitlement?.plan_name ?? null;
+    const { rows: accountRows } = tenantId
+      ? await pool.query('SELECT account_number FROM companies WHERE id = $1', [tenantId])
+      : { rows: [] as Array<{ account_number: string }> };
 
     // The client-tenants console is a platform control, not a tenant setting.
     // Resolve it against the account's real portal binding, never the singleton
@@ -1110,6 +1113,9 @@ res.json({
   subscribed_modules,
   plan_type,
   plan_name,
+  account_number: accountRows[0]?.account_number ?? null,
+  subscription_status: entitlement?.subscription_status ?? null,
+  subscription_expires_at: entitlement?.subscription_expires_at ?? null,
   is_house_ceo: houseCeo,
   house_company_id: houseId,
   permissions,

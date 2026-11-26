@@ -430,6 +430,7 @@ export default function SettingsPage({
     max_devices: number;
     subscription_status: string;
     subscription_expires_at: string | null;
+    account_number?: string | null;
   } | null>(null);
   const [billingErr, setBillingErr] = useState('');
 
@@ -1172,6 +1173,7 @@ export default function SettingsPage({
                   : '—'}
               </div>
               <div className="settings-billing-meta">
+                {billing?.account_number && <span>Account {billing.account_number}</span>}
                 <span>{billing?.subscription_status ?? 'unknown'}</span>
                 <span>
                   {billing

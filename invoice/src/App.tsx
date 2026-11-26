@@ -3498,6 +3498,11 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [authError, setAuthError] = useState(false);
   const [planBlocked, setPlanBlocked] = useState<string | null>(null);
+  const [planStatus, setPlanStatus] = useState<{ status: string | null; expiresAt: string | null }>({
+    status: null,
+    expiresAt: null,
+  });
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
   const [locked, setLocked] = useState(false);
   const [authNotice, setAuthNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -3546,12 +3551,31 @@ export default function App() {
 
   const types = catalog?.documentTypes.length ? catalog.documentTypes : FALLBACK_TYPES;
   const templates = catalog?.templates ?? [];
+  const planLapsed =
+    planStatus.status === 'suspended' ||
+    planStatus.status === 'expired' ||
+    (Boolean(planStatus.expiresAt) && new Date(planStatus.expiresAt as string).getTime() <= Date.now());
 
   const boot = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const me = await api.get<{ subscribed_modules?: string[]; plan_name?: string | null }>('/api/admin/auth/me');
+      const me = await api.get<{
+        subscribed_modules?: string[];
+        plan_name?: string | null;
+        subscription_status?: string | null;
+        subscription_expires_at?: string | null;
+      }>('/api/admin/auth/me');
+      const status = me.subscription_status ?? null;
+      const expiresAt = me.subscription_expires_at ?? null;
+      const lapsed =
+        status === 'suspended' ||
+        status === 'expired' ||
+        (Boolean(expiresAt) && new Date(expiresAt as string).getTime() <= Date.now());
+      setPlanStatus({ status, expiresAt });
+      // One root attribute drives every A4 sheet (including PDF/print clones):
+      // finished invoices carry the plan notice until the tenant renews.
+      document.documentElement.dataset.preyonePlan = lapsed ? 'blocked' : '';
       if (!(me.subscribed_modules ?? []).includes('invoice')) {
         setPlanBlocked(me.plan_name || 'your plan');
         setLoading(false);
@@ -3814,6 +3838,21 @@ export default function App() {
       />
 
       <main className="main glass-shell">
+        {planLapsed && (
+          <div className="plan-alert" role="alert">
+            <span className="plan-alert-icon" aria-hidden>!</span>
+            <div className="plan-alert-copy">
+              <strong>Your Preyone plan has expired or been suspended.</strong>
+              <span>
+                New invoices are blocked and every finished document carries an
+                “Unlimited Plan reached” notice until you renew.
+              </span>
+            </div>
+            <button className="btn primary" type="button" onClick={() => setUpgradeOpen(true)}>
+              Pay &amp; upgrade now
+            </button>
+          </div>
+        )}
         {view !== 'settings' && view !== 'accounting' && view !== 'zar' && view !== 'dashboard' && (
         <div className="topbar">
           <div>
@@ -4070,6 +4109,16 @@ export default function App() {
           />
         )}
       </main>
+
+      {upgradeOpen && (
+        <UpgradeModal
+          onClose={() => setUpgradeOpen(false)}
+          onUpgraded={() => {
+            setUpgradeOpen(false);
+            void boot();
+          }}
+        />
+      )}
 
       {composerOpen && catalog && (
         <Composer

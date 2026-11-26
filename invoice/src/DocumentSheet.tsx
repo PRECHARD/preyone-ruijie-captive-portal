@@ -673,6 +673,13 @@ export function DocumentSheet({
             ref={first ? sheetRef : undefined}
           >
             {first && paid && <img src="/brand/PAID.svg" alt="PAID" className="a4-stamp" />}
+            {/* Shown on every finished sheet only while the tenant's plan is
+                expired/suspended. Driven by a root data attribute so the PDF
+                and print clones inherit it automatically. */}
+            <div className="a4-plan-watermark" aria-hidden="true">
+              <span>Unlimited Plan reached</span>
+              <small>Renew your Preyone plan to remove this notice</small>
+            </div>
             {renderHeader()}
             {first && renderMeta()}
             {renderItems(chunk)}

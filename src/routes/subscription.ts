@@ -49,7 +49,7 @@ subscriptionRouter.get('/plans', requireAdminAuth, async (req: Request, res: Res
       return;
     }
     const { rows } = await pool.query(
-      `SELECT plan_type, max_devices, subscription_status, subscription_expires_at
+      `SELECT plan_type, max_devices, subscription_status, subscription_expires_at, account_number
          FROM companies
         WHERE id = $1`,
       [tenantId]
@@ -64,6 +64,7 @@ subscriptionRouter.get('/plans', requireAdminAuth, async (req: Request, res: Res
             max_devices: Number(company.max_devices),
             subscription_status: company.subscription_status,
             subscription_expires_at: company.subscription_expires_at,
+            account_number: company.account_number,
           }
         : null,
       tiers: TIER_CATALOG,
@@ -105,6 +106,21 @@ subscriptionRouter.post('/checkout', requireAdminAuth, async (req: Request, res:
   }
   const paymentMethod = rawMethod.toLowerCase() as PesepayRail;
 
+  // The client's contact details are captured *before* the gateway hand-off.
+  // They are stored on the intent so the settlement webhook can email the
+  // receipt + invoice to the client even if the till/browser is closed.
+  const clientName = str(req.body?.fullName);
+  const clientEmail = str(req.body?.email).toLowerCase();
+  const clientPhone = str(req.body?.phone);
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clientEmail)) {
+    res.status(400).json({ error: 'A valid client email address is required' });
+    return;
+  }
+  if (!/^\+?\d{9,15}$/.test(clientPhone.replace(/[\s-]/g, ''))) {
+    res.status(400).json({ error: 'A valid client phone number is required' });
+    return;
+  }
+
   try {
     const tenantId = await resolveTenant(req);
     if (!tenantId) {
@@ -116,19 +132,30 @@ subscriptionRouter.post('/checkout', requireAdminAuth, async (req: Request, res:
       tier.devices >= 9999 ? 'unlimited devices' : `${tier.devices} device${tier.devices === 1 ? '' : 's'}`;
     const reasonForPayment = `${tier.name} plan — $${tier.price}/mo — ${deviceLabel}`;
     const reference = `PREYONE-SUB-${uuidv4().substring(0, 8).toUpperCase()}-${Date.now()}`;
+    const invoiceNumber = `PINV-${Date.now().toString(36).toUpperCase()}-${uuidv4().substring(0, 4).toUpperCase()}`;
 
     await pool.query(
       `INSERT INTO pesepay_intents
          (reference, tenant_id, amount, currency, payment_method, purpose, reason_for_payment,
-          target_type, subscription_module, plan_tier)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,'subscription',NULL,$8)`,
-      [reference, tenantId, tier.price, currencyCode, paymentMethod, 'subscription', reasonForPayment, tier.id]
+          target_type, subscription_module, plan_tier, client_name, client_email, client_phone, invoice_number)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,'subscription',NULL,$8,$9,$10,$11,$12)`,
+      [
+        reference,
+        tenantId,
+        tier.price,
+        currencyCode,
+        paymentMethod,
+        'subscription',
+        reasonForPayment,
+        tier.id,
+        clientName || null,
+        clientEmail,
+        clientPhone,
+        invoiceNumber,
+      ]
     );
 
     const admin = req.adminUser as { email?: string; fullName?: string } | undefined;
-    const bodyEmail = str(req.body?.email);
-    const bodyName = str(req.body?.fullName);
-    const bodyPhone = str(req.body?.phone);
 
     const pesepayResponse = await initiatePesepayPayment({
       amount: tier.price,
@@ -136,9 +163,9 @@ subscriptionRouter.post('/checkout', requireAdminAuth, async (req: Request, res:
       paymentMethod,
       reasonForPayment,
       reference,
-      email: bodyEmail || admin?.email,
-      fullName: bodyName || admin?.fullName,
-      phone: bodyPhone || undefined,
+      email: clientEmail || admin?.email,
+      fullName: clientName || admin?.fullName,
+      phone: clientPhone || undefined,
     });
 
     if (!pesepayResponse.success) {
@@ -167,6 +194,8 @@ subscriptionRouter.post('/checkout', requireAdminAuth, async (req: Request, res:
       currencyCode,
       paymentMethod,
       reference,
+      invoiceNumber,
+      clientEmail,
       redirectUrl: pesepayResponse.redirectUrl,
       pollUrl: pesepayResponse.pollUrl,
       instructions: pesepayResponse.instructions,

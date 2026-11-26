@@ -301,6 +301,7 @@ export async function sendClientProvisionedEmail(opts: {
   tempPassword: string;
   pin?: string | null;
   tillCode: string;
+  accountNumber?: string | null;
 }): Promise<boolean> {
   const invoiceUrl = `${appBaseUrl('invoice')}/`;
   const posUrl = `${appBaseUrl('pos')}/`;
@@ -319,6 +320,9 @@ export async function sendClientProvisionedEmail(opts: {
       <p style="margin:0">Your company has been created in Preyone Invoice and POS. You can sign in immediately with the details below.</p>`,
     details: [
       ['Company', escapeEmailHtml(opts.companyName)],
+      ...(opts.accountNumber
+        ? ([['Account number', escapeEmailHtml(opts.accountNumber)]] as Array<[string, string]>)
+        : []),
       ['Plan', `${escapeEmailHtml(opts.planName)} · ${opts.durationDays} days`],
       ['Access until', escapeEmailHtml(expires)],
       ['Sign-in email', escapeEmailHtml(opts.to)],
@@ -358,6 +362,7 @@ export async function sendClientProvisionedEmail(opts: {
     `Invoice: ${invoiceUrl}`,
     `POS: ${posUrl}`,
     `Sign-in email: ${opts.to}`,
+    opts.accountNumber ? `Account number: ${opts.accountNumber}` : '',
     `Temporary password: ${opts.tempPassword}`,
     opts.pin ? `POS PIN: ${opts.pin}` : '',
     `Till code: ${opts.tillCode}`,
@@ -549,6 +554,14 @@ export async function sendSubscriptionPaymentReceiptEmail(opts: {
   reference?: string | null;
   paidAt?: Date | string;
   expiresAt: Date | string;
+  /** Accounting identity of the tenant and the proof-of-payment invoice. */
+  accountNumber?: string | null;
+  invoiceNumber?: string | null;
+  invoicePdf?: Buffer | null;
+  billingName?: string | null;
+  billingEmail?: string | null;
+  billingPhone?: string | null;
+  devices?: number | null;
 }): Promise<boolean> {
   const invoiceUrl = `${appBaseUrl('invoice')}/`;
   const posUrl = `${appBaseUrl('pos')}/`;
@@ -571,38 +584,51 @@ export async function sendSubscriptionPaymentReceiptEmail(opts: {
     )}</strong>,</p>
       <p style="margin:0">We have received your subscription payment. Your access is active and the new expiry is shown below.</p>`,
     details: [
-      ['Plan', escapeEmailHtml(opts.planName)],
+      ['Invoice', escapeEmailHtml(opts.invoiceNumber || 'Attached below')],
+      ['Account number', escapeEmailHtml(opts.accountNumber || '-')],
+      ['Package', escapeEmailHtml(opts.planName)],
       ['Amount', escapeEmailHtml(amount)],
-      ['Method', escapeEmailHtml(opts.method)],
+      ['Payment method', escapeEmailHtml(opts.method)],
       ['Paid', escapeEmailHtml(paid)],
       ['Access until', escapeEmailHtml(expires)],
+      ...(opts.devices
+        ? ([['Devices', opts.devices >= 9999 ? 'Unlimited' : String(opts.devices)]] as Array<[string, string]>)
+        : []),
       ...(opts.reference ? ([['Reference', escapeEmailHtml(opts.reference)]] as Array<[string, string]>) : []),
     ],
     cta: { label: 'Open Invoice', url: invoiceUrl },
     secondaryCta: { label: 'Open POS', url: posUrl },
-    noteHtml: 'Keep this email as your subscription receipt.',
-    footerNote: 'Preyone Invoice & POS · billing receipt',
+    noteHtml: opts.invoicePdf
+      ? 'Your Preyone invoice is attached as a PDF. Keep this email as your payment receipt.'
+      : 'Keep this email as your subscription receipt.',
+    footerNote: 'Preyone Invoice & POS · payment receipt and invoice',
   });
   const text = [
     `Payment received for ${opts.companyName}`,
-    `Plan: ${opts.planName}`,
+    opts.invoiceNumber ? `Invoice: ${opts.invoiceNumber}` : '',
+    `Account number: ${opts.accountNumber || '-'}`,
+    `Package: ${opts.planName}`,
     `Amount: ${amount}`,
-    `Method: ${opts.method}`,
+    `Payment method: ${opts.method}`,
     `Paid: ${paid}`,
     `Access until: ${expires}`,
     opts.reference ? `Reference: ${opts.reference}` : '',
+    opts.invoicePdf ? 'The Preyone invoice PDF is attached to this email.' : '',
     '',
     'Preyone Enterprises · support@preyone.com',
   ]
     .filter(Boolean)
     .join('\n');
+  const attachments = opts.invoicePdf
+    ? [{ filename: `${opts.invoiceNumber || 'preyone-invoice'}.pdf`, content: opts.invoicePdf }]
+    : undefined;
   return sendMail(
     opts.to,
-    `Payment received — ${opts.planName} for ${opts.companyName}`,
+    `Payment received — Invoice ${opts.invoiceNumber || opts.planName} for ${opts.companyName}`,
     html,
     'Preyone Invoice',
     'support@preyone.com',
-    undefined,
+    attachments,
     undefined,
     text
   );

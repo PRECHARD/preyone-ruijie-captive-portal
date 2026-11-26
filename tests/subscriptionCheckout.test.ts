@@ -136,7 +136,12 @@ describe('Subscription checkout routes', () => {
     const res = await request(createApp())
       .post('/api/subscription/checkout')
       .set('Authorization', 'Bearer test-token')
-      .send({ tier: 'growth_20' });
+      .send({
+        tier: 'growth_20',
+        fullName: 'Floniel Babyware',
+        email: 'billing@floniel.co.zw',
+        phone: '+263771327202',
+      });
 
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
@@ -153,6 +158,12 @@ describe('Subscription checkout routes', () => {
     expect(insert![1][1]).toBe(TENANT);
     expect(insert![1][2]).toBe(20);
     expect(insert![1][7]).toBe('growth_20');
+    // Client details are stored on the intent so settlement can email the invoice.
+    expect(insert![1][8]).toBe('Floniel Babyware');
+    expect(insert![1][9]).toBe('billing@floniel.co.zw');
+    expect(insert![1][10]).toBe('+263771327202');
+    expect(res.body.invoiceNumber).toMatch(/^PINV-/);
+    expect(res.body.clientEmail).toBe('billing@floniel.co.zw');
   });
 
   it('derives the tenant from the session company link when present', async () => {
@@ -169,7 +180,12 @@ describe('Subscription checkout routes', () => {
     const res = await request(createApp())
       .post('/api/subscription/checkout')
       .set('Authorization', 'Bearer test-token')
-      .send({ tier: 'unlimited_30' });
+      .send({
+        tier: 'unlimited_30',
+        fullName: 'Floniel Babyware',
+        email: 'billing@floniel.co.zw',
+        phone: '0771327202',
+      });
 
     expect(res.status).toBe(200);
     expect(res.body.tenantId).toBe(LINKED);
@@ -181,13 +197,35 @@ describe('Subscription checkout routes', () => {
     expect(insert![1][7]).toBe('unlimited_30');
   });
 
+  it('requires a client email and phone before starting checkout', async () => {
+    const missingEmail = await request(createApp())
+      .post('/api/subscription/checkout')
+      .set('Authorization', 'Bearer test-token')
+      .send({ tier: 'growth_20', phone: '0771327202' });
+    expect(missingEmail.status).toBe(400);
+    expect(missingEmail.body.error).toMatch(/email/i);
+
+    const missingPhone = await request(createApp())
+      .post('/api/subscription/checkout')
+      .set('Authorization', 'Bearer test-token')
+      .send({ tier: 'growth_20', email: 'billing@floniel.co.zw' });
+    expect(missingPhone.status).toBe(400);
+    expect(missingPhone.body.error).toMatch(/phone/i);
+    expect(initiatePesepayPayment as any).not.toHaveBeenCalled();
+  });
+
   it('marks the intent failed when the gateway declines', async () => {
     (initiatePesepayPayment as any).mockResolvedValue({ success: false, error: 'Gateway down' });
 
     const res = await request(createApp())
       .post('/api/subscription/checkout')
       .set('Authorization', 'Bearer test-token')
-      .send({ tier: 'standard_10' });
+      .send({
+        tier: 'standard_10',
+        fullName: 'Floniel Babyware',
+        email: 'billing@floniel.co.zw',
+        phone: '0771327202',
+      });
 
     expect(res.status).toBe(400);
     expect(res.body.error).toContain('Gateway down');
