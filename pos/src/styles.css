@@ -1101,8 +1101,11 @@ select option,
 }
 .tier-card.on {
   border-color: rgba(16, 185, 129, 0.55);
-  box-shadow: 0 0 0 1px rgba(16, 185, 129, 0.2), 0 0 24px rgba(124, 58, 237, 0.22);
+  background: rgba(16, 185, 129, 0.18);
+  box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.16), 0 0 22px rgba(16, 185, 129, 0.14);
+  transform: translateY(-1px);
 }
+.tier-card.on .tier-name { color: #6ee7b7; }
 .tier-card.current { opacity: 0.75; }
 .tier-name { font-weight: 700; font-size: 0.95rem; color: #fff; }
 .tier-price { font-size: 1.5rem; font-weight: 800; color: #34d399; }

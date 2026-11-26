@@ -315,3 +315,15 @@
   border: 1px solid rgba(148, 163, 184, 0.28) !important;
   color: #cbd5e1 !important;
 }
+
+/* Currency / rail method tabs stay legible on the dark shell. */
+.method-tabs button {
+  background: rgba(15, 23, 42, 0.7) !important;
+  color: #e8eef8 !important;
+  border-color: rgba(148, 163, 184, 0.28) !important;
+}
+.method-tabs button.on {
+  background: linear-gradient(120deg, #047857, #10b981 58%, #34d399) !important;
+  color: #04120d !important;
+  border-color: #34d399 !important;
+}

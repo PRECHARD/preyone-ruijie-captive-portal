@@ -2526,8 +2526,11 @@ tbody tr:last-child td { border-bottom: none; }
 .tier-grid.static .tier-card { cursor: default; }
 .tier-card:hover, .tier-card.on {
   border-color: rgba(52, 211, 153, 0.55);
-  box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.14), 0 0 22px rgba(217, 119, 6, 0.12);
+  background: rgba(16, 185, 129, 0.18);
+  box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.16), 0 0 22px rgba(16, 185, 129, 0.14);
+  transform: translateY(-1px);
 }
+.tier-card.on .tier-name { color: #6ee7b7; }
 .tier-card.current { outline: 1px solid rgba(217, 119, 6, 0.45); }
 .tier-name { font-weight: 700; font-size: 0.82rem; }
 .tier-price { font-size: 1.35rem; font-weight: 800; }
@@ -2551,6 +2554,8 @@ tbody tr:last-child td { border-bottom: none; }
 }
 .method-tabs button.on {
   border-color: #34d399;
+  background: linear-gradient(120deg, #047857, #10b981 58%, #34d399);
+  color: #04120d;
   box-shadow: 0 0 0 2px rgba(52, 211, 153, 0.18);
 }
 .upgrade-fields { display: grid; gap: 0.75rem; margin-bottom: 0.9rem; }
