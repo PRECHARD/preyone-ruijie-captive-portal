@@ -183,3 +183,83 @@
 /* Rail logos on the till checkout buttons, same artwork as Invoice. */
 .method-tabs button { display:inline-flex; align-items:center; justify-content:center; gap:6px; }
 .method-logo { height:16px; max-width:52px; width:auto; object-fit:contain; }
+
+/* â”€â”€ Solid, high-contrast checkout shell (no white/washed backdrop flashes) â”€â”€ */
+.modal-backdrop,
+.overlay {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 1000 !important;
+  isolation: isolate !important;
+  background: rgba(3, 6, 18, 0.78) !important;
+  backdrop-filter: blur(8px) !important;
+  -webkit-backdrop-filter: blur(8px) !important;
+}
+.modal-card,
+.up-card,
+.checkout-glass {
+  position: relative !important;
+  z-index: 1 !important;
+  isolation: isolate !important;
+  background: linear-gradient(160deg, #0D0F18, #101626) !important;
+  border: 1px solid rgba(0, 240, 255, 0.22) !important;
+  color: #e8eef8 !important;
+  padding: 24px !important;
+  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.05) !important;
+}
+.modal-card .modal-title,
+.up-card .modal-title { color: #f2fff9 !important; }
+.modal-card .sheet-sub,
+.up-card .up-eyebrow { color: #94a3b8 !important; }
+/* Rail cards: solid dark surface, emerald selected state, transparent logos. */
+.up-rail {
+  background: #101626 !important;
+  border: 1px solid rgba(148, 163, 184, 0.22) !important;
+  color: #e8eef8 !important;
+}
+.up-rail.selected {
+  border-color: rgba(52, 211, 153, 0.6) !important;
+  background: linear-gradient(160deg, rgba(4, 120, 87, 0.35), #101626) !important;
+  box-shadow: 0 0 0 1px rgba(52, 211, 153, 0.35), 0 0 20px rgba(16, 185, 129, 0.18) !important;
+}
+.up-rail-logo {
+  background: transparent !important;
+  padding: 0 !important;
+  border-radius: 0 !important;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.5)) drop-shadow(0 0 1px rgba(255, 255, 255, 0.85));
+  object-fit: contain;
+}
+.up-rail small { color: #94a3b8 !important; }
+.up-rail strong { color: #e8eef8 !important; }
+/* Form controls: high contrast on the dark surface. */
+.modal-card .input,
+.up-card .input {
+  background: #0a0f1d !important;
+  border-color: rgba(148, 163, 184, 0.28) !important;
+  color: #f1f5f9 !important;
+}
+.modal-card .input:focus,
+.up-card .input:focus {
+  border-color: #00F0FF !important;
+  box-shadow: 0 0 0 3px rgba(0, 240, 255, 0.12) !important;
+}
+.modal-card .field span,
+.up-card .field span {
+  color: #94a3b8 !important;
+}
+/* Primary submit button stays high-contrast emerald. */
+.pay-submit,
+.btn.primary,
+.primary-btn {
+  background: linear-gradient(120deg, #047857, #10b981 58%, #34d399) !important;
+  color: #04120d !important;
+  border: 0 !important;
+  box-shadow: 0 12px 28px rgba(16, 185, 129, 0.28) !important;
+}
+/* Close button */
+.up-close,
+.icon-btn {
+  background: transparent !important;
+  border: 1px solid rgba(148, 163, 184, 0.28) !important;
+  color: #cbd5e1 !important;
+}

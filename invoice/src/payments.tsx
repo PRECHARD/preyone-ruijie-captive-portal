@@ -98,15 +98,6 @@ const RAILS: Record<'USD' | 'ZiG', RailOption[]> = {
       requiresPhone: true,
       mark: 'EC',
     },
-    {
-      rail: 'paygo',
-      label: 'PayGo',
-      blurb: 'ZiG wallet transfer',
-      min: 1,
-      max: 2400,
-      requiresPhone: false,
-      mark: 'PG',
-    },
   ],
 };
 
