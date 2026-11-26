@@ -1,4 +1,4 @@
-@font-face {
+﻿@font-face {
   font-family: 'Poppins';
   src: url('/fonts/Poppins-Regular.woff2') format('woff2');
   font-weight: 400;
@@ -115,7 +115,7 @@ button:focus-visible {
   box-shadow: 0 0 0 1px #10b981, 0 0 18px rgba(16, 185, 129, 0.18);
 }
 
-/* Glass selects — kill native triangles on every <select> */
+/* Glass selects â€” kill native triangles on every <select> */
 select,
 .select {
   appearance: none;
@@ -159,7 +159,7 @@ select option,
   color: #e2e8f0;
 }
 
-/* ── Shell ─────────────────────────────────────────── */
+/* â”€â”€ Shell â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 .app-shell {
   display: flex;
@@ -224,7 +224,7 @@ select option,
   .main-split { grid-template-columns: 1fr; overflow-y: auto; }
 }
 
-/* ── Catalogue pane ────────────────────────────────── */
+/* â”€â”€ Catalogue pane â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 .catalogue { padding: 0.9rem; overflow-y: auto; min-height: 0; }
 .search-row { display: flex; gap: 0.6rem; margin-bottom: 0.8rem; }
@@ -423,7 +423,7 @@ select option,
 
 .empty-note { color: #94a3b8; padding: 2rem; text-align: center; }
 
-/* ── Cart pane ─────────────────────────────────────── */
+/* â”€â”€ Cart pane â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 .cart-pane {
   background: linear-gradient(180deg, rgba(22, 12, 42, 0.82), rgba(10, 5, 24, 0.92));
@@ -568,7 +568,7 @@ select option,
 .customer-fields { display: flex; flex-direction: column; gap: 0.4rem; margin-bottom: 0.5rem; }
 .customer-fields input { font-size: 0.85rem; padding: 0.4rem 0.6rem; }
 
-/* ── Modals ────────────────────────────────────────── */
+/* â”€â”€ Modals â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 .modal-backdrop {
   position: fixed; inset: 0;
@@ -689,7 +689,7 @@ select option,
 }
 .secondary-btn { width: 100%; margin-top: 0.5rem; padding: 0.7rem; font-weight: 600; }
 
-/* PIN pad — glassmorphic login */
+/* PIN pad â€” glassmorphic login */
 .pin-login-screen {
   min-height: 100vh;
   display: flex;
@@ -804,7 +804,7 @@ select option,
 }
 .op-change { font-size: 0.75rem; font-weight: 400; opacity: 0.7; }
 
-/* Till ↔ company link (pre-auth roster stays tenant-scoped) */
+/* Till â†” company link (pre-auth roster stays tenant-scoped) */
 .pin-setup { display: flex; flex-direction: column; gap: 0.55rem; margin-bottom: 0.9rem; text-align: left; }
 .pin-setup-copy { color: #94a3b8; font-size: 0.78rem; line-height: 1.45; margin: 0; }
 .pin-setup-input {
@@ -867,7 +867,7 @@ select option,
 .x-report-row { display: flex; justify-content: space-between; font-size: 0.85rem; padding: 0.3rem 0; }
 .x-report-row strong { font-variant-numeric: tabular-nums; }
 
-/* Receipt — thermal 80mm */
+/* Receipt â€” thermal 80mm */
 .receipt-paper {
   background: #fff; color: #000;
   width: 302px;                 /* 80mm at 96dpi minus margins */
@@ -920,7 +920,7 @@ select option,
   color: #444;
 }
 .r-details li::before {
-  content: '•';
+  content: 'â€¢';
   position: absolute;
   left: 0;
   top: 0;
@@ -955,7 +955,7 @@ select option,
 }
 .toast.error { background: var(--danger); }
 
-/* ── Stock manager ─────────────────────────────────── */
+/* â”€â”€ Stock manager â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 .stock-table {
   width: 100%; border-collapse: collapse; font-size: 0.82rem;
@@ -975,7 +975,7 @@ select option,
 .stock-low { color: #fbbf24; font-weight: 700; }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.15rem 0.9rem; }
 
-/* ── History (SALES & RECEIPTS) ─────────────────────── */
+/* â”€â”€ History (SALES & RECEIPTS) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 .history-pane { padding: 1rem 1.2rem; overflow: auto; max-width: 980px; margin: 0 auto; width: 100%; }
 .history-head { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.6rem; flex-wrap: wrap; }
@@ -1029,7 +1029,7 @@ select option,
 }
 .hr-pay:hover { background: var(--violet); color: #fff; box-shadow: 0 3px 12px rgba(124, 58, 237, 0.3); }
 
-/* ── Dual-mode home dashboard ──────────────────────── */
+/* â”€â”€ Dual-mode home dashboard â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 .home-pane { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .home-tabs { display: flex; gap: 0.45rem; padding: 0.65rem 1rem 0.5rem; align-items: center; }
@@ -1042,7 +1042,7 @@ select option,
 }
 .sync-dot.off { background: #ffb302; }
 
-/* ── Settings ──────────────────────────────────────── */
+/* â”€â”€ Settings â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 .settings-pane {
   padding: 1rem 1.2rem 2rem; overflow-y: auto; flex: 1; min-height: 0;
@@ -1088,7 +1088,7 @@ select option,
   font-size: 0.78rem; color: #c4b5fd;
 }
 
-/* ── Upgrade modal ─────────────────────────────────── */
+/* â”€â”€ Upgrade modal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 .upgrade-card { width: 560px; }
 .tier-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 0.6rem; margin-bottom: 0.9rem; }
@@ -1171,7 +1171,7 @@ select option,
 .qr-wrap img { width: 240px; max-width: 100%; border-radius: 12px; border: 1px solid var(--line-soft); }
 .qr-wrap .hint { max-width: 320px; margin: 0.5rem auto 0; }
 
-/* ── History extras: search, status, convert ───────── */
+/* â”€â”€ History extras: search, status, convert â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 .hist-search {
   font-size: 0.8rem; padding: 0.32rem 0.7rem; min-width: 190px;
@@ -1196,7 +1196,7 @@ select option,
 }
 .hr-convert:hover:not(:disabled) { background: var(--navy-700); color: #fff; }
 
-/* ── Dual-currency display ─────────────────────────── */
+/* â”€â”€ Dual-currency display â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 .p-zig { font-size: 0.68rem; color: #22d3ee; font-weight: 600; }
 .tot-row.zig-line { font-size: 0.76rem; color: #fbbf24; font-weight: 600; }
@@ -1218,7 +1218,7 @@ select option,
   backdrop-filter: none;
 }
 
-/* ── Dual-pane auth (mirrors invoice login) ─────────── */
+/* â”€â”€ Dual-pane auth (mirrors invoice login) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 .auth-shell {
   --pos-primary: #7c3aed;
@@ -1593,7 +1593,7 @@ select option,
   border-color: rgba(244, 63, 94, 0.5) !important;
 }
 
-/* ══ Day/night switch + emerald sign-in ═══════════════════════════════════ */
+/* â•â• Day/night switch + emerald sign-in â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
 .theme-toggle {
   display: inline-flex;
@@ -1741,7 +1741,7 @@ select option,
 .pin-change-tenant { display: block; margin: 0.9rem auto 0; }
 .pin-recover { display: block; margin: 0.45rem auto 0; text-align: center; }
 
-/* â”€â”€ Sign-in parity: exactly the Invoice emerald genre, final cascade â”€â”€ */
+/* Sign-in parity: exactly the Invoice emerald genre, final cascade */
 .auth-shell {
   --pos-primary: #10b981;
   --pos-primary-strong: #047857;
