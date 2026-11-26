@@ -467,6 +467,11 @@ export const api = {
     root<{ status: 'PENDING' | 'SUCCESS' | 'FAILED' }>(
       `/payments/pesepay/status/${intentId}?token=${encodeURIComponent(token)}`
     ),
+  checkoutCancel: (intentId: string, token: string) =>
+    root<{ status: 'PENDING' | 'SUCCESS' | 'FAILED' }>('/payments/pesepay/cancel', {
+      method: 'POST',
+      body: JSON.stringify({ intentId, token }),
+    }),
   currencyRates: () => root<{ rates: CurrencyRate[]; fallback: boolean }>('/currency/rates'),
 
   /** Settings & Branding palette — applies --pos-* CSS vars across the till. */

@@ -334,6 +334,23 @@ export default function UpgradeModal({
                 Reopen payment page
               </button>
             )}
+            <button
+              className="btn ghost"
+              type="button"
+              onClick={async () => {
+                if (session.intentId && session.statusToken) {
+                  try {
+                    await api.checkoutCancel(session.intentId, session.statusToken);
+                  } catch {
+                    /* best effort */
+                  }
+                }
+                setPhase('failed');
+                setError('Payment was cancelled. No money was taken — retry when ready.');
+              }}
+            >
+              Cancel payment
+            </button>
           </div>
         )}
 

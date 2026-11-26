@@ -303,6 +303,28 @@ export function OnlinePaymentModal({
     }
   };
 
+  const cancelPayment = async () => {
+    if (!intent?.intentId || !intent.statusToken) {
+      setPhase('failed');
+      setError('Payment was cancelled. No money was taken.');
+      return;
+    }
+    setBusy(true);
+    stopPolling();
+    try {
+      await api.post('/api/payments/pesepay/cancel', {
+        intentId: intent.intentId,
+        token: intent.statusToken,
+      });
+    } catch {
+      /* best effort */
+    } finally {
+      setBusy(false);
+      setPhase('failed');
+      setError('Payment was cancelled. No money was taken — retry when ready.');
+    }
+  };
+
   const authorize = async () => {
     if (!intent?.intentId) return;
     if (!/^\d{4,8}$/.test(otp.trim())) {
@@ -479,6 +501,9 @@ export function OnlinePaymentModal({
             <div className="pay-actions">
               <button type="button" className="btn ghost" onClick={reset}>
                 Use another rail
+              </button>
+              <button type="button" className="btn ghost" onClick={() => void cancelPayment()} disabled={busy}>
+                Cancel payment
               </button>
             </div>
           </div>

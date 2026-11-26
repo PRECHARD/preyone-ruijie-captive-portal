@@ -1645,6 +1645,65 @@ paymentsRouter.get('/pesepay/status/:intentId', pesepayStatusLimiter, async (req
   }
 });
 
+// Client-initiated cancellation for a checkout that the payer dismissed.
+// Updates the intent, notifies the client by email, and returns a terminal
+// status so the modal stops waiting immediately instead of polling for minutes.
+paymentsRouter.post('/pesepay/cancel', async (req: Request, res: Response) => {
+  const intentId = str(req.body?.intentId);
+  const token = str(req.body?.token);
+  if (!intentId) {
+    res.status(400).json({ error: 'intentId is required' });
+    return;
+  }
+  let decoded: { intentId?: string; reference?: string; type?: string } | null = null;
+  try {
+    decoded = jwt.verify(token, process.env.JWT_SECRET || '') as any;
+  } catch {
+    res.status(401).json({ error: 'Invalid or missing payment token' });
+    return;
+  }
+  if (!decoded || decoded.intentId !== intentId) {
+    res.status(401).json({ error: 'Invalid payment token' });
+    return;
+  }
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, reference, tenant_id, amount, currency, payment_method,
+              client_email, client_name, invoice_number, status
+         FROM pesepay_intents
+        WHERE id = $1`,
+      [intentId]
+    );
+    const intent = rows?.[0];
+    if (!intent) {
+      res.status(404).json({ error: 'Payment not found' });
+      return;
+    }
+    if (intent.status === 'completed') {
+      res.json({ status: 'SUCCESS' });
+      return;
+    }
+    if (intent.status !== 'failed') {
+      await pool.query(`UPDATE pesepay_intents SET status = 'failed' WHERE id = $1`, [intentId]);
+      if (intent.client_email) {
+        await sendPaymentFailedEmail({
+          to: intent.client_email,
+          companyName: intent.client_name || 'Preyone client',
+          amount: intent.amount,
+          currency: intent.currency,
+          method: methodLabel(intent.payment_method),
+          reference: intent.reference,
+          invoiceNumber: intent.invoice_number,
+          reason: 'Payment cancelled by payer',
+        }).catch(() => false);
+      }
+    }
+    res.json({ status: 'FAILED' });
+  } catch (err) {
+    res.status(500).json({ error: 'Unable to cancel payment' });
+  }
+});
+
 paymentsRouter.post('/pesepay/callback', async (req: Request, res: Response) => {
   const integrationKey = process.env.PESEPAY_INTEGRATION_KEY || '';
   const providedKey = req.header('authorization') || '';
