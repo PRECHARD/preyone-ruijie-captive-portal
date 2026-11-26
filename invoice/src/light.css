@@ -189,6 +189,22 @@
   border-color: #cfe5da;
   box-shadow: 0 32px 80px rgba(16, 36, 28, 0.1);
 }
+/* On the daylight hero a white-on-white plate needs a fine emerald hairline
+   and a soft green shadow instead of the dark hero's black drop shadow. */
+[data-preyone-theme='light'] .auth-logo {
+  background: linear-gradient(180deg, #ffffff, #f7fbf8);
+  border-color: rgba(5, 150, 105, 0.22);
+  box-shadow:
+    0 8px 22px rgba(16, 36, 28, 0.11),
+    0 0 0 1px rgba(255, 255, 255, 0.92),
+    inset 0 1px 0 rgba(255, 255, 255, 1);
+}
+[data-preyone-theme='light'] .auth-logo:hover {
+  box-shadow:
+    0 12px 28px rgba(16, 36, 28, 0.16),
+    0 0 0 1px rgba(5, 150, 105, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 1);
+}
 [data-preyone-theme='light'] .auth-hero h2,
 [data-preyone-theme='light'] .auth-points strong,
 [data-preyone-theme='light'] .auth-card h1 {

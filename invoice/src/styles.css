@@ -1668,33 +1668,33 @@ tbody tr:last-child td { border-bottom: none; }
   flex-wrap: wrap;
 }
 
-/* Sign-in keeps the original button-like logo plate: the full-colour
-   "preyonenoneglow" wordmark needs a light surface to read against the emerald
-   hero. The plate is deliberately styled as a soft raised button. */
+/* Sign-in keeps the original button-like logo plate, refined into a small
+   raised chip so the full-colour "preyonenoneglow" wordmark reads against both
+   the dark emerald hero and the daylight hero. */
 .auth-logo {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 12px 20px;
-  border-radius: 16px;
-  background: linear-gradient(180deg, #ffffff, #f3f6fb);
-  border: 1px solid rgba(255, 255, 255, 0.9);
+  padding: 7px 12px;
+  border-radius: 11px;
+  background: linear-gradient(180deg, #ffffff, #f5f8fb);
+  border: 1px solid rgba(255, 255, 255, 0.92);
   box-shadow:
-    0 10px 30px rgba(0, 0, 0, 0.35),
-    0 0 0 1px rgba(255, 255, 255, 0.16),
+    0 7px 20px rgba(0, 0, 0, 0.26),
+    0 0 0 1px rgba(255, 255, 255, 0.12),
     inset 0 1px 0 rgba(255, 255, 255, 0.95);
   transition: transform 0.2s var(--pos-ease-out), box-shadow 0.2s var(--pos-ease-out);
 }
 .auth-logo:hover {
   transform: translateY(-1px);
   box-shadow:
-    0 14px 38px rgba(0, 0, 0, 0.4),
-    0 0 0 1px rgba(255, 255, 255, 0.24),
+    0 10px 26px rgba(0, 0, 0, 0.32),
+    0 0 0 1px rgba(255, 255, 255, 0.22),
     inset 0 1px 0 rgba(255, 255, 255, 1);
 }
 .auth-logo img {
   display: block;
-  height: 52px;
+  height: 36px;
   width: auto;
   max-width: 100%;
   object-fit: contain;

@@ -16,11 +16,11 @@ export function Footer() {
         <div className="footer-col brand-col">
           <Link to="/" aria-label="Preyone — home">
             <img
-              src="/images/preyonelogomainzw.png"
+              src="/images/preyonenoneglow-logo-zoom-800.png"
               alt="Preyone"
               className="footer-brand-mark"
-              width={1200}
-              height={675}
+              width={800}
+              height={400}
               loading="lazy"
               decoding="async"
             />

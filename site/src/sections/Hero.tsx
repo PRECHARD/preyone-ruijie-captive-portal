@@ -73,12 +73,12 @@ export function Hero() {
             <div className="relative flex items-center justify-center overflow-hidden rounded-2xl border border-white/10 bg-ink/70 p-6">
               <div className="noise absolute inset-0" />
               <img
-                src="/images/preyonelogomainzw.png"
-                alt="Preyone Insider Program"
+                src="/images/preyonenoneglow-logo-zoom-800.png"
+                alt="Preyone"
                 width={800}
-                height={800}
+                height={400}
                 loading="eager"
-                className="animate-float relative w-full max-w-[17rem] drop-shadow-[0_18px_40px_rgba(0,212,255,0.28)]"
+                className="animate-float relative w-full max-w-[17rem] drop-shadow-[0_18px_40px_rgba(168,85,247,0.32)]"
               />
 
               <span className="animate-float-slow absolute top-4 right-4 flex items-center gap-1.5 rounded-full border border-cyan-400/30 bg-cyan-400/10 px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-cyan-200">
