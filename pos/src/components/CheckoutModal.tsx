@@ -99,7 +99,7 @@ export default function CheckoutModal({
 
   return (
     <div className="modal-backdrop" onClick={onCancel}>
-      <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+      <div className="modal-card checkout-glass" onClick={(e) => e.stopPropagation()}>
         <h3 className="modal-title">Take payment</h3>
         <div style={{ fontSize: '0.72rem', color: 'var(--muted)', marginBottom: '0.6rem' }}>
           Cashier: {cashierName}
@@ -187,7 +187,7 @@ export default function CheckoutModal({
                   </label>
                 )}
                 <label className="field-label">
-                  Pesepay reference / approval code
+                  Preyone Payment reference / approval code
                   <input
                     value={reference}
                     placeholder="e.g. 8H3K2M"

@@ -143,6 +143,10 @@ export interface CheckoutSession {
   currencyCode: string;
   paymentMethod: string;
   reference: string;
+  invoiceNumber?: string;
+  clientEmail?: string;
+  intentId?: string | null;
+  statusToken?: string | null;
   redirectUrl?: string;
   pollUrl?: string;
   instructions?: string;
@@ -451,8 +455,18 @@ export const api = {
 
   // ── Subscription (outside /api/pos, same PIN-session token) ─────────────
   subscriptionPlans: () => root<SubscriptionPlans>('/subscription/plans'),
-  subscriptionCheckout: (payload: { tier: string; currencyCode?: string; paymentMethod?: string; phone?: string }) =>
-    root<CheckoutSession>('/subscription/checkout', { method: 'POST', body: JSON.stringify(payload) }),
+  subscriptionCheckout: (payload: {
+    tier: string;
+    currencyCode?: string;
+    paymentMethod?: string;
+    phone?: string;
+    fullName?: string;
+    email?: string;
+  }) => root<CheckoutSession>('/subscription/checkout', { method: 'POST', body: JSON.stringify(payload) }),
+  checkoutStatus: (intentId: string, token: string) =>
+    root<{ status: 'PENDING' | 'SUCCESS' | 'FAILED' }>(
+      `/payments/pesepay/status/${intentId}?token=${encodeURIComponent(token)}`
+    ),
   currencyRates: () => root<{ rates: CurrencyRate[]; fallback: boolean }>('/currency/rates'),
 
   /** Settings & Branding palette — applies --pos-* CSS vars across the till. */

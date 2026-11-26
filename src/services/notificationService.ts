@@ -290,6 +290,66 @@ export function buildEmeraldEmail(opts: {
 </html>`;
 }
 
+/** Immediate notice that a payment did not go through, with a retry action. */
+export async function sendPaymentFailedEmail(opts: {
+  to: string;
+  companyName: string;
+  amount?: number | null;
+  currency?: string | null;
+  method?: string | null;
+  reference?: string | null;
+  reason?: string | null;
+  invoiceNumber?: string | null;
+}): Promise<boolean> {
+  const amount =
+    opts.amount != null && Number.isFinite(Number(opts.amount))
+      ? `${opts.currency || 'USD'} ${Number(opts.amount).toFixed(2)}`
+      : null;
+  const html = buildEmeraldEmail({
+    title: 'Payment was unsuccessful',
+    eyebrow: 'Payment notice',
+    preheader: `Your payment for ${opts.companyName} did not go through.`,
+    bodyHtml: `<p style="margin:0 0 12px">Hi <strong style="color:${EMERALD.text}">${escapeEmailHtml(
+      opts.companyName
+    )}</strong>,</p>
+      <p style="margin:0">We could not complete your payment. <strong style="color:#fecaca">No money has been taken</strong> for this attempt. You can retry from the Invoice workspace at any time.</p>`,
+    details: [
+      ['Status', 'Payment unsuccessful'],
+      ...(amount ? ([['Amount', escapeEmailHtml(amount)]] as Array<[string, string]>) : []),
+      ...(opts.method ? ([['Method', escapeEmailHtml(opts.method)]] as Array<[string, string]>) : []),
+      ...(opts.invoiceNumber ? ([['Invoice', escapeEmailHtml(opts.invoiceNumber)]] as Array<[string, string]>) : []),
+      ...(opts.reference ? ([['Reference', escapeEmailHtml(opts.reference)]] as Array<[string, string]>) : []),
+      ...(opts.reason ? ([['Reason', escapeEmailHtml(opts.reason)]] as Array<[string, string]>) : []),
+    ],
+    cta: { label: 'Retry payment in Invoice', url: `${appBaseUrl('invoice')}/` },
+    noteHtml: 'If your phone was charged but the payment shows as unsuccessful, contact support with the reference above.',
+    footerNote: 'Preyone Invoice & POS · payment notice',
+  });
+  const text = [
+    `Payment was unsuccessful for ${opts.companyName}`,
+    amount ? `Amount: ${amount}` : '',
+    opts.method ? `Method: ${opts.method}` : '',
+    opts.invoiceNumber ? `Invoice: ${opts.invoiceNumber}` : '',
+    opts.reference ? `Reference: ${opts.reference}` : '',
+    opts.reason ? `Reason: ${opts.reason}` : '',
+    'No money has been taken for this attempt. Retry in Preyone Invoice.',
+    '',
+    'Preyone Enterprises · support@preyone.com',
+  ]
+    .filter(Boolean)
+    .join('\n');
+  return sendMail(
+    opts.to,
+    `Payment unsuccessful — ${opts.companyName}`,
+    html,
+    'Preyone Invoice',
+    'support@preyone.com',
+    undefined,
+    undefined,
+    text
+  );
+}
+
 /** Welcome mail sent at the moment a client tenant is provisioned. */
 export async function sendClientProvisionedEmail(opts: {
   to: string;
@@ -543,7 +603,7 @@ export async function sendShiftCloseEmail(opts: {
   );
 }
 
-/** Receipt for a cash or Pesepay subscription payment. */
+/** Receipt for a cash or Preyone Payment subscription payment. */
 export async function sendSubscriptionPaymentReceiptEmail(opts: {
   to: string;
   companyName: string;

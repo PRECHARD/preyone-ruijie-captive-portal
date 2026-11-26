@@ -10,6 +10,8 @@ import {
 } from '../services/pesepayService';
 import type { PesepayCurrency, PesepayRail } from '../services/pesepayService';
 import { PLAN_TIERS, TIER_CATALOG, canonicalPlanId, planNameFor, type PlanTier } from '../plans/entitlements';
+import { sendPaymentFailedEmail } from '../services/notificationService';
+import { signPesepayStatusToken } from './payments';
 
 export const subscriptionRouter = Router();
 
@@ -17,6 +19,17 @@ export const subscriptionRouter = Router();
 export { PLAN_TIERS, TIER_CATALOG, type PlanTier };
 
 const str = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
+
+// Customer-facing rail labels never name the payment gateway.
+function selectedMethodLabel(rail: string): string {
+  const labels: Record<string, string> = {
+    ecocash: 'EcoCash',
+    innbucks: 'InnBucks',
+    omari: "O'mari",
+    paygo: 'PayGo',
+  };
+  return labels[rail] || 'Preyone Payment';
+}
 
 // Mirrors the tenant resolution in POST /api/payments/pesepay/initiate: the
 // company always comes from the authenticated session (portal company link,
@@ -134,11 +147,12 @@ subscriptionRouter.post('/checkout', requireAdminAuth, async (req: Request, res:
     const reference = `PREYONE-SUB-${uuidv4().substring(0, 8).toUpperCase()}-${Date.now()}`;
     const invoiceNumber = `PINV-${Date.now().toString(36).toUpperCase()}-${uuidv4().substring(0, 4).toUpperCase()}`;
 
-    await pool.query(
+    const intentRes = await pool.query(
       `INSERT INTO pesepay_intents
          (reference, tenant_id, amount, currency, payment_method, purpose, reason_for_payment,
           target_type, subscription_module, plan_tier, client_name, client_email, client_phone, invoice_number)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,'subscription',NULL,$8,$9,$10,$11,$12)`,
+       VALUES ($1,$2,$3,$4,$5,$6,$7,'subscription',NULL,$8,$9,$10,$11,$12)
+       RETURNING id`,
       [
         reference,
         tenantId,
@@ -170,6 +184,18 @@ subscriptionRouter.post('/checkout', requireAdminAuth, async (req: Request, res:
 
     if (!pesepayResponse.success) {
       await pool.query(`UPDATE pesepay_intents SET status = 'failed' WHERE reference = $1`, [reference]);
+      // The client gave us contact details precisely so we can tell them the
+      // payment did not go through instead of leaving a silent failed checkout.
+      await sendPaymentFailedEmail({
+        to: clientEmail,
+        companyName: clientName || tier.name,
+        amount: tier.price,
+        currency: currencyCode,
+        method: selectedMethodLabel(paymentMethod),
+        reference,
+        invoiceNumber,
+        reason: pesepayResponse.error || 'The payment provider declined the request',
+      }).catch(() => false);
       res.status(400).json({ error: pesepayResponse.error || 'Failed to start checkout', reference });
       return;
     }
@@ -196,6 +222,10 @@ subscriptionRouter.post('/checkout', requireAdminAuth, async (req: Request, res:
       reference,
       invoiceNumber,
       clientEmail,
+      intentId: intentRes.rows[0]?.id ?? null,
+      statusToken: intentRes.rows[0]
+        ? signPesepayStatusToken(intentRes.rows[0].id, reference)
+        : null,
       redirectUrl: pesepayResponse.redirectUrl,
       pollUrl: pesepayResponse.pollUrl,
       instructions: pesepayResponse.instructions,

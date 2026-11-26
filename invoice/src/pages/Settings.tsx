@@ -190,7 +190,7 @@ const TABS: Array<{ key: TabKey; label: string; icon: SettingsIconName; caption:
   { key: 'company', label: 'Company & Branding', icon: 'building', caption: 'Legal identity, logo and contacts' },
   { key: 'numbering', label: 'Document Prefixes', icon: 'hash', caption: 'Prefixes and next document numbers' },
   { key: 'tax', label: 'Taxes & Currency', icon: 'percent', caption: 'Ledger currency and VAT defaults' },
-  { key: 'payments', label: 'Payment Rails', icon: 'card', caption: 'Pesepay, mobile money and auto-ledger' },
+  { key: 'payments', label: 'Payment Rails', icon: 'card', caption: 'Preyone Payment, mobile money and auto-ledger' },
   { key: 'billing', label: 'Upgrade & Billing', icon: 'spark', caption: 'POS / invoicing subscription tiers' },
   { key: 'team', label: 'Team & Roles', icon: 'team', caption: 'Permissions for CEO, Staff and Cashier' },
   { key: 'tenants', label: 'Client Tenants', icon: 'building', caption: 'House CEO: provision clients and record cash plans' },
@@ -1078,14 +1078,14 @@ export default function SettingsPage({
           <header className="settings-section-head">
             <span className="settings-eyebrow">04 · Settlement</span>
             <h3>Payment rails</h3>
-            <p>Choose which Pesepay mobile-money rails appear on customer payment links.</p>
+            <p>Choose which Preyone Payment mobile-money rails appear on customer payment links.</p>
           </header>
 
           <div className="settings-gateway">
             <div className="settings-gateway-head">
               <div className="settings-gateway-mark" aria-hidden>P</div>
               <div>
-                <strong>Pesepay gateway</strong>
+                <strong>Preyone Payment gateway</strong>
                 <p>Single integration for EcoCash, O’mari and InnBucks in USD.</p>
               </div>
               <span className={`settings-status ${payments.pesepay ? 'is-live' : 'is-off'}`}>
@@ -1095,7 +1095,7 @@ export default function SettingsPage({
             <Toggle
               checked={payments.pesepay}
               onChange={(next) => togglePayment('pesepay', next)}
-              label="Enable Pesepay checkout"
+              label="Enable Preyone Payment checkout"
               hint="Adds an online payment action to issued invoices and receipts."
               disabled={role !== null && !isManager}
             />
@@ -1130,14 +1130,14 @@ export default function SettingsPage({
               checked={payments.autoSaveLedger}
               onChange={(next) => togglePayment('autoSaveLedger', next)}
               label="Auto-save ledger entries"
-              hint="Write a payment row the moment Pesepay confirms a successful charge."
+              hint="Write a payment row the moment Preyone Payment confirms a successful charge."
               disabled={role !== null && !isManager}
             />
             <Toggle
               checked={payments.autoReconcile}
               onChange={(next) => togglePayment('autoReconcile', next)}
               label="Auto-reconcile pending transactions"
-              hint="Sweep stale Pesepay checkouts and close the matching document automatically."
+              hint="Sweep stale Preyone Payment checkouts and close the matching document automatically."
               disabled={role !== null && !isManager}
             />
           </div>
@@ -1160,7 +1160,7 @@ export default function SettingsPage({
           <header className="settings-section-head">
             <span className="settings-eyebrow">05 · Subscription</span>
             <h3>Upgrade &amp; billing</h3>
-            <p>$10 POS Only · $15 / $20 POS + Invoicing · $30 Unlimited — Pesepay checkout.</p>
+            <p>$10 POS Only · $15 / $20 POS + Invoicing · $30 Unlimited — Preyone Payment checkout.</p>
           </header>
 
           {billingErr && <div className="banner error">{billingErr}</div>}

@@ -410,7 +410,7 @@ describe('POST /api/payments/pesepay/webhook', () => {
     expect(clientState.query).not.toHaveBeenCalled();
   });
 
-  it('ignores a non-successful transaction status', async () => {
+  it('reports a non-successful transaction status as unsuccessful without applying it', async () => {
     const res = await request(createPaymentsApp())
       .post('/api/payments/pesepay/webhook')
       .set('authorization', KEY)
@@ -418,7 +418,7 @@ describe('POST /api/payments/pesepay/webhook', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.applied).toBe(false);
-    expect(res.body.message).toBe('Ignored non-success status');
+    expect(res.body.message).toBe('Payment was unsuccessful');
     expect(clientState.query).not.toHaveBeenCalled();
   });
 

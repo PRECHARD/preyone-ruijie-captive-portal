@@ -876,7 +876,7 @@ export default function ClientTenants() {
 
       <p className="ct-footnote">
         Cash payments are recorded as paid sales in the first-created Preyone company, then the
-        client's <code>plan_type</code> and expiry are extended in the same transaction. Pesepay
+        client's <code>plan_type</code> and expiry are extended in the same transaction. Preyone Payment
         renewals are untouched and continue through the existing webhook.
       </p>
       <p className="ct-footnote">

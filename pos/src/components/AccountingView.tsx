@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { accountingApi, type StaffUser } from '../api';
 
 interface Overview {
@@ -131,7 +131,7 @@ export default function AccountingView({
                   <strong>{money(overview.cashTotal)}</strong>
                 </div>
                 <div className="acct-kpi-card amber">
-                  <span>Pesepay</span>
+                  <span>Preyone Payment</span>
                   <strong>{money(overview.pesepayTotal)}</strong>
                 </div>
               </>
@@ -166,7 +166,7 @@ export default function AccountingView({
                   className={`hist-tab${tab === 'rails' ? ' on' : ''}`}
                   onClick={() => setTab('rails')}
                 >
-                  Pesepay Rails
+                  Preyone Payment Rails
                 </button>
                 <button
                   type="button"
@@ -215,7 +215,7 @@ export default function AccountingView({
                       <option value="">All rails</option>
                       {['cash', 'card', 'bank', 'ecocash', 'omari', 'innbucks', 'paygo', 'pesepay'].map((r) => (
                         <option key={r} value={r}>
-                          {r}
+                          {r === 'pesepay' ? 'Preyone Payment' : r.toUpperCase()}
                         </option>
                       ))}
                     </select>
@@ -255,7 +255,7 @@ export default function AccountingView({
                 <div className="acct-kpi-row">
                   {['ecocash', 'omari', 'innbucks', 'paygo', 'pesepay'].map((rail) => (
                     <div key={rail} className="acct-kpi-card">
-                      <span>{rail.toUpperCase()}</span>
+                      <span>{rail === 'pesepay' ? 'Preyone Payment' : rail.toUpperCase()}</span>
                       <strong>{money(overview.byRail?.[rail])}</strong>
                     </div>
                   ))}

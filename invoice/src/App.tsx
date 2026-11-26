@@ -160,7 +160,7 @@ const AUTH_POINTS = [
   },
   {
     title: 'Get paid faster',
-    body: 'Pesepay checkout, part-payments and a live accounts-receivable view.',
+    body: 'Preyone Payment checkout, part-payments and a live accounts-receivable view.',
   },
   {
     title: 'Built for teams',
@@ -2626,7 +2626,7 @@ function DocumentDrawer({
                       <select className="select" value={payMethod} onChange={(e) => setPayMethod(e.target.value)}>
                         {['cash', 'card', 'ecocash', 'innbucks', 'bank', 'pesepay', 'other'].map((m) => (
                           <option key={m} value={m}>
-                            {m}
+                            {m === 'pesepay' ? 'Preyone Payment' : m}
                           </option>
                         ))}
                       </select>
@@ -3869,7 +3869,7 @@ export default function App() {
             </p>
           </div>
           <div className="topbar-actions">
-            <span className="status-chip" title="Pesepay USD checkout is available on this workspace">
+            <span className="status-chip" title="Preyone Payment USD checkout is available on this workspace">
               <span className="status-dot" aria-hidden />
               {catalog?.company.currency || 'USD'} ledger
             </span>

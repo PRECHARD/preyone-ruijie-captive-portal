@@ -26,28 +26,51 @@ interface CheckoutSession {
   reference: string;
   invoiceNumber?: string;
   clientEmail?: string;
+  intentId?: string | null;
+  statusToken?: string | null;
   redirectUrl?: string;
   instructions?: string;
 }
 
 /**
- * Payment rails presented exactly like the WiFi checkout tiles: one tap per
- * rail, with the two details Preyone needs to email the invoice captured first.
+ * The one checkout design used across Invoice and POS: real payment logos on
+ * glass tiles, a translucent emerald card, and an immediate unsuccessful state.
  */
 const RAILS = [
-  { key: 'ecocash', label: 'EcoCash', glyph: '📱', hint: 'Pay from your EcoCash wallet', phone: true },
-  { key: 'innbucks', label: 'InnBucks', glyph: '💳', hint: 'Authorise in the InnBucks app', phone: false },
-  { key: 'omari', label: "O'mari USD", glyph: '🏦', hint: 'USD account · PIN on phone', phone: true },
+  {
+    key: 'ecocash',
+    label: 'EcoCash',
+    logo: '/images/pay/ecocash.png',
+    hint: 'Pay from your EcoCash wallet',
+    phone: true,
+  },
+  {
+    key: 'innbucks',
+    label: 'InnBucks',
+    logo: '/images/pay/innbucks.png',
+    hint: 'Authorise in the InnBucks app',
+    phone: false,
+  },
+  {
+    key: 'omari',
+    label: "O'mari",
+    logo: '/images/pay/omari.webp',
+    hint: 'Approve with your phone PIN',
+    phone: true,
+  },
 ];
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+type Phase = 'form' | 'awaiting' | 'failed' | 'success';
 
 export default function UpgradeModal({
   onClose,
   onUpgraded,
+  appName = 'Invoice',
 }: {
   onClose: () => void;
   onUpgraded: (planType: string) => void;
+  appName?: string;
 }) {
   const [plans, setPlans] = useState<SubscriptionPlans | null>(null);
   const [loadErr, setLoadErr] = useState('');
@@ -60,7 +83,7 @@ export default function UpgradeModal({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [session, setSession] = useState<CheckoutSession | null>(null);
-  const [phase, setPhase] = useState<'form' | 'awaiting' | 'success'>('form');
+  const [phase, setPhase] = useState<Phase>('form');
   const [notified, setNotified] = useState(false);
   const pollRef = useRef<number | null>(null);
 
@@ -86,33 +109,48 @@ export default function UpgradeModal({
     };
   }, []);
 
-  // Settlement is server-to-server; poll the catalogue until the plan changes,
-  // then refresh the whole workspace so the banner/watermark disappear.
+  // Poll the payment itself (not just the plan), so a rejection shows the
+  // unsuccessful screen within seconds instead of silently waiting.
   useEffect(() => {
     if (!session || phase !== 'awaiting') return;
     const started = Date.now();
-    pollRef.current = window.setInterval(() => {
+    const poll = async () => {
       if (Date.now() - started > 300_000) {
-        if (pollRef.current) window.clearInterval(pollRef.current);
-        pollRef.current = null;
-        setError('Still waiting for the provider. Your payment will be applied automatically.');
+        setError('Still waiting for confirmation. If you were charged, contact support with the reference.');
         return;
       }
-      api
-        .get<SubscriptionPlans>('/api/subscription/plans')
-        .then((fresh) => {
-          if (fresh.current && fresh.current.plan_type === session.tier && !notified) {
-            setNotified(true);
-            if (pollRef.current) window.clearInterval(pollRef.current);
-            pollRef.current = null;
-            setPhase('success');
-            onUpgraded(session.tier);
+      try {
+        if (session.intentId && session.statusToken) {
+          const status = await api.get<{ status: 'PENDING' | 'SUCCESS' | 'FAILED' }>(
+            `/api/payments/pesepay/status/${session.intentId}?token=${encodeURIComponent(
+              session.statusToken
+            )}`
+          );
+          if (status.status === 'FAILED') {
+            setPhase('failed');
+            setError('Payment was unsuccessful. No money was taken — please try again.');
+            return;
           }
-        })
-        .catch(() => {
-          /* transient */
-        });
-    }, 5_000);
+          if (status.status === 'SUCCESS') {
+            setPhase('success');
+            if (!notified) {
+              setNotified(true);
+              onUpgraded(session.tier);
+            }
+            return;
+          }
+        }
+        const fresh = await api.get<SubscriptionPlans>('/api/subscription/plans');
+        if (fresh.current && fresh.current.plan_type === session.tier && !notified) {
+          setNotified(true);
+          setPhase('success');
+          onUpgraded(session.tier);
+        }
+      } catch {
+        /* transient poll failure — keep waiting */
+      }
+    };
+    pollRef.current = window.setInterval(poll, 4_000);
     return () => {
       if (pollRef.current) window.clearInterval(pollRef.current);
       pollRef.current = null;
@@ -167,8 +205,10 @@ export default function UpgradeModal({
       <div className="modal-card up-card" onClick={(e) => e.stopPropagation()}>
         <header className="up-head">
           <div>
-            <span className="up-eyebrow">SECURE PAYMENT · PESEPAY</span>
-            <h3 className="modal-title">{phase === 'success' ? 'Payment received' : 'Upgrade my plan'}</h3>
+            <span className="up-eyebrow">SECURE PAYMENT · PREYONE PAYMENT</span>
+            <h3 className="modal-title">
+              {phase === 'success' ? 'Payment received' : phase === 'failed' ? 'Payment was unsuccessful' : 'Upgrade my plan'}
+            </h3>
           </div>
           <button className="up-close" type="button" onClick={onClose} aria-label="Close">✕</button>
         </header>
@@ -240,7 +280,7 @@ export default function UpgradeModal({
                   className={`up-rail${rail === r.key ? ' selected' : ''}`}
                   onClick={() => setRail(r.key)}
                 >
-                  <span className="up-rail-glyph" aria-hidden>{r.glyph}</span>
+                  <img className="up-rail-logo" src={r.logo} alt={r.label} />
                   <strong>{r.label}</strong>
                   <small>{r.hint}</small>
                   <span className="up-rail-check" aria-hidden>✓</span>
@@ -262,14 +302,14 @@ export default function UpgradeModal({
             {error && <div className="banner error">{error}</div>}
             <div className="up-summary">
               <span>
-                {selected?.name || 'Plan'} · {selectedRail?.label}
+                {selected?.name || 'Plan'} · {selectedRail?.label} · {appName}
               </span>
               <strong>{amountLabel}</strong>
             </div>
             <button className="pay-submit" type="button" disabled={busy || !plans || !selected?.checkoutReady} onClick={start}>
               {busy ? 'Starting secure payment…' : `Pay ${amountLabel} with ${selectedRail?.label}`}
             </button>
-            <p className="up-secure">🔒 Encrypted by Preyone Payment. Your invoice is emailed as soon as the payment settles.</p>
+            <p className="up-secure">🔒 Secure payment by Preyone. Your invoice is emailed as soon as the payment settles.</p>
           </>
         )}
 
@@ -289,7 +329,6 @@ export default function UpgradeModal({
               </div>
             )}
             {session.instructions && <p className="up-instructions">{session.instructions}</p>}
-            {error && <div className="banner error">{error}</div>}
             {session.redirectUrl && (
               <button
                 className="btn"
@@ -302,19 +341,29 @@ export default function UpgradeModal({
           </div>
         )}
 
-        {phase === 'success' && session && (
+        {(phase === 'failed' || phase === 'success') && session && (
           <div className="up-stage">
-            <div className="checkmark" aria-hidden>✓</div>
-            <h4>Payment received</h4>
+            <div className={phase === 'success' ? 'checkmark' : 'up-fail-mark'} aria-hidden>
+              {phase === 'success' ? '✓' : '!'}
+            </div>
+            <h4>{phase === 'success' ? 'Payment received' : 'Payment was unsuccessful'}</h4>
             <p>
-              {session.name} is now active. The receipt and your Preyone invoice PDF were sent to{' '}
-              <strong>{session.clientEmail || email}</strong>.
+              {phase === 'success'
+                ? `${session.name} is now active. The receipt and your Preyone invoice PDF were sent to ${session.clientEmail || email}.`
+                : 'No money has been taken for this attempt. A notification was sent to your email — you can retry with the same or another payment method.'}
             </p>
             <div className="up-ref">
               <span>Reference</span>
               <strong>{session.reference}</strong>
             </div>
-            <button className="btn primary" type="button" onClick={onClose}>Done</button>
+            <div className="up-actions">
+              {phase === 'failed' && (
+                <button className="btn primary" type="button" onClick={() => { setPhase('form'); setSession(null); }}>
+                  Try again
+                </button>
+              )}
+              <button className="btn ghost" type="button" onClick={onClose}>Close</button>
+            </div>
           </div>
         )}
       </div>

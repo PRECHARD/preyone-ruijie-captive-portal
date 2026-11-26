@@ -274,7 +274,7 @@ export function OnlinePaymentModal({
       setIntent(result);
       if (rail === 'omari') {
         setPhase('authorize');
-        setMessage('Approve the payment with the OTP Pesepay sent to your phone.');
+        setMessage('Approve the payment with the OTP Preyone Payment sent to your phone.');
       } else {
         setPhase('waiting');
         setMessage(
@@ -326,7 +326,7 @@ export function OnlinePaymentModal({
 
   return (
     <div className="overlay pay-modal" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="sheet pay-sheet" role="dialog" aria-modal="true" aria-label="Take online payment">
+      <div className="sheet pay-sheet checkout-glass" role="dialog" aria-modal="true" aria-label="Take online payment">
         <div className="sheet-head">
           <div>
             <h2 className="sheet-title">Take payment</h2>
@@ -334,7 +334,7 @@ export function OnlinePaymentModal({
               {doc.doc_number} · {money(balance, currency)} outstanding
             </p>
             <span className="pay-chip">
-              Pesepay · {currency}
+              Preyone Payment · {currency}
             </span>
           </div>
           <button type="button" className="icon-btn" onClick={onClose} aria-label="Close">

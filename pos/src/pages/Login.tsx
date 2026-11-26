@@ -13,7 +13,7 @@ const AUTH_POINTS = [
   },
   {
     title: 'Shift-ready cash control',
-    body: 'Open floats, X-reports and Pesepay rails — locked to the signed-in cashier.',
+    body: 'Open floats, X-reports and Preyone Payment rails — locked to the signed-in cashier.',
   },
 ];
 

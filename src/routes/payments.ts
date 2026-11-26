@@ -28,7 +28,7 @@ import { createStarlinkInvoice, applyStarlinkPayment, getStarlinkKit } from '../
 import { getStarlinkPlan } from '../plans/starlinkPlans';
 import { syncSaleToLedgerAndStock } from '../db/accounting';
 import { canonicalPlanId, planNameFor, syncPlanModules } from '../plans/entitlements';
-import { sendSubscriptionPaymentReceiptEmail } from '../services/notificationService';
+import { sendPaymentFailedEmail, sendSubscriptionPaymentReceiptEmail } from '../services/notificationService';
 import { buildSubscriptionInvoicePdf } from '../services/subscriptionInvoicePdf';
 import { TIER_CATALOG } from '../plans/entitlements';
 
@@ -1224,6 +1224,17 @@ function safeEqual(a: string, b: string): boolean {
   return timingSafeEqual(bufA, bufB);
 }
 
+/** Customer-facing rail label — never expose the gateway name. */
+function methodLabel(rail: unknown): string {
+  const labels: Record<string, string> = {
+    ecocash: 'EcoCash',
+    innbucks: 'InnBucks',
+    omari: "O'mari",
+    paygo: 'PayGo',
+  };
+  return labels[String(rail || '')] || 'Preyone Payment';
+}
+
 function asUuid(value: unknown): string | null {
   return typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value.trim())
     ? value.trim()
@@ -1835,12 +1846,51 @@ paymentsRouter.post('/pesepay/webhook', async (req: Request, res: Response) => {
     ).toUpperCase();
 
     if (transactionStatus !== 'SUCCESS') {
+      // A rejected/declined payment must tell the client immediately instead
+      // of leaving a checkout that silently never settles.
+      const candidates = [
+        payload.merchantReference,
+        payload.merchant_reference,
+        payload.referenceNumber,
+        payload.reference,
+      ].filter((value): value is string => typeof value === 'string' && value.length > 0);
+      if (candidates.length > 0) {
+        try {
+          const { rows } = await pool.query(
+            `SELECT reference, amount, currency, payment_method, client_email, client_name,
+                    invoice_number, status
+               FROM pesepay_intents
+              WHERE reference = ANY($1::text[]) OR provider_reference = ANY($1::text[])
+              LIMIT 1`,
+            [candidates]
+          );
+          const intent = rows?.[0];
+          if (intent?.client_email && intent.status !== 'failed') {
+            await pool.query(
+              `UPDATE pesepay_intents SET status = 'failed' WHERE reference = $1`,
+              [intent.reference]
+            );
+            await sendPaymentFailedEmail({
+              to: intent.client_email,
+              companyName: intent.client_name || 'Preyone client',
+              amount: intent.amount,
+              currency: intent.currency,
+              method: methodLabel(intent.payment_method),
+              reference: reference || intent.reference,
+              invoiceNumber: intent.invoice_number,
+              reason: `Payment ${transactionStatus || 'unsuccessful'}`,
+            }).catch(() => false);
+          }
+        } catch {
+          /* notification must never block the gateway acknowledgement */
+        }
+      }
       res.status(200).json({
         success: true,
         referenceNumber: reference ?? null,
         status: transactionStatus || 'UNKNOWN',
         applied: false,
-        message: 'Ignored non-success status',
+        message: 'Payment was unsuccessful',
       });
       return;
     }
@@ -1947,12 +1997,6 @@ paymentsRouter.post('/pesepay/webhook', async (req: Request, res: Response) => {
       const receiptAmount = Number(intent?.amount ?? payload.amount ?? 0);
       const recipient = String(intent?.client_email || company.email || '').trim();
       if (recipient && Number.isFinite(receiptAmount) && receiptAmount > 0) {
-        const methodLabels: Record<string, string> = {
-          ecocash: 'EcoCash (Pesepay)',
-          innbucks: 'InnBucks (Pesepay)',
-          omari: "O'mari USD (Pesepay)",
-          paygo: 'PayGo (Pesepay)',
-        };
         const currency = String(intent?.currency || company.currency || 'USD');
         const planName = planNameFor(company.plan_type) || 'Preyone plan';
         const invoiceNumber =
@@ -1970,7 +2014,7 @@ paymentsRouter.post('/pesepay/webhook', async (req: Request, res: Response) => {
           planName,
           amount: receiptAmount,
           currency,
-          paymentMethod: methodLabels[intent?.payment_method] || 'Pesepay',
+          paymentMethod: methodLabel(intent?.payment_method),
           reference: String(reference || intent?.reference || '-'),
           expiresAt: new Date(company.subscription_expires_at || Date.now()),
           devices,
@@ -1981,7 +2025,7 @@ paymentsRouter.post('/pesepay/webhook', async (req: Request, res: Response) => {
           planName,
           amount: receiptAmount,
           currency,
-          method: methodLabels[intent?.payment_method] || 'Pesepay',
+          method: methodLabel(intent?.payment_method),
           reference,
           paidAt: new Date(),
           expiresAt: company.subscription_expires_at,

@@ -1740,3 +1740,77 @@ select option,
 }
 .pin-change-tenant { display: block; margin: 0.9rem auto 0; }
 .pin-recover { display: block; margin: 0.45rem auto 0; text-align: center; }
+
+/* â”€â”€ Sign-in parity: exactly the Invoice emerald genre, final cascade â”€â”€ */
+.auth-shell {
+  --pos-primary: #10b981;
+  --pos-primary-strong: #047857;
+  --pos-primary-soft: rgba(16, 185, 129, 0.2);
+  --pos-accent: #00f0ff;
+  --pos-accent-soft: rgba(0, 240, 255, 0.14);
+  --pos-glow: rgba(16, 185, 129, 0.4);
+  --pos-text: #eafff7;
+  --pos-text-muted: #9bbdaf;
+  --pos-glass-edge: rgba(16, 185, 129, 0.22);
+  background:
+    radial-gradient(900px 560px at 8% -10%, rgba(16, 185, 129, 0.24), transparent 58%),
+    radial-gradient(760px 480px at 100% 0%, rgba(0, 240, 255, 0.12), transparent 55%),
+    #06120d;
+  color: var(--pos-text);
+}
+.auth-hero {
+  border-color: rgba(16, 185, 129, 0.22);
+  background:
+    radial-gradient(720px 420px at 8% 0%, rgba(16, 185, 129, 0.18), transparent 64%),
+    radial-gradient(560px 420px at 100% 100%, rgba(0, 240, 255, 0.1), transparent 62%),
+    linear-gradient(155deg, rgba(8, 32, 25, 0.94), rgba(4, 13, 20, 0.96));
+  box-shadow: 0 40px 100px rgba(0, 0, 0, 0.46), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+.auth-hero::after { background: radial-gradient(circle, rgba(16, 185, 129, 0.35), transparent 68%); }
+.auth-card {
+  background: linear-gradient(160deg, rgba(8, 30, 24, 0.96), rgba(4, 13, 20, 0.96));
+  border: 1px solid rgba(16, 185, 129, 0.24);
+  box-shadow:
+    0 40px 100px rgba(0, 0, 0, 0.55),
+    0 0 0 1px rgba(16, 185, 129, 0.08),
+    0 0 44px rgba(16, 185, 129, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+.auth-card h1, .auth-hero h2 { color: #f2fff9; }
+.auth-kicker, .auth-eyebrow, .auth-state-chip { color: #6ee7b7; }
+.auth-legal a, .auth-foot-hint { color: #93b8aa; }
+.auth-card .input { background: rgba(4, 16, 12, 0.86); border-color: rgba(16, 185, 129, 0.28); color: #eafff7; }
+.auth-card .input:focus { border-color: #34d399; box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.16); }
+.auth-card .btn.primary {
+  background: linear-gradient(120deg, #047857, #10b981 58%, #34d399);
+  color: #04120d;
+  box-shadow: 0 12px 28px rgba(16, 185, 129, 0.24);
+}
+.auth-card .btn.ghost { border-color: rgba(16, 185, 129, 0.28); color: #c7f9e8; }
+
+/* PIN till sign-in uses the same emerald, never the old violet/slate mix. */
+.pin-login-screen {
+  background:
+    radial-gradient(900px 560px at 12% -10%, rgba(16, 185, 129, 0.24), transparent 60%),
+    radial-gradient(760px 480px at 92% 0%, rgba(0, 240, 255, 0.12), transparent 55%),
+    linear-gradient(160deg, #04100c, #06160f 48%, #0a1f16);
+}
+.pin-status { color: #9bbdaf; border-color: rgba(16, 185, 129, 0.24); background: rgba(4, 16, 12, 0.62); }
+.pin-dot { background: rgba(148, 163, 184, 0.28); border-color: rgba(16, 185, 129, 0.3); }
+.pin-pad button { background: rgba(6, 26, 19, 0.78); border-color: rgba(16, 185, 129, 0.24); color: #eafff7; }
+.pin-brand { color: #f2fff9; }
+.pin-sub, .pin-hint { color: #9bbdaf; }
+.pin-setup-input { background: rgba(4, 16, 12, 0.82); border-color: rgba(16, 185, 129, 0.3); }
+
+/* One translucent checkout card across Invoice and POS. */
+.up-card {
+  background:
+    radial-gradient(680px 340px at 8% -10%, rgba(16, 185, 129, 0.3), transparent 66%),
+    radial-gradient(520px 300px at 100% 0%, rgba(0, 240, 255, 0.1), transparent 62%),
+    linear-gradient(160deg, rgba(8, 32, 25, 0.84), rgba(4, 13, 20, 0.76));
+  backdrop-filter: blur(22px) saturate(1.35);
+  -webkit-backdrop-filter: blur(22px) saturate(1.35);
+  border: 1px solid rgba(16, 185, 129, 0.42);
+  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.5), 0 0 42px rgba(16, 185, 129, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.09);
+  color: #eafff7;
+}

@@ -12,7 +12,7 @@ const base = {
   planName: 'PreUnlimited',
   amount: 30,
   currency: 'USD',
-  paymentMethod: 'EcoCash (Pesepay)',
+  paymentMethod: 'EcoCash',
   reference: 'PREYONE-SUB-ABC-123',
   expiresAt: new Date('2026-12-26T10:00:00Z'),
   devices: 9999,
@@ -29,11 +29,11 @@ describe('subscription invoice PDF', () => {
     expect(pdf).toContain('%%EOF');
     expect(pdf).toContain('/Type /Catalog');
     expect(pdf).toContain('/Type /Page ');
-    expect(objects(pdf)).toHaveLength(6);
+    expect(objects(pdf)).toHaveLength(7); // catalog, pages, page, stream, 2 fonts, logo image
 
     const xref = pdf.slice(pdf.indexOf('xref\n'));
     const offsets = [...xref.matchAll(/^(\d{10}) 00000 n $/gm)].map((m) => Number(m[1]));
-    expect(offsets).toHaveLength(6);
+    expect(offsets).toHaveLength(7);
     offsets.forEach((offset, index) => {
       expect(pdf.slice(offset, offset + 12)).toContain(`${index + 1} 0 obj`);
     });
@@ -46,10 +46,20 @@ describe('subscription invoice PDF', () => {
     expect(stream).toContain('PRY-001002');
     expect(stream).toContain('PreUnlimited');
     expect(stream).toContain('USD 30.00');
-    expect(stream).toContain('EcoCash \\(Pesepay\\)');
+    expect(stream).toContain('EcoCash');
     expect(stream).toContain('billing@example.com');
     expect(stream).toContain('TAX INVOICE');
     expect(stream).toContain('PAID');
+  });
+
+  it('embeds the Preyone voucher logo and a gradient header, with no solid green masthead', () => {
+    const pdf = buildSubscriptionInvoicePdf(base).toString('latin1');
+    expect(pdf).toContain('/Subtype /Image');
+    expect(pdf).toContain('/Filter /DCTDecode');
+    expect(pdf).toContain('/Im1 Do');
+    // Gradient strips: several distinct emerald/cyan fills across the header.
+    const fills = [...objects(pdf)[3].matchAll(/826 \d+\.?\d* 16 re f/g)];
+    expect(fills.length).toBeGreaterThanOrEqual(4);
   });
 
   it('escapes parentheses in customer names', () => {

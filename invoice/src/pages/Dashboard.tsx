@@ -222,7 +222,7 @@ function entryLabel(entry: string): string {
   const labels: Record<string, string> = {
     pos_sale: 'Sale',
     invoice_payment: 'Payment',
-    pesepay_collection: 'Pesepay',
+    pesepay_collection: 'Preyone Payment',
     credit_note: 'Credit',
     expense: 'Expense',
     stock_adjustment: 'Stock',

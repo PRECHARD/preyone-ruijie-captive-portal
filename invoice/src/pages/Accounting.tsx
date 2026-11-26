@@ -463,7 +463,7 @@ export default function AccountingPage() {
           <div className="fin-kicker">Financial intelligence</div>
           <h1>Accounting &amp; Financing</h1>
           <p>
-            Live revenue, P&amp;L, cash mix, ledger, Pesepay rails and VAT — a complete financial
+            Live revenue, P&amp;L, cash mix, ledger, Preyone Payment rails and VAT — a complete financial
             cockpit for Preyone Enterprises.
           </p>
           <div className="fin-range">
@@ -532,7 +532,7 @@ export default function AccountingPage() {
               <div className="stat-foot">cash / card / bank</div>
             </div>
             <div className="stat">
-              <div className="stat-label">Pesepay</div>
+              <div className="stat-label">Preyone Payment</div>
               <div className="stat-value">{money(overview?.pesepayTotal)}</div>
               <div className="stat-foot">mobile rails</div>
             </div>
@@ -614,7 +614,7 @@ export default function AccountingPage() {
               [
                 ['overview', 'Overview & P&L'],
                 ['ledger', 'General Ledger'],
-                ['pesepay', 'Pesepay Rail'],
+                ['pesepay', 'Preyone Payment Rail'],
                 ['tax', 'Tax & VAT'],
               ] as const
             ).map(([id, label]) => (
@@ -665,7 +665,7 @@ export default function AccountingPage() {
                   <strong className="mono">{money(overview?.cashTotal)}</strong>
                 </div>
                 <div>
-                  <span className="muted small">Pesepay Rails</span>
+                  <span className="muted small">Preyone Payment Rails</span>
                   <strong className="mono">{money(overview?.pesepayTotal)}</strong>
                 </div>
                 <div>
@@ -685,7 +685,7 @@ export default function AccountingPage() {
                     <option value="">All rails</option>
                     {['cash', 'card', 'bank', ...PESEPAY_RAILS, 'other'].map((r) => (
                       <option key={r} value={r}>
-                        {r}
+                        {r === 'pesepay' ? 'Preyone Payment' : r}
                       </option>
                     ))}
                   </select>
@@ -693,7 +693,7 @@ export default function AccountingPage() {
                     <option value="">All types</option>
                     {['pos_sale', 'invoice_payment', 'pesepay_collection', 'credit_note', 'expense'].map((t) => (
                       <option key={t} value={t}>
-                        {t}
+                        {t === 'pesepay_collection' ? 'Preyone Payment collection' : t}
                       </option>
                     ))}
                   </select>
@@ -756,7 +756,7 @@ export default function AccountingPage() {
               </div>
               <div className="card panel">
                 <div className="panel-head">
-                  <div className="panel-title">Pesepay rail reconciliation</div>
+                  <div className="panel-title">Preyone Payment rail reconciliation</div>
                 </div>
                 <div className="table-wrap">
                   <table>
@@ -773,7 +773,7 @@ export default function AccountingPage() {
                       {ledger.filter((r) => PESEPAY_RAILS.includes(r.rail)).length === 0 ? (
                         <tr>
                           <td colSpan={5} className="empty">
-                            No Pesepay rail entries in this period
+                            No Preyone Payment rail entries in this period
                           </td>
                         </tr>
                       ) : (
