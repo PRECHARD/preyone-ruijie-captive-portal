@@ -4,7 +4,6 @@ import type { Request } from 'express';
 import { PREYONE_COOKIE } from '../src/utils/ssoCookie';
 import {
   ADMIN_STARLINK_HASH,
-  ADMIN_STARLINK_URL,
   starlinkAdminRedirect,
 } from '../src/utils/starlinkAdminEntry';
 
@@ -31,6 +30,11 @@ function req(partial: {
   } as unknown as Request;
 }
 
+const ceoCookie = jwt.sign(
+  { id: '1', role: 'CEO', email: 'ceo@preyone.com' },
+  process.env.JWT_SECRET || 'preyone-jwt-secret-change-in-production',
+);
+
 describe('starlink admin entry', () => {
   it('sends the admin console /starlink/portal link back to the management dashboard', () => {
     expect(starlinkAdminRedirect(req({
@@ -47,14 +51,14 @@ describe('starlink admin entry', () => {
     }))).toBe(ADMIN_STARLINK_HASH);
   });
 
-  it('does not steal admin assets or ordinary console pages', () => {
+  it('does not steal admin assets, ordinary console pages or the privacy page', () => {
     expect(starlinkAdminRedirect(req({
       host: 'admin.preyone.com',
       path: '/',
     }))).toBeNull();
     expect(starlinkAdminRedirect(req({
       host: 'admin.preyone.com',
-      path: '/assets/index-BJOL1wKM.js',
+      path: '/assets/index-D1fgrGO5.js',
       accept: '*/*',
       dest: 'script',
     }))).toBeNull();
@@ -64,60 +68,25 @@ describe('starlink admin entry', () => {
     }))).toBeNull();
   });
 
-  it('sends a signed-in manager on the starlink host to the same dashboard', () => {
-    const cookie = jwt.sign(
-      { id: '1', role: 'CEO', email: 'ceo@preyone.com' },
-      process.env.JWT_SECRET || 'preyone-jwt-secret-change-in-production',
-    );
+  it('never redirects the starlink customer portal, even for a signed-in admin', () => {
     expect(starlinkAdminRedirect(req({
       host: 'starlink.preyone.com',
       path: '/',
-      cookie,
-    }))).toBe(ADMIN_STARLINK_URL);
-    expect(starlinkAdminRedirect(req({
-      host: 'starlink.preyone.com',
-      path: '/starlink/portal',
-      cookie,
-    }))).toBe(ADMIN_STARLINK_URL);
-  });
-
-  it('leaves customers, staff, reset links and the customer preview on the portal', () => {
-    const customer = jwt.sign(
-      { id: '9', role: 'portal' },
-      process.env.JWT_SECRET || 'preyone-jwt-secret-change-in-production',
-    );
-    const staff = jwt.sign(
-      { id: '2', role: 'Staff' },
-      process.env.JWT_SECRET || 'preyone-jwt-secret-change-in-production',
-    );
-    expect(starlinkAdminRedirect(req({
-      host: 'starlink.preyone.com',
-      path: '/starlink/portal',
-      cookie: customer,
+      cookie: ceoCookie,
     }))).toBeNull();
     expect(starlinkAdminRedirect(req({
       host: 'starlink.preyone.com',
-      path: '/',
-      cookie: staff,
+      path: '/starlink/portal',
+      cookie: ceoCookie,
     }))).toBeNull();
     expect(starlinkAdminRedirect(req({
       host: 'starlink.preyone.com',
-      path: '/',
-    }))).toBeNull();
-    const ceo = jwt.sign(
-      { id: '1', role: 'CEO' },
-      process.env.JWT_SECRET || 'preyone-jwt-secret-change-in-production',
-    );
-    expect(starlinkAdminRedirect(req({
-      host: 'starlink.preyone.com',
-      path: '/starlink/portal',
-      query: { mode: 'reset', token: 'abc' },
-      cookie: ceo,
+      path: '/starlink/auth',
     }))).toBeNull();
     expect(starlinkAdminRedirect(req({
-      host: 'admin.preyone.com',
+      host: 'preyone.com',
       path: '/starlink/portal',
-      query: { view: 'customer' },
+      cookie: ceoCookie,
     }))).toBeNull();
   });
 });
