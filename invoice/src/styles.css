@@ -202,13 +202,12 @@ a:focus-visible {
   place-items: center;
   overflow: hidden;
   border-radius: 12px;
-  border: 1px solid rgba(0, 240, 255, 0.2);
-  background:
-    radial-gradient(circle at 32% 22%, rgba(255, 255, 255, 0.11), transparent 46%),
-    linear-gradient(160deg, rgba(14, 22, 38, 0.96), rgba(6, 10, 20, 0.96));
-  box-shadow:
-    0 0 18px rgba(0, 240, 255, 0.1),
-    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  /* The mark already ships with a transparent background. Keeping a dark tile
+     here made it look like a black plate/shadow behind the logo, so the rail
+     now shows the mark exactly like the POS top bar: transparent, no plate. */
+  border: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .brand-logo {
@@ -665,13 +664,13 @@ a:focus-visible {
   font-weight: 800;
   letter-spacing: 0.04em;
   color: var(--role);
-  background: color-mix(in srgb, var(--role) 13%, rgba(8, 14, 26, 0.75));
-  border: 1px solid color-mix(in srgb, var(--role) 46%, transparent);
-  box-shadow:
-    0 0 0 3px color-mix(in srgb, var(--role) 11%, transparent),
-    0 0 18px color-mix(in srgb, var(--role) 32%, transparent),
-    inset 0 1px 0 rgba(255, 255, 255, 0.14);
-  transition: transform 0.25s var(--pos-ease-out), box-shadow 0.25s var(--pos-ease-out);
+  /* Same treatment as the brand mark: a transparent surface with only a thin
+     role-coloured ring. The old dark fill + black glow read as a shadow box
+     around the avatar. */
+  background: color-mix(in srgb, var(--role) 9%, transparent);
+  border: 1px solid color-mix(in srgb, var(--role) 38%, transparent);
+  box-shadow: none;
+  transition: transform 0.25s var(--pos-ease-out), border-color 0.25s var(--pos-ease-out);
 }
 .profile-avatar img {
   width: 100%;
@@ -683,10 +682,8 @@ a:focus-visible {
 .profile-avatar:disabled { cursor: progress; opacity: 0.7; }
 .profile-card:hover .profile-avatar {
   transform: translateY(-1px);
-  box-shadow:
-    0 0 0 3px color-mix(in srgb, var(--role) 18%, transparent),
-    0 0 26px color-mix(in srgb, var(--role) 46%, transparent),
-    inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  border-color: color-mix(in srgb, var(--role) 62%, transparent);
+  box-shadow: none;
 }
 
 /* Signed-in presence dot: the card only renders for a live session. */
@@ -1671,17 +1668,15 @@ tbody tr:last-child td { border-bottom: none; }
   flex-wrap: wrap;
 }
 
-/* The brand mark is the real gradient wordmark, so it needs a light plate to
-   stay legible on the dark hero instead of a recoloured placeholder. */
+/* The mark is the real artwork with a transparent background, so it sits
+   directly on the hero — no white sticker plate and no black drop shadow. */
 .auth-logo {
   display: inline-flex;
   align-items: center;
-  padding: 9px 16px;
+  padding: 0;
   border-radius: 14px;
-  background: #ffffff;
-  box-shadow:
-    0 10px 30px rgba(0, 0, 0, 0.35),
-    0 0 0 1px rgba(255, 255, 255, 0.16);
+  background: transparent;
+  box-shadow: none;
 }
 .auth-logo img {
   display: block;

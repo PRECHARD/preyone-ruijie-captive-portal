@@ -98,10 +98,14 @@
   .catalogue { flex: 0 0 auto; overflow: visible; }
   .cart-pane { flex: 0 0 auto; }
   .product-grid { grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); gap: 0.5rem; }
-  .product-card { padding: 0.6rem 0.65rem; }
+  .product-card { border-radius: 14px; }
+  .p-media { height: 84px; }
+  .p-glyph { font-size: 2.3rem; }
+  .p-body { padding: 0.5rem 0.55rem 0.6rem; }
   .product-card .p-name { font-size: 0.82rem; }
 
-  .cart-line { gap: 0.35rem; }
+  .cart-line { gap: 0.35rem; grid-template-columns: 34px minmax(0, 1fr) auto auto auto; }
+  .cl-thumb { width: 34px; height: 34px; font-size: 1rem; }
   .cart-line .cl-name { font-size: 0.8rem; }
   .cl-total { min-width: 0; font-size: 0.82rem; }
   .qty-btn { padding: 0.2rem 0.45rem; }
@@ -156,6 +160,8 @@
   .topbar .chip,
   .topbar .ghost-btn { flex: 0 1 auto; }
   .product-grid { grid-template-columns: 1fr 1fr; }
+  .p-media { height: 74px; }
+  .p-glyph { font-size: 2rem; }
   .product-card .p-desc { display: none; }
 
   .cart-lines { max-height: 40vh; }

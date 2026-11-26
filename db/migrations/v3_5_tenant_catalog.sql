@@ -45,21 +45,24 @@ UPDATE pos_customers c
 -- Products used by client tenants are cloned. The house keeps the original
 -- row; each client gets its own copy and its document lines are re-pointed so
 -- stock, COGS and catalogue edits stay inside that tenant.
+--
+-- Only genuinely cross-tenant references are collected, so a second run of
+-- this file finds nothing to move and cannot re-point lines at a product that
+-- was never inserted.
 CREATE TEMP TABLE qa_product_clone_map ON COMMIT DROP AS
 SELECT DISTINCT d.company_id AS company_id, i.product_id AS old_id
   FROM pos_document_items i
   JOIN pos_documents d ON d.id = i.document_id
+  JOIN pos_products p ON p.id = i.product_id
  WHERE i.product_id IS NOT NULL
    AND d.company_id IS NOT NULL
-   AND d.company_id <> (SELECT id FROM companies ORDER BY created_at ASC LIMIT 1);
+   AND p.company_id IS DISTINCT FROM d.company_id;
 
-ALTER TABLE qa_product_clone_map ADD COLUMN new_id UUID;
-UPDATE qa_product_clone_map SET new_id = gen_random_uuid();
-
+-- Create a tenant-owned copy only where the tenant does not already have one.
 INSERT INTO pos_products
   (id, company_id, name, description, sku, barcode, category,
    price, cost_price, stock_qty, track_stock, low_stock_threshold, active)
-SELECT m.new_id, m.company_id, p.name, p.description, p.sku, p.barcode, p.category,
+SELECT gen_random_uuid(), m.company_id, p.name, p.description, p.sku, p.barcode, p.category,
        p.price, p.cost_price, p.stock_qty, p.track_stock, p.low_stock_threshold, p.active
   FROM qa_product_clone_map m
   JOIN pos_products p ON p.id = m.old_id
@@ -70,12 +73,19 @@ SELECT m.new_id, m.company_id, p.name, p.description, p.sku, p.barcode, p.catego
       AND COALESCE(existing.sku, '') = COALESCE(p.sku, '')
  );
 
+-- Point historical lines at the tenant's own copy, whether it was just
+-- inserted above or already existed from an earlier run.
 UPDATE pos_document_items i
-   SET product_id = m.new_id
-  FROM pos_documents d, qa_product_clone_map m
+   SET product_id = target.id
+  FROM pos_documents d, qa_product_clone_map m, pos_products p, pos_products target
  WHERE i.document_id = d.id
    AND d.company_id = m.company_id
-   AND i.product_id = m.old_id;
+   AND i.product_id = m.old_id
+   AND p.id = m.old_id
+   AND target.company_id = m.company_id
+   AND target.name = p.name
+   AND COALESCE(target.sku, '') = COALESCE(p.sku, '')
+   AND target.id <> m.old_id;
 
 -- Every row must now have an owner.
 ALTER TABLE pos_products  ALTER COLUMN company_id SET NOT NULL;

@@ -18,6 +18,8 @@ export interface Product {
   track_stock: boolean;
   low_stock_threshold: number;
   active: boolean;
+  /** Optional real photo; when absent the till draws an automatic product icon. */
+  image_url?: string | null;
 }
 
 export interface CustomerRow {
@@ -347,7 +349,13 @@ export const api = {
         stockQty: Number(p.stock_qty) || 0,
         trackStock: p.track_stock !== false,
         lowStockThreshold: Number(p.low_stock_threshold) || 0,
+        imageUrl: p.image_url || undefined,
       }),
+    }),
+  uploadProductImage: (dataUrl: string) =>
+    req<{ imageUrl: string; filename: string; bytes: number }>('/products/image', {
+      method: 'POST',
+      body: JSON.stringify({ dataUrl }),
     }),
   updateProduct: (id: string, patch: Record<string, unknown>) =>
     req<Product>(`/products/${id}`, { method: 'PUT', body: JSON.stringify(patch) }),

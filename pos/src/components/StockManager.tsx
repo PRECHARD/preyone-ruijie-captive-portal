@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api, type Product } from '../api';
+import { productVisual } from '../productVisuals';
 import { ConfirmDialog, type ConfirmOptions } from './ConfirmDialog';
 
 const money = (n: number): string => `$${(Number(n) || 0).toFixed(2)}`;
@@ -16,12 +17,50 @@ interface Draft {
   stockQty: string;
   trackStock: boolean;
   lowStockThreshold: string;
+  imageUrl: string;
 }
 
 const emptyDraft: Draft = {
   name: '', description: '', sku: '', barcode: '', category: '',
   price: '', costPrice: '', stockQty: '0', trackStock: true, lowStockThreshold: '3',
+  imageUrl: '',
 };
+
+/** Downscale a photo in the browser before it ever reaches the server. */
+function readProductPhoto(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    if (!/^image\/(png|jpe?g|webp)$/i.test(file.type)) {
+      reject(new Error('Use a PNG, JPEG or WebP photo.'));
+      return;
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      reject(new Error('Keep the photo under 8 MB.'));
+      return;
+    }
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Could not read that photo.'));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error('That file is not a valid image.'));
+      img.onload = () => {
+        const max = 640;
+        const scale = Math.min(1, max / Math.max(img.width, img.height));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(img.width * scale));
+        canvas.height = Math.max(1, Math.round(img.height * scale));
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          reject(new Error('Could not process that photo.'));
+          return;
+        }
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL('image/webp', 0.86));
+      };
+      img.src = String(reader.result || '');
+    };
+    reader.readAsDataURL(file);
+  });
+}
 
 export default function StockManager({ onChanged }: { onChanged?: () => void }) {
   const [products, setProducts] = useState<Product[]>([]);
@@ -31,6 +70,7 @@ export default function StockManager({ onChanged }: { onChanged?: () => void }) 
   const [adjusting, setAdjusting] = useState<{ p: Product; delta: string; reason: string } | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [imageBusy, setImageBusy] = useState(false);
   const [confirm, setConfirm] = useState<ConfirmOptions | null>(null);
 
   const load = () => {
@@ -62,7 +102,22 @@ export default function StockManager({ onChanged }: { onChanged?: () => void }) 
       stockQty: String(p.stock_qty),
       trackStock: p.track_stock,
       lowStockThreshold: String(p.low_stock_threshold),
+      imageUrl: p.image_url || '',
     });
+
+  const uploadPhoto = async (file: File) => {
+    setError('');
+    setImageBusy(true);
+    try {
+      const dataUrl = await readProductPhoto(file);
+      const uploaded = await api.uploadProductImage(dataUrl);
+      setDraft((d) => (d ? { ...d, imageUrl: uploaded.imageUrl } : d));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not upload that photo');
+    } finally {
+      setImageBusy(false);
+    }
+  };
 
   const saveDraft = async () => {
     if (!draft || !draft.name.trim()) {
@@ -84,6 +139,7 @@ export default function StockManager({ onChanged }: { onChanged?: () => void }) 
           stockQty: Number(draft.stockQty) || 0,
           trackStock: draft.trackStock,
           lowStockThreshold: Number(draft.lowStockThreshold) || 0,
+          imageUrl: draft.imageUrl || null,
         });
       } else {
         await api.createProduct({
@@ -97,6 +153,7 @@ export default function StockManager({ onChanged }: { onChanged?: () => void }) 
           stock_qty: Number(draft.stockQty) || 0,
           track_stock: draft.trackStock,
           low_stock_threshold: Number(draft.lowStockThreshold) || 0,
+          image_url: draft.imageUrl || null,
         } as Product & { name: string });
       }
       setDraft(null);
@@ -164,6 +221,8 @@ export default function StockManager({ onChanged }: { onChanged?: () => void }) 
       />
     </label>
   );
+
+  const draftVisual = draft ? productVisual(draft) : null;
 
   return (
     <div className="catalogue">
@@ -244,6 +303,51 @@ export default function StockManager({ onChanged }: { onChanged?: () => void }) 
                   placeholder={'One detail per line — e.g.\n5 m heavy duty cable\n16 A rated\n2-year warranty'}
                 />
               </label>
+
+              <div className="product-photo-field">
+                <div className={`product-photo-preview p-tone-${draftVisual?.tone || 'slate'}`}>
+                  {draft.imageUrl ? (
+                    <img src={draft.imageUrl} alt="" />
+                  ) : (
+                    <span className="p-glyph" aria-hidden>
+                      {draftVisual?.emoji}
+                    </span>
+                  )}
+                </div>
+                <div className="product-photo-copy">
+                  <strong>Product photo</strong>
+                  <p>
+                    Add a real photo for the till. Leave it blank and Preyone draws the
+                    matching icon ({draftVisual?.label || 'Product'}) from the product name.
+                  </p>
+                  <div className="product-photo-actions">
+                    <label className="secondary-btn" style={{ cursor: imageBusy ? 'progress' : 'pointer' }}>
+                      {imageBusy ? 'Uploading…' : draft.imageUrl ? 'Replace photo' : 'Upload photo'}
+                      <input
+                        type="file"
+                        accept="image/png,image/jpeg,image/webp"
+                        hidden
+                        disabled={imageBusy}
+                        onChange={(event) => {
+                          const file = event.target.files?.[0];
+                          if (file) void uploadPhoto(file);
+                          event.target.value = '';
+                        }}
+                      />
+                    </label>
+                    {draft.imageUrl && (
+                      <button
+                        type="button"
+                        className="secondary-btn"
+                        onClick={() => setDraft({ ...draft, imageUrl: '' })}
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+
               {field('SKU', 'sku')}
               {field('Barcode', 'barcode')}
               {field('Category', 'category', { wide: true })}

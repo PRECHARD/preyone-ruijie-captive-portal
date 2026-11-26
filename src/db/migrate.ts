@@ -1128,8 +1128,12 @@ const SQL = `
   -- stock manager. Added after the table so older databases upgrade in place.
   ALTER TABLE pos_products ADD COLUMN IF NOT EXISTS description TEXT;
 
-  CREATE UNIQUE INDEX IF NOT EXISTS idx_pos_products_sku     ON pos_products (sku)     WHERE sku IS NOT NULL;
-  CREATE UNIQUE INDEX IF NOT EXISTS idx_pos_products_barcode ON pos_products (barcode) WHERE barcode IS NOT NULL;
+  -- SKU and barcode uniqueness is per tenant, created by
+  -- v3_5_tenant_catalog.sql as (company_id, sku) / (company_id, barcode).
+  -- The original global indexes cannot survive two shops sharing a
+  -- manufacturer SKU, so drop any leftovers from older databases here.
+  DROP INDEX IF EXISTS idx_pos_products_sku;
+  DROP INDEX IF EXISTS idx_pos_products_barcode;
   CREATE INDEX IF NOT EXISTS idx_pos_products_name   ON pos_products (lower(name));
   CREATE INDEX IF NOT EXISTS idx_pos_products_active ON pos_products (active);
 
@@ -1991,6 +1995,11 @@ const SQL = `
     if (fs.existsSync(v36Path)) {
       await client.query(fs.readFileSync(v36Path, 'utf8'));
       console.log('Applied db/migrations/v3_6_shift_close_receipts.sql (shift close proof).');
+    }
+    const v37Path = path.resolve(__dirname, '../../db/migrations/v3_7_product_images.sql');
+    if (fs.existsSync(v37Path)) {
+      await client.query(fs.readFileSync(v37Path, 'utf8'));
+      console.log('Applied db/migrations/v3_7_product_images.sql (product photos).');
     }
 
     // Enterprise accounting ledger + stock_applied idempotency flag.

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api, type Product, type StaffUser, type CheckoutResult, type CompanyProfile } from '../api';
+import { productVisual } from '../productVisuals';
 import CheckoutModal from './CheckoutModal';
 import ReceiptModal from './ReceiptModal';
 
@@ -45,6 +46,9 @@ export default function Terminal({ user, notify, onApiError, onShiftChanged, shi
     details: string[];
     price: number;
     qty: number;
+    emoji: string;
+    tone: string;
+    imageUrl: string | null;
   }
 
   useEffect(() => {
@@ -93,6 +97,7 @@ export default function Terminal({ user, notify, onApiError, onShiftChanged, shi
         copy[i] = { ...copy[i], qty: copy[i].qty + 1 };
         return copy;
       }
+      const visual = productVisual(p);
       return [
         ...c,
         {
@@ -101,6 +106,9 @@ export default function Terminal({ user, notify, onApiError, onShiftChanged, shi
           details: splitDetails(p.description),
           price: Number(p.price),
           qty: 1,
+          emoji: visual.emoji,
+          tone: visual.tone,
+          imageUrl: p.image_url || null,
         },
       ];
     });
@@ -203,14 +211,43 @@ export default function Terminal({ user, notify, onApiError, onShiftChanged, shi
           <div className="product-grid">
             {filtered.map((p) => {
               const low = p.track_stock && Number(p.stock_qty) <= Number(p.low_stock_threshold);
+              const visual = productVisual(p);
               return (
-                <button className="product-card" key={p.id} onClick={() => addToCart(p)}>
-                  <span className="p-name">{p.name}</span>
-                  {p.description && <span className="p-desc">{p.description}</span>}
-                  <span className="p-price">{money(Number(p.price))}</span>
-                  {zigRate !== null && <span className="p-zig">≈ {zig(Number(p.price), zigRate)}</span>}
-                  <span className={`p-stock ${low ? 'low' : ''}`}>
-                    {p.track_stock ? `${Number(p.stock_qty)} in stock` : 'service'}
+                <button
+                  className={`product-card p-tone-${visual.tone}`}
+                  key={p.id}
+                  onClick={() => addToCart(p)}
+                  title={p.description || p.name}
+                >
+                  <span className="p-media">
+                    {p.image_url ? (
+                      <img src={p.image_url} alt="" loading="lazy" />
+                    ) : (
+                      <span className="p-glyph" aria-hidden>
+                        {visual.emoji}
+                      </span>
+                    )}
+                    {low ? (
+                      <span className="p-flag p-flag--low">Low</span>
+                    ) : !p.track_stock ? (
+                      <span className="p-flag p-flag--service">Service</span>
+                    ) : null}
+                  </span>
+                  <span className="p-body">
+                    <span className="p-name">{p.name}</span>
+                    {p.description && <span className="p-desc">{p.description}</span>}
+                    <span className="p-meta">
+                      <span className="p-cat">{p.category || visual.label}</span>
+                      <span className={`p-stock ${low ? 'low' : ''}`}>
+                        {p.track_stock ? `${Number(p.stock_qty)} in stock` : 'service'}
+                      </span>
+                    </span>
+                    <span className="p-price-row">
+                      <span className="p-price">{money(Number(p.price))}</span>
+                      {zigRate !== null && (
+                        <span className="p-zig">≈ {zig(Number(p.price), zigRate)}</span>
+                      )}
+                    </span>
                   </span>
                 </button>
               );
@@ -231,6 +268,9 @@ export default function Terminal({ user, notify, onApiError, onShiftChanged, shi
           ) : (
             cart.map((l, idx) => (
               <div className="cart-line" key={`${l.productId}-${idx}`}>
+                <span className={`cl-thumb p-tone-${l.tone}`} aria-hidden>
+                  {l.imageUrl ? <img src={l.imageUrl} alt="" /> : <span>{l.emoji}</span>}
+                </span>
                 <div>
                   <div className="cl-name">{l.description}</div>
                   {l.details.length > 0 && (

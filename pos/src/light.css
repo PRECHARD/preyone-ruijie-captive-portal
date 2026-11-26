@@ -101,6 +101,36 @@
 [data-preyone-theme='light'] .tot-row.grand span:last-child {
   color: #047857;
 }
+[data-preyone-theme='light'] .p-media {
+  background:
+    radial-gradient(90% 120% at 22% 0%, var(--p-tone-soft), transparent 72%),
+    linear-gradient(160deg, #f8fdfa, #edf7f1);
+  border-bottom-color: color-mix(in srgb, var(--p-tone) 24%, #d3e5dc);
+}
+[data-preyone-theme='light'] .p-glyph {
+  filter: drop-shadow(0 4px 8px rgba(16, 36, 28, 0.12));
+}
+[data-preyone-theme='light'] .p-desc,
+[data-preyone-theme='light'] .p-stock {
+  color: #536b60;
+}
+[data-preyone-theme='light'] .p-stock.low,
+[data-preyone-theme='light'] .p-zig {
+  color: #b45309;
+}
+[data-preyone-theme='light'] .p-cat {
+  color: color-mix(in srgb, var(--p-tone) 58%, #10241c);
+  background: color-mix(in srgb, var(--p-tone) 14%, #ffffff);
+}
+[data-preyone-theme='light'] .cl-thumb {
+  background: color-mix(in srgb, var(--p-tone) 12%, #ffffff);
+}
+[data-preyone-theme='light'] .product-photo-field {
+  background: #f8fdfa;
+  border-color: #cfe5da;
+}
+[data-preyone-theme='light'] .product-photo-copy strong { color: #10241c; }
+[data-preyone-theme='light'] .product-photo-copy p { color: #536b60; }
 
 [data-preyone-theme='light'] table th,
 [data-preyone-theme='light'] .stock-table th {

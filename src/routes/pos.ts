@@ -2,6 +2,8 @@ import { Router, Request, Response, NextFunction } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
 import rateLimit from 'express-rate-limit';
 import { pool } from '../db/pool';
 import { requireAdminAuth, requireRole } from '../middleware/adminAuth';
@@ -1778,6 +1780,50 @@ router.get('/products', async (req, res) => {
   res.json(rows);
 });
 
+/**
+ * Product photo upload.
+ *
+ * The till sends a browser-resized data URL, so no multipart parser is needed.
+ * Files are written under public/images and the returned same-origin path is
+ * saved on the product. Each tenant's images are independent; the filename
+ * carries the company prefix so support can trace an image back to its shop.
+ */
+router.post('/products/image', async (req, res) => {
+  const dataUrl = typeof req.body?.dataUrl === 'string' ? req.body.dataUrl : '';
+  const match = /^data:image\/(png|jpe?g|webp);base64,([A-Za-z0-9+/=\s]+)$/i.exec(dataUrl);
+  if (!match) {
+    res.status(422).json({ error: 'Product photo must be a PNG, JPEG or WebP data URL' });
+    return;
+  }
+  const ext = match[1].toLowerCase() === 'jpeg' ? 'jpg' : match[1].toLowerCase();
+  const bytes = Buffer.from(match[2].replace(/\s/g, ''), 'base64');
+  if (bytes.length === 0) {
+    res.status(422).json({ error: 'Product photo is empty' });
+    return;
+  }
+  if (bytes.length > 2 * 1024 * 1024) {
+    res.status(413).json({ error: 'Product photo too large — keep it under 2 MB' });
+    return;
+  }
+  const magicOk =
+    (ext === 'png' && bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) ||
+    (ext === 'jpg' && bytes[0] === 0xff && bytes[1] === 0xd8) ||
+    (ext === 'webp' && bytes.subarray(0, 4).toString('ascii') === 'RIFF' && bytes.subarray(8, 12).toString('ascii') === 'WEBP');
+  if (!magicOk) {
+    res.status(422).json({ error: 'Product photo content does not match its declared image type' });
+    return;
+  }
+
+  const companyId = tenantId(req);
+  const filename = `product-${companyId.slice(0, 8)}-${Date.now()}-${crypto
+    .randomBytes(4)
+    .toString('hex')}.${ext}`;
+  const imagesDir = path.join(__dirname, '..', '..', 'public', 'images');
+  fs.mkdirSync(imagesDir, { recursive: true });
+  fs.writeFileSync(path.join(imagesDir, filename), bytes);
+  res.json({ imageUrl: `/images/${filename}`, filename, bytes: bytes.length });
+});
+
 router.post('/products', async (req, res) => {
   const b = req.body || {};
   const name = str(b.name);
@@ -1786,8 +1832,8 @@ router.post('/products', async (req, res) => {
     return;
   }
   const { rows } = await pool.query(
-    `INSERT INTO pos_products (company_id, name, description, sku, barcode, category, price, cost_price, stock_qty, track_stock, low_stock_threshold)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+    `INSERT INTO pos_products (company_id, name, description, sku, barcode, category, price, cost_price, stock_qty, track_stock, low_stock_threshold, image_url)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
      RETURNING *`,
     [
       tenantId(req),
@@ -1801,6 +1847,7 @@ router.post('/products', async (req, res) => {
       round2(num(b.stockQty)),
       b.trackStock !== false,
       round2(num(b.lowStockThreshold)),
+      str(b.imageUrl) || null,
     ]
   );
   await pool
@@ -1829,6 +1876,7 @@ router.put('/products/:id', async (req, res) => {
     trackStock: 'track_stock',
     lowStockThreshold: 'low_stock_threshold',
     active: 'active',
+    imageUrl: 'image_url',
   };
   for (const [key, col] of Object.entries(map)) {
     if (key in b) {

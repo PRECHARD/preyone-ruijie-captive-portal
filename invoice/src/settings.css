@@ -404,9 +404,9 @@
   /* Proof it on paper, not on the dark rail: uploaded marks are usually dark
      artwork meant for a white invoice, so a dark plate hid them completely. */
   background: #fff;
-  box-shadow:
-    0 10px 26px rgba(0, 0, 0, 0.28),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.7);
+  /* Paper proof stays white for dark artwork, but the black drop shadow made
+     the logo look like it was sitting on a floating dark plate. */
+  box-shadow: none;
 }
 .settings-logo-frame img {
   width: 100%;
