@@ -24,6 +24,14 @@ const METHOD_LABELS: Record<string, string> = {
 
 const money = (n: number): string => `$${(Number(n) || 0).toFixed(2)}`;
 
+// Same real rail logos as the shared Invoice/POS checkout card.
+const METHOD_LOGOS: Record<string, string> = {
+  ecocash: '/images/pay/ecocash.png',
+  innbucks: '/images/pay/innbucks.png',
+  omari: '/images/pay/omari.webp',
+  paygo: '/images/pay/ecocash.png',
+};
+
 export default function CheckoutModal({
   total,
   cashierName,
@@ -99,7 +107,7 @@ export default function CheckoutModal({
 
   return (
     <div className="modal-backdrop" onClick={onCancel}>
-      <div className="modal-card checkout-glass" onClick={(e) => e.stopPropagation()}>
+      <div className="modal-card up-card checkout-glass" onClick={(e) => e.stopPropagation()}>
         <h3 className="modal-title">Take payment</h3>
         <div style={{ fontSize: '0.72rem', color: 'var(--muted)', marginBottom: '0.6rem' }}>
           Cashier: {cashierName}
@@ -138,6 +146,7 @@ export default function CheckoutModal({
             <div className="method-tabs">
               {methods.map((m) => (
                 <button key={m} className={method === m ? 'on' : ''} onClick={() => setMethod(m)}>
+                  {METHOD_LOGOS[m] && <img className="method-logo" src={METHOD_LOGOS[m]} alt="" />}
                   {METHOD_LABELS[m] || m}
                 </button>
               ))}

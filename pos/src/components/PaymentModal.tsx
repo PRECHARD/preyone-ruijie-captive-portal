@@ -54,7 +54,7 @@ export default function PaymentModal({
 
   return (
     <div className="modal-backdrop" onClick={onCancel}>
-      <div className="modal-card checkout-glass" onClick={(e) => e.stopPropagation()}>
+      <div className="modal-card up-card checkout-glass" onClick={(e) => e.stopPropagation()}>
         <h3 className="modal-title">Record payment</h3>
         <div style={{ fontSize: '0.78rem', color: 'var(--muted)', marginBottom: '0.6rem' }}>
           {doc.doc_type === 'quotation' ? 'Quotation' : 'Invoice'} {doc.doc_number}

@@ -134,6 +134,16 @@ function money(value: number, currency: string): string {
   }).format(Number(value) || 0)}`;
 }
 
+function railLogo(rail: PesepayRail): string {
+  const logos: Record<PesepayRail, string> = {
+    ecocash: '/images/pay/ecocash.png',
+    innbucks: '/images/pay/innbucks.png',
+    omari: '/images/pay/omari.webp',
+    paygo: '/images/pay/ecocash.png',
+  };
+  return logos[rail];
+}
+
 function dateLabel(value?: string | null): string {
   if (!value) return new Date().toLocaleDateString();
   return new Date(value).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
@@ -325,8 +335,8 @@ export function OnlinePaymentModal({
   };
 
   return (
-    <div className="overlay pay-modal" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="sheet pay-sheet checkout-glass" role="dialog" aria-modal="true" aria-label="Take online payment">
+    <div className="overlay pay-modal up-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="sheet pay-sheet modal-card up-card checkout-glass" role="dialog" aria-modal="true" aria-label="Take online payment">
         <div className="sheet-head">
           <div>
             <h2 className="sheet-title">Take payment</h2>
@@ -361,7 +371,7 @@ export function OnlinePaymentModal({
                   className={`rail-tile ${rail === o.rail ? 'selected' : ''}`}
                   onClick={() => setRail(o.rail)}
                 >
-                  <span className="rail-mark">{o.mark}</span>
+                  <img className="rail-mark rail-logo" src={railLogo(o.rail)} alt={o.label} />
                   <span className="rail-copy">
                     <strong>{o.label}</strong>
                     <small>{o.blurb}</small>

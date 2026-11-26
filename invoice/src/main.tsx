@@ -4,6 +4,8 @@ import App from './App';
 import './styles.css';
 import './responsive.css';
 import './light.css';
+// Loaded last so the shared checkout glass wins the cascade.
+import './upgradeCheckout.css';
 import { initThemeMode } from './themeMode';
 
 initThemeMode();

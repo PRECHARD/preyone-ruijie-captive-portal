@@ -2,7 +2,7 @@
    so the same modal looks right in the dark glass and daylight themes. */
 
 .up-backdrop { z-index: 1200; }
-.up-card, .checkout-glass {
+.up-card, .checkout-glass, .modal-card.up-card, .modal-card.checkout-glass, .sheet.pay-sheet.checkout-glass {
   width: min(720px, calc(100vw - 28px));
   max-height: 92vh;
   overflow-y: auto;
@@ -178,3 +178,7 @@
 @media (max-width: 720px) {
   .up-fields, .up-rails { grid-template-columns: 1fr; }
 }
+
+/* Rail logos on the till checkout buttons, same artwork as Invoice. */
+.method-tabs button { display:inline-flex; align-items:center; justify-content:center; gap:6px; }
+.method-logo { height:16px; max-width:52px; width:auto; object-fit:contain; }
