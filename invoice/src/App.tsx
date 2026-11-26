@@ -185,7 +185,7 @@ function AuthFrame({
       <aside className="auth-hero">
         <div className="auth-hero-brand">
           <span className="auth-logo">
-            <img src="/brand/Preyone.svg" alt="Preyone" />
+            <img src="/images/preyonenoneglow-logo-zoom-800.png" alt="Preyone" />
           </span>
           <span className="auth-hero-division">Invoicing &amp; finance</span>
         </div>

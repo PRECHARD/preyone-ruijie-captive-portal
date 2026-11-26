@@ -1668,20 +1668,36 @@ tbody tr:last-child td { border-bottom: none; }
   flex-wrap: wrap;
 }
 
-/* The mark is the real artwork with a transparent background, so it sits
-   directly on the hero — no white sticker plate and no black drop shadow. */
+/* Sign-in keeps the original button-like logo plate: the full-colour
+   "preyonenoneglow" wordmark needs a light surface to read against the emerald
+   hero. The plate is deliberately styled as a soft raised button. */
 .auth-logo {
   display: inline-flex;
   align-items: center;
-  padding: 0;
-  border-radius: 14px;
-  background: transparent;
-  box-shadow: none;
+  justify-content: center;
+  padding: 12px 20px;
+  border-radius: 16px;
+  background: linear-gradient(180deg, #ffffff, #f3f6fb);
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  box-shadow:
+    0 10px 30px rgba(0, 0, 0, 0.35),
+    0 0 0 1px rgba(255, 255, 255, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.95);
+  transition: transform 0.2s var(--pos-ease-out), box-shadow 0.2s var(--pos-ease-out);
+}
+.auth-logo:hover {
+  transform: translateY(-1px);
+  box-shadow:
+    0 14px 38px rgba(0, 0, 0, 0.4),
+    0 0 0 1px rgba(255, 255, 255, 0.24),
+    inset 0 1px 0 rgba(255, 255, 255, 1);
 }
 .auth-logo img {
   display: block;
-  height: 22px;
+  height: 52px;
   width: auto;
+  max-width: 100%;
+  object-fit: contain;
 }
 .auth-hero-division {
   display: block;
