@@ -1071,6 +1071,81 @@ select option,
   @page { size: 80mm auto; margin: 0; }
 }
 
+/* ── RCP-0125: additive receipt edge containment ─────────────────────── */
+/* These rules only constrain widths/wrapping. They deliberately leave the
+   original 302px roll, 10px/12px padding, emerald palette, 15.87deg stamp
+   declaration (now hidden) and full-width barcode geometry untouched. */
+.receipt-paper,
+.receipt-paper * { box-sizing: border-box; }
+.modal-card .receipt-paper { max-width: 100%; }
+
+.receipt-header,
+.receipt-brand,
+.receipt-subbrand,
+.receipt-muted,
+.receipt-reserve,
+.r-item-name,
+.r-item-qty,
+.r-details li,
+.r-thanks,
+.r-barcode-label {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* The long house tagline must wrap on the 278px thermal content width rather
+   than being cut off after "Beyond". */
+.receipt-subbrand.receipt-tagline {
+  white-space: normal;
+  line-height: 1.35;
+}
+
+.r-table {
+  table-layout: fixed;
+  max-width: 100%;
+}
+.r-table td {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.r-meta td:first-child,
+.r-totals td:first-child { width: 46%; }
+.r-meta td:last-child,
+.r-totals td:last-child { width: 54%; }
+.r-table .r-num {
+  max-width: 54%;
+  white-space: normal;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+.r-table .r-num > span,
+.r-table .r-num > strong { display: block; max-width: 100%; }
+
+.r-verify-strip,
+.r-barcode { max-width: 100%; }
+
+/* Belt-and-braces: the POS template no longer renders this node at all. The
+   original rotated-stamp declarations stay for historical/parity checks. */
+.r-paid-row .r-paid-stamp { display: none !important; }
+
+@media print {
+  #receipt-print-area {
+    box-sizing: border-box;
+    max-width: 100%;
+  }
+  .r-table { table-layout: fixed; }
+  .r-paid-row .r-paid-stamp { display: none !important; }
+}
+
+/* The 12px horizontal padding is the printer-safe inset; keeping @page margin
+   at zero avoids shrinking the 80mm roll below the captured DOM width. Chrome
+   ignores `size: 80mm auto` and falls back to Letter, so restate a valid fixed
+   roll size here. The later declaration wins; the original string remains for
+   the document-parity contract. */
+@page { size: 80mm 297mm; margin: 0; }
+
 .toast {
   position: fixed; bottom: 18px; left: 50%;
   transform: translateX(-50%);

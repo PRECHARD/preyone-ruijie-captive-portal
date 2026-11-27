@@ -134,6 +134,12 @@ function drawReceipt(doc: jsPDF, opts: ReceiptPdfOptions, pw: number, m: number)
   doc.rect(center - 9, y, 18, 0.7, 'F');
   y += 2.2;
 
+  // RCP-0125: the vector fallback now renders the same wrapped house tagline
+  // as the DOM card, instead of dropping it entirely.
+  if (String(opts.company.tagline || '').trim()) {
+    y = centeredLines(doc, String(opts.company.tagline), center, y + 1.8, inner, 6.4, C.emerald) + 0.8;
+  }
+
   doc.setFontSize(6.2);
   y = centeredLines(doc, opts.company.email, center, y + 1.8, inner, 6.2, C.muted) + 0.9;
   doc.setFontSize(6.2);
@@ -175,19 +181,27 @@ function drawReceipt(doc: jsPDF, opts: ReceiptPdfOptions, pw: number, m: number)
   metaRows.push(['Served by', opts.cashierName, false]);
   const rowH = 3.5;
   const metaTop = y;
+  const metaWidth = inner * 0.54;
+  const metaPrepared = metaRows.map(([label, value, strong]) => {
+    doc.setFont('helvetica', strong ? 'bold' : 'normal');
+    doc.setFontSize(strong ? 7 : 6.4);
+    const lines = doc.splitTextToSize(value, metaWidth) as string[];
+    return { label, value, strong, lines, height: Math.max(rowH, lines.length * 2.4 + 1.2) };
+  });
+  const metaHeight = metaPrepared.reduce((sum, row) => sum + row.height, 0) + 1.6;
   setFill(doc, C.mint);
-  doc.roundedRect(m, metaTop, inner, metaRows.length * rowH + 1.6, 1.2, 1.2, 'F');
+  doc.roundedRect(m, metaTop, inner, metaHeight, 1.2, 1.2, 'F');
   y = metaTop + 2.2;
-  metaRows.forEach(([label, value, strong]) => {
+  metaPrepared.forEach((row) => {
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(6.4);
     setText(doc, C.muted);
-    doc.text(label, m + 2, y + 1.6);
-    doc.setFont('helvetica', strong ? 'bold' : 'normal');
-    doc.setFontSize(strong ? 7 : 6.4);
-    setText(doc, strong ? C.deep : C.ink);
-    doc.text(value, right - 2, y + 1.6, { align: 'right' });
-    y += rowH;
+    doc.text(row.label, m + 2, y + 1.6);
+    doc.setFont('helvetica', row.strong ? 'bold' : 'normal');
+    doc.setFontSize(row.strong ? 7 : 6.4);
+    setText(doc, row.strong ? C.deep : C.ink);
+    doc.text(row.lines, right - 2, y + 1.6, { align: 'right' });
+    y += row.height;
   });
   y += 0.8;
 
@@ -255,9 +269,9 @@ function drawReceipt(doc: jsPDF, opts: ReceiptPdfOptions, pw: number, m: number)
   doc.text(money(opts.total), right - 2, totalTop + 4.9, { align: 'right' });
   y = totalTop + 9;
 
-  // Payment status: emerald pill plus the same 15.87-degree translucent red
-  // PAID stamp used on the main A4 invoice. It sits above the cash line so no
-  // figure is ever covered.
+  // RCP-0125: POS receipts show the green PAID badge only. The angled red PAID
+  // stamp remains an invoice-only treatment; drawing it here duplicated the
+  // paid indicator and clipped against the 80mm right edge.
   y += 1;
   if (Number(opts.balanceDue) > 0) {
     setFill(doc, C.mint);
@@ -282,29 +296,38 @@ function drawReceipt(doc: jsPDF, opts: ReceiptPdfOptions, pw: number, m: number)
     setText(doc, C.white);
     doc.text('PAID', m + 2 + pillW / 2, y + 4, { align: 'center' });
 
-    // jsPDF's high-level text/rect helpers pre-flip their Y coordinates, so
-    // rotate the stamp with raw PDF primitives inside a saved graphics state.
-    // The matrix is the same 15.87-degree banner angle as the A4 invoice stamp.
-    const scale = doc.internal.scaleFactor;
-    const pageHeightPt = doc.internal.pageSize.getHeight() * scale;
-    const angle = (15.87 * Math.PI) / 180;
-    const cos = Math.cos(angle);
-    const sin = Math.sin(angle);
-    const halfW = 13 * scale;
-    const halfH = 3.4 * scale;
-    doc.saveGraphicsState();
-    doc.setCurrentTransformationMatrix(
-      doc.Matrix(cos, sin, -sin, cos, (right - 19) * scale, pageHeightPt - (y + 3) * scale)
-    );
-    doc.setGState(doc.GState({ opacity: 0.28 }));
-    const write = (doc as unknown as { internal: { write: (data: string) => void } }).internal.write;
-    write.call(doc.internal, `1 0.89 0.89 rg ${-halfW} ${-halfH} ${halfW * 2} ${halfH * 2} re f`);
-    write.call(doc.internal, `0.73 0.11 0.11 RG 0.35 w ${-halfW} ${-halfH} ${halfW * 2} ${halfH * 2} re S`);
-    write.call(doc.internal, 'BT 0.73 0.11 0.11 rg /F2 10 Tf 1 0 0 1 -12.2 -3 Tm (PAID) Tj ET');
-    doc.restoreGraphicsState();
+    // Compatibility switch kept explicit: invoice PDFs may opt into the angled
+    // stamp, but POS receipts never do. Keeping the primitive block intact
+    // avoids disturbing older integrations that call this renderer directly.
+    const includeRotatedStamp = false;
+    if (includeRotatedStamp) {
+      // jsPDF's high-level text/rect helpers pre-flip their Y coordinates, so
+      // rotate the stamp with raw PDF primitives inside a saved graphics state.
+      // The matrix is the same 15.87-degree banner angle as the A4 invoice stamp.
+      const scale = doc.internal.scaleFactor;
+      const pageHeightPt = doc.internal.pageSize.getHeight() * scale;
+      const angle = (15.87 * Math.PI) / 180;
+      const cos = Math.cos(angle);
+      const sin = Math.sin(angle);
+      const halfW = 13 * scale;
+      const halfH = 3.4 * scale;
+      doc.saveGraphicsState();
+      doc.setCurrentTransformationMatrix(
+        doc.Matrix(cos, sin, -sin, cos, (right - 19) * scale, pageHeightPt - (y + 3) * scale)
+      );
+      doc.setGState(doc.GState({ opacity: 0.28 }));
+      const write = (doc as unknown as { internal: { write: (data: string) => void } }).internal.write;
+      write.call(doc.internal, `1 0.89 0.89 rg ${-halfW} ${-halfH} ${halfW * 2} ${halfH * 2} re f`);
+      write.call(doc.internal, `0.73 0.11 0.11 RG 0.35 w ${-halfW} ${-halfH} ${halfW * 2} ${halfH * 2} re S`);
+      write.call(doc.internal, 'BT 0.73 0.11 0.11 rg /F2 10 Tf 1 0 0 1 -12.2 -3 Tm (PAID) Tj ET');
+      doc.restoreGraphicsState();
 
-    // Leave room for the rotated stamp's full bounding box before the cash line.
-    y += 11;
+      // Leave room for the rotated stamp's full bounding box before the cash line.
+      y += 11;
+    } else {
+      // Preserve a small gap between the badge and the cash/change lines.
+      y += 2;
+    }
 
     if (Number(opts.cashTendered) > 0) {
       doc.setFont('helvetica', 'normal');
@@ -325,13 +348,12 @@ function drawReceipt(doc: jsPDF, opts: ReceiptPdfOptions, pw: number, m: number)
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(5.6);
       setText(doc, C.muted);
-      doc.text(
+      const methodLines = doc.splitTextToSize(
         opts.payments.map((p) => `${p.method}: ${money(p.amount)}`).join(' + '),
-        center,
-        y + 2,
-        { align: 'center' }
-      );
-      y += 3.2;
+        inner
+      ) as string[];
+      doc.text(methodLines, center, y + 2, { align: 'center' });
+      y += methodLines.length * 2.2 + 1;
     }
   }
 
@@ -339,11 +361,16 @@ function drawReceipt(doc: jsPDF, opts: ReceiptPdfOptions, pw: number, m: number)
   // merchant block, document-ID heading or detached verification URL.
   doc.line(m, y, right, y);
   y += 3.4;
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(7.2);
-  setText(doc, C.deep);
-  doc.text(opts.company.footerText || 'THANKS FOR YOUR PURCHASE', center, y + 2, { align: 'center' });
-  y += 3.6;
+  y = centeredLines(
+    doc,
+    opts.company.footerText || 'THANKS FOR YOUR PURCHASE',
+    center,
+    y + 2,
+    inner,
+    7.2,
+    C.deep,
+    true
+  ) + 0.6;
 
   // Locked transit-matched footer: Powered by / brand / website. Kept in the
   // vector fallback too, so PDFs still match if DOM capture is unavailable.
@@ -381,8 +408,9 @@ function drawReceipt(doc: jsPDF, opts: ReceiptPdfOptions, pw: number, m: number)
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(5.2);
       setText(doc, C.muted);
-      doc.text('SCAN TO VERIFY • preyone.com/verify', center, y + 1.4, { align: 'center' });
-      y += 2.6;
+      const labelLines = doc.splitTextToSize('SCAN TO VERIFY • preyone.com/verify', inner) as string[];
+      doc.text(labelLines, center, y + 1.4, { align: 'center' });
+      y += labelLines.length * 2.2 + 0.4;
     }
   }
 

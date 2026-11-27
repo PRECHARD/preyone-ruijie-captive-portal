@@ -323,7 +323,7 @@ export default function ReceiptModal({
             />
             <div className="receipt-brand">{brandName.toUpperCase()}</div>
             <div className="receipt-accent" />
-            {brandTagline && <div className="receipt-subbrand">{brandTagline}</div>}
+            {brandTagline && <div className="receipt-subbrand receipt-tagline">{brandTagline}</div>}
             <div className="receipt-muted">{brandEmail}</div>
             <div className="receipt-muted">{[brandPhone, brandWebsite].filter(Boolean).join(' · ')}</div>
             {brandAddress && <div className="receipt-muted receipt-reserve">{brandAddress}</div>}
@@ -396,7 +396,6 @@ export default function ReceiptModal({
               <>
                 <div className="r-paid-row">
                   <span className="r-paid-pill">PAID</span>
-                  <span className="r-paid-stamp" aria-hidden="true">PAID</span>
                 </div>
                 {cashTendered > 0 && (
                   <>

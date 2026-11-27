@@ -542,9 +542,14 @@ export async function buildInvoicePdf({ doc, company, template, title }: Invoice
       fy += 3.1;
     }
     if (tagline) {
+      // RCP-0125: wrap the house tagline inside the A4 content box in the
+      // vector fallback too, instead of letting a long line drift off-edge.
       font('italic', 7);
       setInk(accent);
-      pdf.text(tagline, RIGHT, 269, { align: 'right' });
+      const taglineLines = pdf.splitTextToSize(tagline, CONTENT_W) as string[];
+      taglineLines.slice(0, 2).forEach((line, index) => {
+        pdf.text(line, RIGHT, 269 + index * 3, { align: 'right' });
+      });
     }
 
     setFill(accent);

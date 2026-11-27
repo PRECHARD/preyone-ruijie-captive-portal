@@ -867,3 +867,85 @@ html[data-preyone-plan='blocked'] .a4-plan-watermark { display: grid; }
   }
   .no-print { display: none !important; }
 }
+
+/* ── RCP-0125: additive A4 edge containment ──────────────────────────── */
+/* Keep the fixed 210mm sheet and internal 16mm safe area; only stop flex/grid
+   children from refusing to shrink and silently clipping at the sheet edge. */
+.a4-doc,
+.a4-doc *,
+.a4-doc *::before,
+.a4-doc *::after { box-sizing: border-box; }
+.a4-sheet,
+.a4-doc-head,
+.a4-doc-meta,
+.a4-doc-meta > *,
+.a4-items-table,
+.a4-totals,
+.a4-totals-wrap,
+.a4-totals .a4-row,
+.a4-totals .a4-row > *,
+.a4-band-verify,
+.a4-band-verify-line,
+.a4-band-col { max-width: 100%; }
+
+.a4-doc-head > *,
+.a4-doc-meta > *,
+.a4-totals .a4-row > *,
+.a4-band-verify-line > * { min-width: 0; }
+
+.a4-doc-head,
+.a4-doc-meta,
+.a4-totals .a4-row { flex-wrap: wrap; }
+
+.a4-brand-logo,
+.a4-doc-mark,
+.a4-wordmark-text,
+.a4-number-bar,
+.a4-client-name,
+.a4-client-lines,
+.a4-meta-grid dd,
+.a4-item-name,
+.a4-items-table tbody td,
+.a4-tagline,
+.a4-terms-text {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.a4-number-bar { white-space: normal; }
+
+.a4-meta-grid {
+  min-width: 0;
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+}
+.a4-items-table { table-layout: fixed; }
+.a4-items-table thead th,
+.a4-items-table tbody td { min-width: 0; }
+
+/* Long footer contact/address lines must stay inside the gradient band. */
+.a4-band-col {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  max-width: 38mm;
+}
+.a4-band-contact {
+  left: auto;
+  right: 4mm;
+  max-width: 32mm;
+  transform: translateY(-50%);
+  text-align: right;
+}
+.a4-band-verify {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+/* The invoice keeps its single angled PAID image; cap it to the safe area. */
+.a4-stamp {
+  max-width: calc(100% - 32mm);
+  transform-origin: center;
+}
+
+/* Re-state the zero page margin: the 16mm sheet padding is the printer-safe
+   area, and a non-zero page margin would shrink the 210mm content box. */
+@page { size: A4; margin: 0; }
