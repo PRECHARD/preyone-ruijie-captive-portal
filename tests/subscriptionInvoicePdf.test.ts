@@ -22,6 +22,12 @@ function objects(pdf: string): string[] {
   return [...pdf.matchAll(/(\d+) 0 obj\n([\s\S]*?)\nendobj/g)].map((m) => m[2]);
 }
 
+function printed(stream: string): string {
+  return [...stream.matchAll(/\(((?:\\.|[^)])*)\) Tj/g)]
+    .map((m) => m[1].replace(/\\([()\\])/g, '$1'))
+    .join('');
+}
+
 describe('subscription invoice PDF', () => {
   it('builds a structurally valid one-page PDF', () => {
     const pdf = buildSubscriptionInvoicePdf(base).toString('latin1');
@@ -65,5 +71,30 @@ describe('subscription invoice PDF', () => {
   it('escapes parentheses in customer names', () => {
     const pdf = buildSubscriptionInvoicePdf({ ...base, companyName: 'Test (Branch) Ltd' }).toString('latin1');
     expect(objects(pdf)[3]).toContain('Test \\(Branch\\) Ltd');
+  });
+
+  it('prints the full reference and device wording without truncation', () => {
+    const reference = 'PREYONE-SUB-TEST-202611271211';
+    const stream = objects(buildSubscriptionInvoicePdf({ ...base, reference }).toString('latin1'))[3];
+    const shown = printed(stream);
+    expect(shown).toContain(reference);
+    expect(shown).toContain('up to 9999 devices');
+    expect(shown).not.toContain('devic.');
+    expect(shown).not.toContain('PREYONE-SUB-TEST-..');
+  });
+
+  it('uses a labelled total bar aligned to the AMOUNT column', () => {
+    const stream = objects(buildSubscriptionInvoicePdf(base).toString('latin1'))[3];
+    expect(printed(stream)).toContain('TOTAL PAID (USD)');
+    expect(stream).toMatch(/BT 1 1 1 rg \/F2 13 Tf 1 0 0 1 [\d.]+ 466 Tm \(USD 30\.00\) Tj ET/);
+    expect(stream).toContain('AMOUNT');
+    expect(stream).toContain('Subtotal');
+  });
+
+  it('draws the standard 15.87-degree translucent red PAID stamp', () => {
+    const stream = objects(buildSubscriptionInvoicePdf(base).toString('latin1'))[3];
+    expect(stream).toMatch(/q 0\.96\d+ 0\.27\d+ -0\.27\d+ 0\.96\d+ 300 363 cm/);
+    expect(stream).toContain('0.98 0.86 0.86 rg -115 -15 230 30 re f');
+    expect(printed(stream)).toContain('PAID');
   });
 });

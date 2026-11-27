@@ -167,6 +167,36 @@ function emeraldDetails(rows: Array<[string, string]>): string {
   </table>`;
 }
 
+/**
+ * Additive subscription-receipt summary. Built with the deep emerald bar used
+ * on invoice.preyone.com; only this receipt calls it, so every other mail that
+ * goes through buildEmeraldEmail keeps its existing markup. Numeric cells use
+ * tabular numerals so the paid amount stays aligned in Gmail/Outlook too.
+ */
+export function buildSubscriptionReceiptSummary(opts: {
+  invoiceNumber: string;
+  amount: string;
+  paid: string;
+  reference: string;
+}): string {
+  const sans = "'Segoe UI',-apple-system,BlinkMacSystemFont,Roboto,Arial,sans-serif";
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:separate;margin:16px 0 0">
+    <tr><td style="padding:12px 14px 10px;background:${EMERALD.panelSoft};border:1px solid #D1FAE5;border-bottom:0;border-radius:12px 12px 0 0">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+        <td style="font-family:${sans};font-size:10px;font-weight:700;letter-spacing:1.8px;color:#34d399">TAX INVOICE<br><span style="font-size:12px;letter-spacing:0.2px;color:${EMERALD.text}">${escapeEmailHtml(opts.invoiceNumber)}</span></td>
+        <td align="right" style="font-family:${sans}"><span style="display:inline-block;padding:4px 10px;border:1px solid #34d399;border-radius:3px;font-size:10px;font-weight:700;letter-spacing:2px;color:#34d399">PAID</span></td>
+      </tr></table>
+    </td></tr>
+    <tr><td style="background:#047857;padding:12px 14px">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+        <td style="font-family:${sans};font-size:10px;font-weight:700;letter-spacing:1.4px;color:#D1FAE5">TOTAL PAID (USD)</td>
+        <td align="right" style="font-family:${sans};font-size:16px;font-weight:700;color:#ffffff;white-space:nowrap;font-variant-numeric:tabular-nums">${escapeEmailHtml(opts.amount)}</td>
+      </tr></table>
+    </td></tr>
+    <tr><td style="padding:10px 14px;background:${EMERALD.panelSoft};border:1px solid #D1FAE5;border-top:0;border-radius:0 0 12px 12px;font-family:${sans};font-size:10px;line-height:1.5;color:${EMERALD.dim};word-break:break-word">Payment reference: <strong style="color:${EMERALD.muted};font-weight:600">${escapeEmailHtml(opts.reference)}</strong> &nbsp;·&nbsp; Paid ${escapeEmailHtml(opts.paid)}</td></tr>
+  </table>`;
+}
+
 function emeraldButton(label: string, url: string, secondary = false): string {
   const bg = secondary
     ? `background:${EMERALD.panelSoft};border:1px solid ${EMERALD.line};color:${EMERALD.accent}`
@@ -642,15 +672,21 @@ export async function sendSubscriptionPaymentReceiptEmail(opts: {
     bodyHtml: `<p style="margin:0 0 12px">Hi <strong style="color:${EMERALD.text}">${escapeEmailHtml(
       opts.companyName
     )}</strong>,</p>
-      <p style="margin:0">We have received your subscription payment. Your access is active and the new expiry is shown below.</p>`,
+      <p style="margin:0">We have received your subscription payment. Your access is active and the new expiry is shown below.</p>
+      ${buildSubscriptionReceiptSummary({
+        invoiceNumber: opts.invoiceNumber || 'Attached below',
+        amount,
+        paid,
+        reference: opts.reference || '-',
+      })}`,
     details: [
       ['Invoice', escapeEmailHtml(opts.invoiceNumber || 'Attached below')],
       ['Account number', escapeEmailHtml(opts.accountNumber || '-')],
       ['Package', escapeEmailHtml(opts.planName)],
-      ['Amount', escapeEmailHtml(amount)],
+      ['Amount', `<span style="font-variant-numeric:tabular-nums">${escapeEmailHtml(amount)}</span>`],
       ['Payment method', escapeEmailHtml(opts.method)],
       ['Paid', escapeEmailHtml(paid)],
-      ['Access until', escapeEmailHtml(expires)],
+      ['Access Valid Until', escapeEmailHtml(expires)],
       ...(opts.devices
         ? ([['Devices', opts.devices >= 9999 ? 'Unlimited' : String(opts.devices)]] as Array<[string, string]>)
         : []),
@@ -659,9 +695,9 @@ export async function sendSubscriptionPaymentReceiptEmail(opts: {
     cta: { label: 'Open Invoice', url: invoiceUrl },
     secondaryCta: { label: 'Open POS', url: posUrl },
     noteHtml: opts.invoicePdf
-      ? 'Your Preyone invoice is attached as a PDF. Keep this email as your payment receipt.'
-      : 'Keep this email as your subscription receipt.',
-    footerNote: 'Preyone Invoice & POS · payment receipt and invoice',
+      ? 'Your Preyone tax invoice is attached as a PDF. Computer-generated proof of payment and subscription invoice.'
+      : 'Computer-generated proof of payment and subscription invoice.',
+    footerNote: 'Preyone Enterprises · Harare, Zimbabwe · support@preyone.com · +263 771 327 202',
   });
   const text = [
     `Payment received for ${opts.companyName}`,
@@ -673,9 +709,10 @@ export async function sendSubscriptionPaymentReceiptEmail(opts: {
     `Paid: ${paid}`,
     `Access until: ${expires}`,
     opts.reference ? `Reference: ${opts.reference}` : '',
-    opts.invoicePdf ? 'The Preyone invoice PDF is attached to this email.' : '',
+    opts.invoicePdf ? 'The Preyone tax invoice PDF is attached to this email.' : '',
+    'Computer-generated proof of payment and subscription invoice.',
     '',
-    'Preyone Enterprises · support@preyone.com',
+    'Preyone Enterprises · Harare, Zimbabwe · support@preyone.com · +263 771 327 202',
   ]
     .filter(Boolean)
     .join('\n');

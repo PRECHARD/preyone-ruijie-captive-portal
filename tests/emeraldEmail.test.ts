@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { buildEmeraldEmail, buildEmeraldOtpEmail } from '../src/services/notificationService';
+import {
+  buildEmeraldEmail,
+  buildEmeraldOtpEmail,
+  buildSubscriptionReceiptSummary,
+} from '../src/services/notificationService';
 
 describe('emerald invoice/POS email shell', () => {
   it('uses the emerald palette, escapes tenant values and keeps the CTA', () => {
@@ -16,6 +20,21 @@ describe('emerald invoice/POS email shell', () => {
     expect(html).toContain('&lt;Acme&gt;');
     expect(html).toContain('https://invoice.preyone.com/');
     expect(html).toContain('Preyone Invoice &amp; POS');
+  });
+
+  it('renders the subscription total bar with tabular numerals and the full reference', () => {
+    const html = buildSubscriptionReceiptSummary({
+      invoiceNumber: 'PINV-TEST-202611271211',
+      amount: 'USD 30.00',
+      paid: '27 Nov 2026, 12:11',
+      reference: 'PREYONE-SUB-TEST-202611271211',
+    });
+
+    expect(html).toContain('TOTAL PAID (USD)');
+    expect(html).toContain('font-variant-numeric:tabular-nums');
+    expect(html).toContain('USD 30.00');
+    expect(html).toContain('PREYONE-SUB-TEST-202611271211');
+    expect(html).toContain('#047857');
   });
 
   it('renders the OTP in a single, selectable block', () => {
