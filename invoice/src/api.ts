@@ -350,7 +350,17 @@ export interface DocumentLine {
 
 export interface DocumentDetail extends PosDocument {
   items: DocumentLine[];
-  payments: Array<{ id: string; amount: string | number; method: string; paid_at: string }>;
+  payments: Array<{
+    id: string;
+    amount: string | number;
+    method: string;
+    paid_at: string;
+    /** Cash audit fields on v8+ rows; legacy rows leave them null. */
+    cash_tendered?: string | number | null;
+    change_amount?: string | number | null;
+    cashTendered?: string | number | null;
+    change?: string | number | null;
+  }>;
   customer?: { id: string; name: string; email?: string | null; phone?: string | null; address?: string | null } | null;
   cashier_name?: string | null;
 }

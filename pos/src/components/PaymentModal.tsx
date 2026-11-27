@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, type PosDocument } from '../api';
+import { cashChange, cashQuickAmounts } from '../utils/cashAmounts';
 
 const money = (n: number): string => `$${(Number(n) || 0).toFixed(2)}`;
 
@@ -46,8 +47,11 @@ export default function PaymentModal({
   const pollBusy = useRef(false);
 
   const rail = RAILS.find((r) => r.key === method);
-  const value = Number(amount) || 0;
-  const canSubmit = !busy && value > 0 && (manual || !rail || method === 'cash');
+  const tendered = Number(amount) || 0;
+  const applied = method === 'cash' ? Math.round(Math.min(tendered, balance) * 100) / 100 : tendered;
+  const change = method === 'cash' ? cashChange(tendered, applied) : 0;
+  const quickAmounts = useMemo(() => cashQuickAmounts(balance), [balance]);
+  const canSubmit = !busy && tendered > 0 && (manual || !rail || method === 'cash');
 
   const finish = async () => {
     const fresh = await api.document(doc.id);
@@ -101,7 +105,7 @@ export default function PaymentModal({
     setError('');
     try {
       const created = await api.documentPaymentIntent({
-        amount: Math.round(value * 100) / 100,
+        amount: Math.round(applied * 100) / 100,
         paymentMethod: rail.key,
         targetId: doc.id,
         currencyCode: (doc.currency || 'USD').toUpperCase(),
@@ -129,9 +133,10 @@ export default function PaymentModal({
     setError('');
     try {
       const updated = await api.recordPayment(doc.id, {
-        amount: Math.round(value * 100) / 100,
+        amount: Math.round(applied * 100) / 100,
         method,
         reference: reference.trim() || undefined,
+        ...(method === 'cash' ? { cashTendered: tendered, change } : {}),
       });
       onSaved(updated);
     } catch (e) {
@@ -217,6 +222,26 @@ export default function PaymentModal({
               />
             </label>
 
+            {method === 'cash' && (
+              <>
+                {change > 0 && (
+                  <div className="change-box">
+                    <span className="lbl">CHANGE</span>
+                    <span className="amt">{money(change)}</span>
+                  </div>
+                )}
+                {balance > 0 && (
+                  <div className="quick-amts">
+                    {quickAmounts.map((v) => (
+                      <button key={v} type="button" onClick={() => setAmount(v.toFixed(2))}>
+                        {money(v)}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+
             {rail && (
               <>
                 <label className="field-label">
@@ -264,7 +289,7 @@ export default function PaymentModal({
 
             {!rail && (
               <button className="primary-btn" disabled={!canSubmit || busy} onClick={() => void submitManual()}>
-                {busy ? 'Recording…' : `Record ${money(value)} payment`}
+                {busy ? 'Recording…' : `Record ${money(applied)} payment`}
               </button>
             )}
           </>
@@ -280,7 +305,7 @@ export default function PaymentModal({
                     ? 'Confirmed'
                     : 'Request sent'}
               </span>
-              <span className="pay-track-amount">{money(value)}</span>
+              <span className="pay-track-amount">{money(applied)}</span>
             </div>
             <div className="pay-track-ref">
               Reference <span className="mono">{intent.reference}</span>

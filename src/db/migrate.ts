@@ -1261,6 +1261,9 @@ const SQL = `
     method        TEXT NOT NULL DEFAULT 'cash'
                   CHECK (method IN ('cash', 'card', 'ecocash', 'bank', 'pesepay', 'other')),
     reference     TEXT,
+    -- Cash audit fields (v8). NULL on legacy rows and non-cash rails.
+    cash_tendered   NUMERIC(12,2),
+    change_amount   NUMERIC(12,2),
     paid_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     recorded_by   UUID REFERENCES admin_users(id) ON DELETE SET NULL,
     shift_id      UUID REFERENCES pos_shifts(id) ON DELETE SET NULL
@@ -2067,6 +2070,14 @@ const SQL = `
     if (fs.existsSync(v7PaymentPath)) {
       await client.query(fs.readFileSync(v7PaymentPath, 'utf8'));
       console.log('Applied db/migrations/v7_pos_payment_tracking.sql (payment status tracking).');
+    }
+
+    // Cash tender/change audit columns for POS receipts. Idempotent; existing
+    // payment rows keep NULL values and therefore keep their old behaviour.
+    const v8CashPath = path.resolve(__dirname, '../../db/migrations/v8_pos_cash_tender.sql');
+    if (fs.existsSync(v8CashPath)) {
+      await client.query(fs.readFileSync(v8CashPath, 'utf8'));
+      console.log('Applied db/migrations/v8_pos_cash_tender.sql (cash tender audit).');
     }
 
     console.log('Migration complete. Packages + transit + RBAC seeded.');

@@ -629,8 +629,23 @@ select option,
 .change-box .amt { font-weight: 700; font-size: 1.15rem; color: #34d399; }
 .change-box.due .amt { color: #fbbf24; }
 
-.quick-amts { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.4rem; margin-top: 0.45rem; }
-.quick-amts button { padding: 0.5rem 0; font-weight: 600; font-size: 0.85rem; }
+/* One horizontal cash row: every USD choice fits the modal width at once. */
+.quick-amts {
+  display: flex;
+  flex-wrap: nowrap;
+  width: 100%;
+  gap: 0.35rem;
+  margin-top: 0.45rem;
+}
+.quick-amts button {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 0.5rem 0.25rem;
+  font-weight: 600;
+  font-size: 0.85rem;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
 
 /* USSD request-to-pay */
 .ussd-overlay {
@@ -1040,12 +1055,18 @@ select option,
 @media print {
   body * { visibility: hidden !important; }
   #receipt-print-area, #receipt-print-area * { visibility: visible !important; }
+  /* Keep the printed page identical to the modal card: same 302px roll width,
+     same padding, same 11px/1.45 type scale. Only the surrounding app chrome
+     is removed; the receipt itself is never scaled or re-flowed. */
   #receipt-print-area {
     position: absolute; inset: 0;
-    width: 76mm;
+    width: 302px;
+    max-width: none;
     margin: 0 !important;
-    padding: 2mm 2mm !important;
-    font-size: 10.5pt;
+    padding: 10px 12px !important;
+    font-size: 11px;
+    line-height: 1.45;
+    box-shadow: none;
   }
   @page { size: 80mm auto; margin: 0; }
 }

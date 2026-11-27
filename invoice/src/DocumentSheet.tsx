@@ -69,6 +69,9 @@ export interface SheetDoc {
   taxPct?: number;
   total: number;
   amountPaid?: number;
+  /** Cash actually handed over and the change given, when paid in cash. */
+  cashTendered?: number;
+  cashChange?: number;
   currency: string;
 }
 
@@ -271,6 +274,8 @@ export function DocumentSheet({
       ? round2(storedTotal)
       : net;
   const amountPaid = Number(doc.amountPaid) || 0;
+  const cashTendered = Number(doc.cashTendered) || 0;
+  const cashChange = Number(doc.cashChange) || 0;
   const balance = Math.max(round2(total - amountPaid), 0);
   const paid = doc.status === 'paid' || (total > 0 && amountPaid >= total - 0.005);
 
@@ -603,6 +608,18 @@ export function DocumentSheet({
               <span className="a4-lbl">Balance Due</span>
               <span className="a4-val">{money(balance, doc.currency)}</span>
             </div>
+            {cashTendered > 0 && (
+              <div className="a4-row a4-cash-row">
+                <span className="a4-lbl">Cash Tendered</span>
+                <span className="a4-val">{money(cashTendered, doc.currency)}</span>
+              </div>
+            )}
+            {cashChange > 0 && (
+              <div className="a4-row a4-cash-row">
+                <span className="a4-lbl">Change</span>
+                <span className="a4-val">{money(cashChange, doc.currency)}</span>
+              </div>
+            )}
           </>
         )}
       </div>

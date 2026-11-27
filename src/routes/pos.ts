@@ -58,6 +58,24 @@ const num = (v: unknown): number => {
 };
 const str = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
 
+/**
+ * Cash tender audit fields. `amount` is the part applied to the document; the
+ * customer may hand over a larger note, so the receipt must remember both the
+ * full tender and the change. Values are derived server-side rather than
+ * trusted from the client, and NULL means "legacy row: no tender recorded".
+ */
+function cashTenderFields(
+  payment: { cashTendered?: unknown; change?: unknown } | undefined,
+  amount: number,
+  method: string
+): { tendered: number | null; change: number | null } {
+  if (method !== 'cash') return { tendered: null, change: null };
+  const handed = round2(num(payment?.cashTendered));
+  if (handed <= 0) return { tendered: null, change: null };
+  const tendered = Math.max(handed, amount);
+  return { tendered: round2(tendered), change: round2(Math.max(0, tendered - amount)) };
+}
+
 function signToken(user: StaffUser, sid?: string): string {
   return jwt.sign(
     {
@@ -2913,7 +2931,14 @@ router.get('/documents/:id', async (req, res) => {
         [doc.rows[0].customer_id, tenantId(req)]
       )
     : { rows: [] };
-  res.json({ ...doc.rows[0], items: items.rows, payments: pays.rows, customer: customer.rows[0] || null });
+  // Keep the raw snake_case columns for older callers and add camelCase cash
+  // fields so every receipt/invoice view reads the same persisted tender.
+  const payments = pays.rows.map((p: Record<string, unknown>) => ({
+    ...p,
+    cashTendered: p.cash_tendered == null ? null : num(p.cash_tendered),
+    change: p.change_amount == null ? null : num(p.change_amount),
+  }));
+  res.json({ ...doc.rows[0], items: items.rows, payments, customer: customer.rows[0] || null });
 });
 
 /**
@@ -3213,8 +3238,14 @@ router.post('/checkout', async (req, res) => {
     res.status(400).json({ error: 'At least one item is required' });
     return;
   }
-  const rawPayments: Array<{ amount?: number | string; method?: string; reference?: string; intentId?: string }> =
-    Array.isArray(b.payments) ? b.payments : [];
+  const rawPayments: Array<{
+    amount?: number | string;
+    method?: string;
+    reference?: string;
+    intentId?: string;
+    cashTendered?: number | string;
+    change?: number | string;
+  }> = Array.isArray(b.payments) ? b.payments : [];
   const discountPct = Math.max(0, Math.min(100, num(b.discountPct)));
   const taxPct = Math.max(0, num(b.taxPct));
   const totals = computeTotals(rawItems, discountPct, taxPct);
@@ -3347,6 +3378,14 @@ router.post('/checkout', async (req, res) => {
       }
     }
 
+    const recordedPayments: Array<{
+      amount: number;
+      method: string;
+      reference: string | null;
+      cashTendered: number | null;
+      change: number | null;
+    }> = [];
+
     for (const p of rawPayments) {
       const amount = round2(num(p?.amount));
       if (amount <= 0) continue;
@@ -3407,12 +3446,32 @@ router.post('/checkout', async (req, res) => {
         }
       }
 
-      const payIns = await client.query(
-        `INSERT INTO pos_document_payments (document_id, amount, method, reference, recorded_by, shift_id)
-         VALUES ($1,$2,$3,$4,$5,$6)
-         RETURNING id`,
-        [doc.id, amount, method, str(p?.reference) || null, me.id, shiftId]
-      );
+      const tender = cashTenderFields(p, amount, method);
+      const reference = str(p?.reference) || null;
+      const payIns = tender.tendered !== null
+        ? await client.query(
+            `INSERT INTO pos_document_payments
+               (document_id, amount, method, reference, recorded_by, shift_id, cash_tendered, change_amount)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+             RETURNING id, cash_tendered, change_amount`,
+            [doc.id, amount, method, reference, me.id, shiftId, tender.tendered, tender.change]
+          )
+        : await client.query(
+            `INSERT INTO pos_document_payments (document_id, amount, method, reference, recorded_by, shift_id)
+             VALUES ($1,$2,$3,$4,$5,$6)
+             RETURNING id`,
+            [doc.id, amount, method, reference, me.id, shiftId]
+          );
+
+      // Return the persisted cash values so the receipt can show them even
+      // when the browser closes before reading the document again.
+      recordedPayments.push({
+        amount,
+        method,
+        reference,
+        cashTendered: tender.tendered,
+        change: tender.change,
+      });
 
       if (intentId) {
         const consumed = await client.query(
@@ -3459,6 +3518,7 @@ router.post('/checkout', async (req, res) => {
         qty: l.qty,
         lineTotal: l.lineTotal,
       })),
+      payments: recordedPayments,
     });
   } catch (e) {
     await client.query('ROLLBACK');
@@ -3550,12 +3610,21 @@ router.post('/documents/:id/payments', async (req, res) => {
       }
     }
 
-    const payIns = await client.query(
-      `INSERT INTO pos_document_payments (document_id, amount, method, reference, recorded_by, shift_id)
-       VALUES ($1,$2,$3,$4,$5,$6)
-       RETURNING id`,
-      [doc.id, amount, method, reference, me.id, shiftId]
-    );
+    const tender = cashTenderFields(req.body, amount, method);
+    const payIns = tender.tendered !== null
+      ? await client.query(
+          `INSERT INTO pos_document_payments
+             (document_id, amount, method, reference, recorded_by, shift_id, cash_tendered, change_amount)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+           RETURNING id, cash_tendered, change_amount`,
+          [doc.id, amount, method, reference, me.id, shiftId, tender.tendered, tender.change]
+        )
+      : await client.query(
+          `INSERT INTO pos_document_payments (document_id, amount, method, reference, recorded_by, shift_id)
+           VALUES ($1,$2,$3,$4,$5,$6)
+           RETURNING id`,
+          [doc.id, amount, method, reference, me.id, shiftId]
+        );
 
     if (intentId) {
       const consumed = await client.query(

@@ -173,7 +173,17 @@ export default function Terminal({ user, notify, onApiError, onShiftChanged, shi
   const needsCustomer = docType !== 'sale';
   const canCharge = cart.length > 0 && total >= 0;
 
-  const completeSale = async (payments: Array<{ amount: number; method: string; reference?: string; intentId?: string }>, customerNameInput?: string) => {
+  const completeSale = async (
+    payments: Array<{
+      amount: number;
+      method: string;
+      reference?: string;
+      intentId?: string;
+      cashTendered?: number;
+      change?: number;
+    }>,
+    customerNameInput?: string
+  ) => {
     const effectiveCustName = customerNameInput || custName.trim();
     try {
       const result = await api.checkout({
@@ -194,7 +204,9 @@ export default function Terminal({ user, notify, onApiError, onShiftChanged, shi
       setCheckoutOpen(false);
       setReceipt({
         ...result,
-        payments,
+        // Prefer the rows persisted by the server so the receipt shows the
+        // same tendered/change values that were recorded in the transaction.
+        payments: result.payments?.length ? result.payments : payments,
         customer_name: effectiveCustName || undefined,
         customer_phone: custPhone.trim() || undefined,
       });

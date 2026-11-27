@@ -33,6 +33,7 @@ import {
   RECEIPT_TEMPLATES,
 } from './payments';
 import { DocumentSheet, TemplateThumb, type SheetDoc } from './DocumentSheet';
+import { cashChange, cashQuickAmounts } from './cashAmounts';
 import { ConfirmDialog, type ConfirmOptions } from './ConfirmDialog';
 import Sidebar, { type View } from './components/Sidebar';
 import ThemeToggle from './components/ThemeToggle';
@@ -1929,6 +1930,34 @@ function DocumentDrawer({
   };
 
   const balance = doc ? Number(doc.total) - Number(doc.amount_paid) : 0;
+  const cashTenderedNow = Number(payAmount) || 0;
+  const cashApplied =
+    payMethod === 'cash'
+      ? Math.round(Math.min(cashTenderedNow, balance) * 100) / 100
+      : cashTenderedNow;
+  const cashDueChange = payMethod === 'cash' ? cashChange(cashTenderedNow, cashApplied) : 0;
+  const cashQuick = useMemo(() => cashQuickAmounts(balance), [balance]);
+
+  // Persisted cash audit fields on the document itself. Legacy rows have no
+  // tender fields and deliberately keep their original printed layout.
+  const cashRows = (doc?.payments || []).filter((p) => p.method === 'cash');
+  const hasCashAudit = cashRows.some((p) => p.cashTendered != null || p.cash_tendered != null);
+  const cashAuditValue = (p: (typeof cashRows)[number], key: 'cashTendered' | 'cash_tendered') => {
+    const value = p[key];
+    return value == null ? Number(p.amount) || 0 : Number(value) || 0;
+  };
+  const paidCashTendered = hasCashAudit
+    ? Math.round(cashRows.reduce((sum, p) => sum + cashAuditValue(p, 'cashTendered'), 0) * 100) / 100
+    : 0;
+  const paidCashChange = hasCashAudit
+    ? Math.round(
+        cashRows.reduce((sum, p) => {
+          const tendered = cashAuditValue(p, 'cashTendered');
+          const changeValue = p.change ?? p.change_amount;
+          return sum + (changeValue == null ? Math.max(0, tendered - (Number(p.amount) || 0)) : Number(changeValue) || 0);
+        }, 0) * 100
+      ) / 100
+    : 0;
   // Once money is recorded the items and totals are locked; metadata remains
   // editable. A credit note/refund is the correct correction path.
   const itemsLocked = !!doc && Number(doc.amount_paid) > 0;
@@ -1976,6 +2005,8 @@ function DocumentDrawer({
         taxPct: Number(raw?.tax_pct) || 0,
         total: Number(doc.total) || 0,
         amountPaid: Number(doc.amount_paid) || 0,
+        cashTendered: paidCashTendered || undefined,
+        cashChange: paidCashChange || undefined,
         currency: doc.currency || 'USD',
       }
     : null;
@@ -2108,9 +2139,12 @@ function DocumentDrawer({
   const recordPayment = () =>
     act(async () => {
       await api.post(`/api/pos/documents/${id}/payments`, {
-        amount: Number(payAmount),
+        amount: cashApplied,
         method: payMethod,
         reference: payRef || undefined,
+        ...(payMethod === 'cash'
+          ? { cashTendered: cashTenderedNow, change: cashDueChange }
+          : {}),
       });
       setPayAmount('');
       setPayRef('');
@@ -2601,7 +2635,7 @@ function DocumentDrawer({
             <div className="split">
               <div>
                 <div className="card drawer-doc-card no-print">
-                  <div className="a4-preview-shell">
+                  <div className="a4-preview-shell preview-1to1">
                     {drawerSheet && (
                       <DocumentSheet doc={drawerSheet} company={company} template={template} />
                     )}
@@ -2636,6 +2670,25 @@ function DocumentDrawer({
                       <input className="input" value={payRef} onChange={(e) => setPayRef(e.target.value)} />
                     </label>
                   </div>
+                  {payMethod === 'cash' && (
+                    <>
+                      {cashDueChange > 0 && (
+                        <div className="cash-change-line">
+                          <span>CHANGE</span>
+                          <strong className="num">{money(cashDueChange)}</strong>
+                        </div>
+                      )}
+                      {balance > 0 && (
+                        <div className="cash-quick-row" role="group" aria-label="Quick cash amounts">
+                          {cashQuick.map((v) => (
+                            <button key={v} type="button" onClick={() => setPayAmount(v.toFixed(2))}>
+                              {money(v)}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  )}
                   <button
                     className="btn primary"
                     type="button"
@@ -2673,12 +2726,24 @@ function DocumentDrawer({
                   <div className="card" style={{ padding: 16 }}>
                     <div className="panel-title" style={{ marginBottom: 10 }}>Payments</div>
                     <div className="drawer-list">
-                      {doc.payments.map((p) => (
-                        <div className="drawer-item" key={p.id}>
-                          <span>{p.method}</span>
-                          <span className="mono">{money(p.amount, doc.currency || 'USD')}</span>
-                        </div>
-                      ))}
+                      {doc.payments.map((p) => {
+                        const tendered = p.cashTendered ?? p.cash_tendered;
+                        const changeValue = p.change ?? p.change_amount;
+                        return (
+                          <div key={p.id}>
+                            <div className="drawer-item">
+                              <span>{p.method}</span>
+                              <span className="mono">{money(p.amount, doc.currency || 'USD')}</span>
+                            </div>
+                            {tendered != null && (
+                              <div className="drawer-item-sub">
+                                Cash tendered {money(tendered, doc.currency || 'USD')}
+                                {changeValue != null ? ` · Change ${money(changeValue, doc.currency || 'USD')}` : ''}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 )}

@@ -251,11 +251,17 @@ export default function HistoryView({ notify, onApiError }: HistoryViewProps) {
               qty: Number(i.qty),
               lineTotal: Number(i.lineTotal ?? i.line_total ?? i.price * i.qty),
             })),
-            payments: (open.payments || []).map((p) => ({
-              amount: Number(p.amount),
-              method: String(p.method),
-              reference: p.reference,
-            })),
+            payments: (open.payments || []).map((p) => {
+              const rawTendered = p.cashTendered ?? (p as { cash_tendered?: unknown }).cash_tendered;
+              const rawChange = p.change ?? (p as { change_amount?: unknown }).change_amount;
+              return {
+                amount: Number(p.amount),
+                method: String(p.method),
+                reference: p.reference,
+                cashTendered: rawTendered == null ? null : Number(rawTendered),
+                change: rawChange == null ? null : Number(rawChange),
+              };
+            }),
             customer_name: open.customer_name || undefined,
           }}
           cashierName={open.cashier_name || '—'}

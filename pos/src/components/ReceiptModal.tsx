@@ -1,6 +1,7 @@
-import { useCallback, useState, useEffect } from 'react';
+import { useCallback, useState, useEffect, useRef } from 'react';
 import { api, type CheckoutResult, type CompanyProfile } from '../api';
 import { generateReceiptPdf, downloadReceiptPdf, receiptPdfToBlob } from '../utils/receiptPdf';
+import { buildReceiptPdfFromElement } from '../utils/receiptDomPdf';
 import { code128Bars, verificationBarcodePayload } from '../utils/code128';
 
 const money = (n: number): string => `$${(Number(n) || 0).toFixed(2)}`;
@@ -52,6 +53,7 @@ export default function ReceiptModal({
   const [logoSize, setLogoSize] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
   const [pdfError, setPdfError] = useState('');
   const [liveCompany, setLiveCompany] = useState<CompanyProfile | null>(company ?? null);
+  const receiptRef = useRef<HTMLDivElement>(null);
 
   // Re-read the company on every receipt open. Settings & Branding can change
   // while a till is logged in; the receipt must never print yesterday's logo
@@ -163,11 +165,31 @@ export default function ReceiptModal({
         ? 'QUOTATION'
         : 'RECEIPT';
 
-  const cashPayment = result.payments?.find((p) => p.method === 'cash');
-  const cashTendered = cashPayment ? Number(cashPayment.amount) : 0;
-  const change = Math.max(0, cashTendered - Number(result.total));
+  // New rows carry cash_tendered/change_amount from checkout. Older rows
+  // only have `amount`, so fall back to treating that as the cash handed over.
+  const cashParts = (result.payments || []).filter((p) => p.method === 'cash');
+  const cashTendered = Math.round(
+    cashParts.reduce((sum, p) => sum + Number(p.cashTendered ?? p.amount), 0) * 100
+  ) / 100;
+  const change = Math.round(
+    cashParts.reduce((sum, p) => {
+      const tendered = Number(p.cashTendered ?? p.amount);
+      return sum + Number(p.change ?? Math.max(0, tendered - Number(p.amount)));
+    }, 0) * 100
+  ) / 100;
 
-  const getPdfDoc = useCallback(() => {
+  const getPdfDoc = useCallback(async () => {
+    // Print targets this exact DOM node. Capture it for PDF too so the saved
+    // file matches the modal card rather than a parallel vector layout.
+    const element = receiptRef.current;
+    if (element) {
+      try {
+        return await buildReceiptPdfFromElement(element);
+      } catch (e) {
+        console.error('Exact receipt capture failed; using vector fallback:', e);
+        setPdfError('Showing the printable vector receipt; the preview capture was unavailable.');
+      }
+    }
     return generateReceiptPdf({
       docNumber: result.doc_number,
       docType: result.doc_type,
@@ -224,10 +246,10 @@ export default function ReceiptModal({
     logoSize,
   ]);
 
-  const downloadPdf = () => {
+  const downloadPdf = async () => {
     setPdfError('');
     try {
-      var doc = getPdfDoc();
+      const doc = await getPdfDoc();
       downloadReceiptPdf(doc, `${result.doc_number}.pdf`);
     } catch (e) {
       console.error('PDF download failed:', e);
@@ -253,12 +275,12 @@ export default function ReceiptModal({
   const shareWhatsApp = async () => {
     setPdfError('');
     try {
-      var doc = getPdfDoc();
-      var blob = receiptPdfToBlob(doc);
+      const doc = await getPdfDoc();
+      const blob = receiptPdfToBlob(doc);
 
       if (navigator.share) {
         try {
-          var file = new File([blob], `${result.doc_number}.pdf`, { type: 'application/pdf' });
+          const file = new File([blob], `${result.doc_number}.pdf`, { type: 'application/pdf' });
           if (navigator.canShare?.({ files: [file] })) {
             await navigator.share({
               files: [file],
@@ -272,7 +294,7 @@ export default function ReceiptModal({
       }
 
       downloadReceiptPdf(doc, `${result.doc_number}.pdf`);
-      var msg = encodeURIComponent(
+      const msg = encodeURIComponent(
         `${brandName} — ${title} ${result.doc_number}\n` +
         `Total: ${money(result.total)}\n` +
         (result.balanceDue > 0 ? `Balance due: ${money(result.balanceDue)}` : 'PAID IN FULL') +
@@ -288,7 +310,7 @@ export default function ReceiptModal({
   return (
     <div className="modal-backdrop">
       <div className="modal-card">
-        <div id="receipt-print-area" className="receipt-paper">
+        <div id="receipt-print-area" ref={receiptRef} className="receipt-paper">
           {/* Compact emerald store header */}
           <div className="receipt-center receipt-header">
             <div className="receipt-top-rule" />
@@ -413,7 +435,7 @@ export default function ReceiptModal({
 
         <div className="receipt-actions">
           <button onClick={printReceipt}>Print</button>
-          <button onClick={downloadPdf}>Download PDF</button>
+          <button onClick={() => void downloadPdf()}>Download PDF</button>
           <button onClick={shareWhatsApp}>WhatsApp PDF</button>
         </div>
         <button className="primary-btn" onClick={onDone}>New sale</button>

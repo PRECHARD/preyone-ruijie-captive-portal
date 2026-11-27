@@ -133,7 +133,9 @@
     padding: 1rem;
     border-radius: 14px;
   }
-  .quick-amts { grid-template-columns: repeat(2, 1fr); }
+  /* Keep every quick-amount button on the same row on narrow screens too. */
+  .quick-amts { flex-wrap: nowrap; gap: 0.22rem; }
+  .quick-amts button { padding: 0.45rem 0.12rem; font-size: 0.78rem; }
   .pay-total-line .amt { font-size: 1.45rem; }
 
   .stock-table { min-width: 620px; }

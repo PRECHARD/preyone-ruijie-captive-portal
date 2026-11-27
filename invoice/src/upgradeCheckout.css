@@ -327,3 +327,44 @@
   color: #04120d !important;
   border-color: #34d399 !important;
 }
+
+/* Cash tender: exact balance + the next USD bills, always one single row. */
+.cash-quick-row {
+  display: flex;
+  flex-wrap: nowrap;
+  width: 100%;
+  gap: 6px;
+  margin-top: 8px;
+}
+.cash-quick-row button {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 7px 4px;
+  border-radius: 8px;
+  border: 1px solid rgba(16, 185, 129, 0.32);
+  background: rgba(6, 78, 59, 0.22);
+  color: var(--pos-text, #eafff7);
+  font-size: 11px;
+  font-weight: 650;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.cash-quick-row button:hover { border-color: #34d399; background: rgba(16, 185, 129, 0.2); }
+.cash-change-line {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-top: 8px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(16, 185, 129, 0.28);
+  background: rgba(16, 185, 129, 0.12);
+}
+.cash-change-line span {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  color: var(--pos-text-muted, #93b8aa);
+}
+.cash-change-line strong { color: #34d399; font-size: 14px; }

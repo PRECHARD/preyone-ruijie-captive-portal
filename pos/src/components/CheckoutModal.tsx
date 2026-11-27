@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, ApiError, type CheckoutResult, type PosPaymentStatus } from '../api';
+import { cashChange, cashQuickAmounts } from '../utils/cashAmounts';
 
 interface PaymentPart {
   amount: number;
@@ -7,6 +8,9 @@ interface PaymentPart {
   reference?: string;
   /** Present only for provider-confirmed mobile-money parts. */
   intentId?: string;
+  /** Cash handed over, which can be larger than `amount` when change is due. */
+  cashTendered?: number;
+  change?: number;
 }
 
 // Only rails Pesepay actually enables for this merchant (verified against
@@ -86,16 +90,12 @@ export default function CheckoutModal({
 
   const partsSum = useMemo(() => parts.reduce((s, p) => s + p.amount, 0), [parts]);
   const remaining = Math.max(0, Math.round((total - partsSum) * 100) / 100);
-  const change = Math.max(0, Math.round(((Number(tendered) || 0) - remaining) * 100) / 100);
+  const cashTenderedNow = Number(tendered) || 0;
+  const change = cashChange(cashTenderedNow, remaining);
 
-  const quickAmounts = useMemo(() => {
-    const set = new Set<number>([remaining]);
-    for (const step of [1, 5, 10, 20]) {
-      const next = Math.ceil(remaining / step) * step;
-      if (next > 0) set.add(next);
-    }
-    return [...set].filter((v) => v > 0 && v !== Infinity).sort((a, b) => a - b).slice(0, 4);
-  }, [remaining]);
+  // Exact balance first, then the next USD bills up to $100. The buttons are
+  // rendered in one nowrap flex row so every option is visible at once.
+  const quickAmounts = useMemo(() => cashQuickAmounts(remaining), [remaining]);
 
   const buildReference = (): string | undefined => {
     const approval = reference.trim();
@@ -107,13 +107,17 @@ export default function CheckoutModal({
   };
 
   const addManualPart = () => {
-    const amount = Number(tendered);
-    if (!amount || amount <= 0) return;
-    const capped = Math.min(amount, remaining);
-    if (capped <= 0) return;
+    const handed = Math.round((Number(tendered) || 0) * 100) / 100;
+    if (handed <= 0) return;
+    const applied = Math.round(Math.min(handed, remaining) * 100) / 100;
+    if (applied <= 0) return;
+    const cashFields =
+      method === 'cash'
+        ? { cashTendered: handed, change: cashChange(handed, applied) }
+        : {};
     setParts((p) => [
       ...p,
-      { amount: Math.round(capped * 100) / 100, method, reference: buildReference() },
+      { amount: applied, method, reference: buildReference(), ...cashFields },
     ]);
     setTendered('');
     setReference('');
@@ -356,13 +360,15 @@ export default function CheckoutModal({
                     <span className="amt">{money(change)}</span>
                   </div>
                 )}
-                <div className="quick-amts">
-                  {quickAmounts.map((v) => (
-                    <button key={v} type="button" onClick={() => setTendered(String(v.toFixed(2)))}>
-                      {money(v)}
-                    </button>
-                  ))}
-                </div>
+                {remaining > 0 && (
+                  <div className="quick-amts">
+                    {quickAmounts.map((v) => (
+                      <button key={v} type="button" onClick={() => setTendered(v.toFixed(2))}>
+                        {money(v)}
+                      </button>
+                    ))}
+                  </div>
+                )}
                 <button className="secondary-btn" disabled={!(Number(tendered) > 0)} onClick={addManualPart}>
                   Add cash payment
                 </button>

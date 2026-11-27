@@ -63,6 +63,18 @@ export interface PaymentInput {
   reference?: string;
   /** Provider-confirmed intent to consume for mobile-money parts. */
   intentId?: string;
+  /** Cash actually handed over. May exceed `amount` when change is due. */
+  cashTendered?: number;
+  /** Calculated change from `cashTendered - amount`, sent for audit. */
+  change?: number;
+}
+
+export interface PaymentRecord {
+  amount: number;
+  method: string;
+  reference?: string | null;
+  cashTendered?: number | null;
+  change?: number | null;
 }
 
 export interface PosPaymentIntent {
@@ -119,7 +131,7 @@ export interface CheckoutResult {
   amount_paid: number;
   balanceDue: number;
   items: Array<{ description: string; details?: string[]; price: number; qty: number; lineTotal: number }>;
-  payments: Array<{ amount: number; method: string; reference?: string }>;
+  payments: PaymentRecord[];
   customer_name?: string;
   customer_phone?: string;
 }
@@ -150,7 +162,7 @@ export interface PosDocument {
     lineTotal?: number;
     line_total?: number;
   }>;
-  payments?: Array<{ amount: number; method: string; reference?: string }>;
+  payments?: PaymentRecord[];
 }
 
 export interface CurrencyRate {
@@ -474,7 +486,7 @@ export const api = {
   deleteCustomer: (id: string) => req<{ ok: boolean }>(`/customers/${id}`, { method: 'DELETE' }),
 
   // Installment payment against an existing invoice/quote (office or till issued)
-  recordPayment: (id: string, p: { amount: number; method: string; reference?: string; intentId?: string }) =>
+  recordPayment: (id: string, p: PaymentInput) =>
     req<PosDocument & { balanceDue: number }>(`/documents/${id}/payments`, {
       method: 'POST',
       body: JSON.stringify(p),
