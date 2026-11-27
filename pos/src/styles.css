@@ -1,4 +1,6 @@
-﻿@font-face {
+﻿@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+@font-face {
   font-family: 'Poppins';
   src: url('/fonts/Poppins-Regular.woff2') format('woff2');
   font-weight: 400;
@@ -69,7 +71,7 @@
 html, body, #root { height: 100%; margin: 0; }
 
 body {
-  font-family: 'Poppins', system-ui, sans-serif;
+  font-family: 'Inter', 'Poppins', system-ui, sans-serif;
   background:
     radial-gradient(900px 520px at 8% -12%, rgba(124, 58, 237, 0.22), transparent 58%),
     radial-gradient(800px 480px at 100% 0%, rgba(217, 70, 239, 0.14), transparent 55%),
@@ -1816,4 +1818,132 @@ select option,
   border: 1px solid rgba(16, 185, 129, 0.42);
   box-shadow: 0 30px 90px rgba(0, 0, 0, 0.5), 0 0 42px rgba(16, 185, 129, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.09);
   color: #eafff7;
+}
+
+/* â”€â”€ Numeric parity with Invoice (tabular, mono, weights) â”€â”€ */
+.num, .mono, .p-price, .cl-total, .qty-val, .tot-row span:last-child,
+.stat-value, .acct-kpi-card strong, .x-report-row strong, .x-report-row span:last-child,
+.shift-balance, .shift-value, .p-zig, .cl-price {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum', 'cv11', 'ss01';
+}
+.mono, .doc-no, .hr-no, .cl-total, .p-price {
+  font-family: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Consolas, monospace;
+  letter-spacing: -0.01em;
+}
+.price-strong, .tot-row.grand span:last-child, .stat-value {
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+/* â”€â”€ Emerald dark-glass parity with Invoice (topbar, chips, product cards) â”€â”€ */
+body {
+  --pos-primary: #10b981;
+  --pos-primary-strong: #047857;
+  --pos-primary-soft: rgba(16, 185, 129, 0.18);
+  --pos-accent: #00F0FF;
+  --pos-accent-soft: rgba(0, 240, 255, 0.14);
+  --pos-bg: #0D0F18;
+  --pos-bg-elevated: #0a0f1d;
+  --pos-surface: #101626;
+  --pos-surface-2: #151d30;
+  --pos-border: rgba(148, 163, 184, 0.18);
+  --pos-text: #e8eef8;
+  --pos-text-muted: #94a3b8;
+  --pos-glow: rgba(16, 185, 129, 0.35);
+  --pos-glow-accent: rgba(0, 240, 255, 0.25);
+  --pos-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+  background:
+    radial-gradient(1100px 620px at 6% -12%, rgba(16, 185, 129, 0.16), transparent 62%),
+    radial-gradient(900px 520px at 104% -8%, rgba(0, 240, 255, 0.08), transparent 58%),
+    radial-gradient(900px 700px at 50% 120%, rgba(4, 120, 87, 0.1), transparent 62%),
+    #0D0F18;
+  color: #e8eef8;
+}
+
+.topbar {
+  background: linear-gradient(180deg, rgba(10, 15, 29, 0.92), rgba(5, 8, 20, 0.86)) !important;
+  border-bottom: 1px solid rgba(0, 240, 255, 0.12) !important;
+  backdrop-filter: blur(16px) saturate(1.2) !important;
+  -webkit-backdrop-filter: blur(16px) saturate(1.2) !important;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.45) !important;
+}
+.topbar-brand { gap: 12px; }
+.topbar .brand-name { color: #f2fff9; letter-spacing: 0.14em; }
+.topbar .brand-sub { color: #6ee7b7; }
+.topbar-logo { filter: drop-shadow(0 4px 14px rgba(16, 185, 129, 0.35)); }
+
+.chip {
+  background: rgba(15, 23, 42, 0.55) !important;
+  border: 1px solid rgba(148, 163, 184, 0.2) !important;
+  color: #cbd5e1 !important;
+  border-radius: 999px;
+  padding: 0.35rem 0.85rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  transition: all 0.18s ease;
+}
+.chip:hover { border-color: rgba(16, 185, 129, 0.45); color: #e8eef8; }
+.chip.ok {
+  background: linear-gradient(120deg, rgba(4, 120, 87, 0.35), rgba(16, 185, 129, 0.18)) !important;
+  border-color: rgba(52, 211, 153, 0.45) !important;
+  color: #6ee7b7 !important;
+  box-shadow: 0 0 18px rgba(16, 185, 129, 0.2);
+}
+.topbar-actions { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; }
+.topbar .ghost-btn {
+  background: rgba(15, 23, 42, 0.45);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  color: #cbd5e1;
+  border-radius: 10px;
+  padding: 0.35rem 0.7rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+.topbar .ghost-btn:hover { border-color: rgba(16, 185, 129, 0.45); color: #e8eef8; }
+
+.product-card {
+  background: linear-gradient(165deg, rgba(24, 14, 45, 0.72), rgba(12, 7, 28, 0.86)) !important;
+  border-color: rgba(16, 185, 129, 0.22) !important;
+}
+.product-card:hover { border-color: rgba(16, 185, 129, 0.55) !important; box-shadow: 0 14px 34px rgba(0,0,0,0.32), 0 0 0 1px rgba(16,185,129,0.22) !important; }
+.p-price { color: #34d399; }
+.p-cat { color: #6ee7b7; background: rgba(16, 185, 129, 0.12); border-color: rgba(16, 185, 129, 0.25); }
+
+.cart-pane, .cart-head, .cart-foot {
+  background: linear-gradient(180deg, rgba(10, 15, 29, 0.86), rgba(5, 8, 20, 0.82));
+  border-color: rgba(16, 185, 129, 0.16);
+}
+.cart-line .cl-name { color: #f8fafc; }
+.cl-total { color: #34d399; }
+.charge-btn.ready {
+  background: linear-gradient(120deg, #047857, #10b981 58%, #34d399);
+  color: #04120d;
+  box-shadow: 0 12px 28px rgba(16, 185, 129, 0.28);
+}
+
+.settings-card, .settings-panel, .acct-card, .fin-panel, .card, .modal-card {
+  background: linear-gradient(160deg, rgba(15, 23, 42, 0.82), rgba(8, 12, 28, 0.88)) !important;
+  border: 1px solid rgba(148, 163, 184, 0.16) !important;
+  color: #e8eef8 !important;
+}
+.settings-card h3, .settings-panel h3, .card h3 { color: #f2fff9; }
+.input, .select, .textarea {
+  background: rgba(4, 16, 12, 0.86);
+  border-color: rgba(16, 185, 129, 0.28);
+  color: #e8eef8;
+}
+.input:focus, .select:focus, .textarea:focus {
+  border-color: #34d399;
+  box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.16);
+}
+
+/* High-tech command bar: no wrapping/clipping. */
+.topbar { flex-wrap: nowrap; overflow: hidden; }
+.topbar .spacer { min-width: 12px; }
+.topbar-actions { flex-shrink: 0; }
+@media (max-width: 980px) {
+  .topbar .brand-sub { display: none; }
+  .topbar .chip { padding: 0.3rem 0.6rem; font-size: 0.66rem; }
 }
