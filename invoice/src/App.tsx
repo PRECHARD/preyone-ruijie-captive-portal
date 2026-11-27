@@ -3767,6 +3767,21 @@ export default function App() {
     );
   }
 
+  // Never paint the authenticated shell before we know a session exists.
+  // Without this, a refresh briefly flashes the workspace (or its skeleton)
+  // before the 401 redirect swaps in the sign-in panel.
+  if (!getToken()) {
+    return (
+      <LoginPanel
+        initialNotice={authNotice}
+        onSignedIn={() => {
+          setAuthNotice(null);
+          void boot();
+        }}
+      />
+    );
+  }
+
   if (loading) {
     return (
       <div className="app-shell">
