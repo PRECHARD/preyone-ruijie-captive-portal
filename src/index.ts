@@ -20,6 +20,7 @@ import { siteInvoicesRouter } from './routes/siteInvoices';
 import { gatewayRouter, connectAuthRouter } from './routes/gateway';
 import { transitRouter } from './routes/transit';
 import { transitWebRouter } from './routes/transitWeb';
+import { transitPortalRouter } from './routes/transitPortal';
 import { systemAdminRouter } from './routes/systemAdmin';
 import { starlinkRouter } from './routes/starlink';
 import { starlinkAdminRouter } from './routes/starlinkAdmin';
@@ -595,6 +596,15 @@ app.use((req, res, next) => {
       .send('Home Automation build not found. Run `cd homeautomate && npm run build` or set HOMEAUTOMATE_DIST to an external bundle.');
   }
 
+  // transit.preyone.com → staff self-service portal. Separate bundle from the
+  // admin console so transit staff never receive admin cookies/tokens.
+  if (host === 'transit.preyone.com') {
+    if (serveSpaBundle(req, res, spaDistDir('TRANSIT_DIST', path.join('transit', 'dist')))) return;
+    return res
+      .status(503)
+      .send('Transit portal build not found. Run `cd transit && npm run build` or set TRANSIT_DIST.');
+  }
+
   // Any IP or unknown host → captive portal (with proper static file serving)
   res.setHeader('X-Captive-Portal', 'true');
   res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
@@ -621,6 +631,9 @@ app.use('/api/subscription', subscriptionRouter);
 // Public Starlink checkout for the marketing site. No session: the invoice is
 // created from a server-side plan catalog and settled by the Pesepay callback.
 app.use('/api/site', siteInvoicesRouter);
+// Staff-facing portal API. Mounted before the device-bound app router so
+// /portal/* can never be mistaken for an app endpoint.
+app.use('/api/transit/portal', transitPortalRouter);
 app.use('/api/transit', transitRouter);
 app.use('/api/pos', posRouter);
 app.use('/api/accounting', accountingRouter);

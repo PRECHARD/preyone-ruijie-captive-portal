@@ -621,6 +621,19 @@ const SQL = `
   );
   CREATE INDEX IF NOT EXISTS idx_transit_users_company ON transit_users (company_id);
 
+  -- Staff self-service identity + one-time password setup links. Email is
+  -- optional so existing Fleet-created staff keep working; a staff member can
+  -- add it from transit.preyone.com after their first login. The partial unique
+  -- index keeps blank emails from colliding but prevents two staff in the same
+  -- company from sharing a real address.
+  ALTER TABLE transit_users ADD COLUMN IF NOT EXISTS email TEXT NOT NULL DEFAULT '';
+  ALTER TABLE transit_users ADD COLUMN IF NOT EXISTS password_setup_token TEXT;
+  ALTER TABLE transit_users ADD COLUMN IF NOT EXISTS password_setup_expires_at TIMESTAMPTZ;
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_transit_users_email_unique
+    ON transit_users (company_id, lower(email)) WHERE email != '';
+  CREATE INDEX IF NOT EXISTS idx_transit_users_setup_token
+    ON transit_users (password_setup_token) WHERE password_setup_token IS NOT NULL;
+
   CREATE TABLE IF NOT EXISTS transit_devices (
     id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     company_id    UUID NOT NULL REFERENCES transit_companies(id) ON DELETE CASCADE,

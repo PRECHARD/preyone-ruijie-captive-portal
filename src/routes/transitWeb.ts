@@ -7,6 +7,7 @@ import { PERMISSIONS, requirePermission, FIELD_STAFF_ROLES } from '../middleware
 import { transitAudit, transitSecurityEvent } from '../services/transitAudit';
 import { recordAuditLog } from './adminAuth';
 import { zimCareLine } from '../utils/phone';
+import { sendTransitPasswordSetup } from '../services/notificationService';
 
 /**
  * Web-portal transit management — mounted at /api/v1/transit.
@@ -276,7 +277,7 @@ transitWebRouter.get('/staff', requirePermission(PERMISSIONS.COMPANY_ADMIN, PERM
     roleSql = ` AND UPPER(u.role) = UPPER($${params.length})`;
   }
   const { rows } = await pool.query(
-    `SELECT u.id, u.username, u.full_name, u.phone, u.role, u.status, u.created_at,
+    `SELECT u.id, u.username, u.full_name, u.phone, u.email, u.role, u.status, u.created_at,
             (SELECT COUNT(*) FROM transit_devices d WHERE d.user_id = u.id)::int AS device_count,
             (SELECT COALESCE(jsonb_agg(jsonb_build_object('id', d.id, 'deviceUuid', d.device_uuid, 'status', d.status)
                                         ORDER BY d.last_seen DESC NULLS LAST), '[]')
@@ -309,9 +310,14 @@ transitWebRouter.post('/staff', requirePermission(PERMISSIONS.COMPANY_ADMIN, PER
     res.status(422).json({ error: 'Staff provisioning requires a company context' });
     return;
   }
-  const { fullName, role, salesCode, phone, forcePassword } = req.body as {
-    fullName?: string; role?: string; salesCode?: string; phone?: string; forcePassword?: string;
+  const { fullName, role, salesCode, phone, email, forcePassword } = req.body as {
+    fullName?: string; role?: string; salesCode?: string; phone?: string; email?: string; forcePassword?: string;
   };
+  const staffEmail = String(email || '').trim().toLowerCase();
+  if (staffEmail && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(staffEmail)) {
+    res.status(422).json({ error: 'Enter a valid email address.' });
+    return;
+  }
   if (!fullName || !role || !STAFF_ROLES_ALLOWED.includes(role as any)) {
     res.status(422).json({ error: `fullName and a valid role (${STAFF_ROLES_ALLOWED.join(', ')}) are required` });
     return;
@@ -339,17 +345,47 @@ transitWebRouter.post('/staff', requirePermission(PERMISSIONS.COMPANY_ADMIN, PER
       res.status(409).json({ error: `Username "${username}" already exists in this company` });
       return;
     }
+    if (staffEmail) {
+      const emailClash = await client.query(
+        `SELECT id FROM transit_users WHERE company_id = $1 AND lower(email) = $2 AND email != '' AND deleted_at IS NULL`,
+        [companyId, staffEmail]
+      );
+      if (emailClash.rows.length > 0) {
+        await client.query('ROLLBACK');
+        res.status(409).json({ error: `Email "${staffEmail}" is already used in this company` });
+        return;
+      }
+    }
     const passwordHash = await bcrypt.hash(plainPassword, 12);
+    const insertValues: any[] = [companyId, username, passwordHash, fullName, role, String(phone || '').trim()];
+    const emailColumn = staffEmail ? ', email' : '';
+    const emailValue = staffEmail ? ', $7' : '';
+    if (staffEmail) insertValues.push(staffEmail);
     const { rows } = await client.query(
-      `INSERT INTO transit_users (company_id, username, password_hash, full_name, role, phone)
-       VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, username, role, status`,
-      [companyId, username, passwordHash, fullName, role, String(phone || '').trim()]
+      `INSERT INTO transit_users (company_id, username, password_hash, full_name, role, phone${emailColumn})
+       VALUES ($1, $2, $3, $4, $5, $6${emailValue}) RETURNING id, username, role, status`,
+      insertValues
     );
     await client.query('COMMIT');
     const staff = rows[0];
-    await transitAudit({ companyId, action: 'STAFF_CREATED', entity: 'transit_user', entityId: staff.id, metadata: { username, role, phone: String(phone || '').trim(), by: u.email } });
+    await transitAudit({ companyId, action: 'STAFF_CREATED', entity: 'transit_user', entityId: staff.id, metadata: { username, role, phone: String(phone || '').trim(), email: staffEmail, by: u.email } });
+
+    // If an email was supplied, also issue a self-service setup link so the
+    // staff member can replace the generated password without an admin call.
+    if (staffEmail) {
+      void (async () => {
+        const token = crypto.randomUUID();
+        await pool.query(
+          `UPDATE transit_users SET password_setup_token = $1, password_setup_expires_at = $2 WHERE id = $3`,
+          [token, new Date(Date.now() + 60 * 60 * 1000), staff.id]
+        );
+        const { rows: companyRows } = await pool.query('SELECT name FROM transit_companies WHERE id = $1', [companyId]);
+        void sendTransitPasswordSetup(staffEmail, token, fullName, companyRows[0]?.name || '');
+      })();
+    }
+
     res.status(201).json({
-      staff: { id: staff.id, username: staff.username, role: staff.role, status: staff.status, fullName, phone: String(phone || '').trim() },
+      staff: { id: staff.id, username: staff.username, role: staff.role, status: staff.status, fullName, phone: String(phone || '').trim(), email: staffEmail },
       generatedPassword: plainPassword,
     });
   } catch (err) {
@@ -416,6 +452,8 @@ transitWebRouter.patch('/staff/:id', requirePermission(PERMISSIONS.COMPANY_ADMIN
 
   const updates: string[] = [];
   const params: any[] = [];
+  let duplicateEmailGuard = '';
+  let emailIdx = 0;
 
   const fullName = typeof req.body?.fullName === 'string' ? maxLen(req.body.fullName.trim()) : '';
   if (fullName) {
@@ -427,6 +465,21 @@ transitWebRouter.patch('/staff/:id', requirePermission(PERMISSIONS.COMPANY_ADMIN
     params.push(maxLen(phoneRaw.trim()));
     updates.push(`phone = $${params.length}`);
   }
+  if (typeof req.body?.email === 'string') {
+    const email = maxLen(req.body.email.trim().toLowerCase());
+    if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+      res.status(422).json({ error: 'Enter a valid email address.' });
+      return;
+    }
+    params.push(email);
+    emailIdx = params.length;
+    updates.push(`email = $${emailIdx}`);
+    duplicateEmailGuard = ` AND NOT EXISTS (
+      SELECT 1 FROM transit_users dup
+       WHERE dup.company_id = u.company_id AND dup.email != ''
+         AND lower(dup.email) = $${emailIdx} AND dup.id != u.id AND dup.deleted_at IS NULL
+    )`;
+  }
   if (typeof req.body?.role === 'string' && String(req.body.role).trim()) {
     const role = String(req.body.role).trim();
     if (!STAFF_ROLES_ALLOWED.includes(role as any)) {
@@ -437,7 +490,7 @@ transitWebRouter.patch('/staff/:id', requirePermission(PERMISSIONS.COMPANY_ADMIN
     updates.push(`role = $${params.length}`);
   }
   if (updates.length === 0) {
-    res.status(422).json({ error: 'Provide at least one updatable field: fullName, phone or role' });
+    res.status(422).json({ error: 'Provide at least one updatable field: fullName, phone, email or role' });
     return;
   }
 
@@ -447,8 +500,8 @@ transitWebRouter.patch('/staff/:id', requirePermission(PERMISSIONS.COMPANY_ADMIN
   const { rows } = await pool.query(
     `UPDATE transit_users u
         SET ${updates.join(', ')}, updated_at = NOW()
-      WHERE u.id::text = $${idIdx} AND ${scope} AND u.deleted_at IS NULL
-      RETURNING u.id, u.username, u.full_name, u.phone, u.role, u.company_id`,
+      WHERE u.id::text = $${idIdx} AND ${scope} AND u.deleted_at IS NULL${duplicateEmailGuard}
+      RETURNING u.id, u.username, u.full_name, u.phone, u.email, u.role, u.company_id`,
     params
   );
   if (rows.length === 0) {
@@ -480,7 +533,7 @@ transitWebRouter.patch('/staff/:id', requirePermission(PERMISSIONS.COMPANY_ADMIN
     entityId: staff.id,
     metadata: { username: staff.username, fields: updates.map(s => s.split('=')[0].trim()), by: u.email },
   });
-  res.json({ staff: { id: staff.id, username: staff.username, fullName: staff.full_name, phone: staff.phone, role: staff.role }, devicesUnbound });
+  res.json({ staff: { id: staff.id, username: staff.username, fullName: staff.full_name, phone: staff.phone, email: staff.email || '', role: staff.role }, devicesUnbound });
 });
 
 /**

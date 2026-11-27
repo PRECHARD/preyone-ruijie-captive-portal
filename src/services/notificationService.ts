@@ -1162,6 +1162,38 @@ export async function sendPortalForgotPassword(email: string, token: string, ful
   );
 }
 
+// ── Transit staff password setup ──────────────────────────────────────
+/** One-time setup link for Preyone Transit staff (transit_users, not portal users). */
+export async function sendTransitPasswordSetup(
+  email: string,
+  token: string,
+  fullName: string,
+  companyName: string
+): Promise<boolean> {
+  const baseUrl = (process.env.TRANSIT_PORTAL_URL || 'https://transit.preyone.com').replace(/\/$/, '');
+  const setupUrl = `${baseUrl}/set-password?token=${encodeURIComponent(token)}`;
+  const safeName = escapeEmailHtml(fullName || 'there');
+  const safeCompany = escapeEmailHtml(companyName || 'Preyone Transit');
+  return sendMail(
+    email,
+    'Set your Preyone Transit password',
+    `<div style="font-family:'Segoe UI',Arial,sans-serif;max-width:560px;margin:32px auto;background:#0a0a0a;border-radius:16px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.12),0 0 40px rgba(0,229,255,0.08)">
+      ${emailHeader('Set Your Password')}
+      <div style="padding:24px 32px;text-align:center">
+        <div style="width:64px;height:64px;border-radius:50%;background:linear-gradient(135deg,rgba(0,229,255,0.12),rgba(168,85,247,0.12));display:flex;align-items:center;justify-content:center;margin:0 auto 16px;box-shadow:0 0 20px rgba(0,229,255,0.12)">
+          <span style="font-size:28px">🔑</span>
+        </div>
+        <p style="margin:0 0 12px;font-size:15px;color:#cbd5e1;line-height:1.6">Hi <strong style="color:#ffffff">${safeName}</strong>,</p>
+        <p style="margin:0 0 20px;font-size:15px;color:#cbd5e1;line-height:1.6">An administrator at <strong style="color:#00e5ff">${safeCompany}</strong> invited you to set up your Preyone Transit account. Click below to choose a password. This link expires in <strong style="color:#00e5ff">1 hour</strong> and can only be used once.</p>
+        <a href="${setupUrl}" style="display:inline-block;background:linear-gradient(135deg,#00e5ff,#a855f7);color:#0a0a0a;padding:14px 36px;border-radius:8px;text-decoration:none;font-weight:700;font-size:14px;box-shadow:0 4px 20px rgba(0,229,255,0.3)">Set Password</a>
+        <p style="margin:16px 0 0;font-size:13px;color:#64748b">If you didn't expect this, you can safely ignore this email.</p>
+        ${emailFooter()}
+      </div>
+    </div>`,
+    'Preyone Transit'
+  );
+}
+
 // ── Portal user account created (no voucher) ──────────────────────────
 export async function sendPortalAccountCreated(
   email: string,

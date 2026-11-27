@@ -8,9 +8,10 @@ import { PoolClient } from 'pg';
 import { pool } from '../db/pool';
 import { buildRuijieSuccessUrl, WISPrSessionConfig } from '../utils/redirect';
 import { transformToWISPrProfile } from '../utils/wisprTransformer';
-import { sendPortalAccountCreated, sendPortalSignupConfirmation, sendPortalEmailVerification, sendPortalForgotPassword } from '../services/notificationService';
+import { sendPortalAccountCreated, sendPortalSignupConfirmation, sendPortalEmailVerification, sendPortalForgotPassword, sendTransitPasswordSetup } from '../services/notificationService';
 import { listDevices, unbindDevice, getDeviceLimit, normalizeMac } from '../services/deviceBinding';
 import { setPreyoneCookie } from '../utils/ssoCookie';
+import { formatZimPhone } from '../utils/phone';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'preyone-jwt-secret-change-in-production';
 function getJwtSecret(): string {
@@ -649,7 +650,39 @@ authRouter.post('/request-password-reset', requestResetLimiter, async (req: Requ
       [lookupValue]
     );
     if (rows.length === 0 || !rows[0].password_hash) {
-      // Don't reveal whether the account exists
+      // The Flutter transit app calls this endpoint from its Forgot Password
+      // dialog. Fleet staff are stored in transit_users, not users, so fall
+      // back to them here — the installed app benefits without an APK update.
+      const emailLike = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(identifier);
+      const phoneLike = !emailLike && /^\+?[0-9]{9,15}$/.test(identifier.replace(/[\s()-]/g, ''));
+      if (emailLike || phoneLike) {
+        const transitValue = phoneLike ? formatZimPhone(identifier) : identifier.toLowerCase();
+        const transitColumn = phoneLike ? 'u.phone' : 'lower(u.email)';
+        const transit = await pool.query(
+          `SELECT u.id, u.full_name, u.email, c.name AS company_name
+             FROM transit_users u
+             JOIN transit_companies c ON c.id = u.company_id AND c.deleted_at IS NULL
+            WHERE ${transitColumn} = $1 AND u.deleted_at IS NULL AND u.status = 'ACTIVE'`,
+          [transitValue]
+        );
+        // Defensive: route-level unit tests may stub pool.query without rows.
+        const transitRows = Array.isArray(transit?.rows) ? transit.rows : [];
+        // A phone number can belong to more than one company; email is unique
+        // enough for this non-revealing fallback. Only deliver when unambiguous.
+        const candidates = phoneLike && transitRows.length !== 1 ? [] : transitRows;
+        for (const staff of candidates) {
+          if (!staff.email) continue;
+          const setupToken = uuidv4();
+          await pool.query(
+            `UPDATE transit_users
+                SET password_setup_token = $1, password_setup_expires_at = $2
+              WHERE id = $3`,
+            [setupToken, new Date(Date.now() + 60 * 60 * 1000), staff.id]
+          );
+          void sendTransitPasswordSetup(staff.email, setupToken, staff.full_name, staff.company_name);
+        }
+      }
+      // Don't reveal whether the account exists or which table matched.
       res.json({ message: 'If that account is registered, a reset link has been sent.' });
       return;
     }
