@@ -15,6 +15,7 @@ import {
 import InvoicesView from './InvoicesView';
 import SlFooter from './SlFooter';
 import PeseCheckoutModal, { type CheckoutKind } from './PeseCheckoutModal';
+import TelemetryPanel from './TelemetryPanel';
 
 const PENDING_KEY = 'starlink_pending_payment';
 
@@ -37,7 +38,8 @@ const TAB_ICONS: Record<SlTab, IconType> = {
 const FAQS = [
   { q: 'How do I pay for my Starlink service?', a: 'Use the Wallet Top Up or Data Top Up action on the Home tab. Payments run through the Preyone Payment gateway (EcoCash, InnBucks or Omari) and settle in USD — your invoice is marked paid automatically once the payment completes.' },
   { q: 'What happens after I complete a Preyone Payment payment?', a: 'Preyone Payment returns you to this portal. We poll the payment status, mark the invoice PAID and credit your wallet, data bundle or kit order — no manual confirmation needed.' },
-  { q: 'How is data usage tracked per kit?', a: 'Each registered kit keeps a rolling four-month history of monthly consumption (GB). Register your kit from the Devices tab with the serial number printed on the box.' },
+  { q: 'How is data usage tracked per kit?', a: 'Each registered kit keeps a rolling four-month history of monthly consumption (GB). The Telemetry & Forecast panel adds a live 30-day priority/standard view, terminal health and a projected exhaustion date. Register your kit from the Devices tab with the serial number printed on the box.' },
+  { q: 'Can I get usage warnings or automatic data top-ups?', a: 'Yes. In Telemetry & Forecast you can enable 75%, 90% and 100% email and portal alerts for each billing cycle. Auto top-up can buy more data from your wallet when your remaining allowance drops below your chosen minimum.' },
   { q: 'Can I download invoices for accounting?', a: 'Yes. Open Billing, click View on any invoice for the full document, then Download PDF. The Statement button exports everything on screen as a single account statement PDF.' },
   { q: 'I forgot my password — what now?', a: 'Click "Forgot password" on the sign-in screen. A reset link valid for one hour is emailed to you; open it and choose a new password (minimum 8 characters).' },
   { q: 'Which payment methods are supported?', a: 'EcoCash, InnBucks and Omari through Preyone Payment. All portal prices and balances are shown in USD.' },
@@ -548,7 +550,10 @@ export default function StarlinkPortal({ onSignOut }: { onSignOut: () => void })
                       <button
                         key={n.id}
                         type="button"
-                        className={'sp-notif-item' + (n.is_read ? '' : ' is-unread')}
+                        className={
+                          'sp-notif-item sp-notif-item--' + n.category.toLowerCase().replace('_', '-')
+                          + (n.is_read ? '' : ' is-unread')
+                        }
                         onClick={() => {
                           if (!n.is_read) void markOneRead(n.id);
                           setNotifOpen(false);
@@ -807,6 +812,8 @@ export default function StarlinkPortal({ onSignOut }: { onSignOut: () => void })
                 </div>
               )}
             </section>
+
+            <TelemetryPanel kit={activeKit} />
 
             {/* Recent invoices */}
             <section className="sp-panel">

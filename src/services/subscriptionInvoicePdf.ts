@@ -98,8 +98,8 @@ export function buildSubscriptionInvoicePdf(input: SubscriptionInvoicePdfInput):
 
   text(118, 800, 19, 'F2', 'PREYONE', '0.06 0.22 0.17');
   text(118, 784, 8, 'F1', 'ENTERPRISES  |  INVOICE & POS', '0.36 0.48 0.43');
-  text(553, 800, 15, 'F2', 'TAX INVOICE', '0.06 0.22 0.17');
-  text(553, 784, 9, 'F1', fit(input.invoiceNumber, 22), '0.36 0.48 0.43');
+  text(400, 800, 15, 'F2', 'TAX INVOICE', '0.06 0.22 0.17');
+  text(400, 784, 9, 'F1', fit(input.invoiceNumber, 22), '0.36 0.48 0.43');
   commands.push('0.05 0.52 0.38 RG 1.4 w 42 770 m 553 770 l S');
 
   text(42, 735, 11, 'F2', 'BILL TO', '0.06 0.22 0.17');
@@ -110,8 +110,8 @@ export function buildSubscriptionInvoicePdf(input: SubscriptionInvoicePdfInput):
   if (input.billingPhone) text(42, 653, 10, 'F1', `Phone: ${fit(input.billingPhone, 28)}`);
 
   const right = (y: number, label: string, value: unknown) => {
-    text(400, y, 9, 'F1', label, '0.35 0.45 0.41');
-    text(553, y, 10, 'F2', fit(value, 22));
+    text(392, y, 9, 'F1', label, '0.35 0.45 0.41');
+    text(440, y, 10, 'F2', fit(value, 18));
   };
   right(735, 'ISSUED', date(input.issuedAt));
   right(717, 'STATUS', 'PAID');
@@ -122,17 +122,17 @@ export function buildSubscriptionInvoicePdf(input: SubscriptionInvoicePdfInput):
   text(50, 595, 9, 'F2', 'DESCRIPTION', '0.05 0.30 0.22');
   text(345, 595, 9, 'F2', 'QTY', '0.05 0.30 0.22');
   text(425, 595, 9, 'F2', 'UNIT PRICE', '0.05 0.30 0.22');
-  text(553, 595, 9, 'F2', 'AMOUNT', '0.05 0.30 0.22');
+  text(510, 595, 9, 'F2', 'AMOUNT', '0.05 0.30 0.22');
 
   text(50, 563, 11, 'F2', fit(`${input.planName} subscription plan`, 42));
   text(50, 547, 9, 'F1', fit(`Access renewed for 30 days - up to ${input.devices} device(s)`, 46));
   text(345, 563, 10, 'F1', '1');
   text(425, 563, 10, 'F1', money(input.amount, input.currency));
-  text(553, 563, 11, 'F2', money(input.amount, input.currency));
+  text(510, 563, 11, 'F2', money(input.amount, input.currency));
   rule(525);
 
   text(430, 503, 10, 'F1', 'Subtotal');
-  text(553, 503, 10, 'F1', money(input.amount, input.currency));
+  text(510, 503, 10, 'F1', money(input.amount, input.currency));
   text(430, 480, 11, 'F2', 'TOTAL PAID');
   rect(405, 462, 148, 30, '0.02 0.36 0.26');
   text(415, 472, 13, 'F2', money(input.amount, input.currency), '1 1 1');

@@ -22,6 +22,7 @@ const ACTION_LABELS: Record<string, string> = {
   kit_purchase: 'Starlink kit purchase',
   plan_change: 'Plan change',
   plan_renewal: 'Plan renewal',
+  auto_topup: 'Automatic data top-up',
 };
 
 function numberOrNull(value: unknown): number | null {

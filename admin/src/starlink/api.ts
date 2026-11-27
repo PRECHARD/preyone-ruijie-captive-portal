@@ -63,9 +63,76 @@ export type SlNotification = {
   link_url: string | null;
   meta: Record<string, unknown>;
   is_read: boolean;
+  visible_in_portal?: boolean;
   email_status: string;
   email_sent_at: string | null;
   created_at: string;
+};
+
+export type SlAlertPreferences = {
+  kit_id: string;
+  customer_id: string;
+  alert_75_sent_cycle: string | null;
+  alert_90_sent_cycle: string | null;
+  alert_100_sent_cycle: string | null;
+  alert_75_email_enabled: boolean;
+  alert_75_portal_enabled: boolean;
+  alert_90_email_enabled: boolean;
+  alert_90_portal_enabled: boolean;
+  alert_100_email_enabled: boolean;
+  alert_100_portal_enabled: boolean;
+  email_alerts_enabled: boolean;
+  portal_alerts_enabled: boolean;
+  offline_alerts_enabled: boolean;
+  auto_topup_enabled: boolean;
+  auto_topup_gb: number;
+  auto_topup_min_gb: number;
+};
+
+export type SlTelemetrySnapshot = {
+  id: string;
+  kit_id: string;
+  recorded_at: string;
+  priority_used_gb: number;
+  standard_used_gb: number;
+  download_mbps: number | null;
+  upload_mbps: number | null;
+  latency_ms: number | null;
+  ping_drop_rate: number | null;
+  obstruction_percent: number | null;
+  uptime_seconds: number | null;
+  online_status: boolean;
+};
+
+export type SlTelemetryDailyPoint = {
+  date: string;
+  priority_gb: number;
+  standard_gb: number;
+  total_gb: number;
+};
+
+export type SlTelemetryMetrics = {
+  daily_burn_rate_gb: number;
+  days_remaining: number | null;
+  projected_exhaustion_date: string | null;
+  priority_used_gb: number;
+  standard_used_gb: number;
+  priority_total_gb: number;
+  standard_total_gb: number;
+  priority_percent: number;
+  standard_percent: number;
+  total_percent: number;
+  remaining_gb: number;
+  sample_count: number;
+};
+
+export type SlTelemetryResponse = {
+  kit_id: string;
+  cycle: string;
+  snapshots: SlTelemetrySnapshot[];
+  daily: SlTelemetryDailyPoint[];
+  metrics: SlTelemetryMetrics;
+  preferences: SlAlertPreferences;
 };
 
 export type SlVerifyResult = {
@@ -253,6 +320,37 @@ export async function slMarkNotificationsRead(ids?: string[]): Promise<{
   return sfetch('/notifications/mark-read', {
     method: 'POST',
     body: JSON.stringify(ids?.length ? { ids } : {}),
+  });
+}
+
+/** Latest 30-day telemetry, daily totals, burn-rate forecast and alert prefs. */
+export async function slTelemetry(kitId: string): Promise<SlTelemetryResponse> {
+  return sfetch(`/telemetry?kitId=${encodeURIComponent(kitId)}`);
+}
+
+export type SlAlertPreferenceUpdate = Partial<Pick<
+  SlAlertPreferences,
+  | 'alert_75_email_enabled'
+  | 'alert_75_portal_enabled'
+  | 'alert_90_email_enabled'
+  | 'alert_90_portal_enabled'
+  | 'alert_100_email_enabled'
+  | 'alert_100_portal_enabled'
+  | 'email_alerts_enabled'
+  | 'portal_alerts_enabled'
+  | 'offline_alerts_enabled'
+  | 'auto_topup_enabled'
+  | 'auto_topup_gb'
+  | 'auto_topup_min_gb'
+>> & { kitId?: string };
+
+export async function slUpdateAlertPreferences(body: SlAlertPreferenceUpdate): Promise<{
+  ok: boolean;
+  preferences: SlAlertPreferences;
+}> {
+  return sfetch('/telemetry/preferences', {
+    method: 'PATCH',
+    body: JSON.stringify(body),
   });
 }
 

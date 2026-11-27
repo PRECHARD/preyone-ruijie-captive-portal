@@ -8,6 +8,11 @@ import {
   rejectPlanApplication,
   PlanApplicationError,
 } from '../services/starlinkPlanApplications';
+import {
+  parseTelemetrySyncBody,
+  syncStarlinkTelemetry,
+  StarlinkTelemetryError,
+} from '../services/starlinkTelemetry';
 
 /**
  * Admin console API for the Starlink customer book.
@@ -22,7 +27,7 @@ starlinkAdminRouter.use(requireRole('Manager', 'CEO'));
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-const INVOICE_KINDS = ['wallet_topup', 'data_topup', 'kit_purchase', 'service'];
+const INVOICE_KINDS = ['wallet_topup', 'data_topup', 'kit_purchase', 'service', 'auto_topup'];
 const INVOICE_STATUSES = ['PENDING', 'PAID', 'FAILED'];
 const KIT_STATUSES = ['active', 'paused'];
 const MAX_CAPACITY = 100000;
@@ -503,5 +508,20 @@ starlinkAdminRouter.put('/plans/:code/capacity', async (req: Request, res: Respo
     });
   } catch (err) {
     sendError(res, 'plan capacity', err);
+  }
+});
+
+/** Manager/CEO telemetry ingestion. Body: one snapshot or { snapshots: [...] }. */
+starlinkAdminRouter.post('/telemetry/sync', async (req: Request, res: Response) => {
+  try {
+    const snapshots = parseTelemetrySyncBody(req.body);
+    const result = await syncStarlinkTelemetry(snapshots);
+    res.json(result);
+  } catch (err) {
+    if (err instanceof StarlinkTelemetryError) {
+      res.status(err.status).json({ error: err.message });
+      return;
+    }
+    sendError(res, 'telemetry sync', err);
   }
 });

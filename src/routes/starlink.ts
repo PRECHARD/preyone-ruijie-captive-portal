@@ -33,11 +33,16 @@ import {
   listStarlinkNotifications,
   getUnreadStarlinkNotificationCount,
   markStarlinkNotificationsRead,
+  updateStarlinkAlertPreferences,
 } from '../db/starlink';
 import {
   verifyStarlinkPaymentIntent,
   StarlinkIntentError,
 } from '../services/starlinkPaymentReconcile';
+import {
+  getStarlinkTelemetryBundle,
+  StarlinkTelemetryError,
+} from '../services/starlinkTelemetry';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'preyone-jwt-secret-change-in-production';
 
@@ -419,6 +424,54 @@ starlinkRouter.post(
     }
   }
 );
+
+// ---------------------------------------------------------------------------
+// Telemetry, forecast and alert preferences
+// ---------------------------------------------------------------------------
+starlinkRouter.get('/telemetry', requireStarlinkAuth, async (req: Request, res: Response) => {
+  const kitId = String(req.query.kitId ?? '');
+  if (!UUID_RE.test(kitId)) { res.status(400).json({ error: 'Choose a valid kit' }); return; }
+  try {
+    const bundle = await getStarlinkTelemetryBundle(req.starlinkCustomer!.id, kitId);
+    res.json(bundle);
+  } catch (err) {
+    if (err instanceof StarlinkTelemetryError) { res.status(err.status).json({ error: err.message }); return; }
+    console.error('Starlink telemetry error:', err);
+    res.status(500).json({ error: 'Could not load telemetry' });
+  }
+});
+
+const PREF_BOOLEAN_FIELDS = [
+  'alert_75_email_enabled', 'alert_75_portal_enabled',
+  'alert_90_email_enabled', 'alert_90_portal_enabled',
+  'alert_100_email_enabled', 'alert_100_portal_enabled',
+  'email_alerts_enabled', 'portal_alerts_enabled', 'offline_alerts_enabled',
+  'auto_topup_enabled',
+] as const;
+
+starlinkRouter.patch('/telemetry/preferences', requireStarlinkAuth, async (req: Request, res: Response) => {
+  const kitId = String(req.body?.kitId ?? req.query.kitId ?? '');
+  if (!UUID_RE.test(kitId)) { res.status(400).json({ error: 'Choose a valid kit' }); return; }
+  const kit = await getStarlinkKit(kitId, req.starlinkCustomer!.id);
+  if (!kit) { res.status(404).json({ error: 'Kit not found' }); return; }
+
+  const patch: Record<string, boolean | number> = {};
+  for (const field of PREF_BOOLEAN_FIELDS) {
+    if (typeof req.body?.[field] === 'boolean') patch[field] = req.body[field];
+  }
+  const gb = Number(req.body?.auto_topup_gb);
+  if (Number.isFinite(gb)) patch.auto_topup_gb = Math.min(1000, Math.max(1, Math.round(gb * 100) / 100));
+  const minGb = Number(req.body?.auto_topup_min_gb);
+  if (Number.isFinite(minGb)) patch.auto_topup_min_gb = Math.min(100, Math.max(0.5, Math.round(minGb * 100) / 100));
+
+  try {
+    const preferences = await updateStarlinkAlertPreferences(req.starlinkCustomer!.id, kitId, patch);
+    res.json({ ok: true, preferences });
+  } catch (err) {
+    console.error('Starlink telemetry preferences error:', err);
+    res.status(500).json({ error: 'Could not update alert preferences' });
+  }
+});
 
 starlinkRouter.get('/notifications', requireStarlinkAuth, async (req: Request, res: Response) => {
   try {

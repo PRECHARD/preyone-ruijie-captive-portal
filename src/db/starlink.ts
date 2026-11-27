@@ -84,6 +84,8 @@ export interface StarlinkNotification {
   link_url: string | null;
   meta: Record<string, unknown>;
   is_read: boolean;
+  /** Hidden rows still provide an idempotent email claim but never enter the feed. */
+  visible_in_portal?: boolean;
   email_status: string;
   email_sent_at: string | null;
   created_at: string;
@@ -97,6 +99,73 @@ export interface StarlinkPendingIntent {
   amount: number;
   created_at: string;
 }
+
+/** Raw terminal telemetry. Cumulative usage counters are GB, not KB. */
+export interface StarlinkUsageSnapshot {
+  id: string;
+  kit_id: string;
+  recorded_at: string;
+  priority_used_gb: number;
+  standard_used_gb: number;
+  download_mbps: number | null;
+  upload_mbps: number | null;
+  latency_ms: number | null;
+  ping_drop_rate: number | null;
+  obstruction_percent: number | null;
+  uptime_seconds: number | null;
+  online_status: boolean;
+}
+
+export type StarlinkUsageSnapshotInput = {
+  kitId: string;
+  recordedAt?: string | Date;
+  priorityUsedGb: number;
+  standardUsedGb?: number;
+  downloadMbps?: number | null;
+  uploadMbps?: number | null;
+  latencyMs?: number | null;
+  pingDropRate?: number | null;
+  obstructionPercent?: number | null;
+  uptimeSeconds?: number | null;
+  onlineStatus?: boolean;
+};
+
+/** Per-customer/kit alert + auto-top-up configuration. */
+export interface StarlinkAlertPreferences {
+  kit_id: string;
+  customer_id: string;
+  alert_75_sent_cycle: string | null;
+  alert_90_sent_cycle: string | null;
+  alert_100_sent_cycle: string | null;
+  alert_75_email_enabled: boolean;
+  alert_75_portal_enabled: boolean;
+  alert_90_email_enabled: boolean;
+  alert_90_portal_enabled: boolean;
+  alert_100_email_enabled: boolean;
+  alert_100_portal_enabled: boolean;
+  email_alerts_enabled: boolean;
+  portal_alerts_enabled: boolean;
+  offline_alerts_enabled: boolean;
+  auto_topup_enabled: boolean;
+  auto_topup_gb: number;
+  auto_topup_min_gb: number;
+}
+
+export type StarlinkAlertPreferencePatch = Partial<Pick<
+  StarlinkAlertPreferences,
+  | 'alert_75_email_enabled'
+  | 'alert_75_portal_enabled'
+  | 'alert_90_email_enabled'
+  | 'alert_90_portal_enabled'
+  | 'alert_100_email_enabled'
+  | 'alert_100_portal_enabled'
+  | 'email_alerts_enabled'
+  | 'portal_alerts_enabled'
+  | 'offline_alerts_enabled'
+  | 'auto_topup_enabled'
+  | 'auto_topup_gb'
+  | 'auto_topup_min_gb'
+>>;
 
 // ---------------------------------------------------------------------------
 // Schema (additive, idempotent)
@@ -253,12 +322,64 @@ const STARLINK_DDL = `
       created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
+    -- Additive visibility flag: existing rows default to visible, so the
+    -- current feed keeps behaving exactly as before.
+    ALTER TABLE starlink_notifications ADD COLUMN IF NOT EXISTS visible_in_portal BOOLEAN NOT NULL DEFAULT TRUE;
+
     CREATE INDEX IF NOT EXISTS idx_starlink_notifications_customer
       ON starlink_notifications (customer_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_starlink_notifications_unread
       ON starlink_notifications (customer_id) WHERE is_read = FALSE;
     CREATE INDEX IF NOT EXISTS idx_starlink_notifications_mail
       ON starlink_notifications (email_status) WHERE email_status = 'PENDING';
+
+    -- Raw terminal telemetry. One row per kit per timestamp; ON CONFLICT keeps
+    -- admin retries idempotent. Usage counters are cumulative GB.
+    CREATE TABLE IF NOT EXISTS starlink_usage_snapshots (
+      id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      kit_id              UUID NOT NULL REFERENCES starlink_kits(id) ON DELETE CASCADE,
+      recorded_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      priority_used_gb    NUMERIC(12,2) NOT NULL DEFAULT 0,
+      standard_used_gb    NUMERIC(12,2) NOT NULL DEFAULT 0,
+      download_mbps       NUMERIC(10,2),
+      upload_mbps         NUMERIC(10,2),
+      latency_ms          NUMERIC(10,2),
+      ping_drop_rate      NUMERIC(6,2),
+      obstruction_percent NUMERIC(6,2),
+      uptime_seconds      BIGINT,
+      online_status       BOOLEAN NOT NULL DEFAULT TRUE
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_starlink_usage_snapshot_kit_time
+      ON starlink_usage_snapshots (kit_id, recorded_at);
+    CREATE INDEX IF NOT EXISTS idx_starlink_usage_snapshot_recent
+      ON starlink_usage_snapshots (kit_id, recorded_at DESC);
+
+    -- Alert preferences and per-cycle send markers. Per-threshold switches are
+    -- additive to the global email/portal/offline switches.
+    CREATE TABLE IF NOT EXISTS starlink_alert_preferences (
+      kit_id                    UUID PRIMARY KEY REFERENCES starlink_kits(id) ON DELETE CASCADE,
+      customer_id               UUID NOT NULL REFERENCES starlink_customers(id) ON DELETE CASCADE,
+      alert_75_sent_cycle       TEXT,
+      alert_90_sent_cycle       TEXT,
+      alert_100_sent_cycle      TEXT,
+      alert_75_email_enabled    BOOLEAN NOT NULL DEFAULT TRUE,
+      alert_75_portal_enabled   BOOLEAN NOT NULL DEFAULT TRUE,
+      alert_90_email_enabled    BOOLEAN NOT NULL DEFAULT TRUE,
+      alert_90_portal_enabled   BOOLEAN NOT NULL DEFAULT TRUE,
+      alert_100_email_enabled   BOOLEAN NOT NULL DEFAULT TRUE,
+      alert_100_portal_enabled  BOOLEAN NOT NULL DEFAULT TRUE,
+      email_alerts_enabled      BOOLEAN NOT NULL DEFAULT TRUE,
+      portal_alerts_enabled     BOOLEAN NOT NULL DEFAULT TRUE,
+      offline_alerts_enabled    BOOLEAN NOT NULL DEFAULT TRUE,
+      auto_topup_enabled        BOOLEAN NOT NULL DEFAULT FALSE,
+      auto_topup_gb             NUMERIC(10,2) NOT NULL DEFAULT 10,
+      auto_topup_min_gb         NUMERIC(10,2) NOT NULL DEFAULT 2,
+      updated_at                TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_starlink_alert_prefs_customer
+      ON starlink_alert_preferences (customer_id);
 `;
 
 /**
@@ -282,10 +403,11 @@ export async function ensureStarlinkSchema(): Promise<void> {
             WHERE tablename IN (
               'starlink_customers', 'starlink_kits', 'starlink_invoices',
               'starlink_kit_usage', 'starlink_plan_capacity',
-              'starlink_plan_applications', 'starlink_notifications'
+              'starlink_plan_applications', 'starlink_notifications',
+              'starlink_usage_snapshots', 'starlink_alert_preferences'
             )`
         );
-        if (Number(rows[0]?.n) >= 7) return;
+        if (Number(rows[0]?.n) >= 9) return;
       } catch {
         /* connectivity issue — keep retrying */
       }
@@ -617,6 +739,7 @@ function starlinkActionLabel(kind: string): string {
     case 'kit_purchase': return 'Starlink kit purchase';
     case 'plan_change': return 'Plan change';
     case 'plan_renewal': return 'Plan renewal';
+    case 'auto_topup': return 'Automatic data top-up';
     default: return 'Starlink service payment';
   }
 }
@@ -803,7 +926,8 @@ export interface StarlinkReceiptNotification extends StarlinkNotification {
 
 const RECEIPT_NOTIFICATION_SELECT = `
   SELECT n.id, n.customer_id, n.category, n.event_key, n.title, n.body,
-         n.link_url, n.meta, n.is_read, n.email_status, n.email_sent_at, n.created_at,
+         n.link_url, n.meta, n.is_read, n.visible_in_portal,
+         n.email_status, n.email_sent_at, n.created_at,
          c.email AS customer_email, c.full_name AS customer_full_name
     FROM starlink_notifications n
     JOIN starlink_customers c ON c.id = n.customer_id`;
@@ -832,7 +956,7 @@ export async function claimStarlinkNotificationEmail(
         SET email_status = 'SENDING', email_error = NULL
       WHERE event_key = $1 AND email_status = 'PENDING'
       RETURNING id, customer_id, category, event_key, title, body, link_url, meta,
-                is_read, email_status, email_sent_at, created_at`,
+                is_read, visible_in_portal, email_status, email_sent_at, created_at`,
     [eventKey]
   );
   if (!rows[0]) return null;
@@ -866,9 +990,9 @@ export async function listStarlinkNotifications(
 ): Promise<StarlinkNotification[]> {
   const { rows } = await pool.query(
     `SELECT id, customer_id, category, event_key, title, body, link_url, meta,
-            is_read, email_status, email_sent_at, created_at
+            is_read, visible_in_portal, email_status, email_sent_at, created_at
        FROM starlink_notifications
-      WHERE customer_id = $1
+      WHERE customer_id = $1 AND visible_in_portal = TRUE
       ORDER BY created_at DESC
       LIMIT $2`,
     [customerId, Math.min(Math.max(Number(limit) || 50, 1), 100)]
@@ -879,7 +1003,7 @@ export async function listStarlinkNotifications(
 export async function getUnreadStarlinkNotificationCount(customerId: string): Promise<number> {
   const { rows } = await pool.query(
     `SELECT COUNT(*)::int AS n FROM starlink_notifications
-      WHERE customer_id = $1 AND is_read = FALSE`,
+      WHERE customer_id = $1 AND is_read = FALSE AND visible_in_portal = TRUE`,
     [customerId]
   );
   return Number(rows[0]?.n ?? 0);
@@ -900,6 +1024,234 @@ export async function markStarlinkNotificationsRead(customerId: string, ids?: st
         [customerId]
       );
   return result.rowCount ?? 0;
+}
+
+// ---------------------------------------------------------------------------
+// Telemetry, alert preferences and queued portal notices (additive)
+// ---------------------------------------------------------------------------
+
+const PREF_COLUMNS: Record<keyof StarlinkAlertPreferencePatch, string> = {
+  alert_75_email_enabled: 'alert_75_email_enabled',
+  alert_75_portal_enabled: 'alert_75_portal_enabled',
+  alert_90_email_enabled: 'alert_90_email_enabled',
+  alert_90_portal_enabled: 'alert_90_portal_enabled',
+  alert_100_email_enabled: 'alert_100_email_enabled',
+  alert_100_portal_enabled: 'alert_100_portal_enabled',
+  email_alerts_enabled: 'email_alerts_enabled',
+  portal_alerts_enabled: 'portal_alerts_enabled',
+  offline_alerts_enabled: 'offline_alerts_enabled',
+  auto_topup_enabled: 'auto_topup_enabled',
+  auto_topup_gb: 'auto_topup_gb',
+  auto_topup_min_gb: 'auto_topup_min_gb',
+};
+
+const ALERT_CYCLE_COLUMNS: Record<75 | 90 | 100, string> = {
+  75: 'alert_75_sent_cycle',
+  90: 'alert_90_sent_cycle',
+  100: 'alert_100_sent_cycle',
+};
+
+export async function getStarlinkAlertPreferences(
+  customerId: string,
+  kitId: string,
+  client?: PoolClient
+): Promise<StarlinkAlertPreferences> {
+  const q = client ?? pool;
+  await q.query(
+    `INSERT INTO starlink_alert_preferences (customer_id, kit_id)
+     VALUES ($1, $2)
+     ON CONFLICT (kit_id) DO NOTHING`,
+    [customerId, kitId]
+  );
+  const { rows } = await q.query(
+    `SELECT kit_id, customer_id, alert_75_sent_cycle, alert_90_sent_cycle, alert_100_sent_cycle,
+            alert_75_email_enabled, alert_75_portal_enabled,
+            alert_90_email_enabled, alert_90_portal_enabled,
+            alert_100_email_enabled, alert_100_portal_enabled,
+            email_alerts_enabled, portal_alerts_enabled, offline_alerts_enabled,
+            auto_topup_enabled, auto_topup_gb, auto_topup_min_gb
+       FROM starlink_alert_preferences
+      WHERE customer_id = $1 AND kit_id = $2`,
+    [customerId, kitId]
+  );
+  return rows[0] as StarlinkAlertPreferences;
+}
+
+export async function updateStarlinkAlertPreferences(
+  customerId: string,
+  kitId: string,
+  patch: StarlinkAlertPreferencePatch
+): Promise<StarlinkAlertPreferences> {
+  await getStarlinkAlertPreferences(customerId, kitId);
+  const entries = Object.entries(patch).filter(
+    ([key, value]) => value !== undefined && Object.prototype.hasOwnProperty.call(PREF_COLUMNS, key)
+  ) as Array<[keyof StarlinkAlertPreferencePatch, unknown]>;
+  if (entries.length > 0) {
+    const sets = entries.map(
+      ([key], i) => `${PREF_COLUMNS[key]} = $${i + 3}`
+    );
+    const values = entries.map(([, value]) => value);
+    await pool.query(
+      `UPDATE starlink_alert_preferences
+          SET ${sets.join(', ')}, updated_at = NOW()
+        WHERE customer_id = $1 AND kit_id = $2`,
+      [customerId, kitId, ...values]
+    );
+  }
+  return getStarlinkAlertPreferences(customerId, kitId);
+}
+
+export async function markStarlinkAlertCycleSent(
+  customerId: string,
+  kitId: string,
+  threshold: 75 | 90 | 100,
+  cycle: string,
+  client?: PoolClient
+): Promise<void> {
+  const q = client ?? pool;
+  const column = ALERT_CYCLE_COLUMNS[threshold];
+  await q.query(
+    `UPDATE starlink_alert_preferences
+        SET ${column} = $3, updated_at = NOW()
+      WHERE customer_id = $1 AND kit_id = $2`,
+    [customerId, kitId, cycle]
+  );
+}
+
+function telemetryNumber(value: unknown, fallback = 0): number {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function telemetryNullable(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+export async function insertStarlinkUsageSnapshot(
+  input: StarlinkUsageSnapshotInput,
+  client?: PoolClient
+): Promise<StarlinkUsageSnapshot> {
+  const q = client ?? pool;
+  const parsed = input.recordedAt ? new Date(input.recordedAt) : new Date();
+  const recordedAt = Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+  const { rows } = await q.query(
+    `INSERT INTO starlink_usage_snapshots
+       (kit_id, recorded_at, priority_used_gb, standard_used_gb, download_mbps,
+        upload_mbps, latency_ms, ping_drop_rate, obstruction_percent, uptime_seconds, online_status)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+     ON CONFLICT (kit_id, recorded_at) DO UPDATE SET
+       priority_used_gb = EXCLUDED.priority_used_gb,
+       standard_used_gb = EXCLUDED.standard_used_gb,
+       download_mbps = EXCLUDED.download_mbps,
+       upload_mbps = EXCLUDED.upload_mbps,
+       latency_ms = EXCLUDED.latency_ms,
+       ping_drop_rate = EXCLUDED.ping_drop_rate,
+       obstruction_percent = EXCLUDED.obstruction_percent,
+       uptime_seconds = EXCLUDED.uptime_seconds,
+       online_status = EXCLUDED.online_status
+     RETURNING id, kit_id, recorded_at, priority_used_gb, standard_used_gb,
+               download_mbps, upload_mbps, latency_ms, ping_drop_rate,
+               obstruction_percent, uptime_seconds, online_status`,
+    [
+      input.kitId,
+      recordedAt.toISOString(),
+      telemetryNumber(input.priorityUsedGb),
+      telemetryNumber(input.standardUsedGb),
+      telemetryNullable(input.downloadMbps),
+      telemetryNullable(input.uploadMbps),
+      telemetryNullable(input.latencyMs),
+      telemetryNullable(input.pingDropRate),
+      telemetryNullable(input.obstructionPercent),
+      telemetryNullable(input.uptimeSeconds),
+      input.onlineStatus !== false,
+    ]
+  );
+  return rows[0] as StarlinkUsageSnapshot;
+}
+
+export async function listStarlinkUsageSnapshots(
+  kitId: string,
+  days = 30,
+  client?: PoolClient
+): Promise<StarlinkUsageSnapshot[]> {
+  const q = client ?? pool;
+  const window = Math.min(Math.max(Number(days) || 30, 1), 365);
+  const { rows } = await q.query(
+    `SELECT id, kit_id, recorded_at, priority_used_gb, standard_used_gb,
+            download_mbps, upload_mbps, latency_ms, ping_drop_rate,
+            obstruction_percent, uptime_seconds, online_status
+       FROM starlink_usage_snapshots
+      WHERE kit_id = $1 AND recorded_at >= NOW() - ($2::int * INTERVAL '1 day')
+      ORDER BY recorded_at DESC`,
+    [kitId, window]
+  );
+  return rows as StarlinkUsageSnapshot[];
+}
+
+/** Idempotent portal notice insert. Returns true only when this worker created it. */
+export async function queueStarlinkNotification(input: {
+  customerId: string;
+  category: StarlinkNotificationCategory;
+  eventKey: string;
+  title: string;
+  body: string;
+  linkUrl?: string | null;
+  meta?: Record<string, unknown>;
+  emailStatus?: string;
+  visibleInPortal?: boolean;
+}, client?: PoolClient): Promise<boolean> {
+  const q = client ?? pool;
+  const result = await q.query(
+    `INSERT INTO starlink_notifications
+       (customer_id, category, event_key, title, body, link_url, meta, email_status, visible_in_portal)
+     VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9)
+     ON CONFLICT (event_key) DO NOTHING`,
+    [
+      input.customerId,
+      input.category,
+      input.eventKey,
+      input.title,
+      input.body,
+      input.linkUrl ?? null,
+      JSON.stringify(input.meta ?? {}),
+      input.emailStatus ?? 'NOT_APPLICABLE',
+      input.visibleInPortal !== false,
+    ]
+  );
+  return (result.rowCount ?? 0) > 0;
+}
+
+/** Wallet-funded auto top-ups settle immediately, but still get a PAID invoice. */
+export async function createPaidStarlinkInvoice(input: {
+  customerId: string;
+  amount: number;
+  description: string;
+  kind: string;
+  meta?: Record<string, unknown>;
+  paymentReference?: string | null;
+  client: PoolClient;
+}): Promise<StarlinkInvoice> {
+  const invoiceNumber = await nextStarlinkInvoiceNumber(input.client);
+  const { rows } = await input.client.query(
+    `INSERT INTO starlink_invoices
+       (customer_id, invoice_number, amount, currency, description, kind,
+        status, pese_reference, meta, paid_at)
+     VALUES ($1, $2, $3, 'USD', $4, $5, 'PAID', $6, $7::jsonb, NOW())
+     RETURNING id, customer_id, invoice_number, amount, currency, description, kind,
+               status, pese_reference, meta, issued_date, due_date, paid_at, created_at`,
+    [
+      input.customerId,
+      invoiceNumber,
+      input.amount,
+      input.description,
+      input.kind,
+      input.paymentReference ?? 'wallet-auto-topup',
+      JSON.stringify(input.meta ?? {}),
+    ]
+  );
+  return rows[0] as StarlinkInvoice;
 }
 
 /** Pending Starlink intents still attached to an unpaid invoice (recovery UI). */

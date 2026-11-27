@@ -386,3 +386,181 @@ export function buildPaymentReceiptEmail(input: {
 
   return { subject: `Payment receipt · ${input.invoiceNumber}`, html, text };
 }
+
+/** Proactive 75/90/100% warning with a one-click return to the portal top-up flow. */
+export function buildUsageAlertEmail(input: {
+  fullName: string;
+  email: string;
+  threshold: 75 | 90 | 100;
+  kitSerial?: string | null;
+  kitNickname?: string | null;
+  usedGb: number;
+  allowanceGb: number;
+  remainingGb: number;
+  projectedExhaustionDate?: string | null;
+  topupUrl?: string;
+}): { subject: string; html: string; text: string } {
+  const base = starlinkBaseUrl();
+  const topupUrl = esc(input.topupUrl || `${base}/starlink/portal?topup=1`);
+  const kitParts = [input.kitNickname, input.kitSerial].map((v) => String(v || '').trim()).filter(Boolean);
+  const kit = kitParts.length ? kitParts.join(' · ') : 'your kit';
+  const used = `${Number(input.usedGb || 0).toFixed(2)} GB`;
+  const allowance = `${Number(input.allowanceGb || 0).toFixed(2)} GB`;
+  const remaining = `${Math.max(0, Number(input.remainingGb || 0)).toFixed(2)} GB`;
+  const projection = input.projectedExhaustionDate
+    ? fmtEmailDate(input.projectedExhaustionDate)
+    : 'not yet projected';
+
+  const row = (label: string, value: string, emphasis = false) => `
+    <tr>
+      <td style="padding:9px 0;font:13px/1.5 ${FONT};color:${RECEIPT.mut}">${esc(label)}</td>
+      <td align="right" style="padding:9px 0;font:700 13px/1.5 ${FONT};color:${emphasis ? RECEIPT.cyan : RECEIPT.text}">${value}</td>
+    </tr>`;
+
+  const body = `
+          <tr>
+            <td style="padding:0 32px 6px">
+              <p style="margin:0;font:15px/1.7 ${FONT};color:${RECEIPT.mut}">
+                Hi ${firstName(input.fullName)}, ${kit} has reached <b style="color:${RECEIPT.cyan}">${input.threshold}%</b> of this billing cycle's data allowance.
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:12px 32px 0">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+                     style="background:${RECEIPT.panel};border:1px solid ${RECEIPT.line};border-radius:12px;padding:14px 16px">
+                ${row('Kit', esc(kit))}
+                ${row('Data used', esc(used))}
+                ${row('Cycle allowance', esc(allowance))}
+                ${row('Remaining', esc(remaining), true)}
+                ${row('Projected exhaustion', esc(projection))}
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:16px 32px 6px;font:13px/1.7 ${FONT};color:${RECEIPT.mut}">
+              Top up now from the portal to keep this kit online. You can also enable automatic top-up from your
+              Starlink wallet so this never catches you out again. Payments are handled by Preyone Payment.
+            </td>
+          </tr>
+          <tr>
+            <td align="center" style="padding:18px 32px 8px">
+              ${button(topupUrl, 'Top up data now', RECEIPT)}
+            </td>
+          </tr>`;
+
+  const html = layout({
+    preheader: `${input.threshold}% of your Starlink data allowance has been used.`,
+    eyebrow: 'Usage alert',
+    heading: `${input.threshold}% data used, ${firstName(input.fullName)}`,
+    body,
+    recipient: input.email,
+    base,
+    palette: RECEIPT,
+  });
+
+  const text = [
+    `${input.threshold}% data used, ${input.fullName.trim().split(/\s+/)[0] || 'there'}`,
+    '',
+    `Kit: ${kit}`,
+    `Data used: ${used}`,
+    `Cycle allowance: ${allowance}`,
+    `Remaining: ${remaining}`,
+    `Projected exhaustion: ${projection}`,
+    '',
+    `Top up data now: ${topupUrl}`,
+    '',
+    'Preyone Starlink Customer Portal · support@preyone.com',
+  ].join('\n');
+
+  return { subject: `Starlink usage alert · ${input.threshold}% used`, html, text };
+}
+
+function fmtEmailDate(value: string): string {
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return String(value).slice(0, 10);
+  return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+/** Dark-theme receipt for a wallet-funded automatic data purchase. */
+export function buildAutoTopupEmail(input: {
+  fullName: string;
+  email: string;
+  invoiceNumber: string;
+  gb: number;
+  amount: number;
+  walletBalance: number;
+  dataBalance: number;
+  kitSerial?: string | null;
+  kitNickname?: string | null;
+  invoiceUrl?: string;
+}): { subject: string; html: string; text: string } {
+  const base = starlinkBaseUrl();
+  const invoiceUrl = esc(input.invoiceUrl || `${base}/starlink/portal`);
+  const kitParts = [input.kitNickname, input.kitSerial].map((v) => String(v || '').trim()).filter(Boolean);
+  const kit = kitParts.length ? kitParts.join(' · ') : 'your kit';
+
+  const row = (label: string, value: string, emphasis = false) => `
+    <tr>
+      <td style="padding:9px 0;font:13px/1.5 ${FONT};color:${RECEIPT.mut}">${esc(label)}</td>
+      <td align="right" style="padding:9px 0;font:700 13px/1.5 ${FONT};color:${emphasis ? RECEIPT.cyan : RECEIPT.text}">${value}</td>
+    </tr>`;
+
+  const body = `
+          <tr>
+            <td style="padding:0 32px 6px">
+              <p style="margin:0;font:15px/1.7 ${FONT};color:${RECEIPT.mut}">
+                Hi ${firstName(input.fullName)}, we automatically added data to ${esc(kit)} from your Starlink wallet.
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:12px 32px 0">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+                     style="background:${RECEIPT.panel};border:1px solid ${RECEIPT.line};border-radius:12px;padding:14px 16px">
+                ${row('Invoice number', esc(input.invoiceNumber), true)}
+                ${row('Payment reference', 'Wallet auto top-up')}
+                ${row('Action', 'Automatic data top-up')}
+                ${row('Kit', esc(kit))}
+                ${row('Data added', `${Number(input.gb || 0).toFixed(2)} GB`, true)}
+                ${row('Amount paid', `$${Number(input.amount || 0).toFixed(2)} USD`)}
+                ${row('New wallet balance', `$${Number(input.walletBalance || 0).toFixed(2)}`)}
+                ${row('New data balance', `${Number(input.dataBalance || 0).toFixed(2)} GB`)}
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td align="center" style="padding:18px 32px 8px">
+              ${button(invoiceUrl, 'View / download PDF invoice', RECEIPT)}
+            </td>
+          </tr>`;
+
+  const html = layout({
+    preheader: `Automatic ${Number(input.gb || 0).toFixed(0)}GB data top-up receipt.`,
+    eyebrow: 'Auto top-up receipt',
+    heading: `Data added, ${firstName(input.fullName)}`,
+    body,
+    recipient: input.email,
+    base,
+    palette: RECEIPT,
+  });
+
+  const text = [
+    `Data added, ${input.fullName.trim().split(/\s+/)[0] || 'there'}`,
+    '',
+    `Invoice number: ${input.invoiceNumber}`,
+    `Payment reference: Wallet auto top-up`,
+    `Action: Automatic data top-up`,
+    `Kit: ${kit}`,
+    `Data added: ${Number(input.gb || 0).toFixed(2)} GB`,
+    `Amount paid: $${Number(input.amount || 0).toFixed(2)} USD`,
+    `New wallet balance: $${Number(input.walletBalance || 0).toFixed(2)}`,
+    `New data balance: ${Number(input.dataBalance || 0).toFixed(2)} GB`,
+    '',
+    `View or download the PDF invoice: ${invoiceUrl}`,
+    '',
+    'Preyone Starlink Customer Portal · support@preyone.com',
+  ].join('\n');
+
+  return { subject: `Auto top-up receipt · ${input.invoiceNumber}`, html, text };
+}

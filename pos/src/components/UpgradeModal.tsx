@@ -277,8 +277,6 @@ export default function UpgradeModal({
                   onClick={() => setRail(r.key)}
                 >
                   <img className="up-rail-logo" src={r.logo} alt={r.label} />
-                  <strong>{r.label}</strong>
-                  <small>{r.hint}</small>
                   <span className="up-rail-check" aria-hidden>✓</span>
                 </button>
               ))}

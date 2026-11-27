@@ -11,6 +11,7 @@ const KIND_LABEL: Record<string, string> = {
   wallet_topup: 'Wallet Top-Up',
   data_topup: 'Data Top-Up',
   kit_purchase: 'Kit Purchase',
+  auto_topup: 'Auto Top-Up',
   service: 'Service',
 };
 

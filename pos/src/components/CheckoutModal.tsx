@@ -13,7 +13,6 @@ interface PaymentPart {
 const PESEPAY_RAILS = [
   { key: 'ecocash', label: 'EcoCash', customerField: 'EcoCash number', prefix: '*151#', phone: true },
   { key: 'innbucks', label: 'InnBucks', customerField: 'InnBucks number', prefix: '*242#', phone: false },
-  { key: 'paygo', label: 'PayGo', customerField: 'PayGo number', prefix: '*888#', phone: false },
   { key: 'omari', label: 'Omari', customerField: 'Omari number', prefix: '*100#', phone: true },
 ];
 
