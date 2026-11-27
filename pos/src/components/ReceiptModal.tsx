@@ -1,8 +1,39 @@
 import { useCallback, useState, useEffect } from 'react';
 import { api, type CheckoutResult, type CompanyProfile } from '../api';
 import { generateReceiptPdf, downloadReceiptPdf, receiptPdfToBlob } from '../utils/receiptPdf';
+import { code128Bars, verificationBarcodePayload } from '../utils/code128';
 
 const money = (n: number): string => `$${(Number(n) || 0).toFixed(2)}`;
+
+/** Vector Code 128 strip: no image rasterisation, so thermal prints stay sharp. */
+function ReceiptBarcode({ code }: { code: string }) {
+  const payload = verificationBarcodePayload(code);
+  const bars = payload ? code128Bars(payload) : '';
+  if (!bars) return null;
+
+  // Quiet zones are counted in modules (>=10x the narrowest bar).
+  const quiet = 12;
+  const units = bars.length + quiet * 2;
+  let path = '';
+  for (let i = 0; i < bars.length; i++) {
+    if (bars[i] === '1') path += `M${i + quiet} 0h1v40h-1z`;
+  }
+
+  return (
+    <div className="r-verify-strip" aria-label={`Verification barcode ${code}`}>
+      <svg
+        className="r-barcode"
+        viewBox={`0 0 ${units} 40`}
+        preserveAspectRatio="none"
+        shapeRendering="crispEdges"
+        role="img"
+      >
+        <path d={path} fill="#0f172a" />
+      </svg>
+      <div className="r-barcode-label">SCAN TO VERIFY • preyone.com/verify</div>
+    </div>
+  );
+}
 
 export default function ReceiptModal({
   result,
@@ -258,27 +289,29 @@ export default function ReceiptModal({
     <div className="modal-backdrop">
       <div className="modal-card">
         <div id="receipt-print-area" className="receipt-paper">
-          {/* B&W Logo */}
-          <div className="receipt-center">
+          {/* Compact emerald store header */}
+          <div className="receipt-center receipt-header">
+            <div className="receipt-top-rule" />
             <img
               src={logoUrl}
               alt={`${brandName} logo`}
               className="receipt-logo"
-              style={{ filter: 'grayscale(100%) brightness(0)', height: 28, margin: '0 auto 4px' }}
+              style={{ filter: 'grayscale(100%) brightness(0)', height: 24, margin: '0 auto 3px' }}
             />
             <div className="receipt-brand">{brandName.toUpperCase()}</div>
-            {brandTagline && <div className="receipt-muted" style={{ fontSize: '8px' }}>{brandTagline}</div>}
-            <div className="receipt-muted" style={{ fontSize: '9px' }}>{brandEmail}</div>
+            <div className="receipt-accent" />
+            {brandTagline && <div className="receipt-subbrand">{brandTagline}</div>}
+            <div className="receipt-muted">{brandEmail}</div>
             <div className="receipt-muted">{[brandPhone, brandWebsite].filter(Boolean).join(' · ')}</div>
-            {brandAddress && <div className="receipt-muted">{brandAddress}</div>}
-            {brandTaxLine && <div className="receipt-muted">{brandTaxLine}</div>}
+            {brandAddress && <div className="receipt-muted receipt-reserve">{brandAddress}</div>}
+            {brandTaxLine && <div className="receipt-muted receipt-reserve">{brandTaxLine}</div>}
           </div>
           <hr className="r-rule" />
 
           {/* Document Info */}
-          <table className="r-table">
+          <table className="r-table r-meta">
             <tbody>
-              <tr><td>{title}</td><td className="r-num"><strong>{result.doc_number}</strong></td></tr>
+              <tr><td>{title} #</td><td className="r-num"><strong>{result.doc_number}</strong></td></tr>
               <tr><td>Date</td><td className="r-num">{when}</td></tr>
               {result.customer_name && (
                 <tr><td>Customer</td><td className="r-num">{result.customer_name}</td></tr>
@@ -294,7 +327,7 @@ export default function ReceiptModal({
               {result.items.map((i, idx) => (
                 <tr key={idx}>
                   <td>
-                    {i.description}
+                    <span className="r-item-name">{i.description}</span>
                     {(i.details || []).length > 0 && (
                       <ul className="r-details">
                         {(i.details || []).map((d, j) => (
@@ -302,9 +335,11 @@ export default function ReceiptModal({
                         ))}
                       </ul>
                     )}
-                    <span className="receipt-muted">{i.qty} × {money(i.price)}</span>
                   </td>
-                  <td className="r-num">{money(i.lineTotal)}</td>
+                  <td className="r-num">
+                    <span>{money(i.lineTotal)}</span>
+                    <span className="r-item-qty">{i.qty} × {money(i.price)}</span>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -312,14 +347,14 @@ export default function ReceiptModal({
           <hr className="r-rule" />
 
           {/* Totals */}
-          <table className="r-table">
+          <table className="r-table r-totals">
             <tbody>
               <tr><td>Subtotal</td><td className="r-num">{money(result.subtotal)}</td></tr>
               {result.discount_pct > 0 && (
                 <tr><td>Discount ({result.discount_pct}%)</td><td className="r-num">−{money((result.subtotal * result.discount_pct) / 100)}</td></tr>
               )}
               {result.tax_pct > 0 && (
-                <tr><td>VAT ({result.tax_pct}%)</td><td className="r-num">{money((Number(result.total) * Number(result.tax_pct)) / (100 + Number(result.tax_pct)))}</td></tr>
+                <tr><td>VAT ({result.tax_pct}%) incl.</td><td className="r-num">{money((Number(result.total) * Number(result.tax_pct)) / (100 + Number(result.tax_pct)))}</td></tr>
               )}
               <tr><td className="r-grand">TOTAL</td><td className="r-num r-grand">{money(result.total)}</td></tr>
             </tbody>
@@ -336,11 +371,14 @@ export default function ReceiptModal({
               </>
             ) : (
               <>
-                <strong style={{ fontSize: '13px' }}>* PAID IN FULL *</strong>
+                <div className="r-paid-row">
+                  <span className="r-paid-pill">PAID</span>
+                  <span className="r-paid-stamp" aria-hidden="true">PAID</span>
+                </div>
                 {cashTendered > 0 && (
                   <>
                     <br />
-                    <span className="receipt-muted" style={{ fontSize: '10px' }}>
+                    <span className="r-paid-cash">
                       Cash Tendered: {money(cashTendered)}
                     </span>
                     {change > 0 && (
@@ -366,25 +404,9 @@ export default function ReceiptModal({
           </div>
           <hr className="r-rule" />
 
-          {/* Footer */}
-          <div className="receipt-center">
-            <div style={{ fontWeight: 700, fontSize: '11px', marginBottom: 4 }}>
-              {brandFooter || 'THANKS FOR YOUR PURCHASE'}
-            </div>
-            <div className="receipt-muted" style={{ fontSize: '8.5px' }}>
-              {brandTagline || 'Terms & Conditions Apply'}
-            </div>
-            <div className="receipt-muted" style={{ fontSize: '8px', marginTop: 6 }}>
-              {brandName} · {brandEmail}
-            </div>
-          </div>
-          {result.verify_code && (
-            <div className="r-verify">
-              <span className="r-verify-label">Document ID</span>
-              <span className="r-verify-code">{result.verify_code}</span>
-              <span className="r-verify-url">preyone.com/verify</span>
-            </div>
-          )}
+          {/* Short thank-you directly above the full-width verification strip */}
+          <div className="r-thanks">{brandFooter || 'THANKS FOR YOUR PURCHASE'}</div>
+          {result.verify_code && <ReceiptBarcode code={result.verify_code} />}
         </div>
 
         {pdfError && <div className="err-msg" style={{ marginTop: 8 }}>{pdfError}</div>}

@@ -1,6 +1,7 @@
 import jsPDF from 'jspdf';
+import { code128Bars, verificationBarcodePayload } from './code128.ts';
 
-export function generateReceiptPdf(opts: {
+export interface ReceiptPdfOptions {
   docNumber: string;
   docType: string;
   verifyCode?: string;
@@ -30,24 +31,82 @@ export function generateReceiptPdf(opts: {
   };
   logoDataUri?: string;
   logoNatural?: { w: number; h: number };
-}): jsPDF {
-  var pw = 80;
-  var ph = 200;
-  var doc = new jsPDF({ unit: 'mm', format: [pw, ph] });
-  var m = 4;
-  var y = 4;
+}
 
-  // White background (default)
+/** High-Tech Emerald palette shared with invoice.preyone.com documents. */
+const C = {
+  white: [255, 255, 255] as const,
+  deep: [4, 120, 87] as const,       // #047857
+  emerald: [5, 150, 105] as const,   // #059669
+  mint: [236, 253, 245] as const,    // #ECFDF5
+  mintLine: [209, 250, 229] as const,
+  ink: [15, 23, 42] as const,        // crisp dark slate
+  muted: [71, 85, 105] as const,
+  red: [185, 28, 28] as const,
+  redWash: [254, 226, 226] as const,
+};
 
-  // Logo (centered, proportional)
+const money = (value: number) => `$${(Number(value) || 0).toFixed(2)}`;
+
+function setFill(doc: jsPDF, rgb: readonly [number, number, number]) {
+  doc.setFillColor(rgb[0], rgb[1], rgb[2]);
+}
+
+function setText(doc: jsPDF, rgb: readonly [number, number, number]) {
+  doc.setTextColor(rgb[0], rgb[1], rgb[2]);
+}
+
+/** Draw a centred line or two, shrinking once instead of clipping the value. */
+function centeredLines(
+  doc: jsPDF,
+  value: string,
+  centerX: number,
+  startY: number,
+  maxWidth: number,
+  size: number,
+  rgb: readonly [number, number, number],
+  bold = false
+): number {
+  if (!value) return startY;
+  doc.setFont('helvetica', bold ? 'bold' : 'normal');
+  let lines = doc.splitTextToSize(value, maxWidth) as string[];
+  let fontSize = size;
+  if (lines.length > 2) {
+    fontSize = Math.max(5, size - 1);
+    doc.setFontSize(fontSize);
+    lines = doc.splitTextToSize(value, maxWidth) as string[];
+  }
+  setText(doc, rgb);
+  lines.slice(0, 2).forEach((line, index) => {
+    doc.text(String(line), centerX, startY + index * (fontSize * 0.42), { align: 'center' });
+  });
+  return startY + Math.min(lines.length, 2) * (fontSize * 0.42);
+}
+
+/**
+ * Single draw pass shared by the measuring document and the final document.
+ * `ph` is deliberately large while measuring, so the exact bottom is known
+ * before the real page is created and the roll can be cut immediately after
+ * the verification micro-label.
+ */
+function drawReceipt(doc: jsPDF, opts: ReceiptPdfOptions, pw: number, m: number): number {
+  const right = pw - m;
+  const center = pw / 2;
+  const inner = pw - m * 2;
+  let y = 3;
+
+  // Emerald header edge, then a compact branded store block.
+  setFill(doc, C.deep);
+  doc.rect(0, 0, pw, 1.6, 'F');
+
   if (opts.logoDataUri) {
     try {
-      var maxW = 36;
-      var maxH = 28;
-      var lw: number;
-      var lh: number;
+      const maxW = 22;
+      const maxH = 14;
+      let lw: number;
+      let lh: number;
       if (opts.logoNatural && opts.logoNatural.w > 0 && opts.logoNatural.h > 0) {
-        var ratio = opts.logoNatural.w / opts.logoNatural.h;
+        const ratio = opts.logoNatural.w / opts.logoNatural.h;
         if (ratio >= 1) {
           lw = Math.min(maxW, maxH * ratio);
           lh = lw / ratio;
@@ -59,280 +118,275 @@ export function generateReceiptPdf(opts: {
         lw = maxW;
         lh = maxH;
       }
-      doc.addImage(opts.logoDataUri, 'PNG', (pw - lw) / 2, y, lw, lh);
-      y += lh + 2;
-    } catch { /* skip */ }
-  }
-
-  // Company name — large capital letters, brand purple
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(14);
-  doc.setTextColor(54, 17, 106);
-  doc.text(opts.company.name.toUpperCase(), pw / 2, y + 4, { align: 'center' });
-  y += 7;
-
-  // Email
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(6);
-  doc.setTextColor(68, 68, 68);
-  doc.text(opts.company.email, pw / 2, y + 2, { align: 'center' });
-  y += 3;
-
-  // Phone · Website
-  doc.text([opts.company.phone, opts.company.website].filter(Boolean).join(' · '), pw / 2, y + 2, { align: 'center' });
-  y += 3;
-
-  // Address / tax registration, resolved from the company branding settings.
-  if (opts.company.address) {
-    var addressLines = doc.splitTextToSize(opts.company.address.replace(/\r?\n/g, ' · '), pw - m * 2);
-    for (var a = 0; a < addressLines.length && a < 2; a++) {
-      doc.text(String(addressLines[a]), pw / 2, y + 2, { align: 'center' });
-      y += 2.6;
+      doc.addImage(opts.logoDataUri, 'PNG', center - lw / 2, y, lw, lh);
+      y += lh + 0.8;
+    } catch {
+      // A corrupt logo must never stop a sale from printing.
     }
   }
-  var taxLine = [
-    opts.company.taxId ? 'VAT: ' + opts.company.taxId : '',
-    opts.company.registrationNumber ? 'Reg: ' + opts.company.registrationNumber : '',
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(12.5);
+  y = centeredLines(doc, String(opts.company.name || '').toUpperCase(), center, y + 4, inner, 12.5, C.deep, true) + 1.2;
+
+  setFill(doc, C.emerald);
+  doc.rect(center - 9, y, 18, 0.7, 'F');
+  y += 2.2;
+
+  doc.setFontSize(6.2);
+  y = centeredLines(doc, opts.company.email, center, y + 1.8, inner, 6.2, C.muted) + 0.9;
+  doc.setFontSize(6.2);
+  y = centeredLines(
+    doc,
+    [opts.company.phone, opts.company.website].filter(Boolean).join(' · '),
+    center,
+    y + 1.8,
+    inner,
+    6.2,
+    C.muted
+  );
+
+  // Keep reserve data, but only as a single compact line so the roll stays short.
+  const reserve = [
+    opts.company.address ? String(opts.company.address).replace(/\r?\n/g, ' · ') : '',
+    opts.company.taxId ? `VAT: ${opts.company.taxId}` : '',
+    opts.company.registrationNumber ? `Reg: ${opts.company.registrationNumber}` : '',
   ].filter(Boolean).join(' · ');
-  if (taxLine) {
-    doc.text(taxLine, pw / 2, y + 2, { align: 'center' });
-    y += 2.6;
+  if (reserve) {
+    doc.setFontSize(5.6);
+    y = centeredLines(doc, reserve, center, y + 2.2, inner, 5.6, C.muted) + 0.6;
   }
-  y += 1;
+  y += 1.2;
 
-  // Dashed rule
-  doc.setDrawColor(153, 153, 153);
-  doc.setLineDashPattern([2, 1], 0);
-  doc.line(m, y, pw - m, y);
-  doc.setLineDashPattern([], 0);
-  y += 4;
+  doc.setDrawColor(C.mintLine[0], C.mintLine[1], C.mintLine[2]);
+  doc.setLineWidth(0.5);
+  doc.line(m, y, right, y);
+  y += 2.8;
 
-  // Document type
-  var title = opts.docType === 'invoice' ? 'INVOICE' : opts.docType === 'quotation' ? 'QUOTATION' : 'RECEIPT';
+  // Two-column metadata card. Helvetica digits are already tabular; right
+  // alignment fixes the common right edge for every figure in the column.
+  const title = opts.docType === 'invoice' ? 'INVOICE' : opts.docType === 'quotation' ? 'QUOTATION' : 'RECEIPT';
+  const metaRows: Array<[string, string, boolean]> = [
+    [`${title} #`, opts.docNumber, true],
+    ['Date', opts.date, false],
+  ];
+  if (opts.customerName) metaRows.push(['Customer', opts.customerName, false]);
+  metaRows.push(['Served by', opts.cashierName, false]);
+  const rowH = 3.5;
+  const metaTop = y;
+  setFill(doc, C.mint);
+  doc.roundedRect(m, metaTop, inner, metaRows.length * rowH + 1.6, 1.2, 1.2, 'F');
+  y = metaTop + 2.2;
+  metaRows.forEach(([label, value, strong]) => {
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(6.4);
+    setText(doc, C.muted);
+    doc.text(label, m + 2, y + 1.6);
+    doc.setFont('helvetica', strong ? 'bold' : 'normal');
+    doc.setFontSize(strong ? 7 : 6.4);
+    setText(doc, strong ? C.deep : C.ink);
+    doc.text(value, right - 2, y + 1.6, { align: 'right' });
+    y += rowH;
+  });
+  y += 0.8;
 
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(7);
-  doc.setTextColor(0, 0, 0);
-  doc.text(title, m, y + 2);
-  doc.setFont('helvetica', 'bold');
-  doc.text(opts.docNumber, pw - m, y + 2, { align: 'right' });
-  y += 4;
-
-  // Date
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(7);
-  doc.setTextColor(0, 0, 0);
-  doc.text('Date', m, y + 2);
-  doc.setTextColor(68, 68, 68);
-  doc.text(opts.date, pw - m, y + 2, { align: 'right' });
-  y += 4;
-
-  // Customer (if any)
-  if (opts.customerName) {
-    doc.setTextColor(0, 0, 0);
-    doc.text('Customer', m, y + 2);
-    doc.setTextColor(68, 68, 68);
-    doc.text(opts.customerName, pw - m, y + 2, { align: 'right' });
-    y += 4;
-  }
-
-  // Served by
-  doc.setTextColor(0, 0, 0);
-  doc.text('Served by', m, y + 2);
-  doc.setTextColor(68, 68, 68);
-  doc.text(opts.cashierName, pw - m, y + 2, { align: 'right' });
-  y += 4;
-
-  // Dashed rule
-  doc.setDrawColor(153, 153, 153);
-  doc.setLineDashPattern([2, 1], 0);
-  doc.line(m, y, pw - m, y);
-  doc.setLineDashPattern([], 0);
-  y += 4;
-
-  // Items
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(7);
-  for (var j = 0; j < opts.items.length; j++) {
-    var item = opts.items[j];
-    if (y > ph - 14) {
-      doc.addPage([pw, ph]);
-      y = 6;
-    }
-    doc.setTextColor(0, 0, 0);
+  // Items. Description is flush left; qty/price and line total share the right
+  // edge used by the totals and final amount below.
+  doc.line(m, y, right, y);
+  y += 3;
+  opts.items.forEach((item) => {
+    doc.setFont('helvetica', 'bold');
     doc.setFontSize(7);
-    doc.text(item.description, m, y + 2);
-    doc.text('$' + item.lineTotal.toFixed(2), pw - m, y + 2, { align: 'right' });
-    y += 3;
+    setText(doc, C.ink);
+    const descriptionLines = doc.splitTextToSize(item.description, inner - 20) as string[];
+    descriptionLines.slice(0, 2).forEach((line, index) => {
+      doc.text(line, m, y + 2 + index * 2.6);
+    });
+    doc.text(money(item.lineTotal), right, y + 2, { align: 'right' });
+    y += Math.max(3.2, descriptionLines.length * 2.6 + 0.6);
 
-    // Bullet details, one per line. Wrapped to the 80 mm roll width so long
-    // specifications stay readable instead of being clipped at the margin.
-    var details = Array.isArray(item.details) ? item.details : [];
-    for (var k = 0; k < details.length; k++) {
-      var wrapped = doc.splitTextToSize('\u2022 ' + details[k], pw - m * 2 - 2);
-      for (var w = 0; w < wrapped.length; w++) {
-        if (y > ph - 12) {
-          doc.addPage([pw, ph]);
-          y = 6;
-        }
-        doc.setTextColor(90, 90, 90);
+    const details = Array.isArray(item.details) ? item.details : [];
+    details.forEach((detail) => {
+      const wrapped = doc.splitTextToSize(`• ${detail}`, inner - 3) as string[];
+      wrapped.slice(0, 3).forEach((line) => {
+        doc.setFont('helvetica', 'normal');
         doc.setFontSize(6);
-        doc.text(String(wrapped[w]), m + 1.5, y + 2);
-        y += 3;
-      }
-    }
+        setText(doc, C.muted);
+        doc.text(line, m + 1.5, y + 2);
+        y += 2.8;
+      });
+    });
 
-    doc.setTextColor(100, 100, 100);
-    doc.setFontSize(6);
-    doc.text(item.qty + ' x $' + item.price.toFixed(2), m, y + 2);
-    doc.setFontSize(7);
-    y += 4;
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(6.2);
+    setText(doc, C.muted);
+    doc.text(`${Number(item.qty)} x ${money(item.price)}`, right, y + 2, { align: 'right' });
+    y += 3.4;
+  });
+
+  // Totals.
+  doc.line(m, y, right, y);
+  y += 3;
+  const totalRow = (label: string, value: string, strong = false) => {
+    doc.setFont('helvetica', strong ? 'bold' : 'normal');
+    doc.setFontSize(strong ? 8.5 : 7);
+    setText(doc, strong ? C.white : C.ink);
+    doc.text(label, m + 2, y + 2.4);
+    doc.text(value, right - 2, y + 2.4, { align: 'right' });
+    y += strong ? 6.2 : 3.6;
+  };
+  totalRow('Subtotal', money(opts.subtotal));
+  if (Number(opts.discountPct) > 0) {
+    totalRow(`Discount (${opts.discountPct}%)`, `-${money((opts.subtotal * opts.discountPct) / 100)}`);
+  }
+  if (Number(opts.taxPct) > 0) {
+    const taxAmt = (opts.total * opts.taxPct) / (100 + opts.taxPct);
+    totalRow(`VAT (${opts.taxPct}%) incl.`, money(taxAmt));
   }
 
-  // Dashed rule
-  doc.setDrawColor(153, 153, 153);
-  doc.setLineDashPattern([2, 1], 0);
-  doc.line(m, y, pw - m, y);
-  doc.setLineDashPattern([], 0);
-  y += 4;
-
-  // Subtotal
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(7);
-  doc.setTextColor(0, 0, 0);
-  doc.text('Subtotal', m, y + 2);
-  doc.text('$' + opts.subtotal.toFixed(2), pw - m, y + 2, { align: 'right' });
-  y += 4;
-
-  // Discount
-  if (opts.discountPct > 0) {
-    doc.text('Discount (' + opts.discountPct + '%)', m, y + 2);
-    doc.text('-$' + ((opts.subtotal * opts.discountPct) / 100).toFixed(2), pw - m, y + 2, { align: 'right' });
-    y += 4;
-  }
-
-  // Tax (VAT is included in the charge — extract the portion from within)
-  if (opts.taxPct > 0) {
-    var taxAmt = (opts.total * opts.taxPct) / (100 + opts.taxPct);
-    doc.text('VAT (' + opts.taxPct + '%)', m, y + 2);
-    doc.text('$' + taxAmt.toFixed(2), pw - m, y + 2, { align: 'right' });
-    y += 4;
-  }
-
-  // TOTAL (bold, larger)
+  const totalTop = y;
+  setFill(doc, C.deep);
+  doc.roundedRect(m, totalTop, inner, 7.2, 1.3, 1.3, 'F');
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(9);
-  doc.setTextColor(0, 0, 0);
-  doc.text('TOTAL', m, y + 3);
-  doc.text('$' + opts.total.toFixed(2), pw - m, y + 3, { align: 'right' });
-  y += 5;
+  setText(doc, C.white);
+  doc.text('TOTAL', m + 2, totalTop + 4.9);
+  doc.text(money(opts.total), right - 2, totalTop + 4.9, { align: 'right' });
+  y = totalTop + 9;
 
-  // Dashed rule
-  doc.setDrawColor(153, 153, 153);
-  doc.setLineDashPattern([2, 1], 0);
-  doc.line(m, y, pw - m, y);
-  doc.setLineDashPattern([], 0);
-  y += 4;
-
-  // Payment summary
-  if (opts.balanceDue > 0) {
+  // Payment status: emerald pill plus the same 15.87-degree translucent red
+  // PAID stamp used on the main A4 invoice. It sits above the cash line so no
+  // figure is ever covered.
+  y += 1;
+  if (Number(opts.balanceDue) > 0) {
+    setFill(doc, C.mint);
+    doc.roundedRect(m, y, inner, 6.2, 1.4, 1.4, 'F');
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(7);
-    doc.setTextColor(0, 0, 0);
-    doc.text('BALANCE DUE: $' + opts.balanceDue.toFixed(2), pw / 2, y + 2, { align: 'center' });
-    y += 4;
+    doc.setFontSize(7.5);
+    setText(doc, C.deep);
+    doc.text(`BALANCE DUE: ${money(opts.balanceDue)}`, center, y + 4, { align: 'center' });
+    y += 7;
     doc.setFont('helvetica', 'normal');
-    doc.setTextColor(68, 68, 68);
-    doc.text('Paid so far: $' + opts.amountPaid.toFixed(2), pw / 2, y + 2, { align: 'center' });
-    y += 4;
+    doc.setFontSize(6.2);
+    setText(doc, C.muted);
+    doc.text(`Paid so far: ${money(opts.amountPaid)}`, center, y + 2, { align: 'center' });
+    y += 3.6;
   } else {
-    // PAID IN FULL
+    const pillW = 21;
+    const pillH = 5.8;
+    setFill(doc, C.deep);
+    doc.roundedRect(m + 2, y, pillW, pillH, pillH / 2, pillH / 2, 'F');
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(8);
-    doc.setTextColor(0, 0, 0);
-    doc.text('* PAID IN FULL *', pw / 2, y + 2, { align: 'center' });
-    y += 5;
+    setText(doc, C.white);
+    doc.text('PAID', m + 2 + pillW / 2, y + 4, { align: 'center' });
 
-    if (opts.cashTendered > 0) {
+    // jsPDF's high-level text/rect helpers pre-flip their Y coordinates, so
+    // rotate the stamp with raw PDF primitives inside a saved graphics state.
+    // The matrix is the same 15.87-degree banner angle as the A4 invoice stamp.
+    const scale = doc.internal.scaleFactor;
+    const pageHeightPt = doc.internal.pageSize.getHeight() * scale;
+    const angle = (15.87 * Math.PI) / 180;
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    const halfW = 13 * scale;
+    const halfH = 3.4 * scale;
+    doc.saveGraphicsState();
+    doc.setCurrentTransformationMatrix(
+      doc.Matrix(cos, sin, -sin, cos, (right - 19) * scale, pageHeightPt - (y + 3) * scale)
+    );
+    doc.setGState(doc.GState({ opacity: 0.28 }));
+    const write = (doc as unknown as { internal: { write: (data: string) => void } }).internal.write;
+    write.call(doc.internal, `1 0.89 0.89 rg ${-halfW} ${-halfH} ${halfW * 2} ${halfH * 2} re f`);
+    write.call(doc.internal, `0.73 0.11 0.11 RG 0.35 w ${-halfW} ${-halfH} ${halfW * 2} ${halfH * 2} re S`);
+    write.call(doc.internal, 'BT 0.73 0.11 0.11 rg /F2 10 Tf 1 0 0 1 -12.2 -3 Tm (PAID) Tj ET');
+    doc.restoreGraphicsState();
+
+    // Leave room for the rotated stamp's full bounding box before the cash line.
+    y += 11;
+
+    if (Number(opts.cashTendered) > 0) {
       doc.setFont('helvetica', 'normal');
-      doc.setFontSize(6);
-      doc.setTextColor(68, 68, 68);
-      doc.text('Cash Tendered: $' + opts.cashTendered.toFixed(2), pw / 2, y + 2, { align: 'center' });
-      y += 3;
-      if (opts.change > 0) {
+      doc.setFontSize(6.4);
+      setText(doc, C.ink);
+      doc.text(`Cash Tendered: ${money(opts.cashTendered)}`, center, y + 2, { align: 'center' });
+      y += 3.4;
+      if (Number(opts.change) > 0) {
         doc.setFont('helvetica', 'bold');
-        doc.setFontSize(7);
-        doc.setTextColor(0, 0, 0);
-        doc.text('Change: $' + opts.change.toFixed(2), pw / 2, y + 2, { align: 'center' });
-        y += 4;
+        doc.setFontSize(6.8);
+        setText(doc, C.deep);
+        doc.text(`Change: ${money(opts.change)}`, center, y + 2, { align: 'center' });
+        y += 3.4;
       }
     }
 
     if (opts.payments.length > 1) {
       doc.setFont('helvetica', 'normal');
-      doc.setFontSize(5.5);
-      doc.setTextColor(100, 100, 100);
-      var payStr = '';
-      for (var k = 0; k < opts.payments.length; k++) {
-        if (k > 0) payStr += ' + ';
-        payStr += opts.payments[k].method + ': $' + opts.payments[k].amount.toFixed(2);
-      }
-      doc.text(payStr, pw / 2, y + 2, { align: 'center' });
-      y += 3;
+      doc.setFontSize(5.6);
+      setText(doc, C.muted);
+      doc.text(
+        opts.payments.map((p) => `${p.method}: ${money(p.amount)}`).join(' + '),
+        center,
+        y + 2,
+        { align: 'center' }
+      );
+      y += 3.2;
     }
   }
 
-  // Dashed rule
-  y += 1;
-  doc.setDrawColor(153, 153, 153);
-  doc.setLineDashPattern([2, 1], 0);
-  doc.line(m, y, pw - m, y);
-  doc.setLineDashPattern([], 0);
-  y += 4;
-
-  // Thanks
+  // Short thank-you, immediately above the verification strip. No repeated
+  // merchant block, document-ID heading or detached verification URL.
+  doc.line(m, y, right, y);
+  y += 3.4;
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(7);
-  doc.setTextColor(0, 0, 0);
-  doc.text(opts.company.footerText || 'THANKS FOR YOUR PURCHASE', pw / 2, y + 2, { align: 'center' });
-  y += 4;
+  doc.setFontSize(7.2);
+  setText(doc, C.deep);
+  doc.text(opts.company.footerText || 'THANKS FOR YOUR PURCHASE', center, y + 2, { align: 'center' });
+  y += 3.6;
 
-  // Tagline / terms line
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(5.5);
-  doc.setTextColor(68, 68, 68);
-  doc.text(opts.company.tagline || 'Terms & Conditions Apply', pw / 2, y + 2, { align: 'center' });
-  y += 4;
-
-  // Company footer
-  doc.text(opts.company.name + ' · ' + opts.company.email, pw / 2, y + 1, { align: 'center' });
-  y += 3;
-
-  // Public document identifier, bottom-left. This is the same PVN-… value
-  // printed on the A4 document and stored against the database row.
-  if (opts.verifyCode) {
-    y += 3;
-    if (y > ph - 18) {
-      doc.addPage([pw, ph]);
-      y = 6;
+  const payload = verificationBarcodePayload(opts.verifyCode || '');
+  if (payload) {
+    const bars = code128Bars(payload);
+    if (bars) {
+      const quiet = 1.8;
+      const module = (inner - quiet * 2) / bars.length;
+      doc.setFillColor(C.ink[0], C.ink[1], C.ink[2]);
+      for (let i = 0; i < bars.length; i++) {
+        if (bars[i] === '1') {
+          doc.rect(m + quiet + i * module, y, Math.max(module, 0.08), 9, 'F');
+        }
+      }
+      y += 10.2;
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(5.2);
+      setText(doc, C.muted);
+      doc.text('SCAN TO VERIFY • preyone.com/verify', center, y + 1.4, { align: 'center' });
+      y += 2.6;
     }
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(5);
-    doc.setTextColor(120, 120, 120);
-    doc.text('DOCUMENT ID', pw - m, y + 2, { align: 'right' });
-    y += 2.8;
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(6);
-    doc.setTextColor(54, 17, 106);
-    doc.text(opts.verifyCode, pw - m, y + 2, { align: 'right' });
-    y += 3;
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(4.8);
-    doc.setTextColor(120, 120, 120);
-    doc.text('preyone.com/verify', pw - m, y + 2, { align: 'right' });
-    y += 3;
   }
 
+  // No trailing page break: the measuring pass already proved this content
+  // fits the final page height, including the verification micro-label.
+  return y;
+}
+
+/** Final drawn y coordinate on an uncut roll; exported for verification tools. */
+export function estimateReceiptContentBottom(opts: ReceiptPdfOptions): number {
+  const probe = new jsPDF({ unit: 'mm', format: [80, 1200], compress: true });
+  return drawReceipt(probe, opts, 80, 4);
+}
+
+/** Exact roll height needed for this receipt; exported for verification tools. */
+export function estimateReceiptHeight(opts: ReceiptPdfOptions): number {
+  return Math.max(72, Math.ceil(estimateReceiptContentBottom(opts) + 1.5));
+}
+
+export function generateReceiptPdf(opts: ReceiptPdfOptions): jsPDF {
+  const pw = 80;
+  const m = 4;
+  const ph = estimateReceiptHeight(opts);
+  const doc = new jsPDF({ unit: 'mm', format: [pw, ph], compress: true });
+  drawReceipt(doc, opts, pw, m);
   return doc;
 }
 
@@ -341,6 +395,6 @@ export function downloadReceiptPdf(doc: jsPDF, filename: string) {
 }
 
 export function receiptPdfToBlob(doc: jsPDF): Blob {
-  var buf = doc.output('arraybuffer');
+  const buf = doc.output('arraybuffer');
   return new Blob([buf], { type: 'application/pdf' });
 }
