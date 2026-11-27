@@ -3,6 +3,7 @@ import { api, type CheckoutResult, type CompanyProfile } from '../api';
 import { generateReceiptPdf, downloadReceiptPdf, receiptPdfToBlob } from '../utils/receiptPdf';
 import { buildReceiptPdfFromElement } from '../utils/receiptDomPdf';
 import { code128Bars, verificationBarcodePayload } from '../utils/code128';
+import ReceiptPoweredBy from './ReceiptPoweredBy';
 
 const money = (n: number): string => `$${(Number(n) || 0).toFixed(2)}`;
 
@@ -428,6 +429,7 @@ export default function ReceiptModal({
 
           {/* Short thank-you directly above the full-width verification strip */}
           <div className="r-thanks">{brandFooter || 'THANKS FOR YOUR PURCHASE'}</div>
+          <ReceiptPoweredBy website={brandWebsite} />
           {result.verify_code && <ReceiptBarcode code={result.verify_code} />}
         </div>
 

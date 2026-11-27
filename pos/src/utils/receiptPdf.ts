@@ -1,5 +1,6 @@
 import jsPDF from 'jspdf';
 import { code128Bars, verificationBarcodePayload } from './code128.ts';
+import { RECEIPT_POWERED_BY, receiptFooterWebsite } from './receiptPoweredBy.ts';
 
 export interface ReceiptPdfOptions {
   docNumber: string;
@@ -343,6 +344,26 @@ function drawReceipt(doc: jsPDF, opts: ReceiptPdfOptions, pw: number, m: number)
   setText(doc, C.deep);
   doc.text(opts.company.footerText || 'THANKS FOR YOUR PURCHASE', center, y + 2, { align: 'center' });
   y += 3.6;
+
+  // Locked transit-matched footer: Powered by / brand / website. Kept in the
+  // vector fallback too, so PDFs still match if DOM capture is unavailable.
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(6.2);
+  setText(doc, RECEIPT_POWERED_BY.mutedRgb);
+  doc.text(RECEIPT_POWERED_BY.label, center, y + 1.7, { align: 'center' });
+  y += 2.2;
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8.2);
+  setText(doc, RECEIPT_POWERED_BY.navyRgb);
+  doc.text(RECEIPT_POWERED_BY.brand, center, y + 2, { align: 'center' });
+  y += 2.6;
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7);
+  setText(doc, RECEIPT_POWERED_BY.mutedRgb);
+  doc.text(receiptFooterWebsite(opts.company.website), center, y + 1.6, { align: 'center' });
+  y += 2.2;
 
   const payload = verificationBarcodePayload(opts.verifyCode || '');
   if (payload) {

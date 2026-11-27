@@ -20,6 +20,22 @@ Ruijie captive portal system for Preyone UltraNet Wi-Fi. Voucher-based internet 
 > update `docs/frozen-data-pwa.lock.json` with the new SHA-256 hashes in the same
 > change. Do not silently bypass this lock.
 
+## SCOPE LOCK — POS receipt powered-by footer FROZEN (2026-11-27)
+
+> **DO NOT MODIFY** the files listed in `docs/frozen-pos-receipt-footer.lock.json`
+> without **explicit user approval**. The user locked this transit-matched footer
+> on 2026-11-27:
+>
+> - `Powered by`
+> - `PREYONE TECHNOLOGIES`
+> - `www.preyone.com`
+>
+> The footer must keep appearing directly below the receipt thank-you line in
+> the modal preview, browser print, downloaded PDF and WhatsApp PDF. Verify with
+> `npm run verify:receipt-lock`. A hash mismatch or broken wiring means the lock
+> was broken. Unlock only with explicit user approval, updating the manifest with
+> the new SHA-256 hashes in the same change.
+
 ## SCOPE LOCK — Admin console UNLOCKED for Global Settings Hub (2026-10-15)
 
 > **Status change (2026-10-15):** The admin console was permanently frozen at the 12:00 2026-10-13

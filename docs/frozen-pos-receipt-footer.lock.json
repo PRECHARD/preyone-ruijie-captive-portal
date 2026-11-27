@@ -1,0 +1,12 @@
+{
+  "lock": "pos-receipt-powered-by",
+  "lockedAt": "2026-11-27T15:45:00.000Z",
+  "reason": "User-approved freeze of the transit-matched POS receipt footer: Powered by / PREYONE TECHNOLOGIES / www.preyone.com.",
+  "unlock": "Explicit user approval required. Update this manifest with the new SHA-256 hashes when unlocking.",
+  "files": {
+    "pos/src/components/ReceiptPoweredBy.tsx": "4bfa46c3c5c51fe8cdbd9479efb5294b1aa15d357d7dd58eba2062bda1a201cf",
+    "pos/src/utils/receiptPoweredBy.ts": "bb356c44dc75ee7f3abafe16ab20d74c46dd2d0c525e1ea0c4cec12ffcfd9c5c",
+    "tests/posReceiptFooter.test.ts": "7d58563de04713cf91cf0dec2b5beaced0b9ebca0532da675ff86e248079099d",
+    "scripts/verify-pos-receipt-lock.mjs": "bdc58b68acf384bfa0b5e177f08e4269e1faa01c95144eb76da3654ce3cb5a48"
+  }
+}
