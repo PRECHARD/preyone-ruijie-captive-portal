@@ -1,15 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import {
-  FiActivity, FiCreditCard, FiDollarSign, FiDownload, FiExternalLink,
+  FiActivity, FiBell, FiCreditCard, FiDollarSign, FiDownload, FiExternalLink,
   FiGrid, FiHeadphones, FiLogOut, FiMail, FiMessageSquare, FiPackage, FiPhone,
   FiPlus, FiRefreshCw, FiRadio, FiSearch, FiSettings, FiShield,
   FiWifi, FiX, FiCheck, FiChevronDown, FiLock, FiCpu, FiLayers, FiHelpCircle,
 } from 'react-icons/fi';
 import type { IconType } from 'react-icons';
 import {
-  fmtMoney, fmtDate, monthLabel, sfetch, slPaymentStatus, clearToken, ApiError,
+  fmtMoney, fmtDate, monthLabel, sfetch, slPaymentStatus, slVerifyPayment,
+  slNotifications, slMarkNotificationsRead, clearToken, ApiError,
   SL_TABS, type SlTab, type SlDashboard, type SlCustomer, type SlInvoice,
-  type SlKit, type SlCheckoutResult, type SlPlanApplication,
+  type SlKit, type SlCheckoutResult, type SlPlanApplication, type SlNotification,
 } from './api';
 import InvoicesView from './InvoicesView';
 import SlFooter from './SlFooter';
@@ -77,6 +78,16 @@ export default function StarlinkPortal({ onSignOut }: { onSignOut: () => void })
     }
   }, []);
 
+  const loadNotifications = useCallback(async () => {
+    try {
+      const r = await slNotifications();
+      setNotifications(r.notifications);
+      setUnreadCount(r.unreadCount);
+    } catch {
+      /* keep the last known feed — notifications must never block the portal */
+    }
+  }, []);
+
   const nextMonthLabel = () => {
     const d = new Date();
     return new Date(d.getFullYear(), d.getMonth() + 1, 1).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
@@ -125,6 +136,10 @@ export default function StarlinkPortal({ onSignOut }: { onSignOut: () => void })
   );
   const [profileOpen, setProfileOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [notifOpen, setNotifOpen] = useState(false);
+  const [notifications, setNotifications] = useState<SlNotification[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [verifyingIntent, setVerifyingIntent] = useState<string | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [paletteQuery, setPaletteQuery] = useState('');
   const [registering, setRegistering] = useState(false);
@@ -137,6 +152,7 @@ export default function StarlinkPortal({ onSignOut }: { onSignOut: () => void })
   const [busyTab, setBusyTab] = useState(false);
 
   const userRef = useRef<HTMLDivElement>(null);
+  const notifRef = useRef<HTMLDivElement>(null);
   const paletteRef = useRef<HTMLInputElement>(null);
   const toastSeq = useRef(0);
 
@@ -154,6 +170,8 @@ export default function StarlinkPortal({ onSignOut }: { onSignOut: () => void })
       const next = await sfetch<SlDashboard>('/dashboard');
       setData(next);
       setLoadError('');
+      setUnreadCount(next.unreadCount ?? 0);
+      void loadNotifications();
       setProfileForm({ fullName: next.customer.fullName, phone: next.customer.phone });
       setKitId((prev) => (prev && next.kits.some((k) => k.id === prev) ? prev : next.kits[0]?.id || ''));
     } catch (err) {
@@ -161,7 +179,7 @@ export default function StarlinkPortal({ onSignOut }: { onSignOut: () => void })
     } finally {
       if (!silent) setLoading(false);
     }
-  }, []);
+  }, [loadNotifications]);
 
   useEffect(() => {
     load();
@@ -181,6 +199,7 @@ export default function StarlinkPortal({ onSignOut }: { onSignOut: () => void })
   useEffect(() => {
     const onClick = (e: MouseEvent) => {
       if (userRef.current && !userRef.current.contains(e.target as Node)) setUserMenuOpen(false);
+      if (notifRef.current && !notifRef.current.contains(e.target as Node)) setNotifOpen(false);
     };
     document.addEventListener('mousedown', onClick);
     return () => document.removeEventListener('mousedown', onClick);
@@ -196,6 +215,7 @@ export default function StarlinkPortal({ onSignOut }: { onSignOut: () => void })
       if (e.key === 'Escape') {
         setPaletteOpen(false);
         setUserMenuOpen(false);
+        setNotifOpen(false);
       }
     };
     document.addEventListener('keydown', onKey);
@@ -259,6 +279,13 @@ export default function StarlinkPortal({ onSignOut }: { onSignOut: () => void })
   }, [customerId, loadApplications]);
   const kits: SlKit[] = useMemo(() => data?.kits ?? [], [data]);
   const invoices: SlInvoice[] = useMemo(() => data?.invoices ?? [], [data]);
+  const pendingIntents = data?.pendingIntents ?? [];
+  const recoverableInvoice = invoices.find(
+    (i) => i.status === 'PENDING' && pendingIntents.some((p) => p.invoice_id === i.id)
+  ) ?? null;
+  const recoverableIntent = recoverableInvoice
+    ? pendingIntents.find((p) => p.invoice_id === recoverableInvoice.id) ?? null
+    : null;
   const activeKit = useMemo(() => kits.find((k) => k.id === kitId) || kits[0] || null, [kits, kitId]);
   const balanceDue = data?.balanceDue ?? 0;
   const wallet = customer?.walletBalance ?? 0;
@@ -280,6 +307,56 @@ export default function StarlinkPortal({ onSignOut }: { onSignOut: () => void })
         invoiceNumber: result.invoiceNumber,
       }));
     } catch { /* storage unavailable */ }
+  };
+
+  /* ── payment recovery + notifications ── */
+  const verifyNow = async (intentId: string) => {
+    if (verifyingIntent) return;
+    setVerifyingIntent(intentId);
+    try {
+      const result = await slVerifyPayment(intentId);
+      if (result.status === 'SUCCESS') {
+        try {
+          const raw = sessionStorage.getItem(PENDING_KEY);
+          if (raw) {
+            const pending = JSON.parse(raw) as { intentId?: string };
+            if (pending.intentId === intentId) sessionStorage.removeItem(PENDING_KEY);
+          }
+        } catch { /* storage unavailable */ }
+        pushToast('ok', 'Payment confirmed', result.message);
+      } else if (result.status === 'FAILED') {
+        pushToast('err', 'Payment not completed', result.message);
+      } else {
+        pushToast('info', 'Still processing', result.message);
+      }
+      await Promise.all([load(true), loadNotifications()]);
+    } catch (err) {
+      pushToast('err', 'Verification failed', err instanceof ApiError ? err.message : 'Please try again shortly.');
+    } finally {
+      setVerifyingIntent(null);
+    }
+  };
+
+  const markOneRead = async (id: string) => {
+    setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, is_read: true } : n)));
+    setUnreadCount((n) => Math.max(0, n - 1));
+    try {
+      const r = await slMarkNotificationsRead([id]);
+      setUnreadCount(r.unreadCount);
+    } catch {
+      /* optimistic UI is harmless if the server call fails */
+    }
+  };
+
+  const markAllRead = async () => {
+    try {
+      const r = await slMarkNotificationsRead();
+      setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
+      setUnreadCount(r.unreadCount);
+      pushToast('ok', 'Notifications cleared', 'Everything is now marked as read.');
+    } catch (err) {
+      pushToast('err', 'Could not update notifications', err instanceof Error ? err.message : undefined);
+    }
   };
 
   /* ── kit actions ── */
@@ -441,6 +518,57 @@ export default function StarlinkPortal({ onSignOut }: { onSignOut: () => void })
             <kbd>Ctrl K</kbd>
           </button>
 
+          <div className="sp-notif" ref={notifRef}>
+            <button
+              type="button"
+              className="sp-notif-btn"
+              onClick={() => { setNotifOpen((v) => !v); setUserMenuOpen(false); }}
+              aria-label="Notifications"
+              aria-haspopup="dialog"
+              aria-expanded={notifOpen}
+            >
+              <FiBell size={17} />
+              {unreadCount > 0 && (
+                <span className="sp-notif-badge">{unreadCount > 9 ? '9+' : unreadCount}</span>
+              )}
+            </button>
+            {notifOpen && (
+              <div className="sp-notif-pop" role="dialog" aria-label="Notifications">
+                <div className="sp-notif-head">
+                  <b>Notifications</b>
+                  <button type="button" disabled={unreadCount === 0} onClick={markAllRead}>
+                    Mark all read
+                  </button>
+                </div>
+                <div className="sp-notif-list">
+                  {notifications.length === 0 ? (
+                    <div className="sp-notif-empty">You’re all caught up.</div>
+                  ) : (
+                    notifications.map((n) => (
+                      <button
+                        key={n.id}
+                        type="button"
+                        className={'sp-notif-item' + (n.is_read ? '' : ' is-unread')}
+                        onClick={() => {
+                          if (!n.is_read) void markOneRead(n.id);
+                          setNotifOpen(false);
+                          if (n.link_url) window.location.assign(n.link_url);
+                        }}
+                      >
+                        <span className="sp-notif-dot" aria-hidden="true" />
+                        <span className="sp-notif-copy">
+                          <b>{n.title}</b>
+                          <small>{n.body}</small>
+                          <time>{fmtDate(n.created_at)}</time>
+                        </span>
+                      </button>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
           <div className="sp-user" ref={userRef}>
             <button
               type="button"
@@ -477,6 +605,23 @@ export default function StarlinkPortal({ onSignOut }: { onSignOut: () => void })
       {/* ── Main ── */}
       <main className="sp-main">
         {busyTab && <div className="sp-alert" style={{ background: 'rgba(0,229,255,0.06)', borderColor: 'rgba(0,229,255,0.3)', color: 'var(--sp-cyan)' }}>Refreshing…</div>}
+
+        {recoverableInvoice && recoverableIntent && (
+          <div className="sp-alert sp-payment-recovery" role="status">
+            <div>
+              <b>Payment still pending.</b> We could not automatically confirm{' '}
+              <strong>{recoverableInvoice.invoice_number}</strong>. If you already paid, verify it now.
+            </div>
+            <button
+              type="button"
+              className="sp-btn sp-btn--primary sp-btn--small"
+              disabled={verifyingIntent === recoverableIntent.intent_id}
+              onClick={() => void verifyNow(recoverableIntent.intent_id)}
+            >
+              <FiRefreshCw /> {verifyingIntent === recoverableIntent.intent_id ? 'Verifying…' : 'Verify Payment Now'}
+            </button>
+          </div>
+        )}
 
         {/* ── HOME ── */}
         {tab === 'Home' && customer && (

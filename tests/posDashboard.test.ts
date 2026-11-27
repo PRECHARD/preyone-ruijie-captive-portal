@@ -144,8 +144,12 @@ describe('GET /api/pos/dashboard (POS sector aggregate)', () => {
     (pool.query as any)
       .mockImplementation((sql: string) => {
         if (sql.startsWith(selectSql)) {
-          // The probe now accepts sales as well as quotations.
-          expect(sql).toContain("doc_type IN ('quotation', 'sale')");
+          // The probe now accepts sales as well as quotations (and the other
+          // convertible document kinds), so assert the clause is present and
+          // that both convertible kinds are named.
+          expect(sql).toContain('doc_type IN (');
+          expect(sql).toContain("'quotation'");
+          expect(sql).toContain("'sale'");
           return Promise.resolve({ rows: [{ id: 's1', doc_type: 'sale', status: 'paid' }] });
         }
         if (sql.includes('nextval')) return Promise.resolve({ rows: [{ v: 43 }] });

@@ -51,7 +51,7 @@ export function setPreyoneCookie(res: Response, token: string): void {
     domain: isProduction ? '.preyone.com' : undefined,
     httpOnly: true,
     secure: isProduction,
-    sameSite: 'lax',
+    sameSite: 'strict',
     path: '/',
     maxAge: SSO_COOKIE_MAX_AGE_MS,
   });
@@ -76,7 +76,7 @@ export function clearPreyoneCookie(res: Response): void {
     domain: isProduction ? '.preyone.com' : undefined,
     httpOnly: true,
     secure: isProduction,
-    sameSite: 'lax',
+    sameSite: 'strict',
     path: '/',
   });
 }

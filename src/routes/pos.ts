@@ -10,6 +10,7 @@ import { requireAdminAuth, requireRole } from '../middleware/adminAuth';
 import { moduleAccess, requireCompany } from '../middleware/company';
 import { invoiceBlock, subscriptionBlock } from '../plans/entitlements';
 import { requireDeviceAuth } from '../middleware/deviceAuth';
+import { checkRate, clearFailures, isLocked, recordFailure, securityAudit } from '../services/authRateLimit';
 import { enforceSubscriptionGuard } from '../middleware/subscriptionGuard';
 import { markStockApplied, syncSaleToLedgerAndStock } from '../db/accounting';
 import { INVOICE_DOCUMENT_TYPES, ALL_DOCUMENT_TYPES } from '../services/pesepay';
@@ -189,6 +190,7 @@ router.post('/auth/pin', pinLimiter, async (req, res) => {
     res.status(400).json({ error: 'Select your till operator name' });
     return;
   }
+
   // A PIN is only valid inside the tenant whose roster the till loaded. This
   // closes the pre-auth gap where a leaked operator id could be tried from any
   // company's login screen.
@@ -204,6 +206,23 @@ router.post('/auth/pin', pinLimiter, async (req, res) => {
     });
     return;
   }
+
+  const lockKey = `pos:pin:${companyId}:${userId}`;
+  const lock = await isLocked(lockKey);
+  if (lock.locked) {
+    securityAudit('pos_pin_locked', { companyId, userId, retryAfterMs: lock.retryAfterMs });
+    res.status(423).json({
+      error: 'This till is locked after too many failed PIN attempts. Try again later.',
+      code: 'PIN_LOCKED',
+      retryAfterMs: lock.retryAfterMs,
+    });
+    return;
+  }
+  const rl = await checkRate(lockKey, 60_000, 10);
+  if (!rl.allowed) {
+    res.status(429).json({ error: 'Too many attempts. Please slow down.', retryAfterMs: rl.retryAfterMs });
+    return;
+  }
   const { rows } = await pool.query(
     `SELECT id, email, full_name, role, pin_hash, company_id
        FROM admin_users
@@ -213,6 +232,7 @@ router.post('/auth/pin', pinLimiter, async (req, res) => {
   );
   const row = rows[0];
   if (row && (await bcrypt.compare(pin, row.pin_hash))) {
+    await clearFailures(lockKey);
     const user: StaffUser = {
       id: row.id,
       email: row.email,
@@ -232,6 +252,10 @@ router.post('/auth/pin', pinLimiter, async (req, res) => {
     );
     res.json({ token: signToken(user, sid), user });
     return;
+  }
+  const failure = await recordFailure(lockKey);
+  if (failure.locked) {
+    securityAudit('pos_pin_locked', { companyId, userId, attempts: failure.attempts });
   }
   res.status(401).json({ error: 'Invalid PIN for this operator' });
 });

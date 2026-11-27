@@ -2,7 +2,7 @@ import dotenv from 'dotenv';
 import path from 'path';
 dotenv.config({ path: path.resolve(__dirname, '../.env') });
 import 'express-async-errors';
-import express from 'express';
+import express, { type NextFunction } from 'express';
 import cors from 'cors';
 import compression from 'compression';
 import cookieParser from 'cookie-parser';
@@ -106,6 +106,23 @@ app.use(cookieParser());
 app.use(sanitizeRequest);
 app.use('/api', apiRateLimit);
 app.use('/api/admin', adminApiRateLimit);
+
+// Strict content-type enforcement on the mutating admin/POS/subscription
+// surfaces: every one of these routes is JSON-only by contract, so a request
+// that is not application/json is rejected before it reaches the handler.
+function requireJson(req: Request, res: Response, next: NextFunction): void {
+  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
+    const ct = String((req.headers as any)['content-type'] || '').toLowerCase();
+    if (!ct.includes('application/json')) {
+      (res as any).status(415).json({ error: 'Content-Type must be application/json' });
+      return;
+    }
+  }
+  next();
+}
+app.use('/api/admin', requireJson as any);
+app.use('/api/pos', requireJson as any);
+app.use('/api/subscription', requireJson as any);
 
 // ── Gateway routes (work on any host, registered before subdomain routing) ──
 app.use(gatewayRouter);

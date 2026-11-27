@@ -44,12 +44,47 @@ export type SlInvoice = {
   created_at: string;
 };
 
+export type SlPendingIntent = {
+  intent_id: string;
+  invoice_id: string;
+  invoice_number: string;
+  reference: string;
+  amount: number;
+  created_at: string;
+};
+
+export type SlNotification = {
+  id: string;
+  customer_id: string;
+  category: 'PAYMENT' | 'USAGE_ALERT' | 'AUTO_TOPUP' | 'COMMAND' | 'TICKET' | 'FLEET';
+  event_key: string;
+  title: string;
+  body: string;
+  link_url: string | null;
+  meta: Record<string, unknown>;
+  is_read: boolean;
+  email_status: string;
+  email_sent_at: string | null;
+  created_at: string;
+};
+
+export type SlVerifyResult = {
+  status: 'SUCCESS' | 'FAILED' | 'PENDING';
+  message: string;
+  invoiceNumber?: string;
+  providerReference?: string;
+  alreadyPaid?: boolean;
+  amount?: number;
+};
+
 export type SlDashboard = {
   customer: SlCustomer;
   balanceDue: number;
   paidThisMonth: number;
   kits: SlKit[];
   invoices: SlInvoice[];
+  pendingIntents?: SlPendingIntent[];
+  unreadCount?: number;
   totals: { kits: number; pending: number; paid: number };
 };
 
@@ -196,6 +231,29 @@ export async function slPaymentStatus(intentId: string, statusToken: string): Pr
   );
   if (!res.ok) throw new ApiError(res.status, await readError(res));
   return (await res.json()) as SlPaymentStatus;
+}
+
+/** Customer-authenticated re-check of a Starlink intent after a missed webhook. */
+export async function slVerifyPayment(intentId: string): Promise<SlVerifyResult> {
+  return sfetch<SlVerifyResult>(`/payments/verify/${encodeURIComponent(intentId)}`, { method: 'POST' });
+}
+
+export async function slNotifications(limit = 50): Promise<{
+  notifications: SlNotification[];
+  unreadCount: number;
+}> {
+  return sfetch(`/notifications?limit=${limit}`);
+}
+
+export async function slMarkNotificationsRead(ids?: string[]): Promise<{
+  ok: boolean;
+  changed: number;
+  unreadCount: number;
+}> {
+  return sfetch('/notifications/mark-read', {
+    method: 'POST',
+    body: JSON.stringify(ids?.length ? { ids } : {}),
+  });
 }
 
 /* ── Formatters ──────────────────────────────────────────── */

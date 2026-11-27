@@ -106,6 +106,9 @@ beforeEach(() => {
     if (/INSERT INTO pos_documents /.test(sql) || /INSERT INTO pos_documents\n/.test(sql)) {
       return { rows: [{ id: 'doc-1', doc_number: 'RCP-0012', doc_type: 'sale', total: 1 }] };
     }
+    if (/UPDATE pos_documents/.test(sql) && /verify_code/.test(sql)) {
+      return { rows: [{ id: 'doc-1', doc_number: 'RCP-0012', doc_type: 'sale', total: 1, verify_code: 'PVN-0001' }] };
+    }
     if (/INSERT INTO pos_document_payments/.test(sql)) {
       return { rows: [{ id: 1 }] };
     }

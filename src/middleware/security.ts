@@ -23,9 +23,10 @@ export const CONTENT_SECURITY_POLICY = {
     styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
     fontSrc: ["'self'", 'https://fonts.gstatic.com'],
     scriptSrc: ["'self'", "'unsafe-inline'"],
-    imgSrc: ["'self'", 'data:'],
+    imgSrc: ["'self'", 'data:', 'https://*.preyone.com', 'https://api.pesepay.com', 'https://*.brevo.com', 'https://*.sendinblue.com'],
     formAction: ['*'],
-    connectSrc: ["'self'", 'http://192.168.1.216:2060', 'http://192.168.100.1:2060'],
+    connectSrc: ["'self'", 'https://*.preyone.com', 'https://api.pesepay.com', 'http://192.168.1.216:2060', 'http://192.168.100.1:2060'],
+    frameAncestors: ["'none'"],
     upgradeInsecureRequests: null,
   },
 } as const;
@@ -46,7 +47,7 @@ export const helmetMiddleware: RequestHandler = helmet({
  */
 export function securityHeaders(_req: Request, res: Response, next: NextFunction): void {
   res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.setHeader('X-Permitted-Cross-Domain-Policies', 'none');
   res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');

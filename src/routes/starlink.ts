@@ -29,7 +29,15 @@ import {
   getStarlinkInvoice,
   listPlanApplications,
   getBalanceDue,
+  listPendingStarlinkIntents,
+  listStarlinkNotifications,
+  getUnreadStarlinkNotificationCount,
+  markStarlinkNotificationsRead,
 } from '../db/starlink';
+import {
+  verifyStarlinkPaymentIntent,
+  StarlinkIntentError,
+} from '../services/starlinkPaymentReconcile';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'preyone-jwt-secret-change-in-production';
 
@@ -262,10 +270,12 @@ starlinkRouter.post('/auth/change-password', requireStarlinkAuth, async (req: Re
 starlinkRouter.get('/dashboard', requireStarlinkAuth, async (req: Request, res: Response) => {
   try {
     const customer = req.starlinkCustomer!;
-    const [kits, invoices, balanceDue] = await Promise.all([
+    const [kits, invoices, balanceDue, pendingIntents, unreadCount] = await Promise.all([
       listStarlinkKits(customer.id),
       listStarlinkInvoices(customer.id),
       getBalanceDue(customer.id),
+      listPendingStarlinkIntents(customer.id),
+      getUnreadStarlinkNotificationCount(customer.id),
     ]);
 
     const kitsWithUsage = await Promise.all(
@@ -282,6 +292,8 @@ starlinkRouter.get('/dashboard', requireStarlinkAuth, async (req: Request, res: 
       paidThisMonth,
       kits: kitsWithUsage,
       invoices: invoices.slice(0, 20),
+      pendingIntents,
+      unreadCount,
       totals: {
         kits: kits.length,
         pending: invoices.filter((i) => i.status === 'PENDING').length,
@@ -369,4 +381,70 @@ starlinkRouter.get('/invoices/:id', requireStarlinkAuth, async (req: Request, re
   const invoice = await getStarlinkInvoice(req.params.id, req.starlinkCustomer!.id);
   if (!invoice) { res.status(404).json({ error: 'Invoice not found' }); return; }
   res.json({ invoice });
+});
+
+// ---------------------------------------------------------------------------
+// Payment recovery + notifications
+// ---------------------------------------------------------------------------
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const paymentVerifyLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many verification attempts. Please wait a minute.' },
+});
+
+/** Customer-initiated re-check after a missed webhook or closed checkout tab. */
+starlinkRouter.post(
+  '/payments/verify/:intentId',
+  requireStarlinkAuth,
+  paymentVerifyLimiter,
+  async (req: Request, res: Response) => {
+    try {
+      const result = await verifyStarlinkPaymentIntent(req.params.intentId, {
+        customerId: req.starlinkCustomer!.id,
+        actor: 'customer',
+      });
+      res.json(result);
+    } catch (err) {
+      if (err instanceof StarlinkIntentError) {
+        res.status(err.status).json({ error: err.message });
+        return;
+      }
+      console.error('Starlink payment verify error:', err);
+      res.status(500).json({ error: 'Could not verify this payment right now' });
+    }
+  }
+);
+
+starlinkRouter.get('/notifications', requireStarlinkAuth, async (req: Request, res: Response) => {
+  try {
+    const limit = Number(req.query.limit ?? 50);
+    const [notifications, unreadCount] = await Promise.all([
+      listStarlinkNotifications(req.starlinkCustomer!.id, limit),
+      getUnreadStarlinkNotificationCount(req.starlinkCustomer!.id),
+    ]);
+    res.json({ notifications, unreadCount });
+  } catch (err) {
+    console.error('Starlink notifications error:', err);
+    res.status(500).json({ error: 'Could not load notifications' });
+  }
+});
+
+starlinkRouter.post('/notifications/mark-read', requireStarlinkAuth, async (req: Request, res: Response) => {
+  try {
+    const raw = req.body?.ids;
+    const ids = Array.isArray(raw)
+      ? raw.filter((id): id is string => typeof id === 'string' && UUID_RE.test(id))
+      : undefined;
+    const changed = await markStarlinkNotificationsRead(req.starlinkCustomer!.id, ids);
+    const unreadCount = await getUnreadStarlinkNotificationCount(req.starlinkCustomer!.id);
+    res.json({ ok: true, changed, unreadCount });
+  } catch (err) {
+    console.error('Starlink mark-read error:', err);
+    res.status(500).json({ error: 'Could not update notifications' });
+  }
 });

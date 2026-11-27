@@ -20,6 +20,16 @@ const C = {
   purple: '#a855f7',
 };
 
+// Receipt-specific palette requested for payment confirmations. Existing
+// verification/reset emails keep the original cyan/purple shell above.
+const RECEIPT: typeof C = {
+  ...C,
+  bg: '#0D0F18',
+  card: '#0a0f1d',
+  panel: '#0a0f1d',
+  cyan: '#00F0FF',
+};
+
 const FONT = "'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
 
 export function esc(value: string): string {
@@ -39,10 +49,10 @@ export function firstName(fullName: string): string {
   return esc(fullName.trim().split(/\s+/)[0] || 'there');
 }
 
-export function button(href: string, label: string): string {
+export function button(href: string, label: string, palette: typeof C = C): string {
   return `<table role="presentation" cellpadding="0" cellspacing="0" align="center">
                 <tr>
-                  <td align="center" bgcolor="${C.cyan}" style="border-radius:10px;background:linear-gradient(135deg,${C.cyan},${C.purple})">
+                  <td align="center" bgcolor="${palette.cyan}" style="border-radius:10px;background:linear-gradient(135deg,${palette.cyan},${palette.purple})">
                     <a href="${href}" target="_blank" style="display:inline-block;padding:15px 40px;font:700 15px ${FONT};color:#050505;text-decoration:none;border-radius:10px">${label}</a>
                   </td>
                 </tr>
@@ -56,7 +66,9 @@ export function layout(opts: {
   body: string;
   recipient: string;
   base: string;
+  palette?: typeof C;
 }): string {
+  const p = opts.palette ?? C;
   const logo = `${opts.base}/images/preyonenoneglow-logo-zoom-800.png`;
   return `<!doctype html>
 <html lang="en">
@@ -66,26 +78,26 @@ export function layout(opts: {
   <meta name="x-apple-disable-message-reformatting" />
   <title>Preyone Starlink</title>
 </head>
-<body style="margin:0;padding:0;background:${C.bg};-webkit-text-size-adjust:100%">
+<body style="margin:0;padding:0;background:${p.bg};-webkit-text-size-adjust:100%">
   <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent">${esc(opts.preheader)}</div>
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${C.bg};padding:32px 12px">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${p.bg};padding:32px 12px">
     <tr>
       <td align="center">
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;background:${C.card};border:1px solid ${C.line};border-radius:18px;overflow:hidden">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;background:${p.card};border:1px solid ${p.line};border-radius:18px;overflow:hidden">
 
           <tr>
             <td style="padding:34px 24px 8px;text-align:center">
               <img src="${logo}" alt="Preyone" width="200" height="100" style="display:block;margin:0 auto;width:200px;height:auto;border:0" />
-              <div style="margin-top:12px;font:600 10.5px ${FONT};letter-spacing:3px;text-transform:uppercase;color:${C.cyan}">${esc(opts.eyebrow)}</div>
+              <div style="margin-top:12px;font:600 10.5px ${FONT};letter-spacing:3px;text-transform:uppercase;color:${p.cyan}">${esc(opts.eyebrow)}</div>
             </td>
           </tr>
           <tr>
-            <td style="height:3px;background:linear-gradient(90deg,${C.cyan},${C.purple});font-size:0;line-height:0">&nbsp;</td>
+            <td style="height:3px;background:linear-gradient(90deg,${p.cyan},${p.purple});font-size:0;line-height:0">&nbsp;</td>
           </tr>
 
           <tr>
             <td style="padding:32px 32px 8px">
-              <div style="font:700 25px/1.25 ${FONT};color:${C.text};letter-spacing:0.2px">${opts.heading}</div>
+              <div style="font:700 25px/1.25 ${FONT};color:${p.text};letter-spacing:0.2px">${opts.heading}</div>
             </td>
           </tr>
 
@@ -93,28 +105,28 @@ export function layout(opts: {
 
           <tr>
             <td style="padding:8px 32px 30px">
-              <div style="border-top:1px solid ${C.line};padding-top:18px;font:13px/1.6 ${FONT};color:${C.dim}">
+              <div style="border-top:1px solid ${p.line};padding-top:18px;font:13px/1.6 ${FONT};color:${p.dim}">
                 Didn't ask for this? You can ignore this email. Nothing changes unless the link is used. If you're worried
                 about your account, reply to this email or contact
-                <a href="mailto:support@preyone.com" style="color:${C.cyan};text-decoration:none">support@preyone.com</a>.
+                <a href="mailto:support@preyone.com" style="color:${p.cyan};text-decoration:none">support@preyone.com</a>.
               </div>
             </td>
           </tr>
 
           <tr>
-            <td style="background:${C.panel};border-top:1px solid ${C.line};padding:24px 32px;text-align:center">
-              <div style="font:600 13px ${FONT};color:${C.text}">Preyone Starlink Customer Portal</div>
-              <div style="margin-top:6px;font:12.5px/1.6 ${FONT};color:${C.mut}">
-                <a href="mailto:support@preyone.com" style="color:${C.cyan};text-decoration:none">support@preyone.com</a>
+            <td style="background:${p.panel};border-top:1px solid ${p.line};padding:24px 32px;text-align:center">
+              <div style="font:600 13px ${FONT};color:${p.text}">Preyone Starlink Customer Portal</div>
+              <div style="margin-top:6px;font:12.5px/1.6 ${FONT};color:${p.mut}">
+                <a href="mailto:support@preyone.com" style="color:${p.cyan};text-decoration:none">support@preyone.com</a>
                 &nbsp;·&nbsp;
-                <a href="tel:+263771327202" style="color:${C.cyan};text-decoration:none">+263 771 327 202</a>
+                <a href="tel:+263771327202" style="color:${p.cyan};text-decoration:none">+263 771 327 202</a>
               </div>
-              <div style="margin-top:10px;font:12px/1.6 ${FONT};color:${C.dim}">
-                <a href="${opts.base}/starlink-privacy.html" style="color:${C.mut};text-decoration:none">Privacy policy</a>
+              <div style="margin-top:10px;font:12px/1.6 ${FONT};color:${p.dim}">
+                <a href="${opts.base}/starlink-privacy.html" style="color:${p.mut};text-decoration:none">Privacy policy</a>
                 &nbsp;·&nbsp;
-                <a href="https://preyone.com" style="color:${C.mut};text-decoration:none">preyone.com</a>
+                <a href="https://preyone.com" style="color:${p.mut};text-decoration:none">preyone.com</a>
               </div>
-              <div style="margin-top:14px;font:11px/1.6 ${FONT};color:${C.dim}">
+              <div style="margin-top:14px;font:11px/1.6 ${FONT};color:${p.dim}">
                 © ${new Date().getFullYear()} Preyone Enterprises (Pvt) Ltd · Harare, Zimbabwe<br />
                 You received this email because of activity on the account for ${esc(opts.recipient)}.
               </div>
@@ -275,4 +287,102 @@ export function buildPasswordResetEmail(input: { fullName: string; resetUrl: str
   ].join('\n');
 
   return { subject, html, text };
+}
+
+/** Dark-theme receipt sent once after a Starlink invoice moves PENDING -> PAID. */
+export function buildPaymentReceiptEmail(input: {
+  fullName: string;
+  email: string;
+  invoiceNumber: string;
+  providerReference: string;
+  action: string;
+  amount: number;
+  currency?: string;
+  kitSerial?: string | null;
+  kitNickname?: string | null;
+  walletBalance?: number | null;
+  dataBalance?: number | null;
+  invoiceUrl?: string;
+}): { subject: string; html: string; text: string } {
+  const base = starlinkBaseUrl();
+  const invoiceUrl = esc(input.invoiceUrl || `${base}/starlink/portal`);
+  const amount = `$${Number(input.amount || 0).toFixed(2)} USD`;
+  const wallet = input.walletBalance == null ? '—' : `$${Number(input.walletBalance).toFixed(2)}`;
+  const data = input.dataBalance == null ? '—' : `${Number(input.dataBalance).toFixed(2)} GB`;
+  const kitParts = [input.kitNickname, input.kitSerial].map((v) => String(v || '').trim()).filter(Boolean);
+  const kit = kitParts.length ? kitParts.join(' · ') : '—';
+
+  const row = (label: string, value: string, emphasis = false) => `
+    <tr>
+      <td style="padding:9px 0;font:13px/1.5 ${FONT};color:${RECEIPT.mut}">${esc(label)}</td>
+      <td align="right" style="padding:9px 0;font:700 13px/1.5 ${FONT};color:${emphasis ? RECEIPT.cyan : RECEIPT.text}">${value}</td>
+    </tr>`;
+
+  const body = `
+          <tr>
+            <td style="padding:0 32px 6px">
+              <p style="margin:0;font:15px/1.7 ${FONT};color:${RECEIPT.mut}">
+                Hi ${firstName(input.fullName)}, your payment was confirmed. Your Starlink invoice is now marked PAID.
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:12px 32px 0">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+                     style="background:${RECEIPT.panel};border:1px solid ${RECEIPT.line};border-radius:12px;padding:14px 16px">
+                ${row('Invoice number', esc(input.invoiceNumber), true)}
+                ${row('Payment reference', esc(input.providerReference || '—'))}
+                ${row('Payment action', esc(input.action))}
+                ${row('Kit', esc(kit))}
+                ${row('Amount paid', esc(amount), true)}
+                ${row('New wallet balance', esc(wallet))}
+                ${row('New data balance', esc(data))}
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:16px 32px 6px">
+              <div style="font:13px/1.7 ${FONT};color:${RECEIPT.mut}">
+                Wallet top-ups, data bundles, kit orders and plan changes are credited automatically. Keep this email for
+                your records — the PDF invoice is always available in the Starlink customer portal.
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td align="center" style="padding:18px 32px 8px">
+              ${button(invoiceUrl, 'View / download PDF invoice', RECEIPT)}
+              <p style="margin:14px 0 0;font:12px/1.6 ${FONT};color:${RECEIPT.dim}">
+                Opens from starlink.preyone.com/starlink/portal
+              </p>
+            </td>
+          </tr>`;
+
+  const html = layout({
+    preheader: `Payment received for invoice ${input.invoiceNumber}.`,
+    eyebrow: 'Payment receipt',
+    heading: `Payment confirmed, ${firstName(input.fullName)}`,
+    body,
+    recipient: input.email,
+    base,
+    palette: RECEIPT,
+  });
+
+  const text = [
+    `Payment confirmed, ${input.fullName.trim().split(/\s+/)[0] || 'there'}`,
+    '',
+    `Invoice number: ${input.invoiceNumber}`,
+    `Payment reference: ${input.providerReference || '—'}`,
+    `Payment action: ${input.action}`,
+    `Kit: ${kit}`,
+    `Amount paid: ${amount}`,
+    `New wallet balance: ${wallet}`,
+    `New data balance: ${data}`,
+    '',
+    'Your Starlink invoice is now marked PAID. View or download the PDF invoice at:',
+    `${base}/starlink/portal`,
+    '',
+    'Preyone Starlink Customer Portal · support@preyone.com',
+  ].join('\n');
+
+  return { subject: `Payment receipt · ${input.invoiceNumber}`, html, text };
 }

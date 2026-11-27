@@ -29,6 +29,7 @@ import {
 import { setPreyoneCookie, clearPreyoneCookie, resolveAuthToken } from '../utils/ssoCookie';
 import { SESSION_POLICY } from '../sessionPolicy';
 import crypto from 'crypto';
+import { checkRate, clearFailures, isLocked, recordFailure, securityAudit } from '../services/authRateLimit';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'preyone-jwt-secret-change-in-production';
 let _jwtSecretWarned = false;
@@ -464,6 +465,15 @@ adminAuthRouter.post('/login', authLimiter, async (req: Request, res: Response) 
     return;
   }
 
+  const loginKey = `admin:login:${String(email).toLowerCase().trim()}`;
+  const lock = await isLocked(loginKey);
+  if (lock.locked) {
+    securityAudit('admin_login_locked', { email: String(email).toLowerCase().trim(), retryAfterMs: lock.retryAfterMs });
+    res.status(423).json({ error: 'Account locked after too many failed attempts. Try again later.', retryAfterMs: lock.retryAfterMs });
+    return;
+  }
+  await checkRate(loginKey, 60_000, 10);
+
   const { rows } = await pool.query(
     `SELECT id, full_name, email, phone, role, approved, password_hash,
             company_id, portal_company_id, email_verified, two_factor_enabled
@@ -472,6 +482,8 @@ adminAuthRouter.post('/login', authLimiter, async (req: Request, res: Response) 
   );
 
   if (rows.length === 0) {
+    const failure = await recordFailure(loginKey);
+    if (failure.locked) securityAudit('admin_login_locked', { email: String(email).toLowerCase().trim(), attempts: failure.attempts });
     res.status(401).json({ error: 'Invalid email or password' });
     return;
   }
@@ -479,9 +491,12 @@ adminAuthRouter.post('/login', authLimiter, async (req: Request, res: Response) 
   const user = rows[0];
   const valid = await bcrypt.compare(password, user.password_hash);
   if (!valid) {
+    const failure = await recordFailure(loginKey);
+    if (failure.locked) securityAudit('admin_login_locked', { email: String(email).toLowerCase().trim(), attempts: failure.attempts });
     res.status(401).json({ error: 'Invalid email or password' });
     return;
   }
+  await clearFailures(loginKey);
 
   // Staff accounts must be approved by Manager/CEO
   if (user.role === 'Staff' && !user.approved) {
@@ -570,6 +585,14 @@ adminAuthRouter.post('/verify-2fa', verify2faLimiter, async (req: Request, res: 
     [decoded.id]
   );
   const challenge = rows[0];
+  const otpKey = `admin:otp:${decoded.id}`;
+  const otpLock = await isLocked(otpKey);
+  if (otpLock.locked) {
+    securityAudit('admin_otp_locked', { userId: decoded.id, retryAfterMs: otpLock.retryAfterMs });
+    res.status(423).json({ error: 'Too many failed attempts. Try again later.', retryAfterMs: otpLock.retryAfterMs });
+    return;
+  }
+
   if (!challenge) {
     res.status(401).json({
       error: 'This code has expired. Request a new code or sign in again.',
@@ -578,8 +601,14 @@ adminAuthRouter.post('/verify-2fa', verify2faLimiter, async (req: Request, res: 
     return;
   }
 
-  if (hashTwoFaCode(String(code).trim()) !== challenge.code_hash) {
+  const providedHash = hashTwoFaCode(String(code).trim());
+  const hashMatch =
+    providedHash.length === challenge.code_hash.length &&
+    crypto.timingSafeEqual(Buffer.from(providedHash, 'hex'), Buffer.from(challenge.code_hash, 'hex'));
+  if (!hashMatch) {
     const attempts = (challenge.attempts || 0) + 1;
+    const failure = await recordFailure(otpKey);
+    if (failure.locked) securityAudit('admin_otp_locked', { userId: decoded.id, attempts: failure.attempts });
     if (attempts >= 5) {
       await pool.query('DELETE FROM admin_2fa_challenges WHERE id = $1', [challenge.id]);
       res.status(401).json({
@@ -611,6 +640,7 @@ adminAuthRouter.post('/verify-2fa', verify2faLimiter, async (req: Request, res: 
   }
 
   await pool.query('UPDATE admin_2fa_challenges SET consumed_at = NOW() WHERE id = $1', [challenge.id]);
+  await clearFailures(otpKey);
   await recordAuditLog(user.id, user.full_name, 'login', 'admin_user', user.id, '2FA verified');
   await startAdminSession(req, res, user);
 });

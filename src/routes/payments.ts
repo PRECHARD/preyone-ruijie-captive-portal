@@ -24,11 +24,18 @@ import { RuijieApiError } from '../services/ruijieCloud';
 import { isRuijieCloudConfigured, findRuijieProfile, mintRuijieVoucherForTier } from '../services/ruijieMint';
 import { claimPooledVoucher } from '../services/voucherPool';
 import { requireStarlinkAuth } from '../middleware/starlinkAuth';
-import { createStarlinkInvoice, applyStarlinkPayment, getStarlinkKit } from '../db/starlink';
+import {
+  createStarlinkInvoice,
+  applyStarlinkPayment,
+  getStarlinkKit,
+  type StarlinkSettlement,
+} from '../db/starlink';
 import { getStarlinkPlan } from '../plans/starlinkPlans';
 import { syncSaleToLedgerAndStock } from '../db/accounting';
 import { canonicalPlanId, planNameFor, syncPlanModules } from '../plans/entitlements';
 import { sendPaymentFailedEmail, sendSubscriptionPaymentReceiptEmail } from '../services/notificationService';
+import { dispatchStarlinkPaymentReceipt } from '../services/starlinkPaymentNotices';
+import { reconcileStarlinkIntentsOnce } from '../services/starlinkPaymentReconcile';
 import { buildSubscriptionInvoicePdf } from '../services/subscriptionInvoicePdf';
 import { TIER_CATALOG } from '../plans/entitlements';
 
@@ -87,6 +94,11 @@ const PHONE_RE = /^2637\d{8}$/;
 // greppable and completePayment clears error_message on success, so the marker
 // disappears as soon as the voucher is finally issued.
 const RUIJIE_MINT_PENDING_PREFIX = 'ruijie_mint_pending: ';
+
+/** Shared body-field normaliser for the Pesepay cancel endpoint. */
+function str(value: unknown): string {
+  return value == null ? '' : String(value).trim();
+}
 
 function normalizeZwPhone(input: string): string {
   let p = String(input ?? '').replace(/[^\d+]/g, '');
@@ -1838,6 +1850,14 @@ paymentsRouter.post('/pesepay/callback', async (req: Request, res: Response) => 
 
       await client.query('COMMIT');
 
+      // Starlink receipts are dispatched only after the settlement transaction
+      // commits. The unique notification claim makes this safe against the
+      // concurrent reconciliation sweep.
+      const starlinkApplied = intent.target_type === 'starlink' ? (applied as StarlinkSettlement) : null;
+      if (starlinkApplied?.receiptEventKey && !starlinkApplied.alreadyPaid) {
+        void dispatchStarlinkPaymentReceipt(starlinkApplied.receiptEventKey);
+      }
+
       res.json({
         success: true,
         referenceNumber: reference,
@@ -2528,6 +2548,18 @@ export function startPaymentReconciliation(): void {
         }
       })
       .catch((err) => console.error('[payments] sweep failed:', err));
+
+    // Starlink intents live in their own table; the WiFi sweep above never
+    // sees them. Separate advisory lock, same timer, no payment-logic changes.
+    reconcileStarlinkIntentsOnce()
+      .then((r) => {
+        if (r.completed || r.failed) {
+          console.log(
+            `[starlink] sweep: scanned=${r.scanned} completed=${r.completed} failed=${r.failed} pending=${r.pending} skipped=${r.skipped}`
+          );
+        }
+      })
+      .catch((err) => console.error('[starlink] sweep failed:', err));
   };
 
   // One pass shortly after boot: webhooks may have been missed while down.

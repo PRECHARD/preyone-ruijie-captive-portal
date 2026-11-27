@@ -65,6 +65,39 @@ export interface StarlinkUsagePoint {
   is_baseline: boolean;
 }
 
+/** Additive customer-facing feed. Categories are fixed by the DB enum below. */
+export type StarlinkNotificationCategory =
+  | 'PAYMENT'
+  | 'USAGE_ALERT'
+  | 'AUTO_TOPUP'
+  | 'COMMAND'
+  | 'TICKET'
+  | 'FLEET';
+
+export interface StarlinkNotification {
+  id: string;
+  customer_id: string;
+  category: StarlinkNotificationCategory;
+  event_key: string;
+  title: string;
+  body: string;
+  link_url: string | null;
+  meta: Record<string, unknown>;
+  is_read: boolean;
+  email_status: string;
+  email_sent_at: string | null;
+  created_at: string;
+}
+
+export interface StarlinkPendingIntent {
+  intent_id: string;
+  invoice_id: string;
+  invoice_number: string;
+  reference: string;
+  amount: number;
+  created_at: string;
+}
+
 // ---------------------------------------------------------------------------
 // Schema (additive, idempotent)
 // ---------------------------------------------------------------------------
@@ -190,6 +223,42 @@ const STARLINK_DDL = `
       ON starlink_plan_applications (status, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_starlink_plan_applications_customer
       ON starlink_plan_applications (customer_id, created_at DESC);
+
+    -- Customer notification feed. The enum type is created defensively: PM2
+    -- runs this DDL from every worker, so the advisory lock serialises the
+    -- CREATE TYPE before the idempotent IF NOT EXISTS check.
+    DO $$
+    BEGIN
+      PERFORM pg_advisory_xact_lock(hashtext('preyone:starlink_notification_category'));
+      IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'starlink_notification_category') THEN
+        CREATE TYPE starlink_notification_category AS ENUM
+          ('PAYMENT', 'USAGE_ALERT', 'AUTO_TOPUP', 'COMMAND', 'TICKET', 'FLEET');
+      END IF;
+    END $$;
+
+    CREATE TABLE IF NOT EXISTS starlink_notifications (
+      id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      customer_id   UUID NOT NULL REFERENCES starlink_customers(id) ON DELETE CASCADE,
+      category      starlink_notification_category NOT NULL DEFAULT 'PAYMENT',
+      event_key     TEXT NOT NULL UNIQUE,
+      title         TEXT NOT NULL,
+      body          TEXT NOT NULL,
+      link_url      TEXT,
+      meta          JSONB NOT NULL DEFAULT '{}'::jsonb,
+      is_read       BOOLEAN NOT NULL DEFAULT FALSE,
+      read_at       TIMESTAMPTZ,
+      email_status  TEXT NOT NULL DEFAULT 'NOT_APPLICABLE',
+      email_sent_at TIMESTAMPTZ,
+      email_error   TEXT,
+      created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_starlink_notifications_customer
+      ON starlink_notifications (customer_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_starlink_notifications_unread
+      ON starlink_notifications (customer_id) WHERE is_read = FALSE;
+    CREATE INDEX IF NOT EXISTS idx_starlink_notifications_mail
+      ON starlink_notifications (email_status) WHERE email_status = 'PENDING';
 `;
 
 /**
@@ -209,9 +278,14 @@ export async function ensureStarlinkSchema(): Promise<void> {
       lastErr = err;
       try {
         const { rows } = await pool.query(
-          `SELECT COUNT(*)::int AS n FROM pg_tables WHERE tablename LIKE 'starlink%'`
+          `SELECT COUNT(*)::int AS n FROM pg_tables
+            WHERE tablename IN (
+              'starlink_customers', 'starlink_kits', 'starlink_invoices',
+              'starlink_kit_usage', 'starlink_plan_capacity',
+              'starlink_plan_applications', 'starlink_notifications'
+            )`
         );
-        if (Number(rows[0]?.n) >= 4) return;
+        if (Number(rows[0]?.n) >= 7) return;
       } catch {
         /* connectivity issue — keep retrying */
       }
@@ -536,12 +610,29 @@ export async function getBalanceDue(customerId: string): Promise<number> {
 // pesepay_intents row with target_type = 'starlink' completes.
 // ---------------------------------------------------------------------------
 
+function starlinkActionLabel(kind: string): string {
+  switch (kind) {
+    case 'wallet_topup': return 'Wallet top-up';
+    case 'data_topup': return 'Data top-up';
+    case 'kit_purchase': return 'Starlink kit purchase';
+    case 'plan_change': return 'Plan change';
+    case 'plan_renewal': return 'Plan renewal';
+    default: return 'Starlink service payment';
+  }
+}
+
 export interface StarlinkSettlement {
   invoiceNumber: string;
   kind: string;
   amount: number;
+  currency: string;
   walletBalance: number;
+  dataBalance?: number;
+  kitSerial?: string | null;
+  kitNickname?: string | null;
   alreadyPaid: boolean;
+  /** Unique notification key for the post-commit receipt dispatch. */
+  receiptEventKey?: string;
 }
 
 /**
@@ -563,7 +654,7 @@ export async function applyStarlinkPayment(
     throw new Error('Starlink payment intent has no invoice attached');
   }
   const { rows } = await client.query(
-    `SELECT id, customer_id, invoice_number, amount, kind, status, meta
+    `SELECT id, customer_id, invoice_number, amount, currency, kind, status, meta
        FROM starlink_invoices WHERE id = $1 FOR UPDATE`,
     [intent.target_id]
   );
@@ -578,6 +669,7 @@ export async function applyStarlinkPayment(
       invoiceNumber: inv.invoice_number,
       kind: inv.kind,
       amount: Number(inv.amount),
+      currency: String(inv.currency || 'USD'),
       walletBalance: Number(bal.rows[0]?.wallet_balance ?? 0),
       alreadyPaid: true,
     };
@@ -631,14 +723,201 @@ export async function applyStarlinkPayment(
     );
   }
 
-  const bal = await client.query('SELECT wallet_balance FROM starlink_customers WHERE id = $1', [inv.customer_id]);
+  const bal = await client.query(
+    'SELECT wallet_balance, plan_code, plan_renews_at FROM starlink_customers WHERE id = $1',
+    [inv.customer_id]
+  );
+  const customer = (bal.rows[0] ?? {}) as Record<string, any>;
+
+  const kitId = meta.kit_id ? String(meta.kit_id) : null;
+  const kitNumber = meta.kit_number ? String(meta.kit_number) : null;
+  let kitRow: Record<string, any> | null = null;
+  if (kitId || kitNumber) {
+    const { rows: kitRows } = await client.query(
+      `SELECT kit_number, nickname, data_credit_gb FROM starlink_kits
+        WHERE customer_id = $1
+          AND (($2::uuid IS NOT NULL AND id = $2) OR ($3::text IS NOT NULL AND lower(kit_number) = lower($3)))
+        ORDER BY created_at DESC LIMIT 1`,
+      [inv.customer_id, kitId, kitNumber]
+    );
+    kitRow = (kitRows[0] as Record<string, any>) ?? null;
+  }
+
+  const receiptEventKey = `starlink-payment:${inv.id}`;
+  const noticeMeta = {
+    customerId: inv.customer_id,
+    invoiceNumber: inv.invoice_number,
+    kind: inv.kind,
+    amount: Number(inv.amount),
+    currency: String(inv.currency || 'USD'),
+    providerReference: intent.provider_reference || reference,
+    walletBalance: Number(customer.wallet_balance ?? 0),
+    dataBalance: kitRow ? Number(kitRow.data_credit_gb ?? 0) : null,
+    kitSerial: kitRow?.kit_number ?? kitNumber ?? null,
+    kitNickname: (kitRow?.nickname ?? String(meta.nickname || '')) || null,
+    planCode: customer.plan_code ?? null,
+    planRenewsAt: customer.plan_renews_at ? String(customer.plan_renews_at) : null,
+  };
+  const portalBase = (process.env.STARLINK_BASE_URL || 'https://starlink.preyone.com').replace(/\/$/, '');
+
+  // Written inside the settlement transaction. The unique event_key plus the
+  // invoice row lock make the receipt/notification strictly once-only even
+  // when a webhook and a sweep race. Email dispatch happens after commit.
+  await client.query(
+    `INSERT INTO starlink_notifications
+       (customer_id, category, event_key, title, body, link_url, meta, email_status)
+     VALUES ($1, 'PAYMENT', $2, $3, $4, $5, $6::jsonb, 'PENDING')
+     ON CONFLICT (event_key) DO NOTHING`,
+    [
+      inv.customer_id,
+      receiptEventKey,
+      `Payment received · ${inv.invoice_number}`,
+      `Your payment of $${Number(inv.amount).toFixed(2)} for ${starlinkActionLabel(inv.kind)} was confirmed.`,
+      `${portalBase}/starlink/portal`,
+      JSON.stringify(noticeMeta),
+    ]
+  );
+
   return {
     invoiceNumber: inv.invoice_number,
     kind: inv.kind,
     amount: Number(inv.amount),
-    walletBalance: Number(bal.rows[0]?.wallet_balance ?? 0),
+    currency: String(inv.currency || 'USD'),
+    walletBalance: Number(customer.wallet_balance ?? 0),
+    dataBalance: kitRow ? Number(kitRow.data_credit_gb ?? 0) : undefined,
+    kitSerial: kitRow?.kit_number ?? kitNumber ?? null,
+    kitNickname: (kitRow?.nickname ?? String(meta.nickname || '')) || null,
     alreadyPaid: false,
+    receiptEventKey,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Notification feed + post-commit receipt claim
+// ---------------------------------------------------------------------------
+
+export interface StarlinkReceiptNotification extends StarlinkNotification {
+  customer_email: string;
+  customer_full_name: string;
+}
+
+const RECEIPT_NOTIFICATION_SELECT = `
+  SELECT n.id, n.customer_id, n.category, n.event_key, n.title, n.body,
+         n.link_url, n.meta, n.is_read, n.email_status, n.email_sent_at, n.created_at,
+         c.email AS customer_email, c.full_name AS customer_full_name
+    FROM starlink_notifications n
+    JOIN starlink_customers c ON c.id = n.customer_id`;
+
+/** Read a queued payment receipt after its settlement transaction committed. */
+export async function getStarlinkReceiptNotification(
+  eventKey: string
+): Promise<StarlinkReceiptNotification | null> {
+  const { rows } = await pool.query(
+    `${RECEIPT_NOTIFICATION_SELECT} WHERE n.event_key = $1`,
+    [eventKey]
+  );
+  return (rows[0] as StarlinkReceiptNotification) ?? null;
+}
+
+/**
+ * Atomically take ownership of one PENDING email. Only the worker whose UPDATE
+ * returns a row may send, so a webhook, a sweep and a manual verify can never
+ * dispatch the same receipt twice.
+ */
+export async function claimStarlinkNotificationEmail(
+  eventKey: string
+): Promise<StarlinkReceiptNotification | null> {
+  const { rows } = await pool.query(
+    `UPDATE starlink_notifications
+        SET email_status = 'SENDING', email_error = NULL
+      WHERE event_key = $1 AND email_status = 'PENDING'
+      RETURNING id, customer_id, category, event_key, title, body, link_url, meta,
+                is_read, email_status, email_sent_at, created_at`,
+    [eventKey]
+  );
+  if (!rows[0]) return null;
+  const claimed = rows[0] as StarlinkNotification;
+  const receipt = await getStarlinkReceiptNotification(eventKey);
+  if (!receipt) return null;
+  return { ...receipt, ...claimed };
+}
+
+export async function markStarlinkNotificationEmailSent(eventKey: string): Promise<void> {
+  await pool.query(
+    `UPDATE starlink_notifications
+        SET email_status = 'SENT', email_sent_at = NOW(), email_error = NULL
+      WHERE event_key = $1 AND email_status = 'SENDING'`,
+    [eventKey]
+  );
+}
+
+export async function markStarlinkNotificationEmailFailed(eventKey: string, error: string): Promise<void> {
+  await pool.query(
+    `UPDATE starlink_notifications
+        SET email_status = 'FAILED', email_error = $2
+      WHERE event_key = $1 AND email_status = 'SENDING'`,
+    [eventKey, String(error).slice(0, 500)]
+  );
+}
+
+export async function listStarlinkNotifications(
+  customerId: string,
+  limit = 50
+): Promise<StarlinkNotification[]> {
+  const { rows } = await pool.query(
+    `SELECT id, customer_id, category, event_key, title, body, link_url, meta,
+            is_read, email_status, email_sent_at, created_at
+       FROM starlink_notifications
+      WHERE customer_id = $1
+      ORDER BY created_at DESC
+      LIMIT $2`,
+    [customerId, Math.min(Math.max(Number(limit) || 50, 1), 100)]
+  );
+  return rows as StarlinkNotification[];
+}
+
+export async function getUnreadStarlinkNotificationCount(customerId: string): Promise<number> {
+  const { rows } = await pool.query(
+    `SELECT COUNT(*)::int AS n FROM starlink_notifications
+      WHERE customer_id = $1 AND is_read = FALSE`,
+    [customerId]
+  );
+  return Number(rows[0]?.n ?? 0);
+}
+
+export async function markStarlinkNotificationsRead(customerId: string, ids?: string[]): Promise<number> {
+  const result = ids?.length
+    ? await pool.query(
+        `UPDATE starlink_notifications
+            SET is_read = TRUE, read_at = NOW()
+          WHERE customer_id = $1 AND is_read = FALSE AND id = ANY($2::uuid[])`,
+        [customerId, ids]
+      )
+    : await pool.query(
+        `UPDATE starlink_notifications
+            SET is_read = TRUE, read_at = NOW()
+          WHERE customer_id = $1 AND is_read = FALSE`,
+        [customerId]
+      );
+  return result.rowCount ?? 0;
+}
+
+/** Pending Starlink intents still attached to an unpaid invoice (recovery UI). */
+export async function listPendingStarlinkIntents(customerId: string): Promise<StarlinkPendingIntent[]> {
+  const { rows } = await pool.query(
+    `SELECT i.id AS intent_id, i.target_id AS invoice_id, inv.invoice_number,
+            i.reference, i.amount, i.created_at
+       FROM pesepay_intents i
+       JOIN starlink_invoices inv ON inv.id = i.target_id
+      WHERE i.target_type = 'starlink'
+        AND LOWER(i.status) = 'pending'
+        AND inv.customer_id = $1
+        AND inv.status = 'PENDING'
+      ORDER BY i.created_at DESC
+      LIMIT 20`,
+    [customerId]
+  );
+  return rows as StarlinkPendingIntent[];
 }
 
 // ---------------------------------------------------------------------------
