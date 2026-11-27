@@ -12,8 +12,8 @@ import {
  * Customer-facing payment surfaces for the invoicing workspace.
  *
  * `OnlinePaymentModal` drives the three Pesepay rails the merchant has enabled
- * (EcoCash, O'mari and InnBucks USD) through one flow: initiate → (O'mari OTP)
- * → poll → success. The backend settles the invoice on the webhook or on the
+ * (EcoCash, O'mari and InnBucks USD) through one flow: initiate → poll → success.
+ * The backend settles the invoice on the webhook or on the
  * poll itself, so this component only reads state — it never writes payments
  * client-side.
  *
@@ -72,7 +72,7 @@ const RAILS: Record<'USD' | 'ZiG', RailOption[]> = {
     {
       rail: 'omari',
       label: "O'mari",
-      blurb: 'Approve with the OTP sent to your phone',
+      blurb: 'Push prompt to your O’mari line',
       min: 0.5,
       max: 500,
       requiresPhone: true,
@@ -167,9 +167,8 @@ export function OnlinePaymentModal({
   const [amount, setAmount] = useState(balance.toFixed(2));
   const [phone, setPhone] = useState('');
   const [clientEmail, setClientEmail] = useState('');
-  const [otp, setOtp] = useState('');
   const [intent, setIntent] = useState<InitiateResult | null>(null);
-  const [phase, setPhase] = useState<'form' | 'authorize' | 'waiting' | 'success' | 'failed'>('form');
+  const [phase, setPhase] = useState<'form' | 'waiting' | 'success' | 'failed'>('form');
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -273,18 +272,16 @@ export function OnlinePaymentModal({
         email: clientEmail.trim() || undefined,
       });
       setIntent(result);
-      if (rail === 'omari') {
-        setPhase('authorize');
-        setMessage('Approve the payment with the OTP Preyone Payment sent to your phone.');
-      } else {
-        setPhase('waiting');
-        setMessage(
-          rail === 'ecocash'
-            ? 'A prompt is on its way to your phone. Approve it to complete the payment.'
-            : 'Complete the payment in InnBucks, then keep this window open while we confirm it.'
-        );
-        if (result.intentId && result.statusToken) void checkStatus(result.intentId, result.statusToken);
-      }
+      // O'mari is a handset push prompt, not an OTP flow on our side. All three
+      // rails settle through the same signed status poll: the money is only
+      // recorded as paid once the provider confirms it.
+      setPhase('waiting');
+      setMessage(
+        rail === 'innbucks'
+          ? 'Complete the payment in InnBucks, then keep this window open while we confirm it.'
+          : 'A payment prompt is on its way to your phone. Approve it to complete the payment.'
+      );
+      if (result.intentId && result.statusToken) void checkStatus(result.intentId, result.statusToken);
       setAttempts(0);
     } catch (err) {
       setPhase('failed');
@@ -316,32 +313,10 @@ export function OnlinePaymentModal({
     }
   };
 
-  const authorize = async () => {
-    if (!intent?.intentId) return;
-    if (!/^\d{4,8}$/.test(otp.trim())) {
-      setError('Enter the numeric code sent to your phone.');
-      return;
-    }
-    setBusy(true);
-    setError('');
-    try {
-      await api.post('/api/payments/pesepay/authorize', { intentId: intent.intentId, otp: otp.trim() });
-      setPhase('waiting');
-      setMessage('Code accepted. Waiting for the payment to clear…');
-      setAttempts(0);
-      if (intent.statusToken) void checkStatus(intent.intentId, intent.statusToken);
-    } catch (err) {
-      setError(errorText(err));
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const reset = () => {
     stopPolling();
     setPhase('form');
     setIntent(null);
-    setOtp('');
     setError('');
     setMessage('');
     setAttempts(0);
@@ -444,31 +419,6 @@ export function OnlinePaymentModal({
               {busy ? 'Starting…' : `Pay ${money(numericAmount, currency)} with ${option.label}`}
             </button>
           </>
-        )}
-
-        {phase === 'authorize' && (
-          <div className="pay-stage">
-            <span className="rail-mark large">{option.mark}</span>
-            <h3>Confirm with O’mari</h3>
-            <p className="pay-hint">{message}</p>
-            <input
-              className="input otp-input mono"
-              inputMode="numeric"
-              maxLength={8}
-              placeholder="OTP"
-              value={otp}
-              onChange={(e) => setOtp(e.target.value.replace(/\D/g, ''))}
-              autoFocus
-            />
-            <div className="pay-actions">
-              <button type="button" className="btn ghost" onClick={reset} disabled={busy}>
-                Back
-              </button>
-              <button type="button" className="btn primary" onClick={() => void authorize()} disabled={busy}>
-                {busy ? 'Checking…' : 'Authorize payment'}
-              </button>
-            </div>
-          </div>
         )}
 
         {phase === 'waiting' && (

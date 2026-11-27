@@ -24,6 +24,12 @@ import {
 } from '../services/notificationService';
 import { generateDocumentVerifyCode } from '../utils/documentVerifyCode';
 import { withCompanyBranding } from '../utils/companyBranding';
+import {
+  initiatePesepayPayment,
+  isPesepayRail,
+  normalizeGatewayCurrency,
+} from '../services/pesepayService';
+import { reconcilePesepayIntentById, signPesepayStatusToken } from './payments';
 
 /**
  * Preyone POS module — additive only.
@@ -536,6 +542,326 @@ router.get('/company', async (req, res) => {
 });
 
 // ── Company subscriptions (tenancy) — which modules this company owns ─
+// ── Company profile (tenant settings) ─────────────────────────────────────
+//
+// Read is open to every signed-in operator (the till shows the store name on
+// receipts); writes are Manager/CEO only and always scoped to the session's
+// company. Field-by-field COALESCE keeps a partial save from wiping anything.
+router.patch('/company', requireRole(...MANAGER_ROLES), async (req, res) => {
+  const b = req.body || {};
+  const cid = tenantId(req);
+  const text = (key: string, max = 500): string | null | undefined => {
+    if (!(key in b)) return undefined;
+    if (b[key] === null) return null;
+    return str(b[key]).slice(0, max);
+  };
+
+  const name = text('name', 160);
+  if (name !== undefined && !name) {
+    res.status(422).json({ error: 'Company name cannot be empty' });
+    return;
+  }
+  const taxRaw = b.tax_pct ?? b.taxPct;
+  const taxPct = taxRaw === undefined ? undefined : num(taxRaw);
+  if (taxPct !== undefined && (taxPct < 0 || taxPct > 100)) {
+    res.status(422).json({ error: 'VAT % must be between 0 and 100' });
+    return;
+  }
+  const currency = text('currency', 8);
+  if (currency !== undefined && currency && !/^[A-Z]{3}$/.test(currency.toUpperCase())) {
+    res.status(422).json({ error: 'Currency must be a 3-letter code' });
+    return;
+  }
+
+  const { rows } = await pool.query(
+    `UPDATE companies
+        SET name            = COALESCE($2, name),
+            tagline         = COALESCE($3, tagline),
+            address         = COALESCE($4, address),
+            email           = COALESCE($5, email),
+            support_phone   = COALESCE($6, support_phone),
+            website         = COALESCE($7, website),
+            currency        = COALESCE($8, currency),
+            tax_pct         = COALESCE($9, tax_pct),
+            invoice_prefix  = COALESCE($10, invoice_prefix),
+            quote_prefix    = COALESCE($11, quote_prefix),
+            receipt_footer  = COALESCE($12, receipt_footer),
+            terms_text      = COALESCE($13, terms_text),
+            updated_at      = NOW()
+      WHERE id = $1
+      RETURNING *`,
+    [
+      cid,
+      name,
+      text('tagline', 240),
+      text('address', 400),
+      text('email', 240),
+      text('support_phone', 60),
+      text('website', 240),
+      currency ? currency.toUpperCase() : currency,
+      taxPct,
+      text('invoice_prefix', 12),
+      text('quote_prefix', 12),
+      text('receipt_footer', 500),
+      text('terms_text', 4000),
+    ]
+  );
+  if (rows.length === 0) {
+    res.status(404).json({ error: 'Company not found' });
+    return;
+  }
+  res.json(withCompanyBranding(rows[0]));
+});
+
+// ── POS payment intents (mobile-money status tracking) ────────────────────
+//
+// A till sale is only finalised once the provider confirms. The intent is
+// created first (target_id NULL), polled by the till, and then consumed
+// atomically by /checkout. That ordering is what prevents "premature
+// completion" and duplicate charges: a second request for the same
+// shift/amount/rail while one is live is refused, and a confirmed intent can
+// be attached to exactly one sale.
+
+const POS_PAYMENT_METHODS = ['ecocash', 'innbucks', 'omari'] as const;
+
+router.post('/payments/intent', async (req, res) => {
+  const me = req.adminUser!;
+  const b = req.body || {};
+  const amount = round2(num(b.amount));
+  const method = str(b.method).toLowerCase();
+  if (!POS_PAYMENT_METHODS.includes(method as (typeof POS_PAYMENT_METHODS)[number])) {
+    res.status(422).json({ error: 'method must be ecocash, innbucks or omari' });
+    return;
+  }
+  if (!isPesepayRail(method)) {
+    res.status(422).json({ error: 'Unsupported payment method' });
+    return;
+  }
+  if (amount <= 0) {
+    res.status(422).json({ error: 'A positive amount is required' });
+    return;
+  }
+  const currencyRow = await pool.query('SELECT currency FROM companies WHERE id = $1', [tenantId(req)]);
+  const currency = normalizeGatewayCurrency(currencyRow.rows[0]?.currency || 'USD') || 'USD';
+  const phone = str(b.phone);
+  if ((method === 'ecocash' || method === 'omari') && !/^\+?\d{9,15}$/.test(phone.replace(/[\s-]/g, ''))) {
+    res.status(422).json({ error: `A valid ${method === 'ecocash' ? 'EcoCash' : 'O’mari'} number is required` });
+    return;
+  }
+
+  // Bind the intent to the cashier's open shift so the money can only ever be
+  // consumed by a sale in the same shift/tenant.
+  let shiftId: string | null = str(b.shiftId) || null;
+  if (shiftId) {
+    const owned = await pool.query(
+      `SELECT id FROM pos_shifts WHERE id = $1 AND company_id = $2 AND status = 'open'`,
+      [shiftId, tenantId(req)]
+    );
+    if (owned.rows.length === 0) {
+      res.status(422).json({ error: 'Shift not found or already closed' });
+      return;
+    }
+  } else {
+    const open = await pool.query(
+      `SELECT id FROM pos_shifts WHERE company_id = $2 AND cashier_id = $1 AND status = 'open' LIMIT 1`,
+      [me.id, tenantId(req)]
+    );
+    shiftId = open.rows[0]?.id ?? null;
+  }
+
+  // Duplicate-charge guard.
+  const live = await pool.query(
+    `SELECT id, reference FROM pesepay_intents
+      WHERE tenant_id = $1 AND purpose = 'pos_sale' AND payment_method = $2
+        AND ABS(amount - $3) < 0.01 AND status = 'pending'
+        AND created_at > NOW() - interval '5 minutes'
+      ORDER BY created_at DESC LIMIT 1`,
+    [tenantId(req), method, amount]
+  );
+  if (live.rows.length > 0) {
+    const row = live.rows[0];
+    res.status(409).json({
+      error: 'A payment request for this amount is already waiting for approval.',
+      code: 'PAYMENT_PENDING',
+      intentId: row.id,
+      referenceNumber: row.reference,
+      statusToken: signPesepayStatusToken(row.id, row.reference),
+    });
+    return;
+  }
+
+  const reference = `PREYONE-POS-${crypto.randomUUID().substring(0, 8).toUpperCase()}-${Date.now()}`;
+  const reason = `POS sale · ${req.company?.name || 'Preyone'} · ${reference}`;
+
+  const intentRes = await pool.query(
+    `INSERT INTO pesepay_intents
+       (reference, tenant_id, amount, currency, payment_method, purpose, reason_for_payment,
+        target_type, shift_id, client_name, client_phone)
+     VALUES ($1,$2,$3,$4,$5,'pos_sale',$6,'shift',$7,$8,$9)
+     RETURNING id`,
+    [reference, tenantId(req), amount, currency, method, reason, shiftId, str(b.customerName) || null, phone || null]
+  );
+  const intentId = intentRes.rows[0].id as string;
+
+  const gateway = await initiatePesepayPayment({
+    amount,
+    currencyCode: currency,
+    paymentMethod: method,
+    reasonForPayment: reason,
+    reference,
+    phone: phone || undefined,
+    email: str(req.adminUser?.email) || undefined,
+    fullName: str(b.customerName) || req.adminUser?.fullName,
+  });
+
+  if (!gateway.success) {
+    await pool.query(
+      `UPDATE pesepay_intents SET status = 'failed', failure_reason = $2 WHERE id = $1`,
+      [intentId, gateway.error || 'The payment provider declined the request']
+    );
+    res.status(400).json({ error: gateway.error || 'Could not start the payment request', referenceNumber: reference });
+    return;
+  }
+
+  await pool.query(
+    `UPDATE pesepay_intents SET provider_reference = $2, redirect_url = $3, poll_url = $4 WHERE id = $1`,
+    [intentId, gateway.referenceNumber || null, gateway.redirectUrl || null, gateway.pollUrl || null]
+  );
+
+  res.status(201).json({
+    success: true,
+    intentId,
+    statusToken: signPesepayStatusToken(intentId, reference),
+    referenceNumber: reference,
+    providerReference: gateway.referenceNumber || reference,
+    amount,
+    currency,
+    method,
+    instructions: gateway.instructions,
+    shiftId,
+  });
+});
+
+router.get('/payments/:intentId/status', async (req, res) => {
+  const intentId = req.params.intentId;
+  if (!UUID_RE.test(intentId)) {
+    res.status(400).json({ error: 'Invalid payment id' });
+    return;
+  }
+  const load = () =>
+    pool.query(
+      `SELECT id, reference, provider_reference, amount, currency, payment_method, purpose,
+              status, created_at, completed_at, failure_reason, last_checked_at, check_count,
+              target_id, shift_id
+         FROM pesepay_intents
+        WHERE id = $1 AND tenant_id = $2`,
+      [intentId, tenantId(req)]
+    );
+
+  let { rows } = await load();
+  if (rows.length === 0) {
+    res.status(404).json({ error: 'Payment not found' });
+    return;
+  }
+  let intent = rows[0];
+
+  if (intent.status === 'pending') {
+    const last = intent.last_checked_at ? new Date(intent.last_checked_at).getTime() : 0;
+    if (Date.now() - last >= 3_500) {
+      await reconcilePesepayIntentById(intentId);
+      ({ rows } = await load());
+      intent = rows[0];
+    }
+  }
+
+  res.json({
+    intentId: intent.id,
+    status:
+      intent.status === 'completed' ? 'SUCCESS' : intent.status === 'failed' ? 'FAILED' : 'PENDING',
+    state:
+      intent.status === 'completed'
+        ? 'SUCCESS'
+        : intent.status === 'failed'
+          ? 'FAILED'
+          : intent.check_count > 0
+            ? 'PROCESSING'
+            : 'PENDING',
+    label:
+      intent.status === 'completed'
+        ? 'Payment confirmed'
+        : intent.status === 'failed'
+          ? 'Payment not completed'
+          : intent.check_count > 0
+            ? 'Waiting for the payer to approve'
+            : 'Payment request sent',
+    failureReason: intent.failure_reason || null,
+    referenceNumber: intent.provider_reference || intent.reference,
+    amount: Number(intent.amount),
+    currency: intent.currency,
+    method: intent.payment_method,
+    createdAt: intent.created_at,
+    completedAt: intent.completed_at,
+    attachedDocumentId: intent.target_id,
+    shiftId: intent.shift_id,
+  });
+});
+
+router.post('/payments/:intentId/cancel', async (req, res) => {
+  const intentId = req.params.intentId;
+  if (!UUID_RE.test(intentId)) {
+    res.status(400).json({ error: 'Invalid payment id' });
+    return;
+  }
+  const { rows } = await pool.query(
+    `SELECT id, status FROM pesepay_intents WHERE id = $1 AND tenant_id = $2`,
+    [intentId, tenantId(req)]
+  );
+  if (rows.length === 0) {
+    res.status(404).json({ error: 'Payment not found' });
+    return;
+  }
+  if (rows[0].status === 'completed') {
+    res.json({ status: 'SUCCESS' });
+    return;
+  }
+  await pool.query(
+    `UPDATE pesepay_intents
+        SET status = 'failed', failure_reason = 'Cancelled at the till'
+      WHERE id = $1 AND status = 'pending'`,
+    [intentId]
+  );
+  res.json({ status: 'FAILED' });
+});
+
+// Confirmed mobile-money payments that were never attached to a sale (the
+// browser/till closed before "Complete sale"). Manager/CEO can recover them.
+router.get('/payments/credits', requireRole(...MANAGER_ROLES), async (req, res) => {
+  const { rows } = await pool.query(
+    `SELECT id, reference, provider_reference, amount, currency, payment_method,
+            client_name, client_phone, completed_at, shift_id
+       FROM pesepay_intents
+      WHERE tenant_id = $1 AND purpose = 'pos_sale' AND status = 'completed'
+        AND target_id IS NULL
+        AND completed_at > NOW() - interval '7 days'
+      ORDER BY completed_at DESC
+      LIMIT 50`,
+    [tenantId(req)]
+  );
+  res.json(
+    rows.map((r) => ({
+      intentId: r.id,
+      reference: r.provider_reference || r.reference,
+      amount: Number(r.amount),
+      currency: r.currency,
+      method: r.payment_method,
+      customerName: r.client_name,
+      customerPhone: r.client_phone,
+      completedAt: r.completed_at,
+      shiftId: r.shift_id,
+    }))
+  );
+});
+
 router.get('/company/subscriptions', (req, res) => {
   res.json({
     company: { id: req.company!.id, name: req.company!.name },
@@ -2887,7 +3213,7 @@ router.post('/checkout', async (req, res) => {
     res.status(400).json({ error: 'At least one item is required' });
     return;
   }
-  const rawPayments: Array<{ amount?: number | string; method?: string; reference?: string }> =
+  const rawPayments: Array<{ amount?: number | string; method?: string; reference?: string; intentId?: string }> =
     Array.isArray(b.payments) ? b.payments : [];
   const discountPct = Math.max(0, Math.min(100, num(b.discountPct)));
   const taxPct = Math.max(0, num(b.taxPct));
@@ -3027,12 +3353,80 @@ router.post('/checkout', async (req, res) => {
       const method = PAYMENT_METHODS.includes(str(p?.method))
         ? str(p.method)
         : 'cash';
+
+      // A mobile-money part must carry a provider-confirmed intent. Verify it
+      // inside the transaction and consume it (target_id) in the same step, so
+      // one confirmed payment can never settle two sales and an unconfirmed
+      // one can never be recorded as paid.
+      const intentId = str(p?.intentId);
+      if (intentId) {
+        if (!UUID_RE.test(intentId)) {
+          await client.query('ROLLBACK');
+          res.status(422).json({ error: 'Invalid payment reference' });
+          return;
+        }
+        const intentRes = await client.query(
+          `SELECT id, tenant_id, amount, payment_method, purpose, status, target_id, shift_id
+             FROM pesepay_intents
+            WHERE id = $1
+            FOR UPDATE`,
+          [intentId]
+        );
+        const intent = intentRes.rows[0];
+        if (!intent || intent.tenant_id !== tenantId(req)) {
+          await client.query('ROLLBACK');
+          res.status(422).json({ error: 'Payment reference not found for this company' });
+          return;
+        }
+        // Only an unattached POS credit may settle a till sale. Refuse invoice
+        // intents and rail swaps even when their amount happens to match.
+        if (intent.purpose !== 'pos_sale' || intent.payment_method !== method) {
+          await client.query('ROLLBACK');
+          res.status(422).json({ error: 'Payment reference does not match this payment' });
+          return;
+        }
+        if (intent.status !== 'completed') {
+          await client.query('ROLLBACK');
+          res.status(409).json({ error: 'This payment has not been confirmed yet' });
+          return;
+        }
+        if (intent.target_id) {
+          await client.query('ROLLBACK');
+          res.status(409).json({ error: 'This payment has already been applied to another sale' });
+          return;
+        }
+        if (Math.abs(Number(intent.amount) - amount) > 0.01) {
+          await client.query('ROLLBACK');
+          res.status(422).json({ error: 'Payment amount does not match the confirmed amount' });
+          return;
+        }
+        if (shiftId && intent.shift_id && intent.shift_id !== shiftId) {
+          await client.query('ROLLBACK');
+          res.status(422).json({ error: 'Payment belongs to a different shift' });
+          return;
+        }
+      }
+
       const payIns = await client.query(
         `INSERT INTO pos_document_payments (document_id, amount, method, reference, recorded_by, shift_id)
          VALUES ($1,$2,$3,$4,$5,$6)
          RETURNING id`,
         [doc.id, amount, method, str(p?.reference) || null, me.id, shiftId]
       );
+
+      if (intentId) {
+        const consumed = await client.query(
+          `UPDATE pesepay_intents SET target_id = $2
+            WHERE id = $1 AND target_id IS NULL AND status = 'completed'`,
+          [intentId, doc.id]
+        );
+        if (!consumed.rowCount) {
+          await client.query('ROLLBACK');
+          res.status(409).json({ error: 'This payment was already applied to another sale' });
+          return;
+        }
+      }
+
       // Checkout already decremented stock above — mark applied and post GL.
       await syncSaleToLedgerAndStock(client, {
         companyId: tenantId(req),
@@ -3113,12 +3507,68 @@ router.post('/documents/:id/payments', async (req, res) => {
       );
       shiftId = open.rows.length > 0 ? open.rows[0].id : shiftId;
     }
+
+    // Mobile-money installments must reference a provider-confirmed intent and
+    // may only be consumed once.
+    const intentId = str(req.body?.intentId);
+    if (intentId) {
+      if (!UUID_RE.test(intentId)) {
+        await client.query('ROLLBACK');
+        res.status(422).json({ error: 'Invalid payment reference' });
+        return;
+      }
+      const intentRes = await client.query(
+        `SELECT id, tenant_id, amount, payment_method, purpose, status, target_id
+           FROM pesepay_intents WHERE id = $1 FOR UPDATE`,
+        [intentId]
+      );
+      const intent = intentRes.rows[0];
+      if (!intent || intent.tenant_id !== tenantId(req)) {
+        await client.query('ROLLBACK');
+        res.status(422).json({ error: 'Payment reference not found for this company' });
+        return;
+      }
+      if (intent.purpose !== 'pos_sale' || intent.payment_method !== method) {
+        await client.query('ROLLBACK');
+        res.status(422).json({ error: 'Payment reference does not match this payment' });
+        return;
+      }
+      if (intent.status !== 'completed') {
+        await client.query('ROLLBACK');
+        res.status(409).json({ error: 'This payment has not been confirmed yet' });
+        return;
+      }
+      if (intent.target_id) {
+        await client.query('ROLLBACK');
+        res.status(409).json({ error: 'This payment has already been applied' });
+        return;
+      }
+      if (Math.abs(Number(intent.amount) - amount) > 0.01) {
+        await client.query('ROLLBACK');
+        res.status(422).json({ error: 'Payment amount does not match the confirmed amount' });
+        return;
+      }
+    }
+
     const payIns = await client.query(
       `INSERT INTO pos_document_payments (document_id, amount, method, reference, recorded_by, shift_id)
        VALUES ($1,$2,$3,$4,$5,$6)
        RETURNING id`,
       [doc.id, amount, method, reference, me.id, shiftId]
     );
+
+    if (intentId) {
+      const consumed = await client.query(
+        `UPDATE pesepay_intents SET target_id = $2
+          WHERE id = $1 AND target_id IS NULL AND status = 'completed'`,
+        [intentId, doc.id]
+      );
+      if (!consumed.rowCount) {
+        await client.query('ROLLBACK');
+        res.status(409).json({ error: 'This payment was already applied to another document' });
+        return;
+      }
+    }
     const sums = await client.query(
       `SELECT COALESCE(SUM(amount),0) AS paid FROM pos_document_payments WHERE document_id = $1`,
       [doc.id]

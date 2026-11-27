@@ -26,7 +26,7 @@ function navigate(path: string): void {
 }
 
 type Evaluated =
-  | { mode: 'auth'; resetToken: string; verified: boolean }
+  | { mode: 'auth'; resetToken: string; inviteToken: string; verified: boolean }
   | { mode: 'portal' };
 
 function evaluateLocation(): Evaluated {
@@ -35,9 +35,10 @@ function evaluateLocation(): Evaluated {
 
   const mode = params.get('mode');
   const token = params.get('token');
-  if (mode === 'reset' && token) return { mode: 'auth', resetToken: token, verified: false };
+  if (mode === 'reset' && token) return { mode: 'auth', resetToken: token, inviteToken: '', verified: false };
+  if (mode === 'member-invite' && token) return { mode: 'auth', resetToken: '', inviteToken: token, verified: false };
   if (path.startsWith('/starlink/auth')) {
-    return { mode: 'auth', resetToken: '', verified: mode === 'verified' };
+    return { mode: 'auth', resetToken: '', inviteToken: '', verified: mode === 'verified' };
   }
   return { mode: 'portal' };
 }
@@ -55,10 +56,12 @@ function scrubQuery(): void {
 export default function StarlinkApp() {
   const [view, setView] = useState<View>('checking');
   const [resetToken, setResetToken] = useState('');
+  const [inviteToken, setInviteToken] = useState('');
   const [verified, setVerified] = useState(false);
 
-  const showAuth = useCallback((opts?: { resetToken?: string; verified?: boolean; replace?: boolean }) => {
+  const showAuth = useCallback((opts?: { resetToken?: string; inviteToken?: string; verified?: boolean; replace?: boolean }) => {
     setResetToken(opts?.resetToken || '');
+    setInviteToken(opts?.inviteToken || '');
     setVerified(!!opts?.verified);
     setView('auth');
     const target = authPath();
@@ -83,9 +86,14 @@ export default function StarlinkApp() {
       if (loc.mode === 'auth') {
         // Deep link: reset link or explicit /starlink/auth — never auto-bounce
         // away from a reset form, but a signed-in user on /auth goes to portal.
-        if (!token || !loc.resetToken) {
+        if (loc.inviteToken || !token || !loc.resetToken) {
           if (!alive) return;
-          showAuth({ resetToken: loc.resetToken, verified: loc.verified, replace: true });
+          showAuth({
+            resetToken: loc.resetToken,
+            inviteToken: loc.inviteToken,
+            verified: loc.verified,
+            replace: true,
+          });
           return;
         }
       }
@@ -117,6 +125,7 @@ export default function StarlinkApp() {
       const token = getToken();
       if (loc.mode === 'auth') {
         setResetToken(loc.resetToken);
+        setInviteToken(loc.inviteToken);
         setVerified(loc.verified);
         setView('auth');
       } else if (token) {
@@ -151,6 +160,7 @@ export default function StarlinkApp() {
     return (
       <StarlinkAuth
         resetToken={resetToken}
+        inviteToken={inviteToken}
         verified={verified}
         onAuthed={() => {
           scrubQuery();

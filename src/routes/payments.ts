@@ -23,7 +23,7 @@ import type { PesepayCurrency, PesepayRail } from '../services/pesepayService';
 import { RuijieApiError } from '../services/ruijieCloud';
 import { isRuijieCloudConfigured, findRuijieProfile, mintRuijieVoucherForTier } from '../services/ruijieMint';
 import { claimPooledVoucher } from '../services/voucherPool';
-import { requireStarlinkAuth } from '../middleware/starlinkAuth';
+import { requireStarlinkAuth, requireStarlinkRoles, canAccessStarlinkKit } from '../middleware/starlinkAuth';
 import {
   createStarlinkInvoice,
   applyStarlinkPayment,
@@ -1473,8 +1473,10 @@ paymentsRouter.post('/pesepay/initiate', requireAdminAuth, async (req: Request, 
       }
     } else {
       const { rows: docRows } = await pool.query(
-        'SELECT id, total, amount_paid, shift_id FROM pos_documents WHERE id = $1',
-        [targetId]
+        `SELECT id, total, amount_paid, shift_id
+           FROM pos_documents
+          WHERE id = $1 AND company_id = $2`,
+        [targetId, tenantId]
       );
       if (docRows.length === 0) {
         res.status(404).json({ error: 'Document not found' });
@@ -1489,15 +1491,43 @@ paymentsRouter.post('/pesepay/initiate', requireAdminAuth, async (req: Request, 
         res.status(400).json({ error: 'Amount exceeds outstanding document balance' });
         return;
       }
+
+      // Duplicate-charge guard: re-using the same document/amount/rail while a
+      // prompt is still live would push a second handset prompt for money the
+      // payer is already approving. Hand back the live intent instead.
+      const live = await pool.query(
+        `SELECT id, reference, status, created_at
+           FROM pesepay_intents
+          WHERE tenant_id = $1 AND target_id = $2 AND payment_method = $3
+            AND ABS(amount - $4) < 0.01 AND status = 'pending'
+            AND created_at > NOW() - interval '5 minutes'
+          ORDER BY created_at DESC LIMIT 1`,
+        [tenantId, targetId, paymentMethod, amount]
+      );
+      if (live.rows.length > 0) {
+        const row = live.rows[0];
+        res.status(409).json({
+          error: 'A payment request for this amount is already waiting for approval.',
+          code: 'PAYMENT_PENDING',
+          intentId: row.id,
+          referenceNumber: row.reference,
+          statusToken: signPesepayStatusToken(row.id, row.reference),
+        });
+        return;
+      }
     }
 
     const reference = `PREYONE-${uuidv4().substring(0, 8).toUpperCase()}-${Date.now()}`;
+    // Generate the intent id here rather than relying on RETURNING. The token
+    // and every later status check need it even if the INSERT driver does not
+    // hand rows back, and it stays stable across callback/status retries.
+    const intentId = uuidv4();
 
     await pool.query(
       `INSERT INTO pesepay_intents
          (reference, tenant_id, amount, currency, payment_method, purpose, reason_for_payment,
-          target_type, target_id, shift_id, subscription_module, plan_tier)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+          target_type, target_id, shift_id, subscription_module, plan_tier, id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
       [
         reference,
         tenantId,
@@ -1511,6 +1541,7 @@ paymentsRouter.post('/pesepay/initiate', requireAdminAuth, async (req: Request, 
         shiftId,
         subscriptionModule,
         typeof body.planTier === 'string' && body.planTier.trim() ? body.planTier.trim() : null,
+        intentId,
       ]
     );
 
@@ -1527,8 +1558,10 @@ paymentsRouter.post('/pesepay/initiate', requireAdminAuth, async (req: Request, 
 
     if (!pesepayResponse.success) {
       await pool.query(
-        `UPDATE pesepay_intents SET status = 'failed' WHERE reference = $1`,
-        [reference]
+        `UPDATE pesepay_intents
+            SET status = 'failed', failure_reason = $2, last_checked_at = NOW()
+          WHERE reference = $1`,
+        [reference, pesepayResponse.error || 'The payment provider declined the request']
       );
       res.status(400).json({ error: pesepayResponse.error || 'Failed to initiate payment', referenceNumber: reference });
       return;
@@ -1545,6 +1578,8 @@ paymentsRouter.post('/pesepay/initiate', requireAdminAuth, async (req: Request, 
       success: true,
       referenceNumber: reference,
       pesepayReference: pesepayResponse.referenceNumber || reference,
+      intentId,
+      statusToken: signPesepayStatusToken(intentId, reference),
       redirectUrl: pesepayResponse.redirectUrl,
       pollUrl: pesepayResponse.pollUrl,
       instructions: pesepayResponse.instructions,
@@ -1630,29 +1665,62 @@ paymentsRouter.get('/pesepay/status/:intentId', pesepayStatusLimiter, async (req
   }
 
   try {
-    const { rows } = await pool.query(
-      `SELECT id, reference, provider_reference, amount, currency, status, created_at, completed_at
-         FROM pesepay_intents
-        WHERE id = $1`,
-      [intentId]
-    );
+    const load = () =>
+      pool.query(
+        `SELECT id, reference, provider_reference, amount, currency, status, created_at,
+                completed_at, failure_reason, last_checked_at, check_count, target_id,
+                target_type, purpose
+           FROM pesepay_intents
+          WHERE id = $1`,
+        [intentId]
+      );
+
+    let { rows } = await load();
     if (rows.length === 0) {
       // Same response as a wrong token so the endpoint cannot be used to test
       // which intent ids exist.
       res.status(404).json({ error: 'Payment not found' });
       return;
     }
-    const intent = rows[0];
+    let intent = rows[0];
 
+    // Live reconciliation: a seamless mobile-money prompt has no hosted return
+    // page, so the poll is often the only heartbeat. Throttle gateway checks to
+    // one every 3.5 seconds per intent; the webhook/callback remains primary.
+    if (intent.status === 'pending') {
+      const lastCheck = intent.last_checked_at ? new Date(intent.last_checked_at).getTime() : 0;
+      if (Date.now() - lastCheck >= 3_500) {
+        await reconcilePesepayIntentById(intentId);
+        ({ rows } = await load());
+        intent = rows[0];
+      }
+    }
+
+    const publicStatus = PESEDPAY_PUBLIC_STATUS[String(intent.status)] ?? 'PENDING';
     res.json({
-      status: PESEDPAY_PUBLIC_STATUS[String(intent.status)] ?? 'PENDING',
+      status: publicStatus,
+      // 'PROCESSING' means the payer approved on their handset but the
+      // provider has not settled yet -- distinct from an untouched PENDING.
+      state: publicStatus === 'PENDING' ? (intent.check_count > 0 ? 'PROCESSING' : 'PENDING') : publicStatus,
+      label:
+        publicStatus === 'SUCCESS'
+          ? 'Payment confirmed'
+          : publicStatus === 'FAILED'
+            ? 'Payment not completed'
+            : intent.check_count > 0
+              ? 'Waiting for the payer to approve'
+              : 'Payment request sent',
+      failureReason: intent.failure_reason || null,
       referenceNumber: intent.provider_reference || intent.reference,
       amount: Number(intent.amount),
       currency: intent.currency,
       createdAt: intent.created_at,
       completedAt: intent.completed_at,
+      targetType: intent.target_type,
+      targetId: intent.target_id,
     });
   } catch (err) {
+    console.error('[payments] status check failed:', err);
     res.status(500).json({ error: 'Unable to read payment status' });
   }
 });
@@ -1696,7 +1764,12 @@ paymentsRouter.post('/pesepay/cancel', async (req: Request, res: Response) => {
       return;
     }
     if (intent.status !== 'failed') {
-      await pool.query(`UPDATE pesepay_intents SET status = 'failed' WHERE id = $1`, [intentId]);
+      await pool.query(
+        `UPDATE pesepay_intents
+            SET status = 'failed', failure_reason = 'Payment cancelled by payer'
+          WHERE id = $1`,
+        [intentId]
+      );
       if (intent.client_email) {
         await sendPaymentFailedEmail({
           to: intent.client_email,
@@ -1715,6 +1788,194 @@ paymentsRouter.post('/pesepay/cancel', async (req: Request, res: Response) => {
     res.status(500).json({ error: 'Unable to cancel payment' });
   }
 });
+
+/**
+ * Apply a confirmed payment intent exactly once.
+ *
+ * Callers MUST already hold the intent row (`FOR UPDATE`) inside a
+ * transaction. The function is shared by the gateway callback, the live
+ * status poll and the reconciliation sweep, so every path settles through the
+ * same idempotent code: a replayed callback finds status='completed' and does
+ * nothing, which is what prevents duplicate charges/credits.
+ *
+ * A POS sale intent is created with target_id = NULL (money confirmed before
+ * the document exists). Those are marked completed and left unattached; the
+ * till consumes them atomically during /checkout by writing target_id.
+ */
+async function settleIntentRow(
+  client: any,
+  intent: PesepayIntentRow & { purpose?: string | null },
+  providerReference: string | null
+): Promise<{ applied: boolean; alreadyCompleted: boolean; appliedResult: Record<string, unknown> }> {
+  if (intent.status === 'completed') {
+    return { applied: false, alreadyCompleted: true, appliedResult: {} };
+  }
+
+  let appliedResult: Record<string, unknown> = {};
+
+  if (intent.target_type === 'starlink') {
+    appliedResult = (await applyStarlinkPayment(
+      client,
+      { target_id: intent.target_id, amount: Number(intent.amount), provider_reference: undefined },
+      providerReference || intent.reference
+    )) as unknown as Record<string, unknown>;
+  } else if (intent.target_type === 'subscription') {
+    appliedResult = await applySubscriptionPayment(client, intent);
+  } else if (intent.target_id) {
+    appliedResult = await applyDocumentPayment(client, intent, providerReference || intent.reference);
+  }
+  // else: POS credit awaiting attachment (purpose='pos_sale', target_id NULL).
+
+  await client.query(
+    `UPDATE pesepay_intents
+        SET status = 'completed',
+            completed_at = NOW(),
+            failure_reason = NULL,
+            provider_reference = COALESCE($2, provider_reference)
+      WHERE id = $1`,
+    [intent.id, providerReference]
+  );
+
+  // Keep the website checkout ledger in step with the document it settled.
+  // A partial settlement deliberately leaves it 'pending': not yet paid in full.
+  if (intent.target_type === 'invoice' && intent.target_id) {
+    await client.query(
+      `UPDATE site_invoices
+          SET status = CASE WHEN $2 = 'paid' THEN 'success' ELSE status END,
+              updated_at = NOW()
+        WHERE intent_id = $1`,
+      [intent.id, String(appliedResult.status ?? '')]
+    );
+  }
+
+  return { applied: true, alreadyCompleted: false, appliedResult };
+}
+
+/**
+ * Ask Pesepay for the live state of an intent and settle it when confirmed.
+ *
+ * The callback is the primary signal, but a seamless mobile-money prompt has
+ * no hosted page, so a closed browser or a lost callback would otherwise leave
+ * a paid sale showing as pending forever. The status poll and the periodic
+ * sweep call this. Throttling lives with the caller.
+ */
+export async function reconcilePesepayIntentById(intentId: string): Promise<{
+  status: 'pending' | 'completed' | 'failed';
+  changed: boolean;
+  providerStatus?: string;
+  failureReason?: string | null;
+}> {
+  const { rows } = await pool.query(
+    `SELECT id, reference, provider_reference, tenant_id, amount, currency, payment_method,
+            purpose, target_type, target_id, shift_id, subscription_module, plan_tier,
+            status, failure_reason, created_at
+       FROM pesepay_intents
+      WHERE id = $1`,
+    [intentId]
+  );
+  const intent = rows[0] as (PesepayIntentRow & {
+    provider_reference: string | null;
+    failure_reason: string | null;
+    created_at: string;
+  }) | undefined;
+  if (!intent) return { status: 'failed', changed: false, failureReason: 'Payment not found' };
+  if (intent.status === 'completed') return { status: 'completed', changed: false };
+  if (intent.status === 'failed') {
+    return { status: 'failed', changed: false, failureReason: intent.failure_reason };
+  }
+
+  const gatewayRef = intent.provider_reference || intent.reference;
+  const check = await verifyPaymentStatus(gatewayRef);
+  const ageMin = (Date.now() - new Date(intent.created_at).getTime()) / 60_000;
+  const expiryMin = Math.max(2, Number(process.env.POS_PAYMENT_EXPIRY_MIN ?? 10));
+
+  if (!check.found) {
+    // Not found yet is normal right after the prompt is pushed. Only close the
+    // intent once the payment window has fully elapsed.
+    if (ageMin >= expiryMin) {
+      const reason = `No confirmation from the payment provider after ${expiryMin} minutes.`;
+      await pool.query(
+        `UPDATE pesepay_intents
+            SET status = 'failed', failure_reason = $2, last_checked_at = NOW(),
+                check_count = check_count + 1
+          WHERE id = $1 AND status = 'pending'`,
+        [intent.id, reason]
+      );
+      return { status: 'failed', changed: true, providerStatus: 'NOT_FOUND', failureReason: reason };
+    }
+    await pool.query(
+      `UPDATE pesepay_intents SET last_checked_at = NOW(), check_count = check_count + 1 WHERE id = $1`,
+      [intent.id]
+    );
+    return { status: 'pending', changed: false, providerStatus: 'NOT_FOUND' };
+  }
+
+  const parsed = parsePesepayStatus(check.status);
+
+  if (parsed.state === 'completed') {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const locked = await client.query(
+        `SELECT id, reference, tenant_id, amount, currency, payment_method, purpose,
+                target_type, target_id, shift_id, subscription_module, plan_tier, status
+           FROM pesepay_intents WHERE id = $1 FOR UPDATE`,
+        [intent.id]
+      );
+      const lockedIntent = locked.rows[0] as (PesepayIntentRow & { purpose?: string | null }) | undefined;
+      if (!lockedIntent || lockedIntent.status !== 'pending') {
+        await client.query('COMMIT');
+        return { status: lockedIntent?.status === 'completed' ? 'completed' : 'pending', changed: false, providerStatus: parsed.label };
+      }
+      const settled = await settleIntentRow(client, lockedIntent, intent.provider_reference);
+      await client.query('COMMIT');
+
+      const starlinkApplied = lockedIntent.target_type === 'starlink'
+        ? (settled.appliedResult as unknown as StarlinkSettlement)
+        : null;
+      if (starlinkApplied?.receiptEventKey && !starlinkApplied.alreadyPaid) {
+        void dispatchStarlinkPaymentReceipt(starlinkApplied.receiptEventKey);
+      }
+      return { status: 'completed', changed: true, providerStatus: parsed.label };
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => undefined);
+      console.error('[payments] intent settle failed:', err);
+      return { status: 'pending', changed: false, providerStatus: parsed.label };
+    } finally {
+      client.release();
+    }
+  }
+
+  if (parsed.state === 'failed' || parsed.state === 'refunded') {
+    const reason = `Payment provider reported ${parsed.label}.`;
+    await pool.query(
+      `UPDATE pesepay_intents
+          SET status = 'failed', failure_reason = $2, last_checked_at = NOW(),
+              check_count = check_count + 1
+        WHERE id = $1 AND status = 'pending'`,
+      [intent.id, reason]
+    );
+    return { status: 'failed', changed: true, providerStatus: parsed.label, failureReason: reason };
+  }
+
+  if (ageMin >= expiryMin) {
+    const reason = `Payment window expired after ${expiryMin} minutes (provider: ${parsed.label}).`;
+    await pool.query(
+      `UPDATE pesepay_intents
+          SET status = 'failed', failure_reason = $2, last_checked_at = NOW(),
+              check_count = check_count + 1
+        WHERE id = $1 AND status = 'pending'`,
+      [intent.id, reason]
+    );
+    return { status: 'failed', changed: true, providerStatus: parsed.label, failureReason: reason };
+  }
+
+  await pool.query(
+    `UPDATE pesepay_intents SET last_checked_at = NOW(), check_count = check_count + 1 WHERE id = $1`,
+    [intent.id]
+  );
+  return { status: 'pending', changed: false, providerStatus: parsed.label };
+}
 
 paymentsRouter.post('/pesepay/callback', async (req: Request, res: Response) => {
   const integrationKey = process.env.PESEPAY_INTEGRATION_KEY || '';
@@ -1818,42 +2079,15 @@ paymentsRouter.post('/pesepay/callback', async (req: Request, res: Response) => 
         }
       }
 
-      const applied =
-        intent.target_type === 'starlink'
-          ? await applyStarlinkPayment(client, { target_id: intent.target_id, amount: Number(intent.amount), provider_reference: undefined }, reference)
-          : intent.target_type === 'subscription'
-          ? await applySubscriptionPayment(client, intent)
-          : await applyDocumentPayment(client, intent, reference);
-
-      await client.query(
-        `UPDATE pesepay_intents
-            SET status = 'completed', completed_at = NOW(), provider_reference = COALESCE($2, provider_reference)
-          WHERE id = $1`,
-        [intent.id, payload.referenceNumber || null]
-      );
-
-      // Keep the website checkout ledger in step with the document it settled.
-      // applyDocumentPayment() credits pos_documents, but nothing else writes
-      // site_invoices.status, so every paid website invoice would stay
-      // 'pending' forever -- and the replay guard then hands a buyer the wrong
-      // state for an invoice they have already paid. A partial settlement
-      // deliberately leaves it 'pending': it is not yet paid in full.
-      if (intent.target_type === 'invoice') {
-        await client.query(
-          `UPDATE site_invoices
-              SET status = CASE WHEN $2 = 'paid' THEN 'success' ELSE status END,
-                  updated_at = NOW()
-            WHERE intent_id = $1`,
-          [intent.id, String((applied as Record<string, unknown>).status ?? '')]
-        );
-      }
+      const settled = await settleIntentRow(client, intent, payload.referenceNumber || null);
+      const applied = settled.appliedResult;
 
       await client.query('COMMIT');
 
       // Starlink receipts are dispatched only after the settlement transaction
       // commits. The unique notification claim makes this safe against the
       // concurrent reconciliation sweep.
-      const starlinkApplied = intent.target_type === 'starlink' ? (applied as StarlinkSettlement) : null;
+      const starlinkApplied = intent.target_type === 'starlink' ? (applied as unknown as StarlinkSettlement) : null;
       if (starlinkApplied?.receiptEventKey && !starlinkApplied.alreadyPaid) {
         void dispatchStarlinkPaymentReceipt(starlinkApplied.receiptEventKey);
       }
@@ -1862,7 +2096,7 @@ paymentsRouter.post('/pesepay/callback', async (req: Request, res: Response) => 
         success: true,
         referenceNumber: reference,
         status: 'completed',
-        applied: true,
+        applied: settled.applied,
         targetType: intent.target_type,
         ...applied,
       });
@@ -2195,7 +2429,7 @@ function starlinkDefaultReturnUrl(): string {
   return `${base.replace(/\/$/, '')}/starlink/portal`;
 }
 
-paymentsRouter.post('/pese/checkout', requireStarlinkAuth, async (req: Request, res: Response) => {
+paymentsRouter.post('/pese/checkout', requireStarlinkAuth, requireStarlinkRoles('owner', 'admin', 'billing'), async (req: Request, res: Response) => {
   const customer = req.starlinkCustomer!;
   const body = req.body as StarlinkCheckoutBody;
 
@@ -2254,6 +2488,10 @@ paymentsRouter.post('/pese/checkout', requireStarlinkAuth, async (req: Request, 
     const gb = Number(body.gb);
     if (!kitId || !Number.isFinite(gb) || gb <= 0) {
       res.status(400).json({ error: 'Select a kit and a data bundle' });
+      return;
+    }
+    if (!canAccessStarlinkKit(req, kitId)) {
+      res.status(403).json({ error: 'This kit is not assigned to your role' });
       return;
     }
     const kit = await getStarlinkKit(kitId, customer.id);
@@ -2532,6 +2770,38 @@ export async function reconcilePendingPaymentsOnce(): Promise<PaymentReconcileRe
   return result;
 }
 
+/**
+ * Sweep live Pesepay intents (POS/invoice/subscription) that are still pending.
+ *
+ * The callback is primary; this is the safety net for a lost callback or a
+ * till that was closed while the payer was still approving. Kept separate from
+ * the WiFi `payments` sweep because they are different tables with different
+ * settlement rules.
+ */
+export async function reconcilePendingPesepayIntentsOnce(limit = 50): Promise<{ scanned: number; settled: number; failed: number }> {
+  const result = { scanned: 0, settled: 0, failed: 0 };
+  const { rows } = await pool.query(
+    `SELECT id FROM pesepay_intents
+      WHERE status = 'pending'
+        AND created_at < NOW() - interval '2 minutes'
+      ORDER BY created_at ASC
+      LIMIT $1`,
+    [limit]
+  );
+  for (const row of rows) {
+    result.scanned += 1;
+    try {
+      const outcome = await reconcilePesepayIntentById(row.id);
+      if (outcome.status === 'completed') result.settled += 1;
+      if (outcome.status === 'failed') result.failed += 1;
+    } catch (err) {
+      console.error(`[payments] intent reconcile failed for ${row.id}:`, err);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 150));
+  }
+  return result;
+}
+
 let paymentReconcileTimer: ReturnType<typeof setInterval> | null = null;
 
 export function startPaymentReconciliation(): void {
@@ -2560,6 +2830,16 @@ export function startPaymentReconciliation(): void {
         }
       })
       .catch((err) => console.error('[starlink] sweep failed:', err));
+
+    // POS / invoice / subscription intents. Without this, a closed browser or a
+    // dropped callback would leave a paid sale pending forever.
+    reconcilePendingPesepayIntentsOnce()
+      .then((r) => {
+        if (r.settled || r.failed) {
+          console.log(`[payments] intent sweep: scanned=${r.scanned} settled=${r.settled} failed=${r.failed}`);
+        }
+      })
+      .catch((err) => console.error('[payments] intent sweep failed:', err));
   };
 
   // One pass shortly after boot: webhooks may have been missed while down.

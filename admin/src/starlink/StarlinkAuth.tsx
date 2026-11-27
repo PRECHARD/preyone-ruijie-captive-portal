@@ -2,25 +2,27 @@ import { useState, type FormEvent } from 'react';
 import {
   FiCheck, FiLock, FiMail, FiPhone, FiRadio, FiShield, FiUser, FiUserPlus, FiWifi,
 } from 'react-icons/fi';
-import { sfetch, setToken, ApiError } from './api';
+import { sfetch, setToken, slAcceptMemberInvite, ApiError } from './api';
 import SlFooter from './SlFooter';
 
-type View = 'signin' | 'signup' | 'forgot' | 'reset';
+type View = 'signin' | 'signup' | 'forgot' | 'reset' | 'invite';
 
 type AuthPayload = { token: string };
 
 export default function StarlinkAuth({
   initialView = 'signin',
   resetToken = '',
+  inviteToken = '',
   verified = false,
   onAuthed,
 }: {
   initialView?: View;
   resetToken?: string;
+  inviteToken?: string;
   verified?: boolean;
   onAuthed: () => void;
 }) {
-  const [view, setView] = useState<View>(resetToken ? 'reset' : initialView);
+  const [view, setView] = useState<View>(inviteToken ? 'invite' : resetToken ? 'reset' : initialView);
   const [error, setError] = useState(() =>
     new URLSearchParams(window.location.search).get('mode') === 'verify-error'
       ? 'This verification link is invalid or has expired. Sign in and request a new one from your dashboard.'
@@ -43,6 +45,10 @@ export default function StarlinkAuth({
   // reset
   const [newPassword, setNewPassword] = useState('');
   const [newPassword2, setNewPassword2] = useState('');
+  // fleet invitation
+  const [inviteName, setInviteName] = useState('');
+  const [invitePassword, setInvitePassword] = useState('');
+  const [invitePassword2, setInvitePassword2] = useState('');
 
   const go = (next: View) => {
     setView(next);
@@ -76,6 +82,19 @@ export default function StarlinkAuth({
           body: JSON.stringify({ email: forgotEmail }),
         });
         setInfo(data.message);
+      } else if (view === 'invite') {
+        if (invitePassword !== invitePassword2) {
+          setError('Passwords do not match');
+          setBusy(false);
+          return;
+        }
+        const data = await slAcceptMemberInvite({
+          token: inviteToken,
+          name: inviteName,
+          password: invitePassword,
+        });
+        setToken(data.token);
+        onAuthed();
       } else {
         if (newPassword !== newPassword2) {
           setError('Passwords do not match');
@@ -101,13 +120,15 @@ export default function StarlinkAuth({
     view === 'signin' ? 'Welcome back'
       : view === 'signup' ? 'Create your account'
         : view === 'forgot' ? 'Reset password'
-          : 'Choose a new password';
+          : view === 'invite' ? 'Join the fleet'
+            : 'Choose a new password';
 
   const sub =
     view === 'signin' ? 'Sign in to manage your Starlink service.'
       : view === 'signup' ? 'Join the Preyone Starlink customer portal.'
         : view === 'forgot' ? "We'll email you a secure reset link."
-          : 'Enter a new password for your account.';
+          : view === 'invite' ? 'Set a password to accept your branch or billing access.'
+            : 'Enter a new password for your account.';
 
   return (
     <>
@@ -156,7 +177,7 @@ export default function StarlinkAuth({
         <form className="sp-auth-card" onSubmit={submit} noValidate>
           <span className="sp-badge">
             <span className="sp-badge-dot" />
-            {view === 'signup' ? 'New customer' : 'Customer access'}
+            {view === 'signup' ? 'New customer' : view === 'invite' ? 'Fleet invitation' : 'Customer access'}
           </span>
           <h2>{heading}</h2>
           <p className="sp-auth-sub">{sub}</p>
@@ -293,6 +314,48 @@ export default function StarlinkAuth({
             </div>
           )}
 
+          {view === 'invite' && (
+            <>
+              <div className="sp-field">
+                <label htmlFor="sl-invite-name">Your name</label>
+                <input
+                  id="sl-invite-name"
+                  className="sp-input"
+                  value={inviteName}
+                  onChange={(e) => setInviteName(e.target.value)}
+                  placeholder="Branch manager name"
+                  autoComplete="name"
+                />
+              </div>
+              <div className="sp-field">
+                <label htmlFor="sl-invite-pass">Choose a password</label>
+                <input
+                  id="sl-invite-pass"
+                  className="sp-input"
+                  type="password"
+                  value={invitePassword}
+                  onChange={(e) => setInvitePassword(e.target.value)}
+                  placeholder="At least 8 characters"
+                  autoComplete="new-password"
+                  required
+                />
+              </div>
+              <div className="sp-field">
+                <label htmlFor="sl-invite-pass2">Confirm password</label>
+                <input
+                  id="sl-invite-pass2"
+                  className="sp-input"
+                  type="password"
+                  value={invitePassword2}
+                  onChange={(e) => setInvitePassword2(e.target.value)}
+                  placeholder="Repeat the password"
+                  autoComplete="new-password"
+                  required
+                />
+              </div>
+            </>
+          )}
+
           {view === 'reset' && (
             <>
               <div className="sp-field">
@@ -328,7 +391,8 @@ export default function StarlinkAuth({
             {busy
               ? 'Please wait…'
               : view === 'signin' ? 'Sign In' : view === 'signup' ? 'Create Account'
-                : view === 'forgot' ? 'Send Reset Link' : 'Update Password'}
+                : view === 'forgot' ? 'Send Reset Link'
+                  : view === 'invite' ? 'Accept & Sign In' : 'Update Password'}
           </button>
 
           <div className="sp-auth-switch">
@@ -346,7 +410,7 @@ export default function StarlinkAuth({
                 <button type="button" className="sp-link" onClick={() => go('signin')}>Sign in</button>
               </>
             )}
-            {(view === 'forgot' || view === 'reset') && (
+            {(view === 'forgot' || view === 'reset' || view === 'invite') && (
               <button type="button" className="sp-link" onClick={() => go('signin')}>
                 Back to sign in
               </button>

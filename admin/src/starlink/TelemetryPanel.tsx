@@ -11,7 +11,7 @@ import {
   type SlAlertPreferenceUpdate, type SlAlertPreferences, type SlKit, type SlTelemetryResponse,
 } from './api';
 
-type Props = { kit: SlKit | null };
+type Props = { kit: SlKit | null; readOnly?: boolean };
 
 type PrefSwitchProps = {
   checked: boolean;
@@ -54,7 +54,7 @@ function dayLabel(value: string): string {
 }
 
 /** Additive dark-neon telemetry suite for the selected customer kit. */
-export default function TelemetryPanel({ kit }: Props) {
+export default function TelemetryPanel({ kit, readOnly = false }: Props) {
   const kitId = kit?.id || '';
   const [telemetry, setTelemetry] = useState<SlTelemetryResponse | null>(null);
   const [prefs, setPrefs] = useState<SlAlertPreferences | null>(null);
@@ -267,6 +267,7 @@ export default function TelemetryPanel({ kit }: Props) {
         </div>
       </div>
 
+      {!readOnly && (
       <div className="sp-alert-settings">
         <div className="sp-alert-settings-head">
           <div>
@@ -360,6 +361,7 @@ export default function TelemetryPanel({ kit }: Props) {
           </div>
         </div>
       </div>
+      )}
     </section>
   );
 }

@@ -26,6 +26,7 @@ export default function PeseCheckoutModal({
   customer,
   kits,
   initialKind = 'wallet_topup',
+  initialKitId,
   plan,
   invoiceId,
   onClose,
@@ -34,6 +35,7 @@ export default function PeseCheckoutModal({
   customer: SlCustomer;
   kits: SlKit[];
   initialKind?: CheckoutKind;
+  initialKitId?: string;
   plan?: { code: string; name: string; priceUsd: number };
   invoiceId?: string;
   onClose: () => void;
@@ -46,7 +48,9 @@ export default function PeseCheckoutModal({
   );
   const [rail, setRail] = useState<string>('ecocash');
   const [phone, setPhone] = useState<string>(customer.phone || '');
-  const [kitId, setKitId] = useState<string>(kits[0]?.id || '');
+  const [kitId, setKitId] = useState<string>(
+    (initialKitId && kits.some((k) => k.id === initialKitId) ? initialKitId : '') || kits[0]?.id || ''
+  );
   const [bundleIdx, setBundleIdx] = useState(1);
   const [kitNumber, setKitNumber] = useState('');
   const [nickname, setNickname] = useState('');

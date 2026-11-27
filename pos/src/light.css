@@ -486,3 +486,110 @@
   color: #ffffff;
   box-shadow: 0 12px 28px rgba(5, 150, 105, 0.24);
 }
+
+/* Light-mode payment rails + tracking card */
+[data-preyone-theme='light'] .method-tabs button {
+  background: #ffffff;
+  border-color: rgba(15, 23, 42, 0.14);
+}
+[data-preyone-theme='light'] .method-tabs button:hover {
+  background: rgba(16, 185, 129, 0.08);
+  border-color: rgba(4, 120, 87, 0.45);
+}
+[data-preyone-theme='light'] .method-tabs button.on {
+  background: linear-gradient(120deg, #047857, #10b981);
+  border-color: #047857;
+}
+[data-preyone-theme='light'] .pay-track {
+  background: #ffffff;
+  border-color: rgba(15, 23, 42, 0.16);
+}
+[data-preyone-theme='light'] .pay-track-amount { color: #0f172a; }
+[data-preyone-theme='light'] .pay-track-hint { color: #334155; }
+[data-preyone-theme='light'] .pay-track-ref .mono { color: #0f172a; }
+[data-preyone-theme='light'] .link-btn { color: #047857; }
+[data-preyone-theme='light'] .pay-rail-hint { color: #475569; }
+
+/* Light-mode settings layout */
+[data-preyone-theme='light'] .settings-page { color: #0f172a; }
+[data-preyone-theme='light'] .settings-hero {
+  background:
+    radial-gradient(120% 140% at 0% 0%, rgba(16, 185, 129, 0.14), transparent 55%),
+    #ffffff;
+  border-color: rgba(4, 120, 87, 0.22);
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
+}
+[data-preyone-theme='light'] .settings-hero-copy h2 { color: #0f172a; }
+[data-preyone-theme='light'] .settings-hero-copy p { color: #475569; }
+[data-preyone-theme='light'] .settings-tab {
+  background: #ffffff;
+  border-color: rgba(15, 23, 42, 0.12);
+  color: #334155;
+}
+[data-preyone-theme='light'] .settings-tab:hover { border-color: rgba(4, 120, 87, 0.45); color: #064e3b; }
+[data-preyone-theme='light'] .settings-tab.is-active {
+  background: linear-gradient(120deg, rgba(16, 185, 129, 0.16), rgba(4, 120, 87, 0.06));
+  border-color: #059669;
+  color: #064e3b;
+}
+[data-preyone-theme='light'] .settings-tab-caption { color: #64748b; }
+[data-preyone-theme='light'] .settings-tab.is-active .settings-tab-caption { color: #047857; }
+[data-preyone-theme='light'] .settings-panel {
+  background: #ffffff;
+  border-color: rgba(15, 23, 42, 0.1);
+  box-shadow: 0 10px 26px rgba(15, 23, 42, 0.06);
+}
+[data-preyone-theme='light'] .settings-section-head h3 { color: #0f172a; }
+[data-preyone-theme='light'] .settings-section-head p { color: #475569; }
+[data-preyone-theme='light'] .settings-eyebrow { color: #047857; }
+[data-preyone-theme='light'] .settings-chip {
+  color: #065f46;
+  background: rgba(16, 185, 129, 0.12);
+  border-color: rgba(4, 120, 87, 0.28);
+}
+[data-preyone-theme='light'] .settings-field > span { color: #475569; }
+[data-preyone-theme='light'] .settings-input {
+  background: #ffffff;
+  border-color: rgba(15, 23, 42, 0.18);
+  color: #0f172a;
+}
+[data-preyone-theme='light'] .settings-input:disabled { background: #f1f5f9; color: #475569; }
+[data-preyone-theme='light'] .settings-list-row {
+  background: #f8fafc;
+  border-color: rgba(15, 23, 42, 0.1);
+}
+[data-preyone-theme='light'] .settings-list-main strong { color: #0f172a; }
+[data-preyone-theme='light'] .settings-list-main small { color: #64748b; }
+[data-preyone-theme='light'] .settings-block {
+  background: #f8fafc;
+  border-color: rgba(15, 23, 42, 0.1);
+}
+[data-preyone-theme='light'] .settings-block h4 { color: #0f172a; }
+[data-preyone-theme='light'] .settings-hint { color: #475569; }
+[data-preyone-theme='light'] .settings-kv > span { color: #64748b; }
+[data-preyone-theme='light'] .settings-kv > strong { color: #0f172a; }
+[data-preyone-theme='light'] .settings-lock {
+  color: #334155;
+  border-color: rgba(15, 23, 42, 0.14);
+  background: #f1f5f9;
+}
+[data-preyone-theme='light'] .settings-plan {
+  background: linear-gradient(130deg, rgba(16, 185, 129, 0.12), #ffffff);
+  border-color: rgba(4, 120, 87, 0.22);
+}
+[data-preyone-theme='light'] .settings-plan-meta { color: #475569; }
+[data-preyone-theme='light'] .settings-plan-price { color: #047857; }
+[data-preyone-theme='light'] .settings-plan-price span { color: #475569; }
+[data-preyone-theme='light'] .settings-actions { border-color: rgba(15, 23, 42, 0.1); }
+
+[data-preyone-theme='light'] .method-chip {
+  background: #ffffff;
+  border-color: rgba(15, 23, 42, 0.14);
+  color: #334155;
+}
+[data-preyone-theme='light'] .method-chip:hover { border-color: rgba(4, 120, 87, 0.45); color: #064e3b; }
+[data-preyone-theme='light'] .method-chip.on {
+  color: #052e22;
+  background: linear-gradient(120deg, #34d399, #10b981);
+  border-color: transparent;
+}

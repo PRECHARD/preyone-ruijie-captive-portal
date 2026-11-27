@@ -61,6 +61,49 @@ export interface PaymentInput {
   amount: number;
   method: string;
   reference?: string;
+  /** Provider-confirmed intent to consume for mobile-money parts. */
+  intentId?: string;
+}
+
+export interface PosPaymentIntent {
+  success: boolean;
+  intentId: string;
+  statusToken: string;
+  referenceNumber: string;
+  providerReference: string;
+  amount: number;
+  currency: string;
+  method: string;
+  instructions?: string;
+  shiftId: string | null;
+}
+
+export interface PosPaymentStatus {
+  intentId: string;
+  status: 'PENDING' | 'SUCCESS' | 'FAILED';
+  state: 'PENDING' | 'PROCESSING' | 'SUCCESS' | 'FAILED';
+  label: string;
+  failureReason: string | null;
+  referenceNumber: string;
+  amount: number;
+  currency: string;
+  method: string;
+  createdAt: string;
+  completedAt: string | null;
+  attachedDocumentId: string | null;
+  shiftId: string | null;
+}
+
+export interface PosPaymentCredit {
+  intentId: string;
+  reference: string;
+  amount: number;
+  currency: string;
+  method: string;
+  customerName: string | null;
+  customerPhone: string | null;
+  completedAt: string;
+  shiftId: string | null;
 }
 
 export interface CheckoutResult {
@@ -93,6 +136,7 @@ export interface PosDocument {
   total: number;
   amount_paid: number;
   balanceDue: number;
+  currency?: string | null;
   created_at: string;
   cashier_name: string | null;
   customer_name?: string | null;
@@ -179,9 +223,13 @@ export const auth = {
 
 export class ApiError extends Error {
   status: number;
-  constructor(message: string, status: number) {
+  code?: string;
+  payload?: Record<string, unknown>;
+  constructor(message: string, status: number, payload?: Record<string, unknown>) {
     super(message);
     this.status = status;
+    this.payload = payload;
+    this.code = typeof payload?.code === 'string' ? payload.code : undefined;
   }
 }
 
@@ -232,7 +280,11 @@ async function req<T>(path: string, opts: RequestInit = {}): Promise<T> {
   }
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
-    throw new ApiError((data as { error?: string }).error || `Request failed (${res.status})`, res.status);
+    throw new ApiError(
+      (data as { error?: string }).error || `Request failed (${res.status})`,
+      res.status,
+      data as Record<string, unknown>
+    );
   }
   return (await res.json()) as T;
 }
@@ -250,7 +302,11 @@ async function root<T>(path: string, opts: RequestInit = {}): Promise<T> {
   }
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
-    throw new ApiError((data as { error?: string }).error || `Request failed (${res.status})`, res.status);
+    throw new ApiError(
+      (data as { error?: string }).error || `Request failed (${res.status})`,
+      res.status,
+      data as Record<string, unknown>
+    );
   }
   return (await res.json()) as T;
 }
@@ -418,11 +474,92 @@ export const api = {
   deleteCustomer: (id: string) => req<{ ok: boolean }>(`/customers/${id}`, { method: 'DELETE' }),
 
   // Installment payment against an existing invoice/quote (office or till issued)
-  recordPayment: (id: string, p: { amount: number; method: string; reference?: string }) =>
+  recordPayment: (id: string, p: { amount: number; method: string; reference?: string; intentId?: string }) =>
     req<PosDocument & { balanceDue: number }>(`/documents/${id}/payments`, {
       method: 'POST',
       body: JSON.stringify(p),
     }),
+
+  // ── Mobile-money payment intents (live status tracking) ────────────────
+  // The till creates an intent, polls it, and only then consumes it in
+  // /checkout. Nothing is marked paid until the provider confirms.
+  posPaymentIntent: (payload: {
+    amount: number;
+    method: string;
+    phone?: string;
+    shiftId?: string | null;
+    customerName?: string;
+  }) =>
+    req<PosPaymentIntent>('/payments/intent', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  posPaymentStatus: (intentId: string) =>
+    req<PosPaymentStatus>(`/payments/${encodeURIComponent(intentId)}/status`),
+  posPaymentCancel: (intentId: string) =>
+    req<{ status: 'PENDING' | 'SUCCESS' | 'FAILED' }>(
+      `/payments/${encodeURIComponent(intentId)}/cancel`,
+      { method: 'POST' }
+    ),
+  posPaymentCredits: () => req<PosPaymentCredit[]>('/payments/credits'),
+
+  // Invoice-style intent bound to an existing document (used by PaymentModal).
+  // Same shared gateway + status contract as the subscription checkout.
+  documentPaymentIntent: (payload: {
+    amount: number;
+    paymentMethod: string;
+    targetId: string;
+    reasonForPayment: string;
+    currencyCode?: string;
+    phone?: string;
+    email?: string;
+    fullName?: string;
+  }) =>
+    root<{
+      success: boolean;
+      referenceNumber: string;
+      intentId: string | null;
+      statusToken: string | null;
+      amount: number;
+      currencyCode: string;
+      paymentMethod: string;
+      instructions?: string;
+    }>('/payments/pesepay/initiate', {
+      method: 'POST',
+      body: JSON.stringify({ ...payload, targetType: 'invoice' }),
+    }),
+  documentPaymentStatus: (intentId: string, token: string) =>
+    root<{
+      status: 'PENDING' | 'SUCCESS' | 'FAILED';
+      state?: 'PENDING' | 'PROCESSING' | 'SUCCESS' | 'FAILED';
+      label?: string;
+      failureReason?: string | null;
+      referenceNumber?: string;
+      amount?: number;
+      currency?: string;
+      completedAt?: string | null;
+    }>(`/payments/pesepay/status/${encodeURIComponent(intentId)}?token=${encodeURIComponent(token)}`),
+  documentPaymentCancel: (intentId: string, token: string) =>
+    root<{ status: 'PENDING' | 'SUCCESS' | 'FAILED' }>('/payments/pesepay/cancel', {
+      method: 'POST',
+      body: JSON.stringify({ intentId, token }),
+    }),
+
+  // Tenant company profile (Manager/CEO only server-side).
+  updateCompany: (patch: Partial<{
+    name: string;
+    tagline: string | null;
+    address: string | null;
+    email: string | null;
+    support_phone: string | null;
+    website: string | null;
+    currency: string;
+    tax_pct: number;
+    invoice_prefix: string | null;
+    quote_prefix: string | null;
+    receipt_footer: string | null;
+    terms_text: string | null;
+  }>) => req<CompanyProfile>('/company', { method: 'PATCH', body: JSON.stringify(patch) }),
 
   // Quotation/sale → invoice conversion (one click from document history)
   convertToInvoice: (id: string, docType?: string) =>

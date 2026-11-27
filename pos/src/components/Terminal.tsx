@@ -173,7 +173,7 @@ export default function Terminal({ user, notify, onApiError, onShiftChanged, shi
   const needsCustomer = docType !== 'sale';
   const canCharge = cart.length > 0 && total >= 0;
 
-  const completeSale = async (payments: Array<{ amount: number; method: string; reference?: string }>, customerNameInput?: string) => {
+  const completeSale = async (payments: Array<{ amount: number; method: string; reference?: string; intentId?: string }>, customerNameInput?: string) => {
     const effectiveCustName = customerNameInput || custName.trim();
     try {
       const result = await api.checkout({
@@ -213,8 +213,10 @@ export default function Terminal({ user, notify, onApiError, onShiftChanged, shi
         api.drawerAudit({ event: 'open', shiftId }).catch(() => { /* audit is best-effort */ });
       }
       await onShiftChanged();
+      return result;
     } catch (e) {
       if (!onApiError(e)) notify(e instanceof Error ? e.message : 'Sale failed', 'error');
+      throw e;
     }
   };
 
@@ -385,6 +387,8 @@ export default function Terminal({ user, notify, onApiError, onShiftChanged, shi
         <CheckoutModal
           total={total}
           cashierName={user.fullName}
+          shiftId={shiftId}
+          allowUnpaid={docType !== 'sale'}
           onCancel={() => setCheckoutOpen(false)}
           onComplete={completeSale}
         />

@@ -9,6 +9,7 @@ export type SlCustomer = {
   phone: string;
   walletBalance: number;
   planCode?: string | null;
+  planRenewsAt?: string | null;
   emailVerified?: boolean;
   createdAt: string;
 };
@@ -24,7 +25,65 @@ export type SlKit = {
   data_credit_gb: number;
   status: string;
   created_at: string;
+  site_name: string;
+  city: string;
+  gps_lat: number | null;
+  gps_lng: number | null;
+  hardware_model: string;
+  pending_status: string | null;
+  pending_status_at: string | null;
+  pending_request_id: string | null;
   usage?: SlUsagePoint[];
+};
+
+export type SlRole = 'owner' | 'admin' | 'billing' | 'viewer';
+
+export type SlAccountMember = {
+  id: string;
+  name: string;
+  email: string;
+  role: Exclude<SlRole, 'owner'>;
+  assignedKitIds: string[];
+  acceptedAt: string | null;
+};
+
+export type SlCreditTransfer = {
+  id: string;
+  customer_id: string;
+  from_kit_id: string;
+  to_kit_id: string;
+  gb: number;
+  event_key: string;
+  created_at: string;
+};
+
+export type SlFleetResponse = {
+  role: SlRole;
+  member: SlAccountMember | null;
+  kits: SlKit[];
+  invoices: SlInvoice[];
+  transfers: SlCreditTransfer[];
+  members: SlAccountMember[];
+  permissions: { canBill: boolean; canManage: boolean; canInvite: boolean };
+  summary: {
+    kitCount: number;
+    activeKits: number;
+    pausedKits: number;
+    totalDataUsedGb: number;
+    totalDataCreditGb: number;
+    walletBalance: number;
+    balanceDue: number;
+    nextRenewalDate: string | null;
+  };
+};
+
+export type SlServiceStateRequest = {
+  id: string;
+  kit_id: string;
+  requested_status: 'active' | 'paused';
+  effective_at: string;
+  note: string;
+  applied_at: string | null;
 };
 
 export type SlInvoice = {
@@ -146,6 +205,8 @@ export type SlVerifyResult = {
 
 export type SlDashboard = {
   customer: SlCustomer;
+  role?: SlRole;
+  member?: SlAccountMember | null;
   balanceDue: number;
   paidThisMonth: number;
   kits: SlKit[];
@@ -352,6 +413,95 @@ export async function slUpdateAlertPreferences(body: SlAlertPreferenceUpdate): P
     method: 'PATCH',
     body: JSON.stringify(body),
   });
+}
+
+/* ── Fleet, transfers and sub-accounts ──────────────────── */
+
+export async function slPatchKit(kitId: string, body: Record<string, unknown>): Promise<{ ok: boolean }> {
+  return sfetch(`/kits/${encodeURIComponent(kitId)}`, { method: 'PATCH', body: JSON.stringify(body) });
+}
+
+export async function slFleet(): Promise<SlFleetResponse> {
+  return sfetch('/fleet');
+}
+
+export async function slInvoices(status?: string): Promise<{ invoices: SlInvoice[] }> {
+  return sfetch(`/invoices${status ? `?status=${encodeURIComponent(status)}` : ''}`);
+}
+
+export async function slTransferData(body: {
+  fromKitId: string;
+  toKitId: string;
+  gb: number;
+  idempotencyKey?: string;
+}): Promise<{
+  ok: boolean;
+  transfer: SlCreditTransfer;
+  fromBalance: number;
+  toBalance: number;
+  notificationCreated: boolean;
+}> {
+  return sfetch('/kits/transfer-data', { method: 'POST', body: JSON.stringify(body) });
+}
+
+export async function slSetServiceState(kitId: string, body: {
+  state: 'active' | 'paused';
+  effectiveAt?: string;
+  note?: string;
+}): Promise<{
+  ok: boolean;
+  request: SlServiceStateRequest;
+  applied: boolean;
+  notificationCreated: boolean;
+}> {
+  return sfetch(`/kits/${encodeURIComponent(kitId)}/service-state`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function slMembers(): Promise<{ members: SlAccountMember[] }> {
+  return sfetch('/members');
+}
+
+export async function slInviteMember(body: {
+  email: string;
+  name: string;
+  role: 'admin' | 'billing' | 'viewer';
+  assignedKitIds: string[];
+}): Promise<{ member: SlAccountMember; inviteUrl: string; emailSent: boolean }> {
+  return sfetch('/members/invite', { method: 'POST', body: JSON.stringify(body) });
+}
+
+export async function slUpdateMember(
+  memberId: string,
+  body: { role: 'admin' | 'billing' | 'viewer'; assignedKitIds: string[] }
+): Promise<{ member: SlAccountMember }> {
+  return sfetch(`/members/${encodeURIComponent(memberId)}`, { method: 'PATCH', body: JSON.stringify(body) });
+}
+
+export async function slResendMemberInvite(
+  memberId: string
+): Promise<{ member: SlAccountMember; inviteUrl: string; emailSent: boolean }> {
+  return sfetch(`/members/${encodeURIComponent(memberId)}/resend-invite`, { method: 'POST' });
+}
+
+export async function slRemoveMember(memberId: string): Promise<{ ok: boolean }> {
+  return sfetch(`/members/${encodeURIComponent(memberId)}`, { method: 'DELETE' });
+}
+
+/** Public invite acceptance; the token comes from the emailed link. */
+export async function slAcceptMemberInvite(body: {
+  token: string;
+  name?: string;
+  password: string;
+}): Promise<{
+  token: string;
+  customer: SlCustomer;
+  role: SlRole;
+  member?: SlAccountMember;
+}> {
+  return sfetch('/members/accept', { method: 'POST', body: JSON.stringify(body) });
 }
 
 /* ── Formatters ──────────────────────────────────────────── */

@@ -1648,4 +1648,157 @@ a.sl-ft-card:hover { border-color: rgba(0, 229, 255, 0.45); box-shadow: 0 0 22px
 .sp-notif-item--usage-alert .sp-notif-dot { background: var(--sp-telemetry-cyan); box-shadow: 0 0 9px rgba(0,240,255,.7); }
 .sp-notif-item--auto-topup .sp-notif-dot { background: #a855f7; box-shadow: 0 0 9px rgba(168,85,247,.7); }
 .sp-notif-item--payment .sp-notif-dot { background: #22c55e; box-shadow: 0 0 9px rgba(34,197,94,.65); }
+.sp-notif-item--fleet .sp-notif-dot { background: #00e5ff; box-shadow: 0 0 10px rgba(0,229,255,.8); }
+
+/* ==========================================================================
+   FLEET OVERVIEW — multi-kit grouping, transfers and sub-accounts (additive)
+   ========================================================================== */
+.sp-fleet {
+  margin-bottom: 18px;
+  border-color: rgba(0,229,255,.22);
+  background:
+    radial-gradient(760px 320px at 0% 0%, rgba(0,229,255,.06), transparent 60%),
+    radial-gradient(620px 300px at 100% 0%, rgba(168,85,247,.06), transparent 60%),
+    var(--sp-panel);
+}
+.sp-fleet-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+.sp-fleet-head h2 {
+  margin: 10px 0 4px;
+  font-family: var(--font-display, 'Bebas Neue', sans-serif);
+  font-size: 24px;
+  letter-spacing: .04em;
+}
+.sp-fleet-head p { margin: 0; color: var(--sp-mut); font-size: 12.5px; }
+.sp-fleet-head-actions { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; }
+.sp-fleet-switcher { display: grid; gap: 5px; min-width: 230px; }
+.sp-fleet-switcher > span {
+  font-size: 10px; font-weight: 800; letter-spacing: .14em;
+  text-transform: uppercase; color: var(--sp-dim);
+}
+.sp-fleet-cards {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.sp-fleet-card {
+  display: grid;
+  gap: 3px;
+  padding: 14px 16px;
+  border: 1px solid var(--sp-line);
+  border-radius: 12px;
+  background: rgba(0,0,0,.18);
+}
+.sp-fleet-card > svg { color: var(--sp-cyan); margin-bottom: 4px; font-size: 19px; }
+.sp-fleet-card > span {
+  font-size: 10px; font-weight: 800; letter-spacing: .13em;
+  text-transform: uppercase; color: var(--sp-mut);
+}
+.sp-fleet-card > b { font-size: 21px; line-height: 1.2; color: var(--sp-text); }
+.sp-fleet-card > small { font-size: 11px; color: var(--sp-dim); }
+.sp-fleet-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+.sp-fleet-search { display: flex; align-items: center; gap: 8px; flex: 1 1 260px; }
+.sp-fleet-search > svg { color: var(--sp-dim); }
+.sp-fleet-search .sp-input { flex: 1; margin: 0; }
+.sp-fleet-chips { display: flex; gap: 7px; flex-wrap: wrap; }
+.sp-table--fleet { min-width: 900px; }
+.sp-table--fleet td { font-size: 12.5px; }
+.sp-table--fleet tbody tr.is-selected {
+  background: rgba(0,229,255,.07);
+  box-shadow: inset 3px 0 0 var(--sp-cyan);
+}
+.sp-fleet-site {
+  display: grid; gap: 2px; padding: 0; border: 0; background: none;
+  color: var(--sp-text); text-align: left; cursor: pointer; font: inherit;
+}
+.sp-fleet-site:hover b { color: var(--sp-cyan); }
+.sp-fleet-site b { font-size: 13px; }
+.sp-fleet-site small, .sp-fleet-empty { color: var(--sp-dim); font-size: 11px; }
+.sp-fleet-empty { text-align: center; padding: 24px !important; }
+.sp-fleet-credit { color: var(--sp-cyan); font-weight: 800; white-space: nowrap; }
+.sp-row-actions { display: flex; gap: 6px; }
+.sp-row-actions .sp-icon-btn { width: 30px; height: 30px; font-size: 14px; }
+.sp-fleet-team {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--sp-line);
+}
+.sp-fleet-team-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap; margin-bottom: 12px;
+}
+.sp-fleet-team-head h3 {
+  display: flex; align-items: center; gap: 8px;
+  margin: 0 0 3px; font-size: 15px;
+}
+.sp-fleet-team-head h3 svg { color: var(--sp-purple); }
+.sp-fleet-team-head p { margin: 0; color: var(--sp-mut); font-size: 11.5px; }
+.sp-fleet-members { display: grid; gap: 7px; }
+.sp-fleet-member {
+  display: grid;
+  grid-template-columns: 34px minmax(120px, 1fr) auto auto auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 12px;
+  border: 1px solid var(--sp-line);
+  border-radius: 10px;
+  background: rgba(0,0,0,.16);
+}
+.sp-fleet-member > span:nth-child(2) { display: grid; gap: 1px; }
+.sp-fleet-member > span:nth-child(2) b { font-size: 12.5px; }
+.sp-fleet-member > span:nth-child(2) small { color: var(--sp-dim); font-size: 11px; }
+.sp-fleet-member > small { color: var(--sp-mut); font-size: 11px; white-space: nowrap; }
+.sp-fleet-member .sp-avatar { width: 32px; height: 32px; font-size: 11px; }
+.sp-fleet-member-actions { display: flex; align-items: center; gap: 4px; }
+.sp-fleet-invite-link {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap; margin-top: 12px;
+}
+.sp-fleet-invite-link code {
+  display: block; max-width: 560px; overflow-wrap: anywhere;
+  color: var(--sp-cyan); font-size: 11px; margin-top: 4px;
+}
+.sp-fleet-modal-grid { display: grid; gap: 4px; }
+.sp-fleet-modal-grid .sp-field { margin-bottom: 10px; }
+.sp-fleet-checks {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 14px;
+  padding: 10px 12px; border: 1px solid var(--sp-line); border-radius: 10px;
+}
+.sp-fleet-checks label {
+  display: flex; align-items: center; gap: 7px;
+  color: var(--sp-text); font-size: 12px; cursor: pointer;
+  text-transform: none; letter-spacing: 0;
+}
+.sp-fleet-checks input { accent-color: var(--sp-cyan); }
+.sp-inline-ok {
+  display: flex; align-items: center; gap: 7px;
+  margin: 2px 0 0; padding: 8px 10px;
+  border-radius: 9px; background: rgba(34,197,94,.08);
+  border: 1px solid rgba(34,197,94,.3); color: #86efac; font-size: 11.5px;
+}
+@media (max-width: 1180px) {
+  .sp-fleet-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 720px) {
+  .sp-fleet-head { align-items: stretch; }
+  .sp-fleet-head-actions, .sp-fleet-switcher { width: 100%; }
+  .sp-fleet-cards { grid-template-columns: minmax(0, 1fr); }
+  .sp-fleet-member { grid-template-columns: 34px minmax(0, 1fr); gap: 7px 10px; }
+  .sp-fleet-member > small, .sp-fleet-member .sp-badge-pill, .sp-fleet-member-actions { grid-column: 2; }
+  .sp-fleet-checks { grid-template-columns: minmax(0, 1fr); }
+}
 

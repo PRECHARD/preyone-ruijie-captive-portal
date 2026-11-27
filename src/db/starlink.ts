@@ -11,6 +11,7 @@
  * (CREATE TABLE IF NOT EXISTS ...), so no migration of existing objects runs.
  */
 import { pool } from './pool';
+import { starlinkBaseUrl } from '../services/starlinkEmailTemplates';
 import type { PoolClient } from 'pg';
 
 // ---------------------------------------------------------------------------
@@ -39,6 +40,64 @@ export interface StarlinkKit {
   data_usage_gb: number;
   data_credit_gb: number;
   status: string;
+  created_at: string;
+  /** Fleet metadata — additive; older installs read empty strings/nulls. */
+  site_name: string;
+  city: string;
+  gps_lat: number | null;
+  gps_lng: number | null;
+  hardware_model: string;
+  /** A scheduled active/paused change waiting for its effective time. */
+  pending_status: string | null;
+  pending_status_at: string | null;
+  pending_request_id: string | null;
+}
+
+export type StarlinkKitMetadata = {
+  siteName?: string | null;
+  city?: string | null;
+  gpsLat?: number | string | null;
+  gpsLng?: number | string | null;
+  hardwareModel?: string | null;
+};
+
+export type StarlinkAccountMemberRole = 'admin' | 'billing' | 'viewer';
+
+export interface StarlinkAccountMember {
+  id: string;
+  owner_customer_id: string;
+  email: string;
+  name: string;
+  role: StarlinkAccountMemberRole;
+  assigned_kit_ids: string[];
+  invite_token: string | null;
+  invite_expires_at: string | null;
+  password_hash: string | null;
+  accepted_at: string | null;
+  created_at: string;
+}
+
+export interface StarlinkCreditTransfer {
+  id: string;
+  customer_id: string;
+  from_kit_id: string;
+  to_kit_id: string;
+  gb: number;
+  event_key: string;
+  meta: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface StarlinkServiceStateRequest {
+  id: string;
+  customer_id: string;
+  kit_id: string;
+  requested_status: 'active' | 'paused';
+  effective_at: string;
+  note: string;
+  event_key: string;
+  actor_member_id: string | null;
+  applied_at: string | null;
   created_at: string;
 }
 
@@ -227,8 +286,23 @@ const STARLINK_DDL = `
       created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
+    -- Fleet metadata. These are additive columns so single-kit accounts keep
+    -- their existing kit rows and JSON shape (empty labels, standard model).
+    ALTER TABLE starlink_kits ADD COLUMN IF NOT EXISTS site_name TEXT NOT NULL DEFAULT '';
+    ALTER TABLE starlink_kits ADD COLUMN IF NOT EXISTS city TEXT NOT NULL DEFAULT '';
+    ALTER TABLE starlink_kits ADD COLUMN IF NOT EXISTS gps_lat NUMERIC(9,6);
+    ALTER TABLE starlink_kits ADD COLUMN IF NOT EXISTS gps_lng NUMERIC(9,6);
+    ALTER TABLE starlink_kits ADD COLUMN IF NOT EXISTS hardware_model TEXT NOT NULL DEFAULT 'standard';
+    ALTER TABLE starlink_kits ADD COLUMN IF NOT EXISTS pending_status TEXT;
+    ALTER TABLE starlink_kits ADD COLUMN IF NOT EXISTS pending_status_at TIMESTAMPTZ;
+    ALTER TABLE starlink_kits ADD COLUMN IF NOT EXISTS pending_request_id UUID;
+
     CREATE UNIQUE INDEX IF NOT EXISTS idx_starlink_kits_customer_kit
       ON starlink_kits (customer_id, lower(kit_number));
+    CREATE INDEX IF NOT EXISTS idx_starlink_kits_fleet_site
+      ON starlink_kits (customer_id, lower(site_name));
+    CREATE INDEX IF NOT EXISTS idx_starlink_kits_pending_state
+      ON starlink_kits (pending_status_at) WHERE pending_status IS NOT NULL;
 
     -- Native Preyone invoices for this portal (NOT pos_documents — those stay
     -- POS-owned. This portal bills wallet/data/kit purchases only).
@@ -380,6 +454,64 @@ const STARLINK_DDL = `
 
     CREATE INDEX IF NOT EXISTS idx_starlink_alert_prefs_customer
       ON starlink_alert_preferences (customer_id);
+
+    -- Immutable kit-to-kit data credit ledger. Pure data movement: no wallet
+    -- balance and no invoice are created by a transfer.
+    CREATE TABLE IF NOT EXISTS starlink_credit_transfers (
+      id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      customer_id  UUID NOT NULL REFERENCES starlink_customers(id) ON DELETE CASCADE,
+      from_kit_id  UUID NOT NULL REFERENCES starlink_kits(id) ON DELETE RESTRICT,
+      to_kit_id    UUID NOT NULL REFERENCES starlink_kits(id) ON DELETE RESTRICT,
+      gb           NUMERIC(10,2) NOT NULL CHECK (gb > 0),
+      event_key    TEXT NOT NULL UNIQUE,
+      meta         JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      CHECK (from_kit_id <> to_kit_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_starlink_credit_transfers_customer
+      ON starlink_credit_transfers (customer_id, created_at DESC);
+
+    -- Branch managers / accountants / site technicians. These are NOT paying
+    -- customers: all money stays with the owner customer row.
+    CREATE TABLE IF NOT EXISTS starlink_account_members (
+      id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      owner_customer_id UUID NOT NULL REFERENCES starlink_customers(id) ON DELETE CASCADE,
+      email             TEXT NOT NULL,
+      name              TEXT NOT NULL,
+      role              TEXT NOT NULL CHECK (role IN ('admin', 'billing', 'viewer')),
+      assigned_kit_ids  JSONB NOT NULL DEFAULT '[]'::jsonb,
+      invite_token      TEXT UNIQUE,
+      invite_expires_at TIMESTAMPTZ,
+      password_hash     TEXT,
+      accepted_at       TIMESTAMPTZ,
+      created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_starlink_members_email
+      ON starlink_account_members (lower(email));
+    CREATE INDEX IF NOT EXISTS idx_starlink_members_owner
+      ON starlink_account_members (owner_customer_id, created_at DESC);
+
+    -- Scheduled pause / reactivation requests. A future effective_at is applied
+    -- lazily by applyScheduledStarlinkServiceStates() on the next portal read.
+    CREATE TABLE IF NOT EXISTS starlink_kit_service_requests (
+      id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      customer_id      UUID NOT NULL REFERENCES starlink_customers(id) ON DELETE CASCADE,
+      kit_id           UUID NOT NULL REFERENCES starlink_kits(id) ON DELETE CASCADE,
+      requested_status TEXT NOT NULL CHECK (requested_status IN ('active', 'paused')),
+      effective_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      note             TEXT NOT NULL DEFAULT '',
+      event_key        TEXT NOT NULL UNIQUE,
+      actor_member_id  UUID,
+      applied_at       TIMESTAMPTZ,
+      created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_starlink_service_requests_kit
+      ON starlink_kit_service_requests (kit_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_starlink_service_requests_due
+      ON starlink_kit_service_requests (effective_at) WHERE applied_at IS NULL;
 `;
 
 /**
@@ -404,10 +536,12 @@ export async function ensureStarlinkSchema(): Promise<void> {
               'starlink_customers', 'starlink_kits', 'starlink_invoices',
               'starlink_kit_usage', 'starlink_plan_capacity',
               'starlink_plan_applications', 'starlink_notifications',
-              'starlink_usage_snapshots', 'starlink_alert_preferences'
+              'starlink_usage_snapshots', 'starlink_alert_preferences',
+              'starlink_credit_transfers', 'starlink_account_members',
+              'starlink_kit_service_requests'
             )`
         );
-        if (Number(rows[0]?.n) >= 9) return;
+        if (Number(rows[0]?.n) >= 12) return;
       } catch {
         /* connectivity issue — keep retrying */
       }
@@ -535,14 +669,67 @@ function baselineEnabled(): boolean {
   return process.env.STARLINK_BASELINE_USAGE !== 'off';
 }
 
-async function registerKitTx(client: PoolClient, customerId: string, kitNumber: string, nickname: string): Promise<StarlinkKit> {
+const STARLINK_KIT_COLUMNS = `
+  id, customer_id, kit_number, nickname, data_usage_gb, data_credit_gb, status,
+  created_at, site_name, city, gps_lat, gps_lng, hardware_model,
+  pending_status, pending_status_at, pending_request_id`;
+
+/** pg NUMERIC arrives as a string; keep the portal's JSON numeric contract. */
+function normalizeKit(row: any): StarlinkKit {
+  return {
+    ...(row as StarlinkKit),
+    data_usage_gb: Number(row.data_usage_gb ?? 0),
+    data_credit_gb: Number(row.data_credit_gb ?? 0),
+    gps_lat: row.gps_lat == null ? null : Number(row.gps_lat),
+    gps_lng: row.gps_lng == null ? null : Number(row.gps_lng),
+    site_name: row.site_name ?? '',
+    city: row.city ?? '',
+    hardware_model: row.hardware_model ?? 'standard',
+    pending_status: row.pending_status ?? null,
+    pending_status_at: row.pending_status_at ?? null,
+    pending_request_id: row.pending_request_id ?? null,
+  };
+}
+
+const HARDWARE_MODELS = ['standard', 'mini', 'high_performance'];
+
+function normalizeHardwareModel(value: unknown): string {
+  const raw = String(value ?? '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+  if (HARDWARE_MODELS.includes(raw)) return raw;
+  return 'standard';
+}
+
+function normalizeCoordinate(value: unknown, axis: 'lat' | 'lng'): number | null {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(value);
+  const limit = axis === 'lat' ? 90 : 180;
+  return Number.isFinite(n) && n >= -limit && n <= limit ? Math.round(n * 1e6) / 1e6 : null;
+}
+
+async function registerKitTx(
+  client: PoolClient,
+  customerId: string,
+  kitNumber: string,
+  nickname: string,
+  metadata: StarlinkKitMetadata = {}
+): Promise<StarlinkKit> {
   const { rows } = await client.query(
-    `INSERT INTO starlink_kits (customer_id, kit_number, nickname)
-     VALUES ($1, $2, $3)
-     RETURNING id, customer_id, kit_number, nickname, data_usage_gb, data_credit_gb, status, created_at`,
-    [customerId, kitNumber, nickname]
+    `INSERT INTO starlink_kits
+       (customer_id, kit_number, nickname, site_name, city, gps_lat, gps_lng, hardware_model)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+     RETURNING ${STARLINK_KIT_COLUMNS}`,
+    [
+      customerId,
+      kitNumber,
+      nickname,
+      String(metadata.siteName ?? '').trim().slice(0, 120),
+      String(metadata.city ?? '').trim().slice(0, 120),
+      normalizeCoordinate(metadata.gpsLat, 'lat'),
+      normalizeCoordinate(metadata.gpsLng, 'lng'),
+      normalizeHardwareModel(metadata.hardwareModel),
+    ]
   );
-  const kit = rows[0] as StarlinkKit;
+  const kit = normalizeKit(rows[0]);
   if (baselineEnabled()) {
     const now = new Date();
     const seed = (kitNumber.charCodeAt(kitNumber.length - 1) || 7) % 4;
@@ -565,11 +752,18 @@ async function registerKitTx(client: PoolClient, customerId: string, kitNumber: 
   return kit;
 }
 
-export async function registerStarlinkKit(customerId: string, kitNumber: string, nickname?: string): Promise<StarlinkKit> {
+export async function registerStarlinkKit(
+  customerId: string,
+  kitNumber: string,
+  nickname?: string,
+  metadata: StarlinkKitMetadata = {}
+): Promise<StarlinkKit> {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const kit = await registerKitTx(client, customerId, kitNumber.trim(), (nickname || '').trim() || 'My Starlink Kit');
+    const kit = await registerKitTx(
+      client, customerId, kitNumber.trim(), (nickname || '').trim() || 'My Starlink Kit', metadata
+    );
     await client.query('COMMIT');
     return kit;
   } catch (err) {
@@ -582,30 +776,86 @@ export async function registerStarlinkKit(customerId: string, kitNumber: string,
 
 export async function listStarlinkKits(customerId: string): Promise<StarlinkKit[]> {
   const { rows } = await pool.query(
-    `SELECT id, customer_id, kit_number, nickname, data_usage_gb, data_credit_gb, status, created_at
+    `SELECT ${STARLINK_KIT_COLUMNS}
        FROM starlink_kits WHERE customer_id = $1 ORDER BY created_at ASC`,
     [customerId]
   );
-  return rows as StarlinkKit[];
+  return rows.map(normalizeKit);
 }
 
 export async function getStarlinkKit(id: string, customerId: string): Promise<StarlinkKit | null> {
   const { rows } = await pool.query(
-    `SELECT id, customer_id, kit_number, nickname, data_usage_gb, data_credit_gb, status, created_at
+    `SELECT ${STARLINK_KIT_COLUMNS}
        FROM starlink_kits WHERE id = $1 AND customer_id = $2`,
     [id, customerId]
   );
-  return (rows[0] as StarlinkKit) ?? null;
+  return rows[0] ? normalizeKit(rows[0]) : null;
 }
 
-export async function updateStarlinkKit(id: string, customerId: string, patch: { nickname?: string; status?: string }): Promise<void> {
-  await pool.query(
-    `UPDATE starlink_kits
-        SET nickname = COALESCE($3, nickname),
-            status   = COALESCE($4, status)
-      WHERE id = $1 AND customer_id = $2`,
-    [id, customerId, patch.nickname?.trim() || null, patch.status || null]
-  );
+export async function updateStarlinkKit(
+  id: string,
+  customerId: string,
+  patch: { nickname?: string; status?: string } & StarlinkKitMetadata
+): Promise<boolean> {
+  // Each field carries an explicit "provided" flag so an empty string or null
+  // can clear metadata without clearing everything the caller omitted.
+  const statusProvided = patch.status !== undefined && patch.status !== null;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await client.query(
+      `UPDATE starlink_kits
+          SET nickname         = CASE WHEN $3::boolean THEN $4 ELSE nickname END,
+              status           = CASE WHEN $5::boolean THEN $6 ELSE status END,
+              pending_status   = CASE WHEN $5::boolean THEN NULL ELSE pending_status END,
+              pending_status_at = CASE WHEN $5::boolean THEN NULL ELSE pending_status_at END,
+              pending_request_id = CASE WHEN $5::boolean THEN NULL ELSE pending_request_id END,
+              site_name        = CASE WHEN $7::boolean THEN $8 ELSE site_name END,
+              city             = CASE WHEN $9::boolean THEN $10 ELSE city END,
+              gps_lat          = CASE WHEN $11::boolean THEN $12 ELSE gps_lat END,
+              gps_lng          = CASE WHEN $13::boolean THEN $14 ELSE gps_lng END,
+              hardware_model   = CASE WHEN $15::boolean THEN $16 ELSE hardware_model END
+        WHERE id = $1 AND customer_id = $2`,
+      [
+        id,
+        customerId,
+        patch.nickname !== undefined,
+        patch.nickname === undefined ? null : patch.nickname.trim() || '',
+        statusProvided,
+        statusProvided ? patch.status : null,
+        patch.siteName !== undefined,
+        patch.siteName == null ? null : String(patch.siteName).trim().slice(0, 120),
+        patch.city !== undefined,
+        patch.city == null ? null : String(patch.city).trim().slice(0, 120),
+        patch.gpsLat !== undefined,
+        normalizeCoordinate(patch.gpsLat, 'lat'),
+        patch.gpsLng !== undefined,
+        normalizeCoordinate(patch.gpsLng, 'lng'),
+        patch.hardwareModel !== undefined,
+        patch.hardwareModel == null || String(patch.hardwareModel).trim() === ''
+          ? 'standard'
+          : normalizeHardwareModel(patch.hardwareModel),
+      ]
+    );
+    const updated = (result.rowCount ?? 0) > 0;
+    if (updated && statusProvided) {
+      // A manual status decision wins over any earlier schedule. Closing the
+      // request row stops applyScheduledStarlinkServiceStates() from firing it.
+      await client.query(
+        `UPDATE starlink_kit_service_requests
+            SET applied_at = NOW()
+          WHERE kit_id = $1 AND customer_id = $2 AND applied_at IS NULL`,
+        [id, customerId]
+      );
+    }
+    await client.query('COMMIT');
+    return updated;
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 export async function getKitUsageHistory(kitId: string, months = 4): Promise<StarlinkUsagePoint[]> {
@@ -622,6 +872,435 @@ export async function getKitUsageHistory(kitId: string, months = 4): Promise<Sta
     usage_gb: Number(r.usage_gb),
     is_baseline: !!r.is_baseline,
   }));
+}
+
+// ---------------------------------------------------------------------------
+// Fleet grouping, sub-accounts and credit movement (additive)
+// ---------------------------------------------------------------------------
+
+function normalizeMember(row: any): StarlinkAccountMember {
+  const ids = row.assigned_kit_ids;
+  return {
+    ...(row as StarlinkAccountMember),
+    assigned_kit_ids: Array.isArray(ids) ? ids.map((v: unknown) => String(v)) : [],
+  };
+}
+
+function normalizeTransfer(row: any): StarlinkCreditTransfer {
+  return { ...(row as StarlinkCreditTransfer), gb: Number(row.gb ?? 0) };
+}
+
+/** Apply any scheduled pause/reactivation whose effective time has arrived. */
+export async function applyScheduledStarlinkServiceStates(): Promise<number> {
+  const result = await pool.query(
+    `WITH due AS (
+       UPDATE starlink_kits k
+          SET status = r.requested_status,
+              pending_status = NULL,
+              pending_status_at = NULL,
+              pending_request_id = NULL
+         FROM starlink_kit_service_requests r
+        WHERE r.kit_id = k.id
+          AND r.applied_at IS NULL
+          AND r.effective_at <= NOW()
+        RETURNING r.id
+     )
+     UPDATE starlink_kit_service_requests SET applied_at = NOW()
+      WHERE id IN (SELECT id FROM due)`
+  );
+  return result.rowCount ?? 0;
+}
+
+export async function listStarlinkCreditTransfers(customerId: string, limit = 25): Promise<StarlinkCreditTransfer[]> {
+  const { rows } = await pool.query(
+    `SELECT id, customer_id, from_kit_id, to_kit_id, gb, event_key, meta, created_at
+       FROM starlink_credit_transfers
+      WHERE customer_id = $1
+      ORDER BY created_at DESC
+      LIMIT $2`,
+    [customerId, Math.min(Math.max(Number(limit) || 25, 1), 100)]
+  );
+  return rows.map(normalizeTransfer);
+}
+
+/**
+ * Move spendable data credit between two kits on the SAME owner account.
+ * Both rows are locked in a deterministic order, the debit is conditional so
+ * balances can never go negative, and the ledger + notification are committed
+ * with the balance changes.
+ */
+export async function transferStarlinkKitCredit(input: {
+  customerId: string;
+  fromKitId: string;
+  toKitId: string;
+  gb: number;
+  eventKey: string;
+  actorMemberId?: string | null;
+  meta?: Record<string, unknown>;
+}): Promise<{
+  transfer: StarlinkCreditTransfer;
+  fromBalance: number;
+  toBalance: number;
+  notificationCreated: boolean;
+}> {
+  const gb = Math.round(Number(input.gb) * 100) / 100;
+  if (!Number.isFinite(gb) || gb <= 0) throw new Error('Transfer amount must be greater than zero');
+  if (input.fromKitId === input.toKitId) throw new Error('Choose two different kits');
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Replay of a previously completed request is a no-op, not a second debit.
+    const existing = await client.query(
+      `SELECT id, customer_id, from_kit_id, to_kit_id, gb, event_key, meta, created_at
+         FROM starlink_credit_transfers WHERE event_key = $1`,
+      [input.eventKey]
+    );
+    if (existing.rows[0]) {
+      await client.query('COMMIT');
+      const transfer = normalizeTransfer(existing.rows[0]);
+      const [from, to] = await Promise.all([
+        getStarlinkKit(transfer.from_kit_id, input.customerId),
+        getStarlinkKit(transfer.to_kit_id, input.customerId),
+      ]);
+      return {
+        transfer,
+        fromBalance: Number(from?.data_credit_gb ?? 0),
+        toBalance: Number(to?.data_credit_gb ?? 0),
+        notificationCreated: false,
+      };
+    }
+
+    const kitIds = [input.fromKitId, input.toKitId].sort();
+    const locked = await client.query(
+      `SELECT id, customer_id FROM starlink_kits WHERE id = ANY($1::uuid[]) ORDER BY id FOR UPDATE`,
+      [kitIds]
+    );
+    if (locked.rows.length !== 2 || locked.rows.some((r) => r.customer_id !== input.customerId)) {
+      throw new Error('Both kits must belong to this account');
+    }
+
+    const debit = await client.query(
+      `UPDATE starlink_kits
+          SET data_credit_gb = data_credit_gb - $3
+        WHERE id = $1 AND customer_id = $2 AND data_credit_gb >= $3
+        RETURNING data_credit_gb`,
+      [input.fromKitId, input.customerId, gb]
+    );
+    if ((debit.rowCount ?? 0) !== 1) throw new Error('Not enough data credit on the source kit');
+
+    const credit = await client.query(
+      `UPDATE starlink_kits
+          SET data_credit_gb = data_credit_gb + $3
+        WHERE id = $1 AND customer_id = $2
+        RETURNING data_credit_gb`,
+      [input.toKitId, input.customerId, gb]
+    );
+    if ((credit.rowCount ?? 0) !== 1) throw new Error('Destination kit not found');
+
+    const inserted = await client.query(
+      `INSERT INTO starlink_credit_transfers
+         (customer_id, from_kit_id, to_kit_id, gb, event_key, meta)
+       VALUES ($1, $2, $3, $4, $5, $6::jsonb)
+       RETURNING id, customer_id, from_kit_id, to_kit_id, gb, event_key, meta, created_at`,
+      [
+        input.customerId,
+        input.fromKitId,
+        input.toKitId,
+        gb,
+        input.eventKey,
+        JSON.stringify(input.meta ?? {}),
+      ]
+    );
+
+    const notificationCreated = await queueStarlinkNotification({
+      customerId: input.customerId,
+      category: 'FLEET',
+      eventKey: `starlink-fleet-transfer:${input.eventKey}`,
+      title: 'Data credit moved between kits',
+      body: `${gb.toFixed(2)} GB was transferred to another kit on your account.`,
+      linkUrl: `${starlinkBaseUrl()}/starlink/portal`,
+      meta: {
+        from_kit_id: input.fromKitId,
+        to_kit_id: input.toKitId,
+        gb,
+        actor_member_id: input.actorMemberId ?? null,
+      },
+    }, client);
+
+    await client.query('COMMIT');
+    return {
+      transfer: normalizeTransfer(inserted.rows[0]),
+      fromBalance: Number(debit.rows[0].data_credit_gb),
+      toBalance: Number(credit.rows[0].data_credit_gb),
+      notificationCreated,
+    };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/** Create or schedule an active/paused service state change for one kit. */
+export async function requestStarlinkKitServiceState(input: {
+  customerId: string;
+  kitId: string;
+  state: 'active' | 'paused';
+  effectiveAt?: Date | null;
+  note?: string;
+  actorMemberId?: string | null;
+  eventKey: string;
+}): Promise<{ request: StarlinkServiceStateRequest; applied: boolean; notificationCreated: boolean }> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const existing = await client.query(
+      `SELECT id, customer_id, kit_id, requested_status, effective_at, note,
+              event_key, actor_member_id, applied_at, created_at
+         FROM starlink_kit_service_requests WHERE event_key = $1`,
+      [input.eventKey]
+    );
+    if (existing.rows[0]) {
+      await client.query('COMMIT');
+      return {
+        request: existing.rows[0] as StarlinkServiceStateRequest,
+        applied: Boolean(existing.rows[0].applied_at),
+        notificationCreated: false,
+      };
+    }
+
+    const locked = await client.query(
+      `SELECT id, customer_id FROM starlink_kits WHERE id = $1 FOR UPDATE`,
+      [input.kitId]
+    );
+    if (!locked.rows[0] || locked.rows[0].customer_id !== input.customerId) {
+      throw new Error('Kit not found on this account');
+    }
+
+    // Only the newest request is authoritative. Older scheduled changes are
+    // closed out here so they cannot fire later and undo this decision.
+    await client.query(
+      `UPDATE starlink_kit_service_requests
+          SET applied_at = NOW()
+        WHERE kit_id = $1 AND customer_id = $2 AND applied_at IS NULL`,
+      [input.kitId, input.customerId]
+    );
+
+    const effectiveAt = input.effectiveAt && input.effectiveAt.getTime() > Date.now()
+      ? input.effectiveAt
+      : new Date();
+    const inserted = await client.query(
+      `INSERT INTO starlink_kit_service_requests
+         (customer_id, kit_id, requested_status, effective_at, note, event_key, actor_member_id, applied_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, CASE WHEN $4 <= NOW() THEN NOW() ELSE NULL END)
+       RETURNING id, customer_id, kit_id, requested_status, effective_at, note,
+                 event_key, actor_member_id, applied_at, created_at`,
+      [
+        input.customerId,
+        input.kitId,
+        input.state,
+        effectiveAt.toISOString(),
+        String(input.note ?? '').trim().slice(0, 240),
+        input.eventKey,
+        input.actorMemberId ?? null,
+      ]
+    );
+    const request = inserted.rows[0] as StarlinkServiceStateRequest;
+
+    if (request.applied_at) {
+      await client.query(
+        `UPDATE starlink_kits
+            SET status = $3, pending_status = NULL, pending_status_at = NULL, pending_request_id = NULL
+          WHERE id = $1 AND customer_id = $2`,
+        [input.kitId, input.customerId, input.state]
+      );
+    } else {
+      await client.query(
+        `UPDATE starlink_kits
+            SET pending_status = $3, pending_status_at = $4, pending_request_id = $5
+          WHERE id = $1 AND customer_id = $2`,
+        [input.kitId, input.customerId, input.state, request.effective_at, request.id]
+      );
+    }
+
+    const when = request.applied_at ? 'now' : `on ${new Date(request.effective_at).toLocaleString('en-GB')}`;
+    const notificationCreated = await queueStarlinkNotification({
+      customerId: input.customerId,
+      category: 'FLEET',
+      eventKey: `starlink-service-state:${input.eventKey}`,
+      title: request.requested_status === 'paused' ? 'Service pause scheduled' : 'Service reactivation scheduled',
+      body: `Your kit was scheduled to be ${request.requested_status} ${when}.`,
+      linkUrl: `${starlinkBaseUrl()}/starlink/portal`,
+      meta: { kit_id: input.kitId, state: request.requested_status, effective_at: request.effective_at },
+    }, client);
+
+    await client.query('COMMIT');
+    return { request, applied: Boolean(request.applied_at), notificationCreated };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Sub-account members
+// ---------------------------------------------------------------------------
+
+export async function createStarlinkAccountMember(input: {
+  ownerCustomerId: string;
+  email: string;
+  name: string;
+  role: 'admin' | 'billing' | 'viewer';
+  assignedKitIds: string[];
+  inviteTokenHash: string;
+  inviteExpiresAt: Date;
+}): Promise<StarlinkAccountMember> {
+  const { rows } = await pool.query(
+    `INSERT INTO starlink_account_members
+       (owner_customer_id, email, name, role, assigned_kit_ids, invite_token, invite_expires_at)
+     VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7)
+     RETURNING id, owner_customer_id, email, name, role, assigned_kit_ids,
+               invite_token, invite_expires_at, password_hash, accepted_at, created_at`,
+    [
+      input.ownerCustomerId,
+      input.email,
+      input.name,
+      input.role,
+      JSON.stringify(input.assignedKitIds),
+      input.inviteTokenHash,
+      input.inviteExpiresAt.toISOString(),
+    ]
+  );
+  return normalizeMember(rows[0]);
+}
+
+export async function listStarlinkAccountMembers(ownerCustomerId: string): Promise<StarlinkAccountMember[]> {
+  const { rows } = await pool.query(
+    `SELECT id, owner_customer_id, email, name, role, assigned_kit_ids,
+            invite_token, invite_expires_at, password_hash, accepted_at, created_at
+       FROM starlink_account_members
+      WHERE owner_customer_id = $1
+      ORDER BY created_at ASC`,
+    [ownerCustomerId]
+  );
+  return rows.map(normalizeMember);
+}
+
+export async function getStarlinkAccountMemberById(id: string): Promise<StarlinkAccountMember | null> {
+  const { rows } = await pool.query(
+    `SELECT id, owner_customer_id, email, name, role, assigned_kit_ids,
+            invite_token, invite_expires_at, password_hash, accepted_at, created_at
+       FROM starlink_account_members WHERE id = $1`,
+    [id]
+  );
+  return rows[0] ? normalizeMember(rows[0]) : null;
+}
+
+export async function findAcceptedMemberByEmail(email: string): Promise<StarlinkAccountMember | null> {
+  const { rows } = await pool.query(
+    `SELECT id, owner_customer_id, email, name, role, assigned_kit_ids,
+            invite_token, invite_expires_at, password_hash, accepted_at, created_at
+       FROM starlink_account_members
+      WHERE lower(email) = lower($1) AND accepted_at IS NOT NULL AND password_hash IS NOT NULL`,
+    [email]
+  );
+  return rows[0] ? normalizeMember(rows[0]) : null;
+}
+
+export async function acceptStarlinkAccountMember(input: {
+  inviteTokenHash: string;
+  passwordHash: string;
+  name?: string;
+}): Promise<StarlinkAccountMember | null> {
+  const { rows } = await pool.query(
+    `UPDATE starlink_account_members
+        SET password_hash = $2,
+            name = COALESCE(NULLIF($3, ''), name),
+            accepted_at = NOW(),
+            invite_token = NULL,
+            invite_expires_at = NULL
+      WHERE invite_token = $1
+        AND accepted_at IS NULL
+        AND invite_expires_at > NOW()
+      RETURNING id, owner_customer_id, email, name, role, assigned_kit_ids,
+                invite_token, invite_expires_at, password_hash, accepted_at, created_at`,
+    [input.inviteTokenHash, input.passwordHash, String(input.name ?? '').trim()]
+  );
+  return rows[0] ? normalizeMember(rows[0]) : null;
+}
+
+/**
+ * Reissue an invite (also used to re-invite an expired pending member). Clearing
+ * accepted_at/password_hash invalidates any existing sub-account session and
+ * forces the member to set a new password through the new token.
+ */
+export async function rotateStarlinkAccountMemberInvite(input: {
+  ownerCustomerId: string;
+  memberId: string;
+  inviteTokenHash: string;
+  inviteExpiresAt: Date;
+  name?: string;
+  role?: StarlinkAccountMemberRole;
+  assignedKitIds?: string[];
+}): Promise<StarlinkAccountMember | null> {
+  const { rows } = await pool.query(
+    `UPDATE starlink_account_members
+        SET name = COALESCE(NULLIF($5, ''), name),
+            role = COALESCE($6, role),
+            assigned_kit_ids = CASE WHEN $7::boolean THEN $8::jsonb ELSE assigned_kit_ids END,
+            invite_token = $3,
+            invite_expires_at = $4,
+            accepted_at = NULL,
+            password_hash = NULL
+      WHERE id = $1 AND owner_customer_id = $2
+      RETURNING id, owner_customer_id, email, name, role, assigned_kit_ids,
+                invite_token, invite_expires_at, password_hash, accepted_at, created_at`,
+    [
+      input.memberId,
+      input.ownerCustomerId,
+      input.inviteTokenHash,
+      input.inviteExpiresAt.toISOString(),
+      String(input.name ?? '').trim(),
+      input.role ?? null,
+      input.assignedKitIds !== undefined,
+      JSON.stringify(input.assignedKitIds ?? []),
+    ]
+  );
+  return rows[0] ? normalizeMember(rows[0]) : null;
+}
+
+export async function updateStarlinkAccountMemberAccess(input: {
+  ownerCustomerId: string;
+  memberId: string;
+  role: StarlinkAccountMemberRole;
+  assignedKitIds: string[];
+}): Promise<StarlinkAccountMember | null> {
+  const { rows } = await pool.query(
+    `UPDATE starlink_account_members
+        SET role = $3, assigned_kit_ids = $4::jsonb
+      WHERE id = $1 AND owner_customer_id = $2
+      RETURNING id, owner_customer_id, email, name, role, assigned_kit_ids,
+                invite_token, invite_expires_at, password_hash, accepted_at, created_at`,
+    [input.memberId, input.ownerCustomerId, input.role, JSON.stringify(input.assignedKitIds)]
+  );
+  return rows[0] ? normalizeMember(rows[0]) : null;
+}
+
+export async function deleteStarlinkAccountMember(
+  ownerCustomerId: string,
+  memberId: string
+): Promise<boolean> {
+  const result = await pool.query(
+    `DELETE FROM starlink_account_members WHERE id = $1 AND owner_customer_id = $2`,
+    [memberId, ownerCustomerId]
+  );
+  return (result.rowCount ?? 0) > 0;
 }
 
 // ---------------------------------------------------------------------------

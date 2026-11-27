@@ -283,6 +283,118 @@ function downloadStatementPdf(invoices: SlInvoice[], customer: SlCustomer): void
   doc.save(`preyone-starlink-statement-${now.toISOString().slice(0, 10)}.pdf`);
 }
 
+/**
+ * Fleet-wide statement. Reuses the same dark PDF shell as the account
+ * statement and adds one row per registered site before the invoice ledger.
+ */
+export function downloadConsolidatedStatementPdf(
+  invoices: SlInvoice[],
+  customer: SlCustomer,
+  kits: Array<{
+    site_name?: string | null;
+    nickname?: string;
+    kit_number: string;
+    hardware_model?: string;
+    status?: string;
+    data_usage_gb?: number | string;
+    data_credit_gb?: number | string;
+  }> = []
+): void {
+  const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+  const w = doc.internal.pageSize.getWidth();
+  const now = new Date();
+
+  let y = pdfHeader(
+    doc,
+    'FLEET STATEMENT',
+    customer.fullName,
+    `${fmtDate(now.toISOString())} · ${kits.length} site${kits.length === 1 ? '' : 's'}`
+  );
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  doc.setTextColor(...SLATE);
+  doc.text(`${customer.email} · ${customer.phone}`, 40, y);
+  y += 24;
+
+  doc.setFillColor(241, 245, 249);
+  doc.rect(40, y, w - 80, 24, 'F');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9);
+  doc.setTextColor(71, 85, 105);
+  doc.text('SITE / BRANCH', 50, y + 16);
+  doc.text('SERIAL', 220, y + 16);
+  doc.text('MODEL', 330, y + 16);
+  doc.text('USED', w - 180, y + 16, { align: 'right' });
+  doc.text('CREDIT', w - 50, y + 16, { align: 'right' });
+  y += 24;
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  for (const kit of kits.slice(0, 30)) {
+    if (y > doc.internal.pageSize.getHeight() - 100) {
+      pdfFooter(doc, 'Fleet statement · Preyone Enterprises (Pvt) Ltd');
+      doc.addPage();
+      y = 60;
+    }
+    doc.setTextColor(15, 23, 42);
+    doc.text(String(kit.site_name || kit.nickname || 'Unnamed site').slice(0, 30), 50, y + 16);
+    doc.text(String(kit.kit_number).slice(0, 22), 220, y + 16);
+    doc.text(kindLabel(kit.hardware_model || 'standard'), 330, y + 16);
+    doc.text(`${Number(kit.data_usage_gb || 0).toFixed(2)} GB`, w - 180, y + 16, { align: 'right' });
+    doc.text(`${Number(kit.data_credit_gb || 0).toFixed(2)} GB`, w - 50, y + 16, { align: 'right' });
+    doc.setDrawColor(226, 232, 240);
+    doc.line(40, y + 24, w - 40, y + 24);
+    y += 24;
+  }
+
+  y += 18;
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(11);
+  doc.setTextColor(15, 23, 42);
+  doc.text('Consolidated invoice ledger', 40, y);
+  y += 14;
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  doc.setTextColor(...SLATE);
+  for (const inv of invoices.slice(0, 40)) {
+    if (y > doc.internal.pageSize.getHeight() - 90) {
+      pdfFooter(doc, 'Fleet statement · Preyone Enterprises (Pvt) Ltd');
+      doc.addPage();
+      y = 60;
+    }
+    doc.setTextColor(15, 23, 42);
+    doc.text(inv.invoice_number, 50, y + 14);
+    doc.text(fmtDate(inv.issued_date), 170, y + 14);
+    doc.text(inv.description.slice(0, 38), 250, y + 14);
+    doc.setTextColor(...SLATE);
+    doc.text(inv.status, w - 200, y + 14);
+    doc.setTextColor(15, 23, 42);
+    doc.text(fmtMoney(Number(inv.amount), inv.currency), w - 50, y + 14, { align: 'right' });
+    y += 22;
+  }
+
+  const sum = (list: SlInvoice[]) => list.reduce((s, i) => s + Number(i.amount), 0);
+  y += 16;
+  const rows: Array<[string, string]> = [
+    ['Paid total', fmtMoney(sum(invoices.filter((i) => i.status === 'PAID')))],
+    ['Outstanding (pending)', fmtMoney(sum(invoices.filter((i) => i.status === 'PENDING')))],
+    ['Lifetime billed', fmtMoney(sum(invoices))],
+  ];
+  for (const [label, value] of rows) {
+    doc.setFont('helvetica', label === 'Lifetime billed' ? 'bold' : 'normal');
+    doc.setFontSize(10);
+    doc.setTextColor(100, 116, 139);
+    doc.text(label, w - 260, y);
+    doc.setTextColor(label === 'Lifetime billed' ? 0 : 100, label === 'Lifetime billed' ? 150 : 116, label === 'Lifetime billed' ? 173 : 139);
+    doc.text(value, w - 50, y, { align: 'right' });
+    y += 18;
+  }
+
+  pdfFooter(doc, `Fleet statement · ${customer.fullName} · Preyone Enterprises (Pvt) Ltd`);
+  doc.save(`preyone-starlink-fleet-statement-${now.toISOString().slice(0, 10)}.pdf`);
+}
+
 /* ── Component ───────────────────────────────────────────── */
 
 export default function InvoicesView({

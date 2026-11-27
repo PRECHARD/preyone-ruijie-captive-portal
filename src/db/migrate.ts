@@ -1355,6 +1355,14 @@ const SQL = `
   CREATE INDEX IF NOT EXISTS idx_pesepay_intents_status  ON pesepay_intents (status);
   CREATE INDEX IF NOT EXISTS idx_pesepay_intents_target  ON pesepay_intents (target_type, target_id);
 
+  -- Payment-status transparency (POS + invoice). failure_reason distinguishes
+  -- declined/cancelled/expired from a plain "failed" so the till can tell the
+  -- cashier exactly what happened; last_checked_at/check_count throttle the
+  -- gateway reconciliation the status poll performs.
+  ALTER TABLE pesepay_intents ADD COLUMN IF NOT EXISTS failure_reason TEXT;
+  ALTER TABLE pesepay_intents ADD COLUMN IF NOT EXISTS last_checked_at TIMESTAMPTZ;
+  ALTER TABLE pesepay_intents ADD COLUMN IF NOT EXISTS check_count INTEGER NOT NULL DEFAULT 0;
+
   -- Website Starlink checkout. One row per customer attempt, which makes the
   -- POST idempotent on idempotency_key and keeps the customer's own details
   -- (plan, account reference, contact) next to the invoice they triggered.
@@ -2051,6 +2059,14 @@ const SQL = `
     if (fs.existsSync(v6AccountsPath)) {
       await client.query(fs.readFileSync(v6AccountsPath, 'utf8'));
       console.log('Applied db/migrations/v6_company_accounts.sql (company account numbers).');
+    }
+
+    // Payment-intent tracking columns used by the POS status poll (failure
+    // reason + gateway-check throttle). Idempotent so re-running is safe.
+    const v7PaymentPath = path.resolve(__dirname, '../../db/migrations/v7_pos_payment_tracking.sql');
+    if (fs.existsSync(v7PaymentPath)) {
+      await client.query(fs.readFileSync(v7PaymentPath, 'utf8'));
+      console.log('Applied db/migrations/v7_pos_payment_tracking.sql (payment status tracking).');
     }
 
     console.log('Migration complete. Packages + transit + RBAC seeded.');

@@ -11,7 +11,9 @@ import {
   slNotifications, slMarkNotificationsRead, clearToken, ApiError,
   SL_TABS, type SlTab, type SlDashboard, type SlCustomer, type SlInvoice,
   type SlKit, type SlCheckoutResult, type SlPlanApplication, type SlNotification,
+  type SlRole,
 } from './api';
+import FleetPanel from './FleetPanel';
 import InvoicesView from './InvoicesView';
 import SlFooter from './SlFooter';
 import PeseCheckoutModal, { type CheckoutKind } from './PeseCheckoutModal';
@@ -40,7 +42,9 @@ const FAQS = [
   { q: 'What happens after I complete a Preyone Payment payment?', a: 'Preyone Payment returns you to this portal. We poll the payment status, mark the invoice PAID and credit your wallet, data bundle or kit order — no manual confirmation needed.' },
   { q: 'How is data usage tracked per kit?', a: 'Each registered kit keeps a rolling four-month history of monthly consumption (GB). The Telemetry & Forecast panel adds a live 30-day priority/standard view, terminal health and a projected exhaustion date. Register your kit from the Devices tab with the serial number printed on the box.' },
   { q: 'Can I get usage warnings or automatic data top-ups?', a: 'Yes. In Telemetry & Forecast you can enable 75%, 90% and 100% email and portal alerts for each billing cycle. Auto top-up can buy more data from your wallet when your remaining allowance drops below your chosen minimum.' },
-  { q: 'Can I download invoices for accounting?', a: 'Yes. Open Billing, click View on any invoice for the full document, then Download PDF. The Statement button exports everything on screen as a single account statement PDF.' },
+  { q: 'Can I download invoices for accounting?', a: 'Yes. Open Billing, click View on any invoice for the full document, then Download PDF. The Statement button exports everything on screen as a single account statement PDF. Fleet accounts also get a consolidated PDF covering every site.' },
+  { q: 'How do I manage several branches or kits?', a: 'Fleet Overview appears when your account has two or more kits. Name each site, add city/GPS tags and the hardware model, then switch kits, move data credit between them, schedule a seasonal pause or download one consolidated statement.' },
+  { q: 'Can I give my accountant or site technician access?', a: 'Yes. From Fleet Overview, invite a billing user to download PDF invoices and pay through Preyone Payment, or a site technician who only sees telemetry for the kits assigned to them. Invitations expire after seven days.' },
   { q: 'I forgot my password — what now?', a: 'Click "Forgot password" on the sign-in screen. A reset link valid for one hour is emailed to you; open it and choose a new password (minimum 8 characters).' },
   { q: 'Which payment methods are supported?', a: 'EcoCash, InnBucks and Omari through Preyone Payment. All portal prices and balances are shown in USD.' },
 ];
@@ -61,6 +65,7 @@ export default function StarlinkPortal({ onSignOut }: { onSignOut: () => void })
   const [kitId, setKitId] = useState('');
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [checkout, setCheckout] = useState<CheckoutKind | null>(null);
+  const [checkoutKitId, setCheckoutKitId] = useState('');
   const [planTarget] = useState<SlPlan | null>(null);
   const [renewalPayId, setRenewalPayId] = useState<string | undefined>(undefined);
   const [planGroup, setPlanGroup] = useState<'residential' | 'business'>('residential');
@@ -274,11 +279,18 @@ export default function StarlinkPortal({ onSignOut }: { onSignOut: () => void })
 
   /* ── derived ── */
   const customer: SlCustomer | null = data?.customer ?? null;
+  const role: SlRole = data?.role ?? 'owner';
   const customerId = customer?.id;
 
   useEffect(() => {
     if (customerId) loadApplications();
   }, [customerId, loadApplications]);
+  const visibleTabs = useMemo(
+    () => role === 'viewer'
+      ? SL_TABS.filter((t) => t === 'Home' || t === 'Support' || t === 'FAQs')
+      : SL_TABS,
+    [role]
+  );
   const kits: SlKit[] = useMemo(() => data?.kits ?? [], [data]);
   const invoices: SlInvoice[] = useMemo(() => data?.invoices ?? [], [data]);
   const pendingIntents = data?.pendingIntents ?? [];
@@ -299,6 +311,11 @@ export default function StarlinkPortal({ onSignOut }: { onSignOut: () => void })
     setTab(next);
     setUserMenuOpen(false);
     window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const openTopUp = (kind: CheckoutKind, kitId?: string) => {
+    setCheckoutKitId(kitId || activeKit?.id || kits[0]?.id || '');
+    setCheckout(kind);
   };
 
   const onQueued = (result: SlCheckoutResult) => {
@@ -436,18 +453,21 @@ export default function StarlinkPortal({ onSignOut }: { onSignOut: () => void })
 
   /* ── search palette ── */
   const paletteItems = useMemo(() => {
+    const finance = role !== 'viewer';
     const base = [
-      ...SL_TABS.map((t) => ({ label: `Go to ${t}`, hint: 'Tab', run: () => goto(t as SlTab), icon: <FiGrid /> })),
-      { label: 'Wallet Top Up', hint: 'Action', run: () => { goto('Home'); setCheckout('wallet_topup'); }, icon: <FiDollarSign /> },
-      { label: 'Data Top Up', hint: 'Action', run: () => { goto('Home'); setCheckout('data_topup'); }, icon: <FiWifi /> },
-      { label: 'Buy Starlink Kit', hint: 'Action', run: () => { goto('Home'); setCheckout('kit_purchase'); }, icon: <FiPackage /> },
-      { label: 'Download account statement', hint: 'Billing', run: () => goto('Billing'), icon: <FiDownload /> },
+      ...visibleTabs.map((t) => ({ label: `Go to ${t}`, hint: 'Tab', run: () => goto(t), icon: <FiGrid /> })),
+      ...(finance ? [
+        { label: 'Wallet Top Up', hint: 'Action', run: () => { goto('Home'); openTopUp('wallet_topup'); }, icon: <FiDollarSign /> },
+        { label: 'Data Top Up', hint: 'Action', run: () => { goto('Home'); openTopUp('data_topup'); }, icon: <FiWifi /> },
+        { label: 'Buy Starlink Kit', hint: 'Action', run: () => { goto('Home'); openTopUp('kit_purchase'); }, icon: <FiPackage /> },
+        { label: 'Download account statement', hint: 'Billing', run: () => goto('Billing'), icon: <FiDownload /> },
+      ] : []),
       { label: 'Contact support', hint: 'Support', run: () => goto('Support'), icon: <FiHeadphones /> },
     ];
     const q = paletteQuery.trim().toLowerCase();
     return q ? base.filter((i) => i.label.toLowerCase().includes(q)) : base;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [paletteQuery, tab]);
+  }, [paletteQuery, tab, role, visibleTabs]);
 
   const runPaletteItem = (item: typeof paletteItems[number]) => {
     setPaletteOpen(false);
@@ -500,7 +520,7 @@ export default function StarlinkPortal({ onSignOut }: { onSignOut: () => void })
         </div>
 
         <nav className="sp-tabs" aria-label="Portal sections">
-          {SL_TABS.map((t) => (
+          {visibleTabs.map((t) => (
             <button
               key={t}
               type="button"
@@ -640,7 +660,7 @@ export default function StarlinkPortal({ onSignOut }: { onSignOut: () => void })
                 <FiRefreshCw /> Refresh
               </button>
             </div>
-            {customer.emailVerified === false && (
+            {role !== 'viewer' && customer.emailVerified === false && (
               <>
                 <div className="sp-alert sp-alert--ok sp-renewal-banner" role="status">
                   <div>
@@ -653,7 +673,7 @@ export default function StarlinkPortal({ onSignOut }: { onSignOut: () => void })
                 {verifyNotice && <p className="sp-hint" style={{ margin: '-8px 0 14px' }}>{verifyNotice}</p>}
               </>
             )}
-            {!customer.planCode && (
+            {role !== 'viewer' && !customer.planCode && (
               <div className="sp-alert sp-alert--ok sp-renewal-banner" role="status">
                 <div>
                   <b>Welcome to Preyone Starlink.</b> Choose a plan to activate your service.
@@ -672,14 +692,27 @@ export default function StarlinkPortal({ onSignOut }: { onSignOut: () => void })
                 <button
                   type="button"
                   className="sp-btn sp-btn--primary"
-                  onClick={() => { setRenewalPayId(renewalInvoice.id); setCheckout('plan_renewal'); }}
+                  onClick={() => { setRenewalPayId(renewalInvoice.id); openTopUp('plan_renewal'); }}
                 >
                   Pay renewal
                 </button>
               </div>
             )}
 
+            <FleetPanel
+              customer={customer}
+              kits={kits}
+              invoices={invoices}
+              role={role}
+              selectedKitId={activeKit?.id || ''}
+              onSelectKit={setKitId}
+              onTopUpKit={(kit) => openTopUp('data_topup', kit)}
+              onRefresh={() => load(true)}
+              onToast={pushToast}
+            />
+
             {/* Wallet & financial overview */}
+            {role !== 'viewer' && (
             <section className="sp-wallet">
               <div className="sp-wallet-left">
                 <div>
@@ -700,13 +733,13 @@ export default function StarlinkPortal({ onSignOut }: { onSignOut: () => void })
               </div>
 
               <div className="sp-wallet-right">
-                <button type="button" className="sp-action sp-action--cyan" onClick={() => setCheckout('wallet_topup')}>
+                <button type="button" className="sp-action sp-action--cyan" onClick={() => openTopUp('wallet_topup')}>
                   <FiDollarSign /> <span>Wallet Top Up</span>
                 </button>
-                <button type="button" className="sp-action sp-action--purple" onClick={() => setCheckout('data_topup')}>
+                <button type="button" className="sp-action sp-action--purple" onClick={() => openTopUp('data_topup')}>
                   <FiWifi /> <span>Data Top Up</span>
                 </button>
-                <button type="button" className="sp-action sp-action--gold" onClick={() => setCheckout('kit_purchase')}>
+                <button type="button" className="sp-action sp-action--gold" onClick={() => openTopUp('kit_purchase')}>
                   <FiRadio /> <span>Buy Starlink Kit</span>
                 </button>
                 <button type="button" className="sp-action sp-action--ghost" onClick={() => goto('Billing')}>
@@ -714,6 +747,13 @@ export default function StarlinkPortal({ onSignOut }: { onSignOut: () => void })
                 </button>
               </div>
             </section>
+            )}
+
+            {role === 'viewer' && (
+              <div className="sp-alert sp-alert--ok sp-renewal-banner" role="status">
+                <div><b>Telemetry-only access.</b> You can view live usage for your assigned site(s). Billing, transfers and account settings are hidden by your role.</div>
+              </div>
+            )}
 
             <div className="sp-stats">
               <div className="sp-stat">
@@ -813,9 +853,10 @@ export default function StarlinkPortal({ onSignOut }: { onSignOut: () => void })
               )}
             </section>
 
-            <TelemetryPanel kit={activeKit} />
+            <TelemetryPanel kit={activeKit} readOnly={role === 'viewer' || role === 'billing'} />
 
-            {/* Recent invoices */}
+            {/* Recent invoices — billing roles only */}
+            {role !== 'viewer' && (
             <section className="sp-panel">
               <div className="sp-panel-head">
                 <div>
@@ -849,6 +890,7 @@ export default function StarlinkPortal({ onSignOut }: { onSignOut: () => void })
                 </div>
               )}
             </section>
+            )}
           </>
         )}
 
@@ -988,7 +1030,7 @@ export default function StarlinkPortal({ onSignOut }: { onSignOut: () => void })
                 invoices={invoices}
                 loading={loading}
                 onRefresh={() => load(true)}
-                onPay={() => setCheckout('wallet_topup')}
+                onPay={() => openTopUp('wallet_topup')}
               />
             </section>
           </>
@@ -1010,7 +1052,7 @@ export default function StarlinkPortal({ onSignOut }: { onSignOut: () => void })
                 loading={loading}
                 kinds={['kit_purchase', 'data_topup']}
                 onRefresh={() => load(true)}
-                onPay={() => setCheckout('kit_purchase')}
+                onPay={() => openTopUp('kit_purchase')}
               />
             </section>
           </>
@@ -1103,7 +1145,7 @@ export default function StarlinkPortal({ onSignOut }: { onSignOut: () => void })
                     >
                       <FiWifi /> {k.status === 'active' ? 'Pause' : 'Activate'}
                     </button>
-                    <button type="button" className="sp-icon-btn" onClick={() => { setKitId(k.id); setCheckout('data_topup'); }}>
+                    <button type="button" className="sp-icon-btn" onClick={() => openTopUp('data_topup', k.id)}>
                       <FiDollarSign /> Top Up
                     </button>
                   </div>
@@ -1276,6 +1318,7 @@ export default function StarlinkPortal({ onSignOut }: { onSignOut: () => void })
           customer={customer}
           kits={kits}
           initialKind={checkout}
+          initialKitId={checkoutKitId || activeKit?.id || ''}
           plan={
             checkout === 'plan_renewal'
               ? plans.find((p) => p.code === customer.planCode)

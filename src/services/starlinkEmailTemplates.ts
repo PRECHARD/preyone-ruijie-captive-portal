@@ -564,3 +564,84 @@ export function buildAutoTopupEmail(input: {
 
   return { subject: `Auto top-up receipt · ${input.invoiceNumber}`, html, text };
 }
+
+/** Dark-theme branch-manager / accountant / technician invitation. */
+export function buildMemberInviteEmail(input: {
+  fullName: string;
+  email: string;
+  ownerName: string;
+  role: 'admin' | 'billing' | 'viewer';
+  kitLabels: string[];
+  inviteUrl: string;
+  expiresLabel: string;
+}): { subject: string; html: string; text: string } {
+  const base = starlinkBaseUrl();
+  const inviteUrl = esc(input.inviteUrl);
+  const roleLabel = { admin: 'Fleet administrator', billing: 'Billing / accountant', viewer: 'Site technician (view only)' }[input.role];
+  const kits = input.kitLabels.length ? input.kitLabels.map(esc).join(', ') : 'All fleet kits';
+
+  const body = `
+          <tr>
+            <td style="padding:0 32px 6px">
+              <p style="margin:0;font:15px/1.7 ${FONT};color:${RECEIPT.mut}">
+                Hi ${firstName(input.fullName)}, ${esc(input.ownerName)} invited you to their Preyone Starlink fleet as
+                <b style="color:${RECEIPT.cyan}">${esc(roleLabel)}</b>.
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:12px 32px 0">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+                     style="background:${RECEIPT.panel};border:1px solid ${RECEIPT.line};border-radius:12px;padding:14px 16px">
+                <tr>
+                  <td style="padding:8px 0;font:13px/1.5 ${FONT};color:${RECEIPT.mut}">Access level</td>
+                  <td align="right" style="padding:8px 0;font:700 13px/1.5 ${FONT};color:${RECEIPT.text}">${esc(roleLabel)}</td>
+                </tr>
+                <tr>
+                  <td style="padding:8px 0;font:13px/1.5 ${FONT};color:${RECEIPT.mut}">Assigned sites</td>
+                  <td align="right" style="padding:8px 0;font:700 13px/1.5 ${FONT};color:${RECEIPT.cyan}">${kits}</td>
+                </tr>
+                <tr>
+                  <td style="padding:8px 0;font:13px/1.5 ${FONT};color:${RECEIPT.mut}">Link expires</td>
+                  <td align="right" style="padding:8px 0;font:700 13px/1.5 ${FONT};color:${RECEIPT.text}">${esc(input.expiresLabel)}</td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:16px 32px 6px;font:13px/1.7 ${FONT};color:${RECEIPT.mut}">
+              Open the secure invitation link, choose a password and you will land straight in the fleet portal.
+              Nothing changes until you accept. Payments, if enabled for your role, run through Preyone Payment.
+            </td>
+          </tr>
+          <tr>
+            <td align="center" style="padding:18px 32px 8px">
+              ${button(inviteUrl, 'Accept invitation', RECEIPT)}
+            </td>
+          </tr>`;
+
+  const html = layout({
+    preheader: 'You have been invited to a Preyone Starlink fleet.',
+    eyebrow: 'Fleet access',
+    heading: `You're invited, ${firstName(input.fullName)}`,
+    body,
+    recipient: input.email,
+    base,
+    palette: RECEIPT,
+  });
+
+  const text = [
+    `You're invited, ${input.fullName.trim().split(/\s+/)[0] || 'there'}`,
+    '',
+    `${input.ownerName} invited you to their Preyone Starlink fleet.`,
+    `Access level: ${roleLabel}`,
+    `Assigned sites: ${input.kitLabels.length ? input.kitLabels.join(', ') : 'All fleet kits'}`,
+    `Link expires: ${input.expiresLabel}`,
+    '',
+    `Accept your invitation: ${input.inviteUrl}`,
+    '',
+    'Preyone Starlink Customer Portal · support@preyone.com',
+  ].join('\n');
+
+  return { subject: 'You are invited to a Preyone Starlink fleet', html, text };
+}
