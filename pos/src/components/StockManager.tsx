@@ -65,6 +65,7 @@ function readProductPhoto(file: File): Promise<string> {
 export default function StockManager({ onChanged }: { onChanged?: () => void }) {
   const [products, setProducts] = useState<Product[]>([]);
   const [query, setQuery] = useState('');
+  const [showLowOnly, setShowLowOnly] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [adjusting, setAdjusting] = useState<{ p: Product; delta: string; reason: string } | null>(null);
@@ -80,14 +81,16 @@ export default function StockManager({ onChanged }: { onChanged?: () => void }) 
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return products;
-    return products.filter(
-      (p) =>
+    return products.filter((p) => {
+      if (showLowOnly && !(p.track_stock && Number(p.stock_qty) <= Number(p.low_stock_threshold))) return false;
+      if (!q) return true;
+      return (
         p.name.toLowerCase().includes(q) ||
         (p.sku || '').toLowerCase().includes(q) ||
         (p.category || '').toLowerCase().includes(q)
-    );
-  }, [products, query]);
+      );
+    });
+  }, [products, query, showLowOnly]);
 
   const openEdit = (p: Product) =>
     setDraft({
@@ -229,6 +232,14 @@ export default function StockManager({ onChanged }: { onChanged?: () => void }) 
       <div className="search-row">
         <input placeholder="Search products…" value={query} onChange={(e) => setQuery(e.target.value)} />
         <button
+          type="button"
+          className={`secondary-btn ${showLowOnly ? 'is-on' : ''}`}
+          style={{ whiteSpace: 'nowrap' }}
+          onClick={() => setShowLowOnly((v) => !v)}
+        >
+          {showLowOnly ? 'Low stock only' : 'Low stock'}
+        </button>
+        <button
           className="secondary-btn"
           style={{ whiteSpace: 'nowrap' }}
           onClick={() => setShowArchived((v) => !v)}
@@ -312,6 +323,9 @@ export default function StockManager({ onChanged }: { onChanged?: () => void }) 
                     <span className="p-glyph" aria-hidden>
                       {draftVisual?.emoji}
                     </span>
+                  )}
+                  {!draft.imageUrl && (
+                    <span className="auto-icon-badge">Auto-matched: {draftVisual?.label}</span>
                   )}
                 </div>
                 <div className="product-photo-copy">

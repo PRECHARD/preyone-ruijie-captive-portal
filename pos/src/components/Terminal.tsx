@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, type Product, type StaffUser, type CheckoutResult, type CompanyProfile } from '../api';
 import { productVisual } from '../productVisuals';
 import CheckoutModal from './CheckoutModal';
@@ -29,6 +29,8 @@ function splitDetails(value?: string | null): string[] {
 export default function Terminal({ user, notify, onApiError, onShiftChanged, shiftId }: Props) {
   const [products, setProducts] = useState<Product[]>([]);
   const [query, setQuery] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('all');
+  const searchRef = useRef<HTMLInputElement | null>(null);
   const [cart, setCart] = useState<CartLineState[]>([]);
   const [docType, setDocType] = useState<DocType>('sale');
   const [custName, setCustName] = useState('');
@@ -78,16 +80,40 @@ export default function Terminal({ user, notify, onApiError, onShiftChanged, shi
       .catch(() => { /* dual-currency stays off without a rate */ });
   }, []);
 
+  const categories = useMemo(() => {
+    const set = new Set<string>();
+    products.forEach((p) => {
+      if (p.category) set.add(p.category);
+    });
+    return ['all', ...Array.from(set).sort()];
+  }, [products]);
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return products;
-    return products.filter(
-      (p) =>
+    return products.filter((p) => {
+      if (categoryFilter !== 'all' && p.category !== categoryFilter) return false;
+      if (!q) return true;
+      return (
         p.name.toLowerCase().includes(q) ||
         (p.sku || '').toLowerCase().includes(q) ||
-        (p.barcode || '').includes(q)
-    );
-  }, [products, query]);
+        (p.barcode || '').includes(q) ||
+        (p.category || '').toLowerCase().includes(q)
+      );
+    });
+  }, [products, query, categoryFilter]);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === '/' || e.key === 'F2') {
+        if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+        e.preventDefault();
+        searchRef.current?.focus();
+        searchRef.current?.select();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
 
   const addToCart = (p: Product) => {
     setCart((c) => {
@@ -197,7 +223,8 @@ export default function Terminal({ user, notify, onApiError, onShiftChanged, shi
       <section className="catalogue">
         <div className="search-row">
           <input
-            placeholder="Scan barcode or search products…"
+            ref={searchRef}
+            placeholder="Scan barcode or search products… (/ or F2)"
             value={query}
             autoFocus
             onChange={(e) => setQuery(e.target.value)}
@@ -208,7 +235,22 @@ export default function Terminal({ user, notify, onApiError, onShiftChanged, shi
         {filtered.length === 0 ? (
           <div className="empty-note">No products match. Add stock in the admin console.</div>
         ) : (
-          <div className="product-grid">
+          <>
+            {categories.length > 1 && (
+              <div className="category-pills">
+                {categories.map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    className={`category-pill ${categoryFilter === c ? 'on' : ''}`}
+                    onClick={() => setCategoryFilter(c)}
+                  >
+                    {c === 'all' ? 'All' : c}
+                  </button>
+                ))}
+              </div>
+            )}
+            <div className="product-grid">
             {filtered.map((p) => {
               const low = p.track_stock && Number(p.stock_qty) <= Number(p.low_stock_threshold);
               const visual = productVisual(p);
@@ -253,6 +295,7 @@ export default function Terminal({ user, notify, onApiError, onShiftChanged, shi
               );
             })}
           </div>
+          </>
         )}
       </section>
 
